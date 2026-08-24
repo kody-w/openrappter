@@ -100,6 +100,9 @@ const CONTENT_FINDING_ALLOWLIST = new Set([
   'typescript/src/__tests__/docs/open-commercial-boundary.test.ts',
 ]);
 
+const PRIVATE_IDENTITY_PATTERN =
+  /rapter(?:[\s._'"+-])*o(?:[\s._'"+-])*s|rapter(?:[\s._'"+-])*box/i;
+
 interface FindingPattern {
   name: string;
   pattern: RegExp;
@@ -108,7 +111,7 @@ interface FindingPattern {
 const PRIVATE_CONTENT_PATTERNS: FindingPattern[] = [
   {
     name: 'private namespace, owner, package, import or host',
-    pattern: /rapteros|rapterbox/i,
+    pattern: PRIVATE_IDENTITY_PATTERN,
   },
   {
     name: 'private tenant, billing or control-plane runtime contract',
@@ -130,7 +133,7 @@ const PRIVATE_CONTENT_PATTERNS: FindingPattern[] = [
 const PRIVATE_PATH_PATTERNS: FindingPattern[] = [
   {
     name: 'private namespace or owner in tracked path',
-    pattern: /rapteros|rapterbox/i,
+    pattern: PRIVATE_IDENTITY_PATTERN,
   },
   {
     name: 'private runtime marker in tracked path',
@@ -146,7 +149,13 @@ function findings(content: string, patterns: FindingPattern[]): string[] {
 }
 
 function normalizedPathFindings(path: string): string[] {
-  return findings(path.replaceAll('\\', '/').toLowerCase(), PRIVATE_PATH_PATTERNS);
+  let normalized = path.replaceAll('\\', '/');
+  try {
+    normalized = decodeURIComponent(normalized);
+  } catch {
+    // Invalid escapes remain visible to the raw-path patterns.
+  }
+  return findings(normalized.toLowerCase(), PRIVATE_PATH_PATTERNS);
 }
 
 const DEPENDENCY_MAP_KEYS = new Set([
@@ -327,6 +336,67 @@ describe('open core and separately operated service boundary', () => {
     expect(normalizedPathFindings('SRC/RAPTERBOX/neutral.py')).not.toEqual([]);
     expect(normalizedPathFindings('src/control-plane/client.ts')).not.toEqual([]);
     expect(normalizedPathFindings('src/ordinary/client.ts')).toEqual([]);
+  });
+
+  it('regression: rejects exact reported src/rapteros/client.ts path before content scanning', () => {
+    const exactReportedPath = 'src/rapteros/client.ts';
+    const neutralContent = 'export const localOnly = true;';
+    expect(normalizedPathFindings(exactReportedPath)).not.toEqual([]);
+    expect(textFindings(exactReportedPath, neutralContent)).toEqual([]);
+  });
+
+  it('mutates namespace and path separators without bypassing the invariant', () => {
+    const contentMutations = [
+      'RapterOS',
+      'RAPTEROS',
+      'rapter-os',
+      'rapter_os',
+      'rapter.os',
+      'rapter os',
+      "rapter' + 'os",
+      'RapterBox',
+      'rapter-box',
+      'rapter_box',
+      'rapter.box',
+      "rapter' + 'box",
+    ];
+    for (const mutation of contentMutations) {
+      expect(
+        textFindings('virtual.runtime', `import('${mutation}/client')`),
+        mutation,
+      ).not.toEqual([]);
+    }
+
+    const pathMutations = [
+      'src/RAPTEROS/client.ts',
+      'src/rapter-os/client.ts',
+      'src/rapter_os/client.ts',
+      'src/rapter.os/client.ts',
+      'src/rapter%4fs/client.ts',
+      'src\\RapterBox\\client.ts',
+      'src/rapter-box/client.ts',
+      'src/rapter_box/client.ts',
+    ];
+    for (const mutation of pathMutations) {
+      expect(normalizedPathFindings(mutation), mutation).not.toEqual([]);
+    }
+
+    const endpointMutations = [
+      '/CONTROL-PLANE',
+      '/api/control_plane',
+      '\\api\\control-plane',
+      '///tenants/current',
+      '/v99/billing?scope=read',
+      'https://public.example/telemetry/events',
+      '//public.example/api/control-plane',
+    ];
+    for (const mutation of endpointMutations) {
+      const normalized = mutation.replaceAll('\\', '/');
+      expect(
+        textFindings('virtual.runtime', `fetch('${normalized}')`),
+        mutation,
+      ).not.toEqual([]);
+    }
   });
 
   it('detects endpoints and private identities independent of syntax or scheme', () => {

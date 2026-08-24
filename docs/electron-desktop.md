@@ -117,9 +117,12 @@ documents. Electron processes raw files locally:
 Raw files never enter the gateway. Only the bounded extracted text and source
 metadata are sent to the configured Copilot backend to draft the buddy
 definition. Creation still goes through RAPP-Herdr's identity, health, and
-`READY` handshake. Desktop discovers Homebrew and standard-system `ffmpeg` /
-`ffprobe` locations; custom installations can set
+`READY` handshake. Desktop packages LGPL FFmpeg and FFprobe executables and can
+also discover Homebrew or standard-system installations; custom installations can set
 `OPENRAPPTER_FFMPEG_PATH` and `OPENRAPPTER_FFPROBE_PATH`.
+Sensitive values are masked before provider analysis. PDF and DOCX parsing runs
+in a killable, memory-limited child process, while startup and shutdown sweep
+or remove private evidence scratch directories.
 
 ### Whisper “tell”
 

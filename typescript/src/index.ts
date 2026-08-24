@@ -545,7 +545,14 @@ async function startGatewayInProcess(opts?: {
     const { analyzeEstateBuddyEvidence } = await import(
       './gateway/estate-buddy-analyzer.js'
     );
-    const estateProvider = backend.provider;
+    const estateProvider = backend.kind === 'copilot-cli'
+      ? new (await import(
+        './providers/copilot-cli-direct.js'
+      )).CopilotCliDirectProvider({
+        model: backend.model,
+        exposeAgents: false,
+      })
+      : backend.provider;
     server.setEstateBuddyAnalyzer(
       (input) => analyzeEstateBuddyEvidence(estateProvider, input),
     );

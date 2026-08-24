@@ -360,6 +360,7 @@ describe('chat brain selector', () => {
       ui: 'rapplication',
       evidenceSummary: 'An invoice workflow with an approval gate.',
       confidence: 'high',
+      privacy: { masked: false, findings: [] },
       sourceFiles: [{
         filename: 'invoice-walkthrough.mp4',
         mimeType: 'video/mp4',

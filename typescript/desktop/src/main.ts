@@ -42,7 +42,11 @@ import {
 } from './vibevoice.js';
 import { SECURE_RENDERER_PREFERENCES } from './window-security.js';
 import { waitForGatewayReady } from './gateway-ready.js';
-import { extractBuddyEvidence } from './buddy-evidence.js';
+import {
+  extractBuddyEvidence,
+  hasActiveBuddyEvidenceJobs,
+  shutdownBuddyEvidenceJobs,
+} from './buddy-evidence.js';
 
 const packageRoot = path.join(
   import.meta.dirname,
@@ -1386,6 +1390,7 @@ async function finishDesktopSmoke(exitCode: number): Promise<void> {
   await Promise.allSettled([
     stopOwnedShowSessions(),
     stopOwnedGateway(),
+    shutdownBuddyEvidenceJobs(),
     vibeVoiceService?.stop() ?? Promise.resolve(),
   ]);
   if (commandTimer) clearInterval(commandTimer);
@@ -1440,12 +1445,17 @@ if (!ownsInstanceLock) {
 
   app.on('before-quit', (event) => {
     if (quitting) return;
-    if (!gatewayProcess && !vibeVoiceService) return;
+    if (
+      !gatewayProcess
+      && !vibeVoiceService
+      && !hasActiveBuddyEvidenceJobs()
+    ) return;
     event.preventDefault();
     quitting = true;
     void Promise.all([
       stopOwnedShowSessions(),
       stopOwnedGateway(),
+      shutdownBuddyEvidenceJobs(),
       vibeVoiceService?.stop() ?? Promise.resolve(),
     ]).finally(() => app.quit());
   });

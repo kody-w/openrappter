@@ -79,7 +79,8 @@ describe("estate buddy evidence analyzer", () => {
     const provider = providerWith(`${json}${json}`);
 
     const result = await analyzeEstateBuddyEvidence(provider, {
-      evidenceText: "A sufficiently detailed transcript of an approval workflow.",
+      evidenceText:
+        "A sufficiently detailed transcript of an approval workflow.",
       sourceFiles: [
         {
           filename: "transcript.txt",
@@ -90,5 +91,37 @@ describe("estate buddy evidence analyzer", () => {
     });
 
     expect(result.name).toBe("Workflow Guide");
+  });
+
+  it("redacts sensitive evidence before provider analysis", async () => {
+    const provider = providerWith(
+      JSON.stringify({
+        name: "Secure Workflow Guide",
+        role: "Follow the demonstrated secure workflow and preserve approval boundaries.",
+        ui: "chat",
+        evidenceSummary: "A secure demonstrated workflow.",
+        confidence: "high",
+      }),
+    );
+    const token = `ghp_${"A".repeat(24)}`;
+
+    const result = await analyzeEstateBuddyEvidence(provider, {
+      evidenceText: `Paste access token ${token} into the form, then request approval.`,
+      sourceFiles: [
+        {
+          filename: "secure-transcript.txt",
+          mimeType: "text/plain",
+          kind: "document",
+        },
+      ],
+    });
+
+    const prompt = vi.mocked(provider.chat).mock.calls[0][0][0].content;
+    expect(prompt).not.toContain(token);
+    expect(prompt).toContain("[redacted]");
+    expect(result.privacy.masked).toBe(true);
+    expect(
+      result.privacy.findings.some((finding) => finding.kind === "token"),
+    ).toBe(true);
   });
 });

@@ -44,6 +44,7 @@ describe("estate buddy gateway methods", () => {
       evidenceSummary: "A map workflow.",
       confidence: "high",
       sourceFiles: [],
+      privacy: { masked: false, findings: [] },
     });
 
     registerEstateBuddyMethods(server, { client, analyzer });

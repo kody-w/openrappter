@@ -2360,6 +2360,11 @@ export class OpenRappterChat extends LitElement {
           extractionWarnings.length
             ? ` Skipped: ${extractionWarnings.join(' ')}`
             : ''
+        )
+        + (
+          draft.privacy.masked
+            ? ' Sensitive values were redacted before Copilot analysis.'
+            : ''
         );
     } catch (err) {
       this.error = `Could not analyze buddy evidence: ${(err as Error).message}`;

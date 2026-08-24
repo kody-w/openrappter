@@ -61,6 +61,10 @@ export interface EstateBuddyDraft {
   evidenceSummary: string;
   confidence: "high" | "medium" | "low";
   sourceFiles: EstateBuddyEvidenceSource[];
+  privacy: {
+    masked: boolean;
+    findings: Array<{ path: string; kind: string; count: number }>;
+  };
 }
 
 export async function listEstateBuddies(): Promise<EstateBuddyList> {

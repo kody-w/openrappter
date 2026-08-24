@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { LLMProvider } from "../providers/types.js";
 import { chatWithFlightRecorder } from "../providers/recorded-chat.js";
+import { maskSensitivePayload } from "../show-and-tell/privacy.js";
 import type {
   EstateBuddyEvidenceDraft,
   EstateBuddyEvidenceInput,
@@ -117,10 +118,12 @@ export async function analyzeEstateBuddyEvidence(
   rawInput: EstateBuddyEvidenceInput,
 ): Promise<EstateBuddyEvidenceDraft> {
   const input = EvidenceInputSchema.parse(rawInput);
+  const masked = maskSensitivePayload(input);
+  const safeInput = EvidenceInputSchema.parse(masked.value);
   const sessionId = `estate-buddy-analysis-${randomUUID()}`;
   const response = await chatWithFlightRecorder({
     provider,
-    messages: [{ role: "user", content: analysisPrompt(input) }],
+    messages: [{ role: "user", content: analysisPrompt(safeInput) }],
     options: {
       model: process.env.OPENRAPPTER_MODEL,
       temperature: 0.1,
@@ -130,7 +133,7 @@ export async function analyzeEstateBuddyEvidence(
     scope: { sessionId },
     attributes: {
       phase: "evidence-analysis",
-      sourceCount: input.sourceFiles.length,
+      sourceCount: safeInput.sourceFiles.length,
     },
   });
   if (!response.content) {
@@ -141,6 +144,14 @@ export async function analyzeEstateBuddyEvidence(
     ok: true,
     schema: "openrappter-estate-buddy-draft/1.0",
     ...draft,
-    sourceFiles: input.sourceFiles,
+    sourceFiles: safeInput.sourceFiles,
+    privacy: {
+      masked: masked.findings.length > 0,
+      findings: masked.findings.map(({ path, kind, count }) => ({
+        path,
+        kind,
+        count,
+      })),
+    },
   };
 }

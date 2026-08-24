@@ -1,17 +1,28 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import mammoth from "mammoth";
-import { PDFParse } from "pdf-parse";
+import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
+import ffprobeInstaller from "@ffprobe-installer/ffprobe";
 
 const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
 const MAX_MEDIA_BYTES = 100 * 1024 * 1024;
 const MAX_DURATION_SECONDS = 20 * 60;
 const MAX_TEXT_CHARS = 100_000;
 const MAX_PROCESS_OUTPUT = 2 * 1024 * 1024;
+const MAX_DOCX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
+const EVIDENCE_PREFIX = "openrappter-buddy-evidence-";
+const activeChildren = new Set<ChildProcess>();
+const activeScratch = new Set<string>();
 
 export type BuddyEvidenceKind = "video" | "audio" | "document";
 
@@ -122,7 +133,12 @@ function defaultRunCommand(
     const child = spawn(binary, args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+      },
     });
+    activeChildren.add(child);
     let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0);
     let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0);
     let settled = false;
@@ -149,6 +165,7 @@ function defaultRunCommand(
       finish(new Error(`${binary} timed out.`));
     }, timeoutMs);
     child.once("error", (error) => {
+      activeChildren.delete(child);
       finish(new Error(`${binary} is unavailable: ${error.message}`));
     });
     child.stdout.on("data", (chunk: Buffer) => {
@@ -158,6 +175,7 @@ function defaultRunCommand(
       stderr = append(stderr, chunk);
     });
     child.once("close", (code) => {
+      activeChildren.delete(child);
       if (code === 0) {
         finish();
         return;
@@ -171,18 +189,79 @@ function defaultRunCommand(
   });
 }
 
-function mediaBinary(name: "ffmpeg" | "ffprobe"): string {
+async function evidenceScratch(): Promise<string> {
+  const scratch = await mkdtemp(path.join(os.tmpdir(), EVIDENCE_PREFIX));
+  activeScratch.add(scratch);
+  return scratch;
+}
+
+async function removeEvidenceScratch(scratch: string): Promise<void> {
+  activeScratch.delete(scratch);
+  await rm(scratch, { recursive: true, force: true });
+}
+
+async function pruneStaleEvidenceScratch(): Promise<void> {
+  try {
+    const entries = await readdir(os.tmpdir(), { withFileTypes: true });
+    const cutoff = Date.now() - 24 * 60 * 60 * 1_000;
+    for (const entry of entries.slice(0, 2_000)) {
+      if (!entry.isDirectory() || !entry.name.startsWith(EVIDENCE_PREFIX)) {
+        continue;
+      }
+      const candidate = path.join(os.tmpdir(), entry.name);
+      try {
+        if ((await stat(candidate)).mtimeMs < cutoff) {
+          await rm(candidate, { recursive: true, force: true });
+        }
+      } catch {
+        // Another cleanup may have removed the directory.
+      }
+    }
+  } catch {
+    // Per-job cleanup still runs when the temp root cannot be swept.
+  }
+}
+
+export async function shutdownBuddyEvidenceJobs(): Promise<void> {
+  for (const child of activeChildren) {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+  }
+  await Promise.all(
+    [...activeScratch].map((scratch) => removeEvidenceScratch(scratch)),
+  );
+}
+
+export function hasActiveBuddyEvidenceJobs(): boolean {
+  return activeChildren.size > 0 || activeScratch.size > 0;
+}
+
+export function resolveBuddyMediaBinary(name: "ffmpeg" | "ffprobe"): string {
   const override =
     name === "ffmpeg"
-      ? process.env.OPENRAPPTER_FFMPEG_PATH ?? process.env.FFMPEG_PATH
-      : process.env.OPENRAPPTER_FFPROBE_PATH ?? process.env.FFPROBE_PATH;
+      ? (process.env.OPENRAPPTER_FFMPEG_PATH ?? process.env.FFMPEG_PATH)
+      : (process.env.OPENRAPPTER_FFPROBE_PATH ?? process.env.FFPROBE_PATH);
   if (override) return override;
   const executable = process.platform === "win32" ? `${name}.exe` : name;
+  const installed =
+    name === "ffmpeg" ? ffmpegInstaller.path : ffprobeInstaller.path;
+  const unpackedInstalled = String(installed).replace(
+    /([\\/])app\.asar([\\/])/,
+    "$1app.asar.unpacked$2",
+  );
   const candidates =
     process.platform === "darwin"
-      ? [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`]
+      ? [
+          unpackedInstalled,
+          installed,
+          `/opt/homebrew/bin/${name}`,
+          `/usr/local/bin/${name}`,
+        ]
       : process.platform === "win32"
         ? [
+            unpackedInstalled,
+            installed,
             path.join(
               process.env.LOCALAPPDATA ?? "",
               "Microsoft",
@@ -191,9 +270,16 @@ function mediaBinary(name: "ffmpeg" | "ffprobe"): string {
               executable,
             ),
           ]
-        : [`/usr/bin/${name}`, `/usr/local/bin/${name}`];
-  return candidates.find((candidate) => candidate && existsSync(candidate))
-    ?? executable;
+        : [
+            unpackedInstalled,
+            installed,
+            `/usr/bin/${name}`,
+            `/usr/local/bin/${name}`,
+          ];
+  return (
+    candidates.find((candidate) => candidate && existsSync(candidate)) ??
+    executable
+  );
 }
 
 async function mediaDuration(
@@ -233,11 +319,11 @@ async function extractMediaTranscript(
     throw new Error("Local Whisper transcription is unavailable.");
   }
   const runCommand = dependencies.runCommand ?? defaultRunCommand;
-  const ffmpegPath = dependencies.ffmpegPath ?? mediaBinary("ffmpeg");
-  const ffprobePath = dependencies.ffprobePath ?? mediaBinary("ffprobe");
-  const scratch = await mkdtemp(
-    path.join(os.tmpdir(), "openrappter-buddy-evidence-"),
-  );
+  const ffmpegPath =
+    dependencies.ffmpegPath ?? resolveBuddyMediaBinary("ffmpeg");
+  const ffprobePath =
+    dependencies.ffprobePath ?? resolveBuddyMediaBinary("ffprobe");
+  const scratch = await evidenceScratch();
   const source = path.join(scratch, "source-media");
   const rawAudio = path.join(scratch, "audio.f32le");
   try {
@@ -289,32 +375,110 @@ async function extractMediaTranscript(
       : transcript.text;
     return { text, duration };
   } finally {
-    await rm(scratch, { recursive: true, force: true });
+    await removeEvidenceScratch(scratch);
+  }
+}
+
+function assertDocxArchiveBounds(data: Uint8Array): void {
+  const buffer = Buffer.from(data);
+  let entries = 0;
+  let uncompressed = 0;
+  for (let offset = 0; offset + 46 <= buffer.length; offset += 1) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) continue;
+    entries += 1;
+    uncompressed += buffer.readUInt32LE(offset + 24);
+    if (entries > 5_000 || uncompressed > MAX_DOCX_UNCOMPRESSED_BYTES) {
+      throw new Error("DOCX evidence expands beyond the safe archive limit.");
+    }
+  }
+  if (entries === 0)
+    throw new Error("DOCX evidence is not a valid ZIP archive.");
+}
+
+function assertEvidenceMagic(data: Uint8Array, mimeType: string): void {
+  const buffer = Buffer.from(data);
+  const starts = (value: string, offset = 0) =>
+    buffer.toString("ascii", offset, offset + value.length) === value;
+  if (mimeType === "application/pdf" && !starts("%PDF-")) {
+    throw new Error("PDF evidence does not have a valid PDF signature.");
+  }
+  if (mimeType.includes("wordprocessingml")) {
+    if (!starts("PK\u0003\u0004")) {
+      throw new Error("DOCX evidence does not have a valid ZIP signature.");
+    }
+    assertDocxArchiveBounds(data);
+  }
+  if (
+    ["video/mp4", "video/quicktime", "video/x-m4v", "audio/mp4"].includes(
+      mimeType,
+    ) &&
+    !starts("ftyp", 4)
+  ) {
+    throw new Error("MP4 evidence does not have a valid media signature.");
+  }
+  if (
+    mimeType === "video/webm" &&
+    !(
+      buffer[0] === 0x1a &&
+      buffer[1] === 0x45 &&
+      buffer[2] === 0xdf &&
+      buffer[3] === 0xa3
+    )
+  ) {
+    throw new Error("WebM evidence does not have a valid media signature.");
+  }
+  if (mimeType === "audio/wav" && !(starts("RIFF") && starts("WAVE", 8))) {
+    throw new Error("WAV evidence does not have a valid audio signature.");
+  }
+  if (mimeType === "audio/ogg" && !starts("OggS")) {
+    throw new Error("Ogg evidence does not have a valid audio signature.");
+  }
+  if (
+    mimeType === "audio/mpeg" &&
+    !(starts("ID3") || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0))
+  ) {
+    throw new Error("MP3 evidence does not have a valid audio signature.");
+  }
+  if (
+    (mimeType.startsWith("text/") ||
+      mimeType === "application/json" ||
+      mimeType === "application/x-subrip") &&
+    buffer.subarray(0, 8_192).includes(0)
+  ) {
+    throw new Error("Text evidence contains binary data.");
   }
 }
 
 async function extractDocument(
   data: Uint8Array,
   mimeType: string,
+  dependencies: BuddyEvidenceDependencies,
 ): Promise<string> {
   const buffer = Buffer.from(data);
-  if (mimeType === "application/pdf") {
-    const parser = new PDFParse({ data: buffer });
+  if (mimeType === "application/pdf" || mimeType.includes("wordprocessingml")) {
+    const runCommand = dependencies.runCommand ?? defaultRunCommand;
+    const scratch = await evidenceScratch();
+    const source = path.join(scratch, "document");
     try {
-      const info = await parser.getInfo({ parsePageInfo: false });
-      if (info.total > 200) {
-        throw new Error("PDF evidence must contain at most 200 pages.");
+      await writeFile(source, buffer, { mode: 0o600 });
+      const output = await runCommand(
+        process.execPath,
+        [
+          "--max-old-space-size=256",
+          path.join(import.meta.dirname, "document-extractor.js"),
+          mimeType,
+          source,
+        ],
+        60_000,
+      );
+      const result = JSON.parse(output) as { text?: unknown };
+      if (typeof result.text !== "string") {
+        throw new Error("Document extractor returned no text.");
       }
-      return (await parser.getText()).text;
+      return result.text;
     } finally {
-      await parser.destroy();
+      await removeEvidenceScratch(scratch);
     }
-  }
-  if (
-    mimeType ===
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-  ) {
-    return (await mammoth.extractRawText({ buffer })).value;
   }
   return buffer.toString("utf8");
 }
@@ -323,6 +487,7 @@ export async function extractBuddyEvidence(
   rawInput: BuddyEvidenceInput,
   dependencies: BuddyEvidenceDependencies = {},
 ): Promise<BuddyEvidenceResult> {
+  await pruneStaleEvidenceScratch();
   const filename = normalizedFilename(rawInput.filename);
   const mimeType = inferredMimeType(filename, rawInput.mimeType);
   const kind = kindFor(mimeType);
@@ -332,11 +497,12 @@ export async function extractBuddyEvidence(
       `${kind === "document" ? "Document" : "Media"} evidence exceeds its size limit.`,
     );
   }
+  assertEvidenceMagic(rawInput.data, mimeType);
 
   let extracted: string;
   let summary: string;
   if (kind === "document") {
-    extracted = await extractDocument(rawInput.data, mimeType);
+    extracted = await extractDocument(rawInput.data, mimeType, dependencies);
     summary = `Extracted transcript text from ${filename}.`;
   } else {
     const media = await extractMediaTranscript(

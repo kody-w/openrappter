@@ -7,6 +7,8 @@
   "type": "module",
   "main": "dist/main.js",
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "1.1.0",
+    "@ffprobe-installer/ffprobe": "2.1.2",
     "@huggingface/transformers": "4.2.0",
     "mammoth": "1.12.1",
     "pdf-parse": "2.4.5",
@@ -72,7 +74,9 @@
       "runtime/node_modules/**/*.node",
       "runtime/node_modules/openrappter/dist/agents/python/**/*",
       "node_modules/**/*.node",
-      "node_modules/onnxruntime-node/bin/**/*"
+      "node_modules/onnxruntime-node/bin/**/*",
+      "node_modules/@ffmpeg-installer/**/*",
+      "node_modules/@ffprobe-installer/**/*"
     ]
   }
 }

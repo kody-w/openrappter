@@ -1221,7 +1221,7 @@ export class OpenRappterSurgeon extends LitElement {
   @state() private patientSession = '';
   @state() private patientTransport: PatientTransportState = {
     status: 'checking',
-    message: 'Checking the public patient chat wire…',
+    message: 'Checking gateway health on the patient chat transport…',
     retryable: false,
   };
   @state() private copilotAuth: CopilotAuthState = {

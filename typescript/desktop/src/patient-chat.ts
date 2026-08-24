@@ -51,9 +51,9 @@ export async function executePatientChatRequest(options: {
       throw new Error('Patient chat request is too large.');
     }
     const response = await (options.fetchImpl ?? fetch)(
-      `${origin.origin}/chat`,
+      `${origin.origin}${request.action === 'probe' ? '/health' : '/chat'}`,
       {
-        method: request.action === 'probe' ? 'HEAD' : 'POST',
+        method: request.action === 'probe' ? 'GET' : 'POST',
         headers: {
           Authorization: `Bearer ${options.gatewayToken}`,
           Origin: origin.origin,
@@ -66,9 +66,7 @@ export async function executePatientChatRequest(options: {
     );
     return {
       status: response.status,
-      body: request.action === 'probe'
-        ? ''
-        : await boundedResponseText(response, MAX_RESPONSE_BYTES),
+      body: await boundedResponseText(response, MAX_RESPONSE_BYTES),
     };
   } catch (error) {
     return {

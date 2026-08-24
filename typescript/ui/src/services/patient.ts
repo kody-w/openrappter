@@ -36,7 +36,7 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 let state: PatientTransportState = {
   status: 'checking',
-  message: 'Checking the public patient chat wire…',
+  message: 'Checking gateway health on the patient chat transport…',
   retryable: false,
 };
 let probePromise: Promise<PatientTransportState> | undefined;
@@ -60,7 +60,7 @@ export function probePatientTransport(
   if (probePromise) return probePromise;
   state = {
     status: 'checking',
-    message: 'Checking the public patient chat wire…',
+    message: 'Checking gateway health on the patient chat transport…',
     retryable: false,
   };
   probePromise = (async () => {
@@ -136,7 +136,7 @@ async function executeTransport(
   const abort = () => controller.abort();
   externalSignal?.addEventListener('abort', abort, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const target = resolveHostedChatUrl();
+  const target = resolveHostedUrl(request.action);
   if (!target) {
     clearTimeout(timer);
     return { status: 0, body: '', error: 'cors-blocked' };
@@ -144,7 +144,7 @@ async function executeTransport(
   const crossOrigin = new URL(target).origin !== location.origin;
   try {
     const response = await fetch(target, {
-      method: request.action === 'probe' ? 'HEAD' : 'POST',
+      method: request.action === 'probe' ? 'GET' : 'POST',
       headers: request.action === 'send'
         ? {
             ...gateway.httpAuthHeaders(),
@@ -162,9 +162,7 @@ async function executeTransport(
     });
     return {
       status: response.status,
-      body: request.action === 'probe'
-        ? ''
-        : await boundedResponseText(response),
+      body: await boundedResponseText(response),
     };
   } catch (error) {
     return {
@@ -228,10 +226,17 @@ function classifyTransport(
       retryable: true,
     };
   }
-  if (probe && result.status !== 204) {
+  if (probe && result.status !== 200) {
     return {
       status: 'server-error',
-      message: 'The public patient chat readiness probe failed.',
+      message: 'Gateway health is not ready on the patient chat transport.',
+      retryable: true,
+    };
+  }
+  if (probe && !healthResponseIsReady(result.body)) {
+    return {
+      status: 'server-error',
+      message: 'Gateway health returned an invalid or degraded response.',
       retryable: true,
     };
   }
@@ -244,7 +249,9 @@ function classifyTransport(
   }
   return {
     status: 'ready',
-    message: 'Public patient chat is ready.',
+    message: probe
+      ? 'Gateway health is ready on the public patient chat transport.'
+      : 'Public patient chat is ready.',
     retryable: false,
   };
 }
@@ -288,9 +295,10 @@ async function boundedResponseText(response: Response): Promise<string> {
   return text;
 }
 
-function resolveHostedChatUrl(): string | null {
+function resolveHostedUrl(action: 'probe' | 'send'): string | null {
   const configured = import.meta.env.VITE_GATEWAY_URL;
-  if (!configured) return new URL('/chat', location.origin).href;
+  const pathname = action === 'probe' ? '/health' : '/chat';
+  if (!configured) return new URL(pathname, location.origin).href;
   try {
     const url = new URL(configured);
     if (url.username || url.password) return null;
@@ -298,11 +306,28 @@ function resolveHostedChatUrl(): string | null {
     else if (url.protocol === 'wss:') url.protocol = 'https:';
     else if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
     if (location.protocol === 'https:' && url.protocol !== 'https:') return null;
-    url.pathname = '/chat';
+    url.pathname = pathname;
     url.search = '';
     url.hash = '';
     return url.href;
   } catch {
     return null;
+  }
+
+}
+
+function healthResponseIsReady(text: string): boolean {
+  try {
+    const value = JSON.parse(text) as Record<string, unknown>;
+    const checks = value.checks;
+    return value.status === 'ok'
+      && typeof value.version === 'string'
+      && typeof value.uptime === 'number'
+      && typeof value.timestamp === 'string'
+      && Boolean(checks)
+      && typeof checks === 'object'
+      && (checks as Record<string, unknown>).gateway === true;
+  } catch {
+    return false;
   }
 }

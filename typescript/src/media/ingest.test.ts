@@ -565,7 +565,7 @@ describe('secure media ingest', () => {
     });
   });
 
-  it.runIf(process.env.OPENRAPPTER_LARGE_MEDIA_TEST === '1')(
+  it(
     'ingests an exact >100 MB streamed fixture without a 100 MB allocation',
     async () => {
       const root = testRoot();

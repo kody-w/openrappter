@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, dirname, extname, resolve } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020.js';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(__dirname, '../../../..');
@@ -171,12 +172,23 @@ const PROTECTED_IDENTIFIER =
 const PROTECTED_ENDPOINT =
   /\/+(?:api\/)?(?:v\d+\/)?(?:control[-_]?plane|tenants?|billing|telemetry)(?=\/|[?#\s"'`)]|$)/i;
 
-function normalizedValueFindings(input: string): string[] {
+function normalizedValueFindings(
+  input: string,
+  collapseWholeValue = false,
+): string[] {
   const views = normalizedViews(input);
   const result = new Set<string>();
+  const collapsedWhole = views.token.replaceAll(' ', '');
   if (
-    views.identifiers.some((identifier) => PROTECTED_IDENTIFIER.test(identifier)) ||
-    /\brapter\s+(?:os|box)\b/i.test(views.token)
+    views.identifiers.some((identifier) =>
+      PROTECTED_IDENTIFIER.test(identifier)) ||
+    (
+      collapseWholeValue &&
+      (
+        PROTECTED_IDENTIFIER.test(collapsedWhole) ||
+        collapsedWhole === 'controlplane'
+      )
+    )
   ) {
     result.add('protected private identifier');
   }
@@ -212,7 +224,7 @@ function literalValues(source: string): string[] {
   );
 }
 
-function staticallyAssembledStrings(source: string): string[] {
+function tokenizedStaticStrings(source: string): string[] {
   const result = new Set<string>();
   const plus = new RegExp(
     `${STRING_LITERAL}(?:\\s*\\+\\s*${STRING_LITERAL})+`,
@@ -244,7 +256,166 @@ function staticallyAssembledStrings(source: string): string[] {
 }
 
 function normalizedPathFindings(path: string): string[] {
-  return normalizedValueFindings(path);
+  return normalizedValueFindings(path, true);
+}
+
+const JS_FAMILY_EXTENSIONS = new Set([
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.ts',
+  '.tsx',
+  '.cts',
+]);
+const MAX_AST_NODES = 250_000;
+const MAX_STATIC_DEPTH = 48;
+const MAX_STATIC_OUTPUT = 64 * 1024;
+const MAX_STATIC_RESULTS = 10_000;
+
+interface StaticAnalysis {
+  values: string[];
+  error?: string;
+}
+
+class StaticAnalysisLimitError extends Error {}
+
+function scriptKind(path: string): ts.ScriptKind {
+  switch (extname(path).toLowerCase()) {
+    case '.tsx':
+      return ts.ScriptKind.TSX;
+    case '.jsx':
+      return ts.ScriptKind.JSX;
+    case '.js':
+    case '.mjs':
+    case '.cjs':
+      return ts.ScriptKind.JS;
+    default:
+      return ts.ScriptKind.TS;
+  }
+}
+
+function boundedStaticValue(value: string): string {
+  if (value.length > MAX_STATIC_OUTPUT) {
+    throw new StaticAnalysisLimitError('static string output limit exceeded');
+  }
+  return value;
+}
+
+function unwrapParentheses(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (ts.isParenthesizedExpression(current)) current = current.expression;
+  return current;
+}
+
+function evaluateStaticString(node: ts.Node, depth = 0): string | null {
+  if (depth > MAX_STATIC_DEPTH) {
+    throw new StaticAnalysisLimitError('static expression depth limit exceeded');
+  }
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return boundedStaticValue(node.text);
+  }
+  if (ts.isParenthesizedExpression(node)) {
+    return evaluateStaticString(node.expression, depth + 1);
+  }
+  if (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.PlusToken
+  ) {
+    const left = evaluateStaticString(node.left, depth + 1);
+    const right = evaluateStaticString(node.right, depth + 1);
+    if (left === null || right === null) return null;
+    return boundedStaticValue(left + right);
+  }
+  if (
+    ts.isCallExpression(node) &&
+    ts.isPropertyAccessExpression(node.expression)
+  ) {
+    const receiverNode = node.expression.expression;
+    const method = node.expression.name.text;
+    if (method === 'concat') {
+      const receiver = evaluateStaticString(receiverNode, depth + 1);
+      if (receiver === null) return null;
+      const args: string[] = [];
+      for (const argument of node.arguments) {
+        const value = evaluateStaticString(argument, depth + 1);
+        if (value === null) return null;
+        args.push(value);
+      }
+      return boundedStaticValue(receiver + args.join(''));
+    }
+    const unwrappedReceiver = unwrapParentheses(receiverNode);
+    if (method === 'join' && ts.isArrayLiteralExpression(unwrappedReceiver)) {
+      if (node.arguments.length !== 1) return null;
+      const separator = evaluateStaticString(node.arguments[0], depth + 1);
+      if (separator === null) return null;
+      const elements: string[] = [];
+      for (const element of unwrappedReceiver.elements) {
+        if (ts.isSpreadElement(element)) return null;
+        const value = evaluateStaticString(element, depth + 1);
+        if (value === null) return null;
+        elements.push(value);
+      }
+      return boundedStaticValue(elements.join(separator));
+    }
+  }
+  return null;
+}
+
+function typescriptStaticStrings(path: string, source: string): StaticAnalysis {
+  try {
+    const sourceFile = ts.createSourceFile(
+      path,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      scriptKind(path),
+    );
+    const diagnostics = (
+      sourceFile as ts.SourceFile & {
+        parseDiagnostics: readonly ts.Diagnostic[];
+      }
+    ).parseDiagnostics;
+    if (diagnostics.length > 0) {
+      return { values: [], error: 'TypeScript parser rejected source' };
+    }
+
+    let nodeCount = 0;
+    const values = new Set<string>();
+    const visit = (node: ts.Node): void => {
+      nodeCount += 1;
+      if (nodeCount > MAX_AST_NODES) {
+        throw new StaticAnalysisLimitError('AST node limit exceeded');
+      }
+      const value = evaluateStaticString(node);
+      if (value !== null) {
+        values.add(value);
+        if (values.size > MAX_STATIC_RESULTS) {
+          throw new StaticAnalysisLimitError('static result limit exceeded');
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+    return { values: [...values] };
+  } catch (error) {
+    return {
+      values: [],
+      error: error instanceof Error
+        ? error.message
+        : 'unknown static parser failure',
+    };
+  }
+}
+
+function staticallyAssembledStrings(
+  path: string,
+  source: string,
+): StaticAnalysis {
+  if (JS_FAMILY_EXTENSIONS.has(extname(path).toLowerCase())) {
+    return typescriptStaticStrings(path, source);
+  }
+  return { values: tokenizedStaticStrings(source) };
 }
 
 const DEPENDENCY_MAP_KEYS = new Set([
@@ -273,8 +444,12 @@ function dependencyEntries(value: unknown): [string, string][] {
 
 function textFindings(path: string, content: string): string[] {
   const result = new Set(normalizedValueFindings(content));
-  for (const assembled of staticallyAssembledStrings(content)) {
-    for (const finding of normalizedValueFindings(assembled)) {
+  const staticAnalysis = staticallyAssembledStrings(path, content);
+  if (staticAnalysis.error) {
+    result.add(`static parser failed closed: ${staticAnalysis.error}`);
+  }
+  for (const assembled of staticAnalysis.values) {
+    for (const finding of normalizedValueFindings(assembled, true)) {
       result.add(`static assembly: ${finding}`);
     }
   }
@@ -464,7 +639,7 @@ describe('open core and separately operated service boundary', () => {
     ];
     for (const mutation of contentMutations) {
       expect(
-        textFindings('virtual.runtime', `import('${mutation}/client')`),
+        textFindings('virtual.runtime.ts', `import('${mutation}/client')`),
         mutation,
       ).not.toEqual([]);
     }
@@ -539,6 +714,13 @@ describe('open core and separately operated service boundary', () => {
       "const value = ['rapter', 'os'].join('');",
       "const value = ['/control', '-plane'].join('');",
       "value = '/ten' + 'ants'",
+      "const value = ('rapter' /* block */ + // line\n ('os'));",
+      "const value = (('rapter' + ('o')) + 's');",
+      "const value = ('rapter').concat(/* reviewer */ ('os'));",
+      "const value = (['rapter', /* reviewer */ 'os']).join('');",
+      "const value = `rapter` + `os`;",
+      "const value = ('rapter' + 'o').concat('s');",
+      "const value = ['control', 'plane'].join('-');",
     ];
     for (const construction of constructions) {
       expect(
@@ -549,15 +731,27 @@ describe('open core and separately operated service boundary', () => {
   });
 
   it('does not reject safe prose that merely discusses ordinary concepts', () => {
-    const safeControls = [
+    const safeProse = [
       'The tenant asked the service team about an invoice.',
       'Telemetry helps a local client observe health.',
       'A controller manages the public plane.',
       'The billing cycle is described in user-facing documentation.',
       'A raptor boxes its lunch before a flight.',
     ];
-    for (const control of safeControls) {
+    for (const control of safeProse) {
       expect(textFindings('safe-prose.md', control), control).toEqual([]);
+    }
+
+    const safeCode = [
+      "const prefix = 'rapter'; const value = prefix + 'os';",
+      "const value = make('rapter', 'os');",
+      "const value = `rapter${suffix}`;",
+      "const value = ['rapter', suffix].join('');",
+      "// 'rapter' + 'os' is documentation, not executable assembly",
+      "/* ['control', 'plane'].join('-') is an example comment */",
+    ];
+    for (const control of safeCode) {
+      expect(textFindings('safe-code.ts', control), control).toEqual([]);
     }
   });
 

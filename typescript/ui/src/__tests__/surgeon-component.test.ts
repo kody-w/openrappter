@@ -170,6 +170,46 @@ describe('openrappter-surgeon', () => {
     expect(element.shadowRoot?.textContent).toContain('Inspect memory');
   });
 
+  it('uses readable radio semantics with roving keyboard mode selection', async () => {
+    const element = document.createElement('openrappter-surgeon') as SurgeonElement;
+    document.body.append(element);
+    await settle(element);
+    const surgeon = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      '[data-mode="surgeon"]',
+    )!;
+    const patientMode = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      '[data-mode="patient"]',
+    )!;
+    const group = element.shadowRoot?.querySelector('.mode-switcher');
+
+    expect(group?.getAttribute('role')).toBe('radiogroup');
+    expect(surgeon.getAttribute('role')).toBe('radio');
+    expect(surgeon.getAttribute('aria-checked')).toBe('true');
+    expect(surgeon.dataset.state).toBe('selected');
+    expect(surgeon.tabIndex).toBe(0);
+    expect(patientMode.dataset.state).toBe('unselected');
+    expect(patientMode.tabIndex).toBe(-1);
+
+    surgeon.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'ArrowRight',
+      bubbles: true,
+    }));
+    await settle(element);
+    expect(patientMode.getAttribute('aria-checked')).toBe('true');
+    expect(patientMode.dataset.state).toBe('selected');
+    expect(element.shadowRoot?.activeElement).toBe(patientMode);
+    expect(element.shadowRoot?.querySelector('.mode-status')?.textContent)
+      .toContain('Observing: Patient mode');
+
+    surgeon.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+    }));
+    await settle(element);
+    expect(surgeon.getAttribute('aria-checked')).toBe('true');
+    expect(element.shadowRoot?.activeElement).toBe(surgeon);
+  });
+
   it('turns the production HTTP 401 into inline reauthentication without a fake answer', async () => {
     mocks.sendTurn.mockRejectedValueOnce(new Error(
       'GitHub token does not have Copilot API access (HTTP 401). Sign in with a GitHub account that has Copilot enabled.',
@@ -215,6 +255,15 @@ describe('openrappter-surgeon', () => {
     expect(Array.from(
       element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.tbtn') ?? [],
     ).every((button) => button.disabled)).toBe(true);
+    expect(Array.from(
+      element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.tbtn') ?? [],
+    ).every((button) =>
+      button.dataset.state === 'auth-unavailable'
+      && button.getAttribute('aria-describedby') === 'copilot-mode-status'
+      && Boolean(button.title)
+    )).toBe(true);
+    expect(element.shadowRoot?.querySelector('.mode-status')?.textContent)
+      .toContain('Observing: Surgeon mode');
   });
 
   it('routes offline fallback only to deterministic local health without invoking a provider', async () => {
@@ -323,6 +372,10 @@ describe('openrappter-surgeon', () => {
     ).map((option) => option.value)).toEqual(['supported-model']);
     expect(element.shadowRoot?.textContent).not.toContain('model_not_supported');
     expect(element.shadowRoot?.querySelector<HTMLButtonElement>('.send')?.disabled)
+      .toBe(true);
+    expect(Array.from(
+      element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.tbtn') ?? [],
+    ).every((button) => button.dataset.state === 'model-unavailable'))
       .toBe(true);
     const recommended = Array.from(
       element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.model-resolution button') ?? [],

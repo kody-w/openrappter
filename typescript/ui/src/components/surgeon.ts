@@ -416,6 +416,84 @@ export class OpenRappterSurgeon extends LitElement {
       flex: 0 0 auto;
     }
 
+    .mode-switcher {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--border, var(--line));
+      border-radius: 12px;
+      background: var(--bg-secondary, var(--theater-soft));
+    }
+
+    .tbtn {
+      appearance: none;
+      min-height: 40px;
+      padding: 8px 12px;
+      border: 2px solid var(--border, var(--line));
+      border-radius: 8px;
+      background: var(--bg-tertiary, #121a2d);
+      color: var(--text-primary, #f7f9ff);
+      font-weight: 750;
+      line-height: 1.2;
+      cursor: pointer;
+      text-shadow: none;
+    }
+
+    .tbtn[data-state='selected'] {
+      border-color: var(--accent, var(--cyan));
+      background: var(--accent, var(--cyan));
+      color: var(--accent-foreground, var(--theater));
+      box-shadow: inset 0 0 0 1px var(--accent-foreground, var(--theater));
+    }
+
+    .tbtn[data-state='unselected']:hover {
+      border-color: var(--accent-hover, var(--blue));
+      background: var(--bg-secondary, var(--theater-soft));
+      color: var(--text-primary, #f7f9ff);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .tbtn:focus-visible {
+      outline: 3px solid var(--accent-hover, var(--blue));
+      outline-offset: 3px;
+    }
+
+    .tbtn:disabled {
+      opacity: 1;
+      border-style: dashed;
+      border-color: var(--text-secondary, #94a0ba);
+      background:
+        repeating-linear-gradient(
+          -45deg,
+          var(--bg-secondary, var(--theater-soft)) 0 7px,
+          var(--bg-tertiary, #121a2d) 7px 14px
+        );
+      color: var(--text-primary, #f7f9ff);
+      cursor: not-allowed;
+    }
+
+    .tbtn[data-state='auth-unavailable'] {
+      border-style: double;
+      border-color: var(--error, var(--red));
+    }
+
+    .tbtn[data-state='model-unavailable'] {
+      border-style: dotted;
+      border-color: var(--warning, var(--amber));
+    }
+
+    .tbtn[data-state='disabled'] {
+      border-style: dashed;
+    }
+
+    .mode-icon {
+      display: inline-block;
+      min-width: 1.25em;
+      margin-right: 4px;
+      font-weight: 900;
+    }
+
     .copilot {
       width: 38px;
       height: 38px;
@@ -449,6 +527,85 @@ export class OpenRappterSurgeon extends LitElement {
       font-weight: 700;
       letter-spacing: .08em;
       text-transform: uppercase;
+    }
+
+    .mode-status {
+      max-width: min(100%, 420px);
+      color: var(--text-primary, #f7f9ff);
+      background: var(--bg-tertiary, #121a2d);
+      border-color: var(--text-secondary, #94a0ba);
+      line-height: 1.45;
+      text-transform: none;
+    }
+
+    @media (prefers-color-scheme: light) {
+      .mode-switcher {
+        background: var(--bg-secondary, #f3f4f6);
+      }
+
+      .tbtn {
+        background: var(--bg-tertiary, #e5e7eb);
+        color: var(--text-primary, #111827);
+        border-color: var(--border, #4b5563);
+      }
+
+      .tbtn:disabled,
+      .mode-status {
+        color: var(--text-primary, #111827);
+        background: var(--bg-secondary, #f3f4f6);
+        border-color: var(--text-secondary, #4b5563);
+      }
+    }
+
+    @media (prefers-contrast: more) {
+      .mode-switcher,
+      .tbtn,
+      .mode-status {
+        border-width: 2px;
+      }
+
+      .tbtn[data-state='selected'] {
+        outline: 2px solid var(--text-primary, #f7f9ff);
+        outline-offset: 1px;
+      }
+    }
+
+    @media (forced-colors: active) {
+      .mode-switcher {
+        border: 2px solid ButtonText;
+        background: Canvas;
+        forced-color-adjust: auto;
+      }
+
+      .tbtn {
+        border: 2px solid ButtonText;
+        background: ButtonFace;
+        color: ButtonText;
+        forced-color-adjust: auto;
+      }
+
+      .tbtn[data-state='selected'] {
+        border-color: Highlight;
+        background: Highlight;
+        color: HighlightText;
+        box-shadow: none;
+      }
+
+      .tbtn:disabled {
+        border-color: GrayText;
+        background: Canvas;
+        color: GrayText;
+      }
+
+      .tbtn:focus-visible {
+        outline: 3px solid Highlight;
+      }
+
+      .mode-status {
+        border: 2px solid ButtonText;
+        background: Canvas;
+        color: CanvasText;
+      }
     }
 
     .transcript {
@@ -1241,6 +1398,71 @@ export class OpenRappterSurgeon extends LitElement {
     return copilotActionsReady(this.copilotAuth);
   }
 
+  private modeState(mode: 'surgeon' | 'patient'): string {
+    if (this.busy) return 'disabled';
+    if (this.copilotAuth.status !== 'ready') return 'auth-unavailable';
+    if (this.copilotAuth.model?.status !== 'ready') {
+      return 'model-unavailable';
+    }
+    return this.mode === mode ? 'selected' : 'unselected';
+  }
+
+  private modeUnavailableReason(): string {
+    if (this.busy) return 'A request is currently in progress.';
+    if (this.copilotAuth.status !== 'ready') return this.copilotAuth.message;
+    if (this.copilotAuth.model?.status !== 'ready') {
+      return this.copilotAuth.model?.message
+        ?? 'Choose a supported Copilot model to continue.';
+    }
+    return '';
+  }
+
+  private modeStatusText(): string {
+    const selected = this.mode === 'patient' ? 'Patient mode' : 'Surgeon mode';
+    const reason = this.modeUnavailableReason();
+    const activity = this.mode === 'patient'
+      ? (this.patientSession ? 'conversation active' : 'agent chat ready')
+      : (this.patientCase?.status.replace('_', ' ') ?? 'observing');
+    return `Observing: ${selected} — ${reason || activity}`;
+  }
+
+  private async selectMode(
+    mode: 'surgeon' | 'patient',
+    focus = false,
+  ): Promise<void> {
+    if (!this.actionsReady() || this.busy) return;
+    this.mode = mode;
+    this.error = null;
+    await this.updateComplete;
+    if (focus) {
+      this.shadowRoot
+        ?.querySelector<HTMLButtonElement>(`[data-mode="${mode}"]`)
+        ?.focus();
+    }
+  }
+
+  private onModeKeydown(event: KeyboardEvent): void {
+    if (!this.actionsReady() || this.busy) return;
+    if (event.key === ' ' || event.key === 'Enter') {
+      const mode = (event.target as HTMLElement).dataset.mode;
+      if (mode === 'surgeon' || mode === 'patient') {
+        event.preventDefault();
+        void this.selectMode(mode, true);
+      }
+      return;
+    }
+    if (
+      event.key === 'ArrowLeft'
+      || event.key === 'ArrowUp'
+      || event.key === 'ArrowRight'
+      || event.key === 'ArrowDown'
+    ) {
+      event.preventDefault();
+      const next = this.mode === 'surgeon' ? 'patient' : 'surgeon';
+      void this.selectMode(next, true);
+    }
+  }
+
   private async chooseModel(model: string): Promise<void> {
     if (!model || this.busy) return;
     this.busy = true;
@@ -1693,30 +1915,47 @@ export class OpenRappterSurgeon extends LitElement {
                   ? 'agent chat through the configured AI backend · POST /chat'
                   : 'Brain surgeon · adaptive agent mode'}</span>
               </div>
-              <div class="toolbar" role="group" aria-label="Who you are talking to">
+              <div
+                class="toolbar mode-switcher"
+                role="radiogroup"
+                aria-label="Conversation mode"
+                aria-describedby="copilot-mode-status"
+                @keydown=${this.onModeKeydown}
+              >
                 <button
-                  class="tbtn${this.mode === 'surgeon' ? ' on' : ''}"
-                  aria-pressed=${this.mode === 'surgeon'}
+                  class="tbtn"
+                  role="radio"
+                  data-mode="surgeon"
+                  data-state=${this.modeState('surgeon')}
+                  aria-checked=${this.mode === 'surgeon'}
+                  aria-describedby="copilot-mode-status"
+                  tabindex=${this.actionsReady() && this.mode === 'surgeon' ? 0 : -1}
                   ?disabled=${this.busy || !this.actionsReady()}
-                  title=${this.actionsReady()
-                    ? 'Talk to the Copilot surgeon'
-                    : this.copilotAuth.message}
-                  @click=${() => { this.mode = 'surgeon'; this.error = null; }}
-                >⌘ Surgeon</button>
+                  title=${this.modeUnavailableReason()
+                    || 'Talk to the Copilot surgeon'}
+                  @click=${() => this.selectMode('surgeon')}
+                ><span class="mode-icon" aria-hidden="true">⌘</span>Surgeon</button>
                 <button
-                  class="tbtn${this.mode === 'patient' ? ' on' : ''}"
-                  aria-pressed=${this.mode === 'patient'}
+                  class="tbtn"
+                  role="radio"
+                  data-mode="patient"
+                  data-state=${this.modeState('patient')}
+                  aria-checked=${this.mode === 'patient'}
+                  aria-describedby="copilot-mode-status"
+                  tabindex=${this.actionsReady() && this.mode === 'patient' ? 0 : -1}
                   ?disabled=${this.busy || !this.actionsReady()}
-                  title=${this.actionsReady()
-                    ? 'Talk to the configured agent backend'
-                    : this.copilotAuth.message}
-                  @click=${() => { this.mode = 'patient'; this.error = null; }}
-                >🦖 Patient</button>
+                  title=${this.modeUnavailableReason()
+                    || 'Talk to the configured agent backend'}
+                  @click=${() => this.selectMode('patient')}
+                ><span class="mode-icon" aria-hidden="true">🦖</span>Patient</button>
               </div>
-              <span class="case-status">
-                ${this.mode === 'patient'
-                  ? (this.patientSession ? 'in conversation' : 'ready')
-                  : (this.patientCase?.status.replace('_', ' ') ?? 'ready')}
+              <span
+                class="case-status mode-status"
+                id="copilot-mode-status"
+                role="status"
+                aria-live="polite"
+              >
+                ${this.modeStatusText()}
               </span>
             </header>
 

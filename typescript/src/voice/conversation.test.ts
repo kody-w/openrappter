@@ -288,8 +288,11 @@ describe('Grail voice conversation state machine', () => {
   });
 
   it('times out a noisy/hung operation and requires recovery', async () => {
+    let aborted = false;
     const { deps, clock } = harness({
-      transcribeLocal: vi.fn(async () => new Promise<string>(() => {})),
+      transcribeLocal: vi.fn(async (_audio, signal) => new Promise<string>(() => {
+        signal.addEventListener('abort', () => { aborted = true; }, { once: true });
+      })),
     });
     const conversation = new GrailVoiceConversation(
       settings({ operationTimeoutMs: 1_000 }),
@@ -306,5 +309,6 @@ describe('Grail voice conversation state machine', () => {
       state: 'error',
       reason: 'transcription-timeout',
     });
+    expect(aborted).toBe(true);
   });
 });

@@ -251,3 +251,5 @@ ident, and rolling-buffer design above remains a separate beta specification.
 The default Grail adapter and bounded back-and-forth conversation controller now
 live beside that seam in `typescript/src/voice/grail-adapter.ts` and
 `conversation.ts`. Pending shells remain untouched.
+Conversation STT is another owner of the existing Skills Recorder
+`NarrationService`; it does not launch or cache a second Whisper model.

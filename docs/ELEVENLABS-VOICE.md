@@ -52,6 +52,22 @@ requires a visible human action. Any execution approval pauses the loop;
 voice code has no approve method and cannot resume while `exec.pending` is
 non-empty.
 
+### One local STT authority
+
+Voice input does not create a second Whisper runtime. Skills Recorder
+narration, Voice conversation, walkthrough evidence, and desktop smoke all
+acquire the same ref-counted `NarrationService`, the same
+`Xenova/whisper-small` q8 pipeline, the same application-data model cache, and
+the same pinned revision (`2d67713f236afa48a18992566e7647f6ca848e13`).
+
+The authority serializes a bounded PCM/request queue, exposes model download
+progress and ready/offline/error/busy health, supports request-id cancellation,
+unloads only after the last owner releases, and cancels all work on desktop
+shutdown. A failed inference clears and rebuilds the cached pipeline once; it
+never downloads a second model or changes the package pin. Recorder and Voice
+can coexist, and Voice waits on an in-progress Recorder download rather than
+starting another.
+
 The public reference in `localFirstTools` was used only for interaction
 vocabulary (separate input/output groups, continuous mode, PTT, visible
 listening/speaking state, pause). Its branding, assets, unsafe browser speech,

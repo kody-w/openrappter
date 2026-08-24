@@ -81,6 +81,13 @@ export class OpenRappterVoiceConversation extends LitElement {
   @state() private error = '';
   @state() private settings: GrailVoiceSettings =
     DEFAULT_GRAIL_VOICE_SETTINGS;
+  @state() private sttStatus: {
+    model?: string;
+    health?: string;
+    phase?: string;
+    progress?: number | null;
+    queueDepth?: number;
+  } = {};
 
   private readonly capture: GrailVoiceInputCapture = new GrailVoiceInputCapture(
     new BrowserVoiceCaptureBackend(),
@@ -118,12 +125,23 @@ export class OpenRappterVoiceConversation extends LitElement {
     },
   );
   private wakeLock?: WakeLockSentinelLike;
+  private sttCleanup?: () => void;
+  private activeTranscriptionRequest = '';
 
   connectedCallback(): void {
     super.connectedCallback();
     void desktopBridge()?.voice({ action: 'status' }).then((status) => {
       this.applyStatus(status as VoiceStatusPayload);
     }).catch(() => {});
+    const desktop = desktopBridge();
+    if (desktop) {
+      this.sttCleanup = desktop.onNarrationStatus((status) => {
+        this.sttStatus = status;
+      });
+      void desktop.narration({ action: 'status' }).then((status) => {
+        this.sttStatus = status;
+      }).catch(() => {});
+    }
     gateway.on('approval', this.onApproval);
     document.addEventListener('visibilitychange', this.onVisibilityChange);
     window.addEventListener('keydown', this.onKeyDown, { capture: true });
@@ -137,6 +155,15 @@ export class OpenRappterVoiceConversation extends LitElement {
     window.removeEventListener('keydown', this.onKeyDown, { capture: true });
     window.removeEventListener('keyup', this.onKeyUp, { capture: true });
     this.capture.dispose();
+    void this.conversation.cancel('unmounted');
+    this.sttCleanup?.();
+    this.sttCleanup = undefined;
+    if (this.activeTranscriptionRequest) {
+      void desktopBridge()?.narration({
+        action: 'cancel',
+        request_id: this.activeTranscriptionRequest,
+      }).catch(() => {});
+    }
     void this.releaseWakeLock();
   }
 
@@ -212,18 +239,47 @@ export class OpenRappterVoiceConversation extends LitElement {
     if (signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'cancelled' });
     const desktop = desktopBridge();
     if (!desktop) throw new Error('Local Whisper requires OpenRappter Desktop.');
-    const status = await desktop.narration({ action: 'status' });
-    if (String(status.model ?? 'missing') !== 'ready') {
-      await desktop.narration({ action: 'download' });
-    }
-    if (signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'cancelled' });
-    const durationMs = audio.byteLength / 4 / 16_000 * 1_000;
-    const result = await desktop.narration({
-      action: 'voice.transcribe',
-      duration_ms: durationMs,
-      samples: audio,
+    const requestId = `voice-${crypto.randomUUID()}`;
+    this.activeTranscriptionRequest = requestId;
+    await desktop.narration({
+      action: 'acquire',
+      owner: 'voice-conversation',
     });
-    return String(result.text ?? '');
+    const cancel = () => {
+      void desktop.narration({
+        action: 'cancel',
+        request_id: requestId,
+      }).catch(() => {});
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    try {
+      const status = await desktop.narration({ action: 'status' });
+      if (String(status.model ?? 'missing') !== 'ready') {
+        await desktop.narration({
+          action: 'download',
+          owner: 'voice-conversation',
+        });
+      }
+      if (signal.aborted) {
+        throw Object.assign(new Error('cancelled'), { code: 'cancelled' });
+      }
+      const durationMs = audio.byteLength / 4 / 16_000 * 1_000;
+      const result = await desktop.narration({
+        action: 'voice.transcribe',
+        owner: 'voice-conversation',
+        request_id: requestId,
+        duration_ms: durationMs,
+        samples: audio,
+      });
+      return String(result.text ?? '');
+    } finally {
+      signal.removeEventListener('abort', cancel);
+      this.activeTranscriptionRequest = '';
+      await desktop.narration({
+        action: 'release',
+        owner: 'voice-conversation',
+      }).catch(() => {});
+    }
   }
 
   private handleCaptureError(code: string): void {
@@ -360,6 +416,13 @@ export class OpenRappterVoiceConversation extends LitElement {
           ${this.transcript
             ? `Transcript: ${this.transcript}`
             : 'Microphone audio stays local and is not retained.'}
+        </span>
+        <span class="privacy">
+          Whisper: ${this.sttStatus.health ?? this.sttStatus.model ?? 'missing'}
+          ${typeof this.sttStatus.progress === 'number'
+            ? ` · ${Math.round(this.sttStatus.progress)}%`
+            : ''}
+          ${this.sttStatus.queueDepth ? ` · queue ${this.sttStatus.queueDepth}` : ''}
         </span>
         ${this.snapshot.reason === 'transcript-review'
           ? html`

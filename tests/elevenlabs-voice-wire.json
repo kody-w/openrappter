@@ -48,6 +48,9 @@
         "model-unavailable"
       ],
       "microphoneTransport": "local-electron-narration-only",
+      "sttAuthority": "shared-ref-counted-skills-recorder-narration-service",
+      "sttModel": "Xenova/whisper-small@2d67713f236afa48a18992566e7647f6ca848e13",
+      "sttQueue": "bounded-serial-cancellable",
       "externalTurnInput": "final-transcript-only",
       "externalTtsInput": "signed-final-assistant-text-only"
     }

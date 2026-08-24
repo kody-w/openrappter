@@ -36,6 +36,7 @@ import {
 import {
   NARRATION_MODEL_DOWNLOAD_LABEL,
   NarrationService,
+  type NarrationOwner,
 } from './narration.js';
 import {
   VIBEVOICE_MODEL_LABEL,
@@ -561,6 +562,10 @@ function narration(): NarrationService {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('openrappter:narration-status', status);
     }
+  }, {
+    // One cache/pipeline for Skills Recorder, walkthrough evidence, smoke, and
+    // back-and-forth Voice mode. No caller may create its own Whisper service.
+    cacheDir: path.join(app.getPath('userData'), 'models'),
   });
   return narrationService;
 }
@@ -582,6 +587,8 @@ async function runWhisperModelSmoke(): Promise<void> {
   const scratch = mkdtempSync(
     path.join(app.getPath('temp'), 'openrappter-whisper-'),
   );
+  const stt = narration();
+  stt.acquire('desktop-smoke');
   try {
     const aiff = path.join(scratch, 'voice.aiff');
     const raw = path.join(scratch, 'voice.f32le');
@@ -613,8 +620,11 @@ async function runWhisperModelSmoke(): Promise<void> {
     const samples = new Float32Array(
       audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength),
     );
-    await narration().download();
-    const transcript = await narration().transcribe(samples, 'en');
+    await stt.download('desktop-smoke');
+    const transcript = await stt.transcribe(samples, 'en', {
+      owner: 'desktop-smoke',
+      requestId: `smoke-${randomBytes(8).toString('hex')}`,
+    });
     const normalized = transcript.text.toLowerCase();
     if (
       !normalized.includes('openrappter') &&
@@ -629,6 +639,7 @@ async function runWhisperModelSmoke(): Promise<void> {
       })}`,
     );
   } finally {
+    stt.release('desktop-smoke');
     rmSync(scratch, { recursive: true, force: true });
   }
 }
@@ -664,6 +675,18 @@ function bytes(value: unknown): Uint8Array {
   throw new Error('Narration payload is not binary audio.');
 }
 
+function narrationOwner(value: unknown): NarrationOwner {
+  if (
+    value === 'skills-recorder'
+    || value === 'voice-conversation'
+    || value === 'buddy-evidence'
+    || value === 'desktop-smoke'
+  ) {
+    return value;
+  }
+  return 'system';
+}
+
 async function handleNarration(
   event: IpcMainInvokeEvent,
   request: unknown,
@@ -671,6 +694,18 @@ async function handleNarration(
   const input = validateTrustedRequest(event, request);
   const action = input.action;
   if (action === 'status') return narration().status();
+  if (action === 'acquire') {
+    return narration().acquire(narrationOwner(input.owner));
+  }
+  if (action === 'release') {
+    return narration().release(narrationOwner(input.owner));
+  }
+  if (action === 'cancel') {
+    const requestId =
+      typeof input.request_id === 'string' ? input.request_id : '';
+    if (!requestId) throw new Error('A local transcription request id is required.');
+    return { cancelled: narration().cancel(requestId) };
+  }
   if (action === 'download') {
     const approval = await dialog.showMessageBox(mainWindow!, {
       type: 'question',
@@ -687,7 +722,7 @@ async function handleNarration(
     if (approval.response !== 1) {
       throw new Error('Whisper download was cancelled.');
     }
-    return narration().download();
+    return narration().download(narrationOwner(input.owner));
   }
   if (action === 'voice.transcribe') {
     const durationMs =
@@ -713,7 +748,14 @@ async function handleNarration(
         sampleBytes.byteOffset + sampleBytes.byteLength,
       ),
     );
-    const transcript = await narration().transcribe(samples, 'en');
+    const transcript = await narration().transcribe(samples, 'en', {
+      owner: 'voice-conversation',
+      requestId:
+        typeof input.request_id === 'string'
+          ? input.request_id
+          : `voice-${randomBytes(8).toString('hex')}`,
+      maxSegmentSeconds: 30,
+    });
     if (!transcript.text) {
       throw new Error('Whisper did not detect meaningful speech.');
     }
@@ -743,7 +785,14 @@ async function handleNarration(
       sampleBytes.byteOffset + sampleBytes.byteLength,
     ),
   );
-  const transcript = await narration().transcribe(samples, language);
+  const transcript = await narration().transcribe(samples, language, {
+    owner: 'skills-recorder',
+    requestId:
+      typeof input.request_id === 'string'
+        ? input.request_id
+        : `recorder-${randomBytes(8).toString('hex')}`,
+    maxSegmentSeconds: 30,
+  });
   if (!transcript.text) {
     throw new Error('Whisper did not detect meaningful narration.');
   }
@@ -785,15 +834,18 @@ async function handleBuddyEvidence(
     throw new Error('Buddy evidence requires a filename and media type.');
   }
   const data = bytes(input.data);
-  return extractBuddyEvidence(
-    {
-      filename: input.filename,
-      mimeType: input.mimeType,
-      data,
-    },
-    {
-      transcribe: async (samples) => {
-        if (!narration().isCached()) {
+  const stt = narration();
+  stt.acquire('buddy-evidence');
+  try {
+    return await extractBuddyEvidence(
+      {
+        filename: input.filename,
+        mimeType: input.mimeType,
+        data,
+      },
+      {
+        transcribe: async (samples) => {
+          if (!stt.isCached()) {
           const approval = await dialog.showMessageBox(mainWindow!, {
             type: 'question',
             title: 'Analyze walkthrough locally?',
@@ -811,12 +863,18 @@ async function handleBuddyEvidence(
           if (approval.response !== 1) {
             throw new Error('Walkthrough analysis was cancelled.');
           }
-          await narration().download();
+            await stt.download('buddy-evidence');
+          }
+          return stt.transcribe(samples, 'en', {
+            owner: 'buddy-evidence',
+            requestId: `buddy-${randomBytes(8).toString('hex')}`,
+          });
         }
-        return narration().transcribe(samples, 'en');
       },
-    },
-  );
+    );
+  } finally {
+    stt.release('buddy-evidence');
+  }
 }
 
 async function handleVoice(
@@ -2107,6 +2165,7 @@ if (!ownsInstanceLock) {
     if (
       !gatewayProcess
       && !vibeVoiceService
+      && !narrationService
       && !hasActiveBuddyEvidenceJobs()
     ) return;
     event.preventDefault();
@@ -2115,6 +2174,7 @@ if (!ownsInstanceLock) {
       stopOwnedShowSessions(),
       stopOwnedGateway(),
       shutdownBuddyEvidenceJobs(),
+      Promise.resolve(narrationService?.shutdown()),
       vibeVoiceService?.stop() ?? Promise.resolve(),
     ]).finally(() => app.quit());
   });

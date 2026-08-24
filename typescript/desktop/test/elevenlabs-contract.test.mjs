@@ -12,6 +12,10 @@ const agent = readFileSync(
   new URL('../../src/agents/TTSAgent.ts', import.meta.url),
   'utf8',
 );
+const narration = readFileSync(
+  new URL('../src/narration.ts', import.meta.url),
+  'utf8',
+);
 
 test('ElevenLabs credentials remain in the authenticated desktop main process', () => {
   assert.match(main, /safeStorage/);
@@ -74,4 +78,16 @@ test('conversation microphone audio is ephemeral local-Whisper input', () => {
   assert.match(branch, /narration\(\)\.transcribe/);
   assert.match(branch, /45-second local safety limit/);
   assert.doesNotMatch(branch, /writeFile|appendEvent|fetch|elevenLabs/);
+});
+
+test('one ref-counted narration service owns every local Whisper caller', () => {
+  assert.equal((main.match(/new NarrationService\(/g) ?? []).length, 1);
+  assert.match(main, /owner: 'voice-conversation'/);
+  assert.match(main, /owner: 'skills-recorder'/);
+  assert.match(main, /stt\.acquire\('buddy-evidence'\)/);
+  assert.match(narration, /private readonly owners = new Map/);
+  assert.match(narration, /private readonly queue/);
+  assert.match(narration, /restartCount/);
+  assert.match(narration, /shutdown\(\)/);
+  assert.match(main, /narrationService\?\.shutdown\(\)/);
 });

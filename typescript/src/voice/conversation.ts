@@ -188,6 +188,7 @@ export class GrailVoiceConversation {
           this.dependencies.transcribeLocal(audio, controller.signal),
           this.settings.operationTimeoutMs,
           'transcription-timeout',
+          () => controller.abort(),
         )
       ).trim().slice(0, 8_000);
     } catch (error) {
@@ -271,6 +272,7 @@ export class GrailVoiceConversation {
           this.dependencies.speakAssistant(output, controller.signal),
           this.settings.operationTimeoutMs,
           'speech-timeout',
+          () => controller.abort(),
         );
       } catch (error) {
         if (generation !== this.generation) return true;
@@ -415,6 +417,7 @@ export class GrailVoiceConversation {
         this.dependencies.sendTranscript(transcript, controller.signal),
         this.settings.operationTimeoutMs,
         'send-timeout',
+        () => controller.abort(),
       );
       if (generation !== this.generation) return;
       this.emit('thinking', undefined, {
@@ -480,10 +483,14 @@ export class GrailVoiceConversation {
     promise: Promise<T>,
     timeoutMs: number,
     reason: string,
+    onTimeout?: () => void,
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = this.clock.setTimeout(
-        () => reject(new Error(reason)),
+        () => {
+          onTimeout?.();
+          reject(new Error(reason));
+        },
         timeoutMs,
       );
       promise.then(

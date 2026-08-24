@@ -19,7 +19,11 @@ describe('default Grail conversation integration contract', () => {
   });
 
   it('sends microphone samples only to local narration and sends only transcript to chat', () => {
+    expect(component).toContain("action: 'acquire'");
+    expect(component).toContain("owner: 'voice-conversation'");
     expect(component).toContain("action: 'voice.transcribe'");
+    expect(component).toContain("action: 'cancel'");
+    expect(component).toContain("action: 'release'");
     expect(component).toContain('samples: audio');
     expect(component).toContain('this.sendTranscript(text, signal)');
     expect(component).not.toMatch(/gateway\.(?:call|request)\([^)]*audio/s);

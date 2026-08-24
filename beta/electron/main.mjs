@@ -69,6 +69,7 @@ import {
   OPENRAPPTER_TILE_EXTENSION,
   OpenRappterTileStore,
 } from "./openrappter-tile.mjs";
+import { OrganismEggAdapter } from "./organism-egg-adapter.mjs";
 import { startOpenRappterChatEndpoint } from "./openrappter-chat-endpoint.mjs";
 import {
   dispatchPackNode,
@@ -283,6 +284,10 @@ const dimensionTileStore = new DimensionTileStore({ betaHome });
 const openRappterTileStore = new OpenRappterTileStore({
   betaHome,
   brainstemDir: config.brainstemDir,
+});
+const organismEggAdapter = new OrganismEggAdapter({
+  openRappterHome,
+  packageDir,
 });
 const rappterPackConfigPath = process.env.RAPPTER_PACK_CONFIG
   || path.join(openRappterHome, "pack.json");
@@ -3009,6 +3014,80 @@ function registerIpc() {
     return {
       file: openRappterTileStore.backup(),
       ...openRappterTileStore.describe(),
+    };
+  });
+  ipcMain.handle("beta:organism-egg-export", async (event, request = {}) => {
+    assertTrustedIpc(event);
+    const mode = request.mode === "sealed-backup" ? "sealed-backup" : "portable";
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: mode === "sealed-backup"
+        ? "Create a sealed OpenRappter backup"
+        : "Export a portable OpenRappter organism",
+      defaultPath: `OpenRappter-${mode}-${new Date().toISOString().slice(0, 10)}.egg`,
+      filters: [{ name: "OpenRappter organism egg", extensions: ["egg"] }],
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    const file = result.filePath.endsWith(".egg")
+      ? result.filePath
+      : `${result.filePath}.egg`;
+    return {
+      canceled: false,
+      ...await organismEggAdapter.export(file, {
+        mode,
+        includeHistory: request.includeHistory === true,
+        includeMedia: request.includeMedia === true,
+        passphrase: String(request.passphrase || ""),
+      }),
+    };
+  });
+  ipcMain.handle("beta:organism-egg-preview", async (event, request = {}) => {
+    assertTrustedIpc(event);
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Inspect and preview an OpenRappter organism egg",
+      properties: ["openFile"],
+      filters: [{ name: "OpenRappter organism egg", extensions: ["egg"] }],
+    });
+    const file = result.filePaths?.[0];
+    if (result.canceled || !file) return { canceled: true };
+    const passphrase = String(request.passphrase || "");
+    const inspection = await organismEggAdapter.inspect(file, {
+      ...(passphrase ? { passphrase } : {}),
+    });
+    const preview = inspection.decrypted
+      ? await organismEggAdapter.preview(file, {
+          semantics: request.semantics === "clone" ? "clone" : "restore",
+          ...(passphrase ? { passphrase } : {}),
+        })
+      : null;
+    return { canceled: false, file, inspection, preview };
+  });
+  ipcMain.handle("beta:organism-egg-apply", async (event, request = {}) => {
+    assertTrustedIpc(event);
+    if (
+      !request.file
+      || !/^[0-9a-f]{64}$/.test(String(request.approval || ""))
+      || !String(request.passphrase || "")
+    ) {
+      throw new Error("Apply requires a preview-bound approval and rollback passphrase.");
+    }
+    const confirmation = await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      buttons: ["Cancel", "Apply verified restore"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      title: "Apply organism egg?",
+      message: `Restore ${request.changed || 0} verified changes to ${request.targetRappid || "this organism"}?`,
+      detail: `Egg ${String(request.eggDigest || "").slice(0, 16)}…\nA sealed rollback egg will be created first. Imported agents remain asleep until restart.`,
+    });
+    if (confirmation.response !== 1) return { canceled: true };
+    return {
+      canceled: false,
+      ...await organismEggAdapter.apply(String(request.file), {
+        semantics: request.semantics === "clone" ? "clone" : "restore",
+        approval: String(request.approval),
+        passphrase: String(request.passphrase),
+      }),
     };
   });
   ipcMain.handle("beta:rappter-pack-status", async (event) => {

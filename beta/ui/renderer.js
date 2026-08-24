@@ -2354,6 +2354,151 @@ setInterval(() => void maintainAmbientContext(), 240000);
   void describe();
 })();
 
+// ---- Quantum RAPPID organism eggs: RAPP/1 export, sealed backup, restore ----
+(() => {
+  const portable = document.getElementById("organism-egg-portable");
+  const sealed = document.getElementById("organism-egg-sealed");
+  const previewButton = document.getElementById("organism-egg-preview");
+  const passphrase = document.getElementById("organism-egg-passphrase");
+  const status = document.getElementById("organism-egg-status");
+  const detail = document.getElementById("organism-egg-detail");
+  if (
+    !portable || !sealed || !previewButton || !passphrase || !status || !detail
+  ) return;
+
+  let pending = null;
+  const busy = (value) => {
+    portable.disabled = value;
+    sealed.disabled = value;
+    previewButton.disabled = value;
+  };
+  const describe = (inspection, preview) => {
+    const header = inspection.header;
+    const dimensions = header.dimensions || {};
+    const changed = preview?.preview?.entries?.filter(
+      (entry) => entry.change !== "unchanged",
+    ) || [];
+    const lines = [
+      `${header.mode} · ${header.organismRappid}`,
+      `${dimensions.files || 0} files · ${dimensions.bytes || 0} bytes · ${dimensions.agents || 0} agents · ${dimensions.skills || 0} skills`,
+      `${dimensions.media || 0} sounds · ${dimensions.midi || 0} MIDI · ${dimensions.sessions || 0} sessions`,
+      `root ${header.rootDigest}`,
+      inspection.decrypted ? "payload hashes verified" : "sealed payload remains encrypted",
+    ];
+    if (preview?.preview) {
+      lines.push(
+        `${preview.preview.compatible ? "compatible" : "identity mismatch"} · ${changed.length} changes · ${preview.preview.semantics}`,
+        `base ${preview.preview.baseStateDigest}`,
+        `reauth: ${(preview.preview.reauthentication || []).join(", ") || "none"}`,
+      );
+      for (const entry of changed.slice(0, 20)) {
+        lines.push(`${entry.change.padEnd(7)} ${entry.path} (${entry.sizeDelta >= 0 ? "+" : ""}${entry.sizeDelta} B)`);
+      }
+      if (changed.length > 20) lines.push(`…and ${changed.length - 20} more changes`);
+    }
+    for (const exclusion of header.privacy?.exclusions || []) {
+      lines.push(`excluded: ${exclusion}`);
+    }
+    detail.textContent = lines.join("\n");
+  };
+
+  const runExport = async (mode) => {
+    if (mode === "sealed-backup" && String(passphrase.value).length < 12) {
+      status.textContent = "A sealed backup needs a passphrase of at least 12 characters.";
+      passphrase.focus();
+      return;
+    }
+    busy(true);
+    try {
+      const result = await window.brainstemBeta.organismEggExport({
+        mode,
+        // A desktop backup is complete; a portable sharing artifact is lean.
+        // Fine-grained overrides remain available in the installed CLI.
+        includeHistory: mode === "sealed-backup",
+        includeMedia: mode === "sealed-backup",
+        passphrase: mode === "sealed-backup" ? passphrase.value : "",
+      });
+      if (result?.canceled) return;
+      status.textContent = `Saved ${result.output}. The egg remains private until you intentionally share it.`;
+      describe({ header: {
+        mode: result.manifest.mode,
+        organismRappid: result.manifest.organismRappid,
+        dimensions: result.manifest.dimensions,
+        rootDigest: result.manifest.rootDigest,
+        privacy: result.manifest.privacy,
+      }, decrypted: true });
+    } catch (error) {
+      status.textContent = `Egg export failed: ${error?.message || error}`;
+    } finally {
+      if (mode === "sealed-backup") passphrase.value = "";
+      busy(false);
+    }
+  };
+  portable.addEventListener("click", () => void runExport("portable"));
+  sealed.addEventListener("click", () => void runExport("sealed-backup"));
+  const applyPending = async () => {
+    if (!pending) return;
+    if (String(passphrase.value).length < 12) {
+      status.textContent = "Apply needs a passphrase to encrypt the automatic rollback egg.";
+      passphrase.focus();
+      return;
+    }
+    busy(true);
+    try {
+      const preview = pending.preview.preview;
+      const changed = preview.entries.filter((entry) => entry.change !== "unchanged").length;
+      const result = await window.brainstemBeta.organismEggApply({
+        file: pending.file,
+        passphrase: passphrase.value,
+        semantics: preview.semantics,
+        approval: preview.approvalBinding,
+        eggDigest: preview.eggDigest,
+        targetRappid: preview.targetRappid,
+        changed,
+      });
+      if (result?.canceled) return;
+      status.textContent = `Restore committed and healthy. Rollback: ${result.rollbackEgg}. Restart to awaken restored agents.`;
+      pending = null;
+      previewButton.textContent = "Inspect / preview import";
+      detail.textContent = "Import applied through the organism transaction. No imported code executed during preview.";
+    } catch (error) {
+      status.textContent = `Egg apply failed and was rolled back: ${error?.message || error}`;
+    } finally {
+      passphrase.value = "";
+      busy(false);
+    }
+  };
+  previewButton.addEventListener("click", async () => {
+    if (pending) {
+      await applyPending();
+      return;
+    }
+    busy(true);
+    try {
+      const result = await window.brainstemBeta.organismEggPreview({
+        passphrase: passphrase.value,
+        semantics: "restore",
+      });
+      if (result?.canceled) return;
+      describe(result.inspection, result.preview);
+      if (!result.inspection.decrypted) {
+        status.textContent = "Header verified. Enter the passphrase to decrypt and produce a read-only diff.";
+        return;
+      }
+      pending = result;
+      previewButton.textContent = "Apply verified restore";
+      const changed = result.preview.preview.entries.filter(
+        (entry) => entry.change !== "unchanged",
+      ).length;
+      status.textContent = `Preview complete: ${changed} changes. Content stayed inert; nothing was applied.`;
+    } catch (error) {
+      status.textContent = `Egg preview failed: ${error?.message || error}`;
+    } finally {
+      busy(false);
+    }
+  });
+})();
+
 // ---- Rappter Pack Sentinel: mixed nodes, deterministic acceptance ----------
 (() => {
   const runButton = document.getElementById("rappter-pack-run");

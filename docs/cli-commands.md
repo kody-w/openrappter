@@ -20,6 +20,7 @@ Run `openrappter <command> --help` for a command's own options.
 | `cron` |  | Manage cron jobs |
 | `approvals` |  | Review commands waiting on your approval |
 | `backup` |  | Snapshot and restore your OpenRappter data |
+| `egg` |  | Export, inspect, diff, and transactionally restore a RAPP/1 organism egg |
 | `memory` |  | Search and record what this rappter remembers |
 | `sessions` |  | Inspect and manage chat sessions |
 | `channels` |  | Inspect and control messaging channels |

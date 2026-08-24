@@ -77,6 +77,15 @@ contextBridge.exposeInMainWorld("brainstemBeta", {
   openrappterTileBackup: () => (
     ipcRenderer.invoke("beta:openrappter-tile-backup")
   ),
+  organismEggExport: (request) => (
+    ipcRenderer.invoke("beta:organism-egg-export", request)
+  ),
+  organismEggPreview: (request) => (
+    ipcRenderer.invoke("beta:organism-egg-preview", request)
+  ),
+  organismEggApply: (request) => (
+    ipcRenderer.invoke("beta:organism-egg-apply", request)
+  ),
   rappterPackStatus: () => ipcRenderer.invoke("beta:rappter-pack-status"),
   rappterPackRun: () => ipcRenderer.invoke("beta:rappter-pack-run"),
   deleteAgent: (filename) => ipcRenderer.invoke("beta:delete-agent", filename),

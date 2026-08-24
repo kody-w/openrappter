@@ -140,6 +140,12 @@ try {
     "dist/show-and-tell/store.js",
     "dist/show-and-tell/worker.js",
     "dist/cli/show-and-tell.js",
+    "dist/cli/egg.js",
+    "dist/egg/archive.js",
+    "dist/egg/inventory.js",
+    "dist/egg/midi.js",
+    "dist/egg/service.js",
+    "dist/egg/xpedition.js",
   ]) {
     if (!packedFiles.has(required)) {
       throw new Error(`Tarball does not contain ${required}`);
@@ -236,6 +242,15 @@ try {
   }
 
   const binary = path.join(installedRoot, "bin", "openrappter.mjs");
+  const eggHelp = run(process.execPath, [binary, "egg", "--help"], {
+    cwd: installRoot,
+    env: { ...process.env, OPENRAPPTER_HOME: home },
+  });
+  for (const command of ["export", "inspect", "diff", "import"]) {
+    if (!eggHelp.stdout.includes(command)) {
+      throw new Error(`Installed package does not expose egg ${command}`);
+    }
+  }
   const cleverHelp = run(
     process.execPath,
     [binary, "clever-girl", "observe", "--help"],
@@ -896,7 +911,7 @@ try {
   }
 
   console.log(
-    `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2/v3`,
+    `Package smoke passed: ${artifact.filename} includes runnable Web UI, organism eggs, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2/v3`,
   );
 } finally {
   rmSync(scratch, {

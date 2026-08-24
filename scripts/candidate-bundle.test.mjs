@@ -95,3 +95,15 @@ test('first candidate branch creation tolerates an already-empty orphan index', 
     fs.rmSync(repository, { recursive: true, force: true });
   }
 });
+
+test('candidate identity fields survive the workflow step boundary', () => {
+  const workflow = fs.readFileSync(
+    new URL('../.github/workflows/build-candidate.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(
+    workflow,
+    /echo "CANDIDATE_KIND=\$CANDIDATE_KIND" >> "\$GITHUB_ENV"/,
+    'the commit step reads CANDIDATE_KIND after the build step exits',
+  );
+});

@@ -1,0 +1,198 @@
+{
+  "beta/build/icon.icns": {
+    "sha256": "443f1b0d191390abc0de1255032c2d29c163df605265b0d482b07474648f2c85",
+    "reason": "Non-executable application icon asset."
+  },
+  "beta/build/icon.ico": {
+    "sha256": "f31e4032bf5b9bca0d902539731fe66f1971fecc8cc2833b8791b9c7e3be520c",
+    "reason": "Non-executable application icon asset."
+  },
+  "beta/build/icon.png": {
+    "sha256": "6997cafd40300605efffb389442953d066fe2ce0ea67bf22b5f10a5b6a739d66",
+    "reason": "Non-executable application icon asset used by the desktop shell."
+  },
+  "beta/build/icons/1024x1024.png": {
+    "sha256": "6997cafd40300605efffb389442953d066fe2ce0ea67bf22b5f10a5b6a739d66",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/120x120.png": {
+    "sha256": "fc7577d549b56fb422eb678e07c1561a1310a947241836aea544786884bd718e",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/128x128.png": {
+    "sha256": "1c3fa48d034cfeb9813fcab3b3cab5afc1cd7b908c90210cfea8ba1bd8dd4161",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/152x152.png": {
+    "sha256": "388f4e3c3e215835d32850da20a41bada89a456c24d6b8cd41a47df43824e179",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/167x167.png": {
+    "sha256": "447c31fb03cf9c71b158a80440aaeeca4f9e277d97e9045b5d191ee599dbb1d8",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/16x16.png": {
+    "sha256": "f70db34ad0631be9996a4b3e24838dc17787efc60fa079a88edd0fa2dd4487cc",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/180x180.png": {
+    "sha256": "d75494805f52bfb56cd0d33300fbf08a2a5dbe02cb0c54319ae4f79091aebd1f",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/192x192.png": {
+    "sha256": "a7db4fe2c584cfd769c3a18c63fd7b36f7bbc392558dac3b2dba7e59a51c96b9",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/20x20.png": {
+    "sha256": "898f820a765414a716b4af9fe119988affbfc9896006d00496c7df43397b860e",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/24x24.png": {
+    "sha256": "a086cd507b1d3ac4fdde06882ac87d5a31c904425376316f8794ae5a7dd62120",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/256x256.png": {
+    "sha256": "71449eb9e0c725d183562b288b12468ea88ff5687d4fcd243d02bb9357be79d0",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/29x29.png": {
+    "sha256": "2b441e9001b7b7c3ec975ac87bdb81a6a7edc4a7d037e54ff138d01525a1a0da",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/32x32.png": {
+    "sha256": "cc938f561a5cc0b6cbc06ce1f3418c5168a3d15de5504cdd856e57961b3e3cbd",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/40x40.png": {
+    "sha256": "b6167660dc7ca1591ba4ae8dbfe3c40ab1b8b68e766bcba6cc25a805196d660a",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/48x48.png": {
+    "sha256": "6b798b499335d217d5431d702490af730be7be8ef1d7969d9f0334803608a5dd",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/512x512.png": {
+    "sha256": "4ea7bf786784422e33b9418d04ae0eb0b9db65264750105cc12936cc2a16a8f6",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/58x58.png": {
+    "sha256": "66fe154e140b29f8734780004c924809ffdf3a4746522682c32ba96d79bb5df6",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/60x60.png": {
+    "sha256": "db2323f0c7be85c1cd4925a8cda0aadbf2354b6f4e1f9ac01760875bd9731c0e",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/64x64.png": {
+    "sha256": "5ddc12611f2a3fda00a98cec409dcac2f10a98d88ae0a0e2c9023dc7e2239ba5",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/72x72.png": {
+    "sha256": "b66442fa2d763ecca59a3a1a20fb55e8f9c120ad7a930fe0bd3f43c829a6af29",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/76x76.png": {
+    "sha256": "7863b850ce333a9423fc7b51253950510377825f841544e46b31a5277dbcefdb",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/80x80.png": {
+    "sha256": "936b97af17765c8cf52507e195bc4bbd714dba0baa6ed62e55d6f811e70e3ae4",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/87x87.png": {
+    "sha256": "7cd1edbe7ba7592b77aa76f6fec091cb232e17e52f24d67f9510a1ddbd39cd51",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/build/icons/96x96.png": {
+    "sha256": "db7b67041e548a6932ff28bd6e284afc3fd93b84209757d16171158f6fcc63db",
+    "reason": "Non-executable generated-size application icon asset."
+  },
+  "beta/docs/show-mode/force-mode.png": {
+    "sha256": "d18ca5a2034a6f58ee9d59bc9fe6eeea6111fa95316f4f121c16e102327f619d",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-01-welcome.png": {
+    "sha256": "f5f4d8bbf959d5a9f299ca3d4fc11faf98b71e384b4c26fda27105f6c4c60af8",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-02-interview.png": {
+    "sha256": "f58d2c853b69ad65a882447663322a05a51e5cdd88e14d1f8f9a3d7a7333bcd6",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-03-pill.png": {
+    "sha256": "82813712989b3d9046b7ece848928fe87ab4e3adcf8f2caddbacabc799d1d2b3",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-04-doors.png": {
+    "sha256": "5d95752bed45204d129ae2cb94b15029a45e063cb1fc6474353a280a3eec7620",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-05-import.png": {
+    "sha256": "344b8996d25e3a6f6473dd2a9fdf2a08f0676d94976732fa204de03c8e80b450",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-06-analyze.png": {
+    "sha256": "b5214958608b684d5e4d2498d253017bbaa1390a3d8759ddf37275618f641a1a",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-07-edit.png": {
+    "sha256": "386e542c8b6a102c6f74c2f108bb29cbcb04bb27dafa82c31a348f6aa5493f2c",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-08-approve.png": {
+    "sha256": "2d1c81b7c31076b402792004162849799b7e00a077435312e4fe38c80a8c72bd",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-09-preview.png": {
+    "sha256": "53e6ca0351d58e6ae33d4aea51187f1ca56cf513a55bbf90e3cfadacce11916c",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-10-test.png": {
+    "sha256": "944e15a9cb6232cf3d05e08904b1209788dfc927cf65a844d82f8c59a3ebf1c1",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-11-confirm.png": {
+    "sha256": "b16e89c88609d5298f74e3512aead3f1a4701a7459832e1ed8cc0048a6e4d430",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-12-promote.png": {
+    "sha256": "077fcd5627ae2f809aaa06a3b579ddfcc6eaee937781f8d8a458774aff82fe36",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-13-why.png": {
+    "sha256": "b6c448a49d4720e6c3a324d5693d3cb6ac8c0d3caf15b61df6269e58bb45b2f2",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "beta/docs/show-mode/step-14-end.png": {
+    "sha256": "30899d186c448f6d8f8c7942d1d1c71477f3ae891dbecca4713ef83f9679602f",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "docs/blog/dojo-screenshot.png": {
+    "sha256": "8c60a09baeef846fcb427f9e4f11d4d998c21529aa7d3a4b0781bb8db7d8ff7a",
+    "reason": "Non-executable documentation screenshot."
+  },
+  "macos/dist/OpenRappter-Bar-1.4.0.dmg": {
+    "sha256": "c6f8f134e98a6cfafffa50b4d890da35c289c521d15ee7a6d7b190d16c211996",
+    "reason": "Non-executable historical signed release disk image."
+  },
+  "macos/dist/OpenRappter-Bar-1.5.0.dmg": {
+    "sha256": "b240fce1c1d001385714a8e8a616db03b3b4d02c17879cc7f252f52bef87cd75",
+    "reason": "Non-executable historical signed release disk image."
+  },
+  "macos/dist/OpenRappter-Bar-1.6.0.dmg": {
+    "sha256": "115797896a320ad21c718b345493b107ab603b475c75d426bc7b3e61b9916a2a",
+    "reason": "Non-executable historical signed release disk image."
+  },
+  "macos/dist/OpenRappter-Bar-1.7.0.dmg": {
+    "sha256": "e169d628a99318fdd092a2cfa18da6f77126bcc87b5d3d557667e43057db92fd",
+    "reason": "Non-executable historical signed release disk image."
+  },
+  "macos/dist/OpenRappter-Bar-1.8.0.dmg": {
+    "sha256": "d16f97c7185e304aadce5b0b09282eecce04da03ca690b9fe45718cbf0424f86",
+    "reason": "Non-executable historical signed release disk image."
+  },
+  "typescript/desktop/build/icon.png": {
+    "sha256": "6997cafd40300605efffb389442953d066fe2ce0ea67bf22b5f10a5b6a739d66",
+    "reason": "Non-executable desktop application icon asset."
+  }
+}

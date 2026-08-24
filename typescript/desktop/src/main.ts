@@ -42,6 +42,12 @@ import {
 } from './vibevoice.js';
 import { SECURE_RENDERER_PREFERENCES } from './window-security.js';
 import { waitForGatewayReady } from './gateway-ready.js';
+import {
+  extractBuddyEvidence,
+  hasActiveBuddyEvidenceJobs,
+  pruneStaleBuddyEvidence,
+  shutdownBuddyEvidenceJobs,
+} from './buddy-evidence.js';
 
 const packageRoot = path.join(
   import.meta.dirname,
@@ -72,8 +78,12 @@ const allowedActions = new Set([
   'observe',
   'stop',
   'analyze',
+  'bundle',
+  'propose',
   'review',
+  'revise_plan',
   'build',
+  'export',
   'replay',
   'test',
   'list',
@@ -622,6 +632,55 @@ async function handleNarration(
   return transcript;
 }
 
+async function handleBuddyEvidence(
+  event: IpcMainInvokeEvent,
+  request: unknown,
+): Promise<unknown> {
+  const input = validateTrustedRequest(event, request);
+  if (input.action !== 'extract') {
+    throw new Error(`Unsupported buddy evidence action: ${String(input.action)}`);
+  }
+  if (
+    typeof input.filename !== 'string'
+    || typeof input.mimeType !== 'string'
+  ) {
+    throw new Error('Buddy evidence requires a filename and media type.');
+  }
+  const data = bytes(input.data);
+  return extractBuddyEvidence(
+    {
+      filename: input.filename,
+      mimeType: input.mimeType,
+      data,
+    },
+    {
+      transcribe: async (samples) => {
+        if (!narration().isCached()) {
+          const approval = await dialog.showMessageBox(mainWindow!, {
+            type: 'question',
+            title: 'Analyze walkthrough locally?',
+            message: 'Download local Whisper to transcribe this walkthrough?',
+            detail:
+              `Whisper Small q8 is ${NARRATION_MODEL_DOWNLOAD_LABEL}. `
+              + 'The model is cached on this device. The video and audio never '
+              + 'leave the device; only the extracted transcript is sent to '
+              + 'your configured Copilot model when you request an agent draft.',
+            buttons: ['Cancel', 'Download and analyze'],
+            cancelId: 0,
+            defaultId: 1,
+            noLink: true,
+          });
+          if (approval.response !== 1) {
+            throw new Error('Walkthrough analysis was cancelled.');
+          }
+          await narration().download();
+        }
+        return narration().transcribe(samples, 'en');
+      },
+    },
+  );
+}
+
 async function handleVoice(
   event: IpcMainInvokeEvent,
   request: unknown,
@@ -1019,6 +1078,7 @@ async function handleShowAndTell(
   else if (action === 'capture') purpose = 'capture';
   else if (action === 'delete') purpose = 'delete';
   else if (action === 'review' && input.approve === true) purpose = 'approve';
+  else if (action === 'revise_plan' && input.approve === true) purpose = 'approve';
   if (purpose) {
     if (!smokeBypass && !(await nativeConsent(purpose))) {
       return {
@@ -1345,6 +1405,7 @@ async function finishDesktopSmoke(exitCode: number): Promise<void> {
   await Promise.allSettled([
     stopOwnedShowSessions(),
     stopOwnedGateway(),
+    shutdownBuddyEvidenceJobs(),
     vibeVoiceService?.stop() ?? Promise.resolve(),
   ]);
   if (commandTimer) clearInterval(commandTimer);
@@ -1399,12 +1460,17 @@ if (!ownsInstanceLock) {
 
   app.on('before-quit', (event) => {
     if (quitting) return;
-    if (!gatewayProcess && !vibeVoiceService) return;
+    if (
+      !gatewayProcess
+      && !vibeVoiceService
+      && !hasActiveBuddyEvidenceJobs()
+    ) return;
     event.preventDefault();
     quitting = true;
     void Promise.all([
       stopOwnedShowSessions(),
       stopOwnedGateway(),
+      shutdownBuddyEvidenceJobs(),
       vibeVoiceService?.stop() ?? Promise.resolve(),
     ]).finally(() => app.quit());
   });
@@ -1418,6 +1484,7 @@ if (!ownsInstanceLock) {
   });
 
   void app.whenReady().then(async () => {
+    await pruneStaleBuddyEvidence();
     if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
       console.log('OPENRAPPTER_DESKTOP_SMOKE ready-handler');
       smokeRoot = path.join(
@@ -1504,6 +1571,7 @@ if (!ownsInstanceLock) {
       );
       ipcMain.handle('openrappter:show-and-tell', handleShowAndTell);
       ipcMain.handle('openrappter:narration', handleNarration);
+      ipcMain.handle('openrappter:buddy-evidence', handleBuddyEvidence);
       ipcMain.handle('openrappter:voice', handleVoice);
       ipcMain.handle(
         'openrappter:desktop-control',

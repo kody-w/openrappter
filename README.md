@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Frontier Grail](./docs/grail-default-plan.md) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Frontier Grail](./docs/grail-default-plan.md) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -40,6 +40,20 @@ irm https://kody-w.github.io/openrappter/install.ps1 | iex
 Works on macOS, Linux, WSL & Windows. Installs Node.js (if needed), clones the repo, builds both runtimes, and creates the `openrappter` command. Done.
 
 Or try the quickstart demo: `git clone https://github.com/kody-w/openrappter.git && cd openrappter && ./quickstart.sh`
+
+### Select an exact release ring
+
+Stable is the safe default. To select a maintained pointer:
+
+```bash
+curl -fsSL https://kody-w.github.io/openrappter/install.sh |
+  bash -s -- --ring beta
+```
+
+`--ring` overrides `OPENRAPPTER_RING`. The five values are `stable`, `beta`,
+`canary`, `alpha`, and `nightly`. Resolution validates a closed manifest and
+installs an exact checksummed artifact or source commit; unavailable rings fail
+closed rather than falling back. See [release ring semantics and safety](docs/release-rings.md).
 
 ---
 
@@ -78,6 +92,28 @@ agent that under-declares is refused there, so conformance here is what makes
 these agents adoptable by a governed deployment.
 
 Details: [`docs/RAPP.md`](docs/RAPP.md)
+
+### Quantum RAPPIDs: organisms that grow without losing identity
+
+A Quantum RAPPID starts small and grows through append-only RAPP/1 body frames.
+Memory, skills, sound, devices, visuals, and capabilities are dimensions of one
+mint-once identity. Exact unique verified bytes are its **weight**; contiguous
+body-frame depth is its **frame height**. Unknown data is marked unmeasured,
+never estimated.
+
+The Habitat UI exposes traits, lifecycle stage, wake-call playback,
+trait-conditioned MIDI continuation, and preview-only growth proposals.
+Show-and-Tell can attach an approved, privacy-scanned generated skill as a
+dimension; raw captures stay private. Chat buffers response deltas behind a
+typing-presence bubble and reveals one complete committed message.
+
+The native [RAPPID Field iOS companion](./ios/RappidField/README.md) carries the
+same sound-first identity and exact creature stats into a private,
+location-free field guide. A DEBUG-only semantic AI-player interface drives
+the same reducer as human controls through strict command/receipt handshakes;
+it is compiled out of Release builds.
+
+See [Quantum RAPPIDs](./docs/quantum-rappids.md).
 
 
 ## Get Started — Let Your AI Agent Do It
@@ -156,6 +192,9 @@ openrappter show-and-tell capture --label "All checks are green"
 openrappter show-and-tell stop
 openrappter show-and-tell analyze
 openrappter show-and-tell approve
+openrappter show-and-tell propose
+openrappter show-and-tell revise-plan --approve
+openrappter show-and-tell export
 openrappter show-and-tell build --target all
 openrappter show-and-tell test
 ```
@@ -278,6 +317,21 @@ runtimes are tested against -- its `required` arrays drive the assertions in
 `typescript/src/__tests__/integration/rapp-chat-contract.test.ts`, so a key
 added there fails both suites until both runtimes emit it.
 
+The chat target picker can also project a RAPP-Herdr estate. It lists verified
+Twins, chats through Herdr's central routing, and creates a device-local Twin
+with default chat or a generated rapplication. A buddy is shown online only
+after its identity, health, and chat handshake succeeds. The gateway reads
+`~/.config/rapp-herdr/estate.json` and `~/.local/bin/rapp-herdr` by default;
+override those paths with `RAPP_HERDR_ESTATE` and `RAPP_HERDR_BIN`.
+
+**Create AI** can derive the Twin from evidence instead of a manually written
+role. Attach up to three walkthrough videos, audio recordings, PDFs, DOCX files,
+or text transcripts. OpenRappter Desktop extracts documents and transcribes
+media locally with its pinned Whisper model, then sends only the bounded
+extracted text to the configured Copilot backend for a reviewable name, role,
+interface, evidence summary, and confidence. The operator can edit that draft
+before RAPP-Herdr creates and verifies the Twin.
+
 ```bash
 # Install and go
 curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash
@@ -299,7 +353,7 @@ openrappter --exec Shell "ls -la"
 | **Local-First Data** | Memory, config, and state live in `~/.openrappter/` on your machine |
 | **Single File Agents** | One file = one agent — metadata defined in native code constructors, deterministic, portable |
 | **Persistent Memory** | Remembers facts, preferences, and context across sessions |
-| **Dual Runtime** | Same agent contract in Python (20 agents) and TypeScript (34 agents) |
+| **Dual Runtime** | Same agent contract in Python (21 agents) and TypeScript (35 agents) |
 | **Data Sloshing** | Automatic context enrichment (temporal, memory, behavioral signals) before every action |
 | **Data Slush** | Agent-to-agent signal pipeline — agents return curated `data_slush` that feeds into the next agent's context |
 | **Auto-Discovery** | Drop a `*_agent.py` or `*Agent.ts` file in `agents/` — no registration needed |
@@ -307,6 +361,8 @@ openrappter --exec Shell "ls -la"
 | **ClawHub Compatible** | OpenClaw skills work here too — `openrappter clawhub install author/skill` |
 | **Runtime Agent Generation** | `LearnNew` agent creates new agents from natural language descriptions |
 | **Show-and-Tell** | Record a real workflow, review its reconstructed intent and steps, then build a reusable skill or disabled automation |
+| **Quantum RAPPIDs** | Grow one canonical organism through verified memory, skill, sonic, device, visual, and capability frames with exact weight/height stats |
+| **Committed Messages** | Buffer partial response deltas behind typing presence, then reveal one complete stable message |
 | **Electron Desktop** | Native desktop shell with a sandboxed renderer, current packaged UI, gateway reuse, and visual Show-and-Tell controls |
 | **Autonomous UI Control** | Chat and approved hot-loaded agents drive the visible Electron UI through semantic snapshots and refs |
 | **Local Voice Loop** | On-device Whisper narration and optional VibeVoice speech with self-bootstrapping model caches |

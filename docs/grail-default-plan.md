@@ -64,6 +64,15 @@ Fail closed behind typed adapters:
 - large media ingest
 - #445 data-only selector
 
+Current integration status:
+
+- #437 release rings is merged and Grail uses exact `rings.get`,
+  `rings.preview`, and `rings.apply` contracts.
+- Clever Girl v3 is merged; Grail probes the packaged status seam without
+  copying detector logic.
+- #445 descriptor, #446 Copilot auth, #448 organism egg, adaptive twin, and
+  #450 large-media implementations remain isolated pending merge.
+
 When the independent PRs merge, retarget and replace adapters with their exact
 interfaces. Do not copy unmerged implementations.
 

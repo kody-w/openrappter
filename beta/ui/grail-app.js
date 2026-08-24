@@ -35,6 +35,7 @@
   let skillsState = { state: "unknown", message: "Skills have not been discovered." };
   let channelsState = { state: "unknown", message: "Optional channels have not been checked." };
   let mediaIngestState = { state: "idle", message: "No media selected." };
+  let releasePreview = null;
 
   const SURFACES = Object.freeze({
     "operating-room": { title: "Operating Room", description: "Whole-organism patient, model, transport, and dependency state." },
@@ -151,10 +152,16 @@
 
   async function refreshDependencies() {
     const checks = [
-      ["release.status", (value) => {
-        ringState = value?.ring
-          ? { state: "ready", message: `Ring ${value.ring}; receipt ${value.receiptId || "unavailable"}.` }
-          : truthfulUnavailable("Release ring", "No ring receipt returned.");
+      ["rings.get", (value) => {
+        ringState = value?.selectedRing && value?.resolved
+          ? {
+              state: "ready",
+              message:
+                `Ring ${value.selectedRing}; ${value.resolved.status}; `
+                + `version ${value.resolved.version || "unavailable"}.`,
+              value,
+            }
+          : truthfulUnavailable("Release ring", "No closed ring state returned.");
       }, (error) => { ringState = truthfulUnavailable("Release ring", error); }],
       ["clever-girl.status", (value) => {
         detectorState = value?.version
@@ -609,21 +616,45 @@
     mediaInput.addEventListener("change", () => handleMedia(mediaInput.files?.[0]));
     const ringSelect = document.getElementById("grail-ring-select");
     const ringApply = document.getElementById("grail-ring-apply");
+    const ringDowngrade = document.getElementById("grail-ring-downgrade");
     const ringMessage = document.getElementById("grail-ring-message");
-    ringSelect.addEventListener("change", () => {
-      ringMessage.textContent = ringSelect.value === "stable"
-        ? "Stable selected. Nothing changes until an approved Apply receipt exists."
-        : `${ringSelect.value} is a preview ring. Selection alone changes nothing.`;
+    ringSelect.addEventListener("change", async () => {
+      ringApply.disabled = true;
+      ringDowngrade.checked = false;
+      releasePreview = null;
+      ringMessage.textContent =
+        `${ringSelect.value} selected. Resolving the closed ring pointer…`;
+      try {
+        releasePreview = await rpc("rings.preview", {
+          ring: ringSelect.value,
+        });
+        const needsDowngrade = releasePreview.olderThanCurrent === true;
+        ringMessage.textContent =
+          `${releasePreview.status}; version ${releasePreview.version || "unavailable"}. `
+          + "Selection alone changes nothing.";
+        ringApply.disabled =
+          releasePreview.canApply !== true || needsDowngrade;
+      } catch (cause) {
+        ringMessage.textContent =
+          `Release preview unavailable: ${String(cause?.message || cause)}`;
+      }
+    });
+    ringDowngrade.addEventListener("change", () => {
+      ringApply.disabled =
+        releasePreview?.canApply !== true ||
+        (releasePreview?.olderThanCurrent === true && !ringDowngrade.checked);
     });
     ringApply.addEventListener("click", async () => {
       ringApply.disabled = true;
       try {
-        const request = await rpc("release.requestApproval", {
+        const result = await rpc("rings.apply", {
           ring: ringSelect.value,
+          allowDowngrade: ringDowngrade.checked,
         });
-        ringMessage.textContent = request?.approvalId
-          ? `Approval ${request.approvalId} requested. No release was applied.`
-          : "Release adapter returned no approval receipt; nothing changed.";
+        ringMessage.textContent = result?.applied === true
+          ? `${result.selectedRing} saved for the next update. No package was downloaded.`
+          : "Release adapter returned no applied pointer; nothing changed.";
+        await refreshDependencies();
       } catch (cause) {
         ringMessage.textContent =
           `Release Apply unavailable: ${String(cause?.message || cause)}`;

@@ -47,6 +47,16 @@ mkdirSync(output, { recursive: true });
 cpSync(grailRoot, output, { recursive: true });
 cpSync(legacyOutput, path.join(output, 'legacy'), { recursive: true });
 cpSync(grailIcon, path.join(output, 'icon.svg'));
+for (const selectorAsset of [
+  'release-ring-selector.js',
+  'release-ring-selector.js.map',
+  'release-ring-selector.d.ts',
+]) {
+  cpSync(
+    path.join(legacyOutput, selectorAsset),
+    path.join(output, selectorAsset),
+  );
+}
 const builtIndex = path.join(output, 'index.html');
 writeFileSync(
   builtIndex,

@@ -61,9 +61,16 @@ async function bootGrail() {
           message: 'fixture ready',
         },
         'backend.status': { status: 'ready', model: 'fixture-model' },
-        'release.status': {
-          ring: 'stable',
-          receiptId: 'fixture-receipt',
+        'rings.get': {
+          allowedRings: ['stable', 'beta', 'canary', 'alpha', 'nightly'],
+          selectedRing: 'stable',
+          currentVersion: '1.13.0',
+          resolved: {
+            ring: 'stable',
+            status: 'published',
+            version: '1.13.0',
+            canApply: false,
+          },
         },
         'clever-girl.status': { version: 'v3-fixture' },
         'twin.versions': { versions: ['v1'] },

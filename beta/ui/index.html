@@ -853,7 +853,11 @@
             <option value="alpha">alpha</option>
             <option value="nightly">nightly</option>
           </select>
-          <button id="grail-ring-apply" data-drive="grail.onboarding.ringApply" type="button">Request approved Apply</button>
+          <button id="grail-ring-apply" data-drive="grail.onboarding.ringApply" type="button" disabled>Apply for next update</button>
+          <label>
+            <input id="grail-ring-downgrade" data-drive="grail.onboarding.ringDowngrade" type="checkbox">
+            I understand this may select an older exact version.
+          </label>
           <span id="grail-ring-message" role="status"></span>
         </article>
         <article class="grail-onboarding-step" data-grail-step="onboarding-skills"><strong>Skills</strong><span>Discover existing local skills.</span></article>

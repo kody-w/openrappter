@@ -173,8 +173,9 @@ function defaultRunCommand(
 
 function mediaBinary(name: "ffmpeg" | "ffprobe"): string {
   const override =
-    process.env[`OPENRAPPTER_${name.toUpperCase()}_PATH`] ??
-    process.env[`${name.toUpperCase()}_PATH`];
+    name === "ffmpeg"
+      ? process.env.OPENRAPPTER_FFMPEG_PATH ?? process.env.FFMPEG_PATH
+      : process.env.OPENRAPPTER_FFPROBE_PATH ?? process.env.FFPROBE_PATH;
   if (override) return override;
   const executable = process.platform === "win32" ? `${name}.exe` : name;
   const candidates =

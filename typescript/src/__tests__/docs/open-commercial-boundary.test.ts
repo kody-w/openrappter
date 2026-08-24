@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { basename, dirname, extname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020.js';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
@@ -259,15 +259,19 @@ function normalizedPathFindings(path: string): string[] {
   return normalizedValueFindings(path, true);
 }
 
-const JS_FAMILY_EXTENSIONS = new Set([
-  '.js',
+const COMPILER_AST_SUFFIXES = [
+  '.d.mts',
+  '.d.cts',
+  '.d.ts',
+  '.tsx',
   '.jsx',
+  '.mts',
+  '.cts',
   '.mjs',
   '.cjs',
   '.ts',
-  '.tsx',
-  '.cts',
-]);
+  '.js',
+] as const;
 const MAX_AST_NODES = 250_000;
 const MAX_STATIC_DEPTH = 48;
 const MAX_STATIC_OUTPUT = 64 * 1024;
@@ -280,8 +284,13 @@ interface StaticAnalysis {
 
 class StaticAnalysisLimitError extends Error {}
 
+function compilerAstSuffix(path: string): string | undefined {
+  const lower = path.toLowerCase();
+  return COMPILER_AST_SUFFIXES.find((suffix) => lower.endsWith(suffix));
+}
+
 function scriptKind(path: string): ts.ScriptKind {
-  switch (extname(path).toLowerCase()) {
+  switch (compilerAstSuffix(path)) {
     case '.tsx':
       return ts.ScriptKind.TSX;
     case '.jsx':
@@ -412,7 +421,7 @@ function staticallyAssembledStrings(
   path: string,
   source: string,
 ): StaticAnalysis {
-  if (JS_FAMILY_EXTENSIONS.has(extname(path).toLowerCase())) {
+  if (compilerAstSuffix(path)) {
     return typescriptStaticStrings(path, source);
   }
   return { values: tokenizedStaticStrings(source) };
@@ -728,6 +737,41 @@ describe('open core and separately operated service boundary', () => {
         construction,
       ).not.toEqual([]);
     }
+  });
+
+  it('reviewer regression: routes raw .mts and .d.mts through static parsing', () => {
+    for (const path of ['reviewer.mts', 'reviewer.d.mts']) {
+      const staticSource =
+        "export declare const value = ('rapter' /* block */ + // line\n ('os'));";
+      expect(textFindings(path, staticSource), path).not.toEqual([]);
+
+      const dynamicSource =
+        "declare function compose(...parts: string[]): string;\n" +
+        "export declare const value = compose('rapter', 'os');";
+      expect(textFindings(path, dynamicSource), path).toEqual([]);
+    }
+  });
+
+  it('meta: enumerates every supported TypeScript and JavaScript suffix', () => {
+    expect([...COMPILER_AST_SUFFIXES].sort()).toEqual([
+      '.cjs',
+      '.cts',
+      '.d.cts',
+      '.d.mts',
+      '.d.ts',
+      '.js',
+      '.jsx',
+      '.mjs',
+      '.mts',
+      '.ts',
+      '.tsx',
+    ]);
+    for (const suffix of COMPILER_AST_SUFFIXES) {
+      expect(compilerAstSuffix(`fixture${suffix}`), suffix).toBe(suffix);
+    }
+    expect(compilerAstSuffix('fixture.d.mts')).toBe('.d.mts');
+    expect(compilerAstSuffix('fixture.d.cts')).toBe('.d.cts');
+    expect(compilerAstSuffix('fixture.d.ts')).toBe('.d.ts');
   });
 
   it('does not reject safe prose that merely discusses ordinary concepts', () => {

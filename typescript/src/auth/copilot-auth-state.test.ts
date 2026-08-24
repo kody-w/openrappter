@@ -63,4 +63,28 @@ describe('CopilotAuthStateService', () => {
     expect(state.code).toBe('COPILOT_AUTH_ERROR');
     expect(JSON.stringify(state)).not.toContain(secret);
   });
+
+  it('does not let a late ready completion cross a credential generation', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const auth = new CopilotAuthStateService(async () => {
+      await gate;
+    });
+    const generation = auth.captureGeneration();
+    const pending = auth.check('stale-token', 'stale-user', { generation });
+
+    auth.advanceGeneration();
+    auth.needsSignIn('COPILOT_SIGN_IN_REQUIRED', false);
+    release();
+
+    await expect(pending).resolves.toMatchObject({
+      status: 'needs-sign-in',
+    });
+    expect(auth.current()).toMatchObject({
+      status: 'needs-sign-in',
+      code: 'COPILOT_SIGN_IN_REQUIRED',
+    });
+  });
 });

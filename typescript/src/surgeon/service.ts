@@ -170,6 +170,7 @@ export class SurgeonService {
     current: SurgeonCase,
   ): Promise<SurgeonConsultResult> {
     this.authState?.requireReady();
+    const authGeneration = this.authState?.captureGeneration();
     this.assertCaseNotInSurgery(current);
     if (this.consultingCases.has(current.id)) {
       throw new Error('This patient case is already being examined');
@@ -213,7 +214,7 @@ export class SurgeonService {
         parsed = parseModelTurn(repair.content);
       }
     } catch (error) {
-      this.authState?.reportFailure(error);
+      this.authState?.reportFailure(error, authGeneration);
       throw error;
     } finally {
       this.consultingCases.delete(current.id);
@@ -311,6 +312,7 @@ export class SurgeonService {
     current: SurgeonCase,
   ): Promise<SurgeonCase> {
     this.authState?.requireReady();
+    const authGeneration = this.authState?.captureGeneration();
     const procedure = this.requireProcedure(current, approval);
     if (current.status === 'recovered' && procedure.status === 'recovered') {
       return cloneCase(current);
@@ -430,6 +432,7 @@ export class SurgeonService {
         patientAfter,
       );
     } catch (error) {
+      this.authState?.reportFailure(error, authGeneration);
       const failedAt = this.timestamp();
       procedure.status = 'failed';
       procedure.completedAt = failedAt;

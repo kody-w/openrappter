@@ -198,6 +198,14 @@ export async function resolveGithubToken(): Promise<string | null> {
         if (!profileState.id || identity.login !== profileState.id) {
           throw new Error('Stored GitHub identity could not be verified.');
         }
+        const { retireMatchingLegacyCredentialCopies } = await import(
+          './auth/legacy-credential-migration.js'
+        );
+        retireMatchingLegacyCredentialCopies({
+          token: candidate.token,
+          legacyPath: GITHUB_TOKEN_FILE,
+          envPath: openrappterPath('.env'),
+        });
       }
       // This token works — sync it to all sources so they stay consistent
       if (candidate.source !== 'credentials' && !desktopOwnsCredentials()) {

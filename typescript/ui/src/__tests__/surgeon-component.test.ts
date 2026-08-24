@@ -186,6 +186,9 @@ describe('openrappter-surgeon', () => {
       'The patient is stable and ready for deeper inspection.',
     );
     expect(element.shadowRoot?.querySelector<HTMLButtonElement>('.send')?.disabled).toBe(true);
+    expect(Array.from(
+      element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.tbtn') ?? [],
+    ).every((button) => button.disabled)).toBe(true);
   });
 
   it('routes offline fallback only to deterministic local health without invoking a provider', async () => {

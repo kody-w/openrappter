@@ -177,8 +177,13 @@ export function classifyCopilotAuthFailure(error: unknown): CopilotAuthState {
 
 export class CopilotAuthStateService {
   private state: CopilotAuthState = INITIAL_COPILOT_AUTH_STATE;
-  private pending?: Promise<CopilotAuthState>;
-  private pendingToken?: string;
+  private generation = 0;
+  private active?: {
+    generation: number;
+    token: string;
+    controller: AbortController;
+    promise: Promise<CopilotAuthState>;
+  };
 
   constructor(
     private readonly validateAccess: (
@@ -192,7 +197,19 @@ export class CopilotAuthStateService {
     return { ...this.state };
   }
 
-  checking(): CopilotAuthState {
+  captureGeneration(): number {
+    return this.generation;
+  }
+
+  advanceGeneration(): number {
+    this.generation += 1;
+    this.active?.controller.abort();
+    this.active = undefined;
+    return this.generation;
+  }
+
+  checking(generation = this.generation): CopilotAuthState {
+    if (generation !== this.generation) return this.current();
     this.state = {
       status: 'checking',
       code: 'COPILOT_AUTH_CHECKING',
@@ -202,7 +219,29 @@ export class CopilotAuthStateService {
     return this.current();
   }
 
-  needsSignIn(code: 'COPILOT_SIGN_IN_REQUIRED' | 'COPILOT_AUTH_CANCELLED' = 'COPILOT_SIGN_IN_REQUIRED'): CopilotAuthState {
+  markReady(
+    username?: string,
+    generation = this.generation,
+  ): CopilotAuthState {
+    if (generation !== this.generation) return this.current();
+    this.state = checked({
+      status: 'ready',
+      code: 'COPILOT_READY',
+      message: username
+        ? `GitHub Copilot is ready for ${username}.`
+        : 'GitHub Copilot is ready.',
+      retryable: false,
+      ...(username ? { username } : {}),
+    });
+    return this.current();
+  }
+
+  needsSignIn(
+    code: 'COPILOT_SIGN_IN_REQUIRED' | 'COPILOT_AUTH_CANCELLED' =
+      'COPILOT_SIGN_IN_REQUIRED',
+    advance = true,
+  ): CopilotAuthState {
+    if (advance) this.advanceGeneration();
     this.state = checked({
       status: 'needs-sign-in',
       code,
@@ -215,7 +254,11 @@ export class CopilotAuthStateService {
     return this.current();
   }
 
-  reportFailure(error: unknown): CopilotAuthState {
+  reportFailure(
+    error: unknown,
+    generation = this.generation,
+  ): CopilotAuthState {
+    if (generation !== this.generation) return this.current();
     this.state = classifyCopilotAuthFailure(error);
     return this.current();
   }
@@ -223,34 +266,54 @@ export class CopilotAuthStateService {
   async check(
     token: string | null | undefined,
     username?: string,
-    signal?: AbortSignal,
+    options: {
+      generation?: number;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<CopilotAuthState> {
-    if (!token) return this.needsSignIn();
-    if (this.pending && this.pendingToken === token) return this.pending;
+    const generation = options.generation ?? this.generation;
+    if (generation !== this.generation) return this.current();
+    if (!token) return this.needsSignIn('COPILOT_SIGN_IN_REQUIRED', false);
+    if (
+      this.active
+      && this.active.generation === generation
+      && this.active.token === token
+    ) return this.active.promise;
 
-    this.checking();
-    this.pendingToken = token;
-    this.pending = (async () => {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (options.signal?.aborted) {
+      controller.abort();
+    } else {
+      options.signal?.addEventListener('abort', abort, { once: true });
+    }
+    this.checking(generation);
+    const operation = {
+      generation,
+      token,
+      controller,
+      promise: Promise.resolve(this.current()),
+    };
+    operation.promise = (async () => {
       try {
-        await this.validateAccess(token, signal);
-        this.state = checked({
-          status: 'ready',
-          code: 'COPILOT_READY',
-          message: username
-            ? `GitHub Copilot is ready for ${username}.`
-            : 'GitHub Copilot is ready.',
-          retryable: false,
-          ...(username ? { username } : {}),
-        });
+        await this.validateAccess(token, controller.signal);
+        if (
+          generation === this.generation
+          && !controller.signal.aborted
+        ) this.markReady(username, generation);
       } catch (error) {
-        this.state = classifyCopilotAuthFailure(error);
+        if (
+          generation === this.generation
+          && !controller.signal.aborted
+        ) this.reportFailure(error, generation);
       } finally {
-        this.pending = undefined;
-        this.pendingToken = undefined;
+        options.signal?.removeEventListener('abort', abort);
+        if (this.active === operation) this.active = undefined;
       }
       return this.current();
     })();
-    return this.pending;
+    this.active = operation;
+    return operation.promise;
   }
 
   requireReady(): void {

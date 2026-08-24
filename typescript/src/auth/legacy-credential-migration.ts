@@ -52,45 +52,14 @@ export async function migrateLegacyDesktopCredential(options: {
     throw error;
   }
 
-  const legacyBytes = fs.readFileSync(options.legacyPath);
-  const envBytes = options.envPath && fs.existsSync(options.envPath)
-    ? fs.readFileSync(options.envPath)
-    : undefined;
-  let envRetired = false;
   try {
-    (options.unlink ?? fs.unlinkSync)(options.legacyPath);
-    if (options.envPath && envBytes) {
-      const original = envBytes.toString('utf8');
-      const retained = original
-        .split(/\r?\n/)
-        .filter((line) => {
-          const match = line.match(/^\s*(?:COPILOT_GITHUB_TOKEN|GITHUB_TOKEN)\s*=\s*(.*)\s*$/);
-          if (!match) return true;
-          const raw = match[1].trim();
-          const value = (
-            (raw.startsWith('"') && raw.endsWith('"'))
-            || (raw.startsWith("'") && raw.endsWith("'"))
-          ) ? raw.slice(1, -1) : raw;
-          return value !== options.token;
-        })
-        .join('\n');
-      if (retained !== original) {
-        atomicPrivateReplace(options.envPath, retained);
-        envRetired = true;
-      }
-    }
+    retireMatchingLegacyCredentialCopies({
+      token: options.token,
+      legacyPath: options.legacyPath,
+      envPath: options.envPath,
+      unlink: options.unlink,
+    });
   } catch (error) {
-    try {
-      if (!fs.existsSync(options.legacyPath)) {
-        fs.writeFileSync(options.legacyPath, legacyBytes, { mode: 0o600 });
-        fs.chmodSync(options.legacyPath, 0o600);
-      }
-      if (envRetired && options.envPath && envBytes) {
-        atomicPrivateReplace(options.envPath, envBytes);
-      }
-    } catch {
-      // Profile rollback below still prevents the migrated copy becoming active.
-    }
     store.remove('copilot', identity.login, { promoteReplacement: false });
     try {
       fs.unlinkSync(profilePath);
@@ -100,6 +69,86 @@ export async function migrateLegacyDesktopCredential(options: {
     throw error;
   }
   return { token: options.token, username: identity.login };
+}
+
+export function retireMatchingLegacyCredentialCopies(options: {
+  token: string;
+  legacyPath: string;
+  envPath?: string;
+  unlink?: (target: string) => void;
+}): { retired: string[] } {
+  const legacyBytes = fs.existsSync(options.legacyPath)
+    ? fs.readFileSync(options.legacyPath)
+    : undefined;
+  if (legacyBytes) {
+    let legacyToken: unknown;
+    try {
+      legacyToken = (
+        JSON.parse(legacyBytes.toString('utf8')) as { token?: unknown }
+      ).token;
+    } catch {
+      throw new Error('Legacy GitHub credential cleanup failed.');
+    }
+    if (legacyToken !== options.token) {
+      throw new Error('Legacy GitHub credential does not match the active profile.');
+    }
+  }
+
+  const envBytes = options.envPath && fs.existsSync(options.envPath)
+    ? fs.readFileSync(options.envPath)
+    : undefined;
+  let retainedEnv: string | undefined;
+  if (envBytes) {
+    const original = envBytes.toString('utf8');
+    const retained: string[] = [];
+    for (const line of original.split(/\r?\n/)) {
+      const match = line.match(
+        /^\s*(?:COPILOT_GITHUB_TOKEN|GITHUB_TOKEN)\s*=\s*(.*)\s*$/,
+      );
+      if (!match) {
+        retained.push(line);
+        continue;
+      }
+      const raw = match[1].trim();
+      const value = (
+        (raw.startsWith('"') && raw.endsWith('"'))
+        || (raw.startsWith("'") && raw.endsWith("'"))
+      ) ? raw.slice(1, -1) : raw;
+      if (value !== options.token) {
+        throw new Error(
+          'Legacy environment credential does not match the active profile.',
+        );
+      }
+    }
+    const next = retained.join('\n');
+    if (next !== original) retainedEnv = next;
+  }
+
+  const retired: string[] = [];
+  try {
+    if (legacyBytes) {
+      (options.unlink ?? fs.unlinkSync)(options.legacyPath);
+      retired.push(options.legacyPath);
+    }
+    if (options.envPath && envBytes && retainedEnv !== undefined) {
+      atomicPrivateReplace(options.envPath, retainedEnv);
+      retired.push(options.envPath);
+    }
+  } catch (cause) {
+    try {
+      if (legacyBytes && !fs.existsSync(options.legacyPath)) {
+        fs.writeFileSync(options.legacyPath, legacyBytes, { mode: 0o600 });
+        fs.chmodSync(options.legacyPath, 0o600);
+      }
+      if (options.envPath && envBytes && retired.includes(options.envPath)) {
+        atomicPrivateReplace(options.envPath, envBytes);
+      }
+    } catch {
+      // Cleanup remains failed and is surfaced without credential material.
+    }
+    throw new Error('Legacy GitHub credential cleanup failed.', { cause });
+  }
+  return { retired };
 }
 
 function atomicPrivateReplace(

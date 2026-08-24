@@ -1,10 +1,22 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import * as nodeFs from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerAuthMethods } from '../../gateway/methods/auth-methods.js';
 import { CopilotAuthStateService } from '../../auth/copilot-auth-state.js';
 import { CopilotTokenError } from '../../providers/copilot-token.js';
+import {
+  AuthProfileStore,
+  type AuthProfileStoreFs,
+} from '../../auth/profiles.js';
 
 type Handler = (params: unknown, connection: unknown) => Promise<unknown>;
 
@@ -484,5 +496,232 @@ describe('auth.remove live token updates', () => {
 
     expect(requestDeviceCode).toHaveBeenCalledTimes(2);
     expect(pollForAccessToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps late startup and auth.check completions signed out after removal', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-stale-ready-'));
+    cleanup.push(dataDir);
+    writeFileSync(join(dataDir, 'auth-profiles.json'), JSON.stringify([{
+      id: 'active',
+      provider: 'copilot',
+      type: 'device-code',
+      token: 'active-token',
+      default: true,
+      createdAt: '2026-08-15T00:00:00.000Z',
+    }]), { mode: 0o600 });
+    const methods = new Map<string, Handler>();
+    const updates: Array<string | null> = [];
+    const releases: Array<() => void> = [];
+    const resolveGitHubIdentity = vi.fn(
+      (_token: string, _fetch: unknown, signal?: AbortSignal) =>
+        new Promise<{ id: number; login: string }>((resolve) => {
+          releases.push(() => resolve({ id: 1, login: 'active' }));
+          signal?.addEventListener('abort', () => undefined, { once: true });
+        }),
+    );
+    registerAuthMethods({
+      registerMethod(name, handler) {
+        methods.set(name, handler as Handler);
+      },
+    }, {
+      dataDir,
+      resolveGitHubIdentity,
+      copilotAuthStateService: new CopilotAuthStateService(async () => undefined),
+      onAuthTokenUpdate: (token: string | null) => updates.push(token),
+    });
+
+    const check = methods.get('auth.check')!({}, {});
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    await methods.get('auth.remove')!({ id: 'active' }, {});
+    releases.forEach((release) => release());
+    await check;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(await methods.get('auth.status')!({}, {})).toMatchObject({
+      status: 'needs-sign-in',
+      code: 'COPILOT_SIGN_IN_REQUIRED',
+    });
+    expect(await methods.get('auth.active')!({}, {})).toBeNull();
+    expect(updates).toEqual([null]);
+  });
+
+  it('retires matching legacy copies only after an existing profile verifies', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-coexistence-'));
+    cleanup.push(dataDir);
+    const token = 'matching-profile-token';
+    writeFileSync(join(dataDir, 'auth-profiles.json'), JSON.stringify([{
+      id: 'active',
+      provider: 'copilot',
+      type: 'device-code',
+      token,
+      default: true,
+      createdAt: '2026-08-15T00:00:00.000Z',
+    }]), { mode: 0o600 });
+    const credentialsDir = join(dataDir, 'credentials');
+    mkdirSync(credentialsDir, { recursive: true, mode: 0o700 });
+    const legacyPath = join(credentialsDir, 'github-token.json');
+    writeFileSync(legacyPath, JSON.stringify({ token }), { mode: 0o600 });
+    const envPath = join(dataDir, '.env');
+    writeFileSync(envPath, `OTHER=value\nGITHUB_TOKEN=${token}\n`, {
+      mode: 0o600,
+    });
+    const previousProcessToken = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = 'process-token-must-not-change';
+    const methods = new Map<string, Handler>();
+    const updates: Array<string | null> = [];
+    registerAuthMethods({
+      registerMethod(name, handler) {
+        methods.set(name, handler as Handler);
+      },
+    }, {
+      dataDir,
+      resolveGitHubIdentity: async () => ({ id: 1, login: 'active' }),
+      copilotAuthStateService: new CopilotAuthStateService(async () => undefined),
+      onAuthTokenUpdate: (value: string | null) => updates.push(value),
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(existsSync(legacyPath)).toBe(false);
+    expect(readFileSync(envPath, 'utf8')).toBe('OTHER=value\n');
+    expect(process.env.GITHUB_TOKEN).toBe('process-token-must-not-change');
+    expect(updates).toEqual([token]);
+    expect(await methods.get('auth.status')!({}, {})).toMatchObject({
+      status: 'ready',
+    });
+    expect(JSON.parse(readFileSync(
+      join(dataDir, 'auth-profiles.json'),
+      'utf8',
+    ))).toHaveLength(1);
+    expect(new AuthProfileStore(dataDir).get('copilot')).toMatchObject({
+      id: 'active',
+      token,
+    });
+    expect([
+      join(dataDir, 'auth-profiles.json'),
+      envPath,
+      legacyPath,
+    ].filter((file) =>
+      existsSync(file) && readFileSync(file, 'utf8').includes(token)
+    )).toEqual([join(dataDir, 'auth-profiles.json')]);
+    if (previousProcessToken === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = previousProcessToken;
+  });
+
+  it('surfaces cleanup failure and never activates the existing profile', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-cleanup-fail-'));
+    cleanup.push(dataDir);
+    writeFileSync(join(dataDir, 'auth-profiles.json'), JSON.stringify([{
+      id: 'active',
+      provider: 'copilot',
+      type: 'device-code',
+      token: 'private-profile-token',
+      default: true,
+      createdAt: '2026-08-15T00:00:00.000Z',
+    }]), { mode: 0o600 });
+    const methods = new Map<string, Handler>();
+    const updates: Array<string | null> = [];
+    registerAuthMethods({
+      registerMethod(name, handler) {
+        methods.set(name, handler as Handler);
+      },
+    }, {
+      dataDir,
+      resolveGitHubIdentity: async () => ({ id: 1, login: 'active' }),
+      retireLegacyCopies: () => {
+        throw new Error('safe injected cleanup failure');
+      },
+      copilotAuthStateService: new CopilotAuthStateService(async () => undefined),
+      onAuthTokenUpdate: (value: string | null) => updates.push(value),
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(await methods.get('auth.status')!({}, {})).toMatchObject({
+      status: 'error',
+      code: 'COPILOT_AUTH_ERROR',
+    });
+    expect(updates).toEqual([null]);
+    expect(JSON.stringify(await methods.get('auth.status')!({}, {})))
+      .not.toContain('private-profile-token');
+  });
+
+  it('refuses a nonmatching legacy copy without deleting or activating it', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-cleanup-refuse-'));
+    cleanup.push(dataDir);
+    writeFileSync(join(dataDir, 'auth-profiles.json'), JSON.stringify([{
+      id: 'active',
+      provider: 'copilot',
+      type: 'device-code',
+      token: 'active-profile-token',
+      default: true,
+      createdAt: '2026-08-15T00:00:00.000Z',
+    }]), { mode: 0o600 });
+    const credentialsDir = join(dataDir, 'credentials');
+    mkdirSync(credentialsDir, { recursive: true, mode: 0o700 });
+    const legacyPath = join(credentialsDir, 'github-token.json');
+    writeFileSync(
+      legacyPath,
+      JSON.stringify({ token: 'different-legacy-token' }),
+      { mode: 0o600 },
+    );
+    const methods = new Map<string, Handler>();
+    const updates: Array<string | null> = [];
+    registerAuthMethods({
+      registerMethod(name, handler) {
+        methods.set(name, handler as Handler);
+      },
+    }, {
+      dataDir,
+      resolveGitHubIdentity: async () => ({ id: 1, login: 'active' }),
+      copilotAuthStateService: new CopilotAuthStateService(async () => undefined),
+      onAuthTokenUpdate: (value: string | null) => updates.push(value),
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(await methods.get('auth.status')!({}, {})).toMatchObject({
+      status: 'error',
+    });
+    expect(JSON.parse(readFileSync(legacyPath, 'utf8'))).toEqual({
+      token: 'different-legacy-token',
+    });
+    expect(updates).toEqual([null]);
+  });
+
+  it('returns an RPC error when durable profile removal fails', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-rpc-write-fail-'));
+    cleanup.push(dataDir);
+    const durable = new AuthProfileStore(dataDir);
+    durable.add({
+      id: 'active',
+      provider: 'copilot',
+      type: 'device-code',
+      token: 'active-token',
+      default: true,
+    });
+    const failingStore = new AuthProfileStore(dataDir, {
+      ...nodeFs,
+      renameSync: vi.fn(() => {
+        throw new Error('injected rename failure');
+      }),
+    } as AuthProfileStoreFs);
+    const methods = new Map<string, Handler>();
+    const updates: Array<string | null> = [];
+    registerAuthMethods({
+      registerMethod(name, handler) {
+        methods.set(name, handler as Handler);
+      },
+    }, {
+      dataDir,
+      authProfileStore: failingStore,
+      resolveGitHubIdentity: async () => ({ id: 1, login: 'active' }),
+      copilotAuthStateService: new CopilotAuthStateService(async () => undefined),
+      onAuthTokenUpdate: (value: string | null) => updates.push(value),
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    await expect(methods.get('auth.remove')!({ id: 'active' }, {}))
+      .rejects.toThrow('Auth profile store write failed.');
+    expect(failingStore.get('copilot')?.id).toBe('active');
+    expect(new AuthProfileStore(dataDir).get('copilot')?.id).toBe('active');
+    expect(updates).toEqual(['active-token', null]);
   });
 });

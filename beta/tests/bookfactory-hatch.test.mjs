@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -26,16 +27,28 @@ function sha256(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
 
-function dryLoadFixture(t, fixture) {
+function dryLoadSources(t, sources) {
   const root = mkdtempSync(path.join(tmpdir(), "bookfactory-grail-"));
   const agents = path.join(root, "agents");
   mkdirSync(agents);
-  copyFileSync(path.join(fixtureRoot, fixture), path.join(agents, "bookfactory_agent.py"));
+  for (const [filename, source] of Object.entries(sources)) {
+    if (source.fixture) {
+      copyFileSync(path.join(fixtureRoot, source.fixture), path.join(agents, filename));
+    } else {
+      writeFileSync(path.join(agents, filename), source.inline);
+    }
+  }
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return routeManagerInternals.dryLoadAgentDirectory({
     python: testPython(),
     brainstemDir,
     agentDirectory: agents,
+  });
+}
+
+function dryLoadFixture(t, fixture) {
+  return dryLoadSources(t, {
+    "bookfactory_agent.py": { fixture },
   });
 }
 
@@ -60,4 +73,52 @@ test("pinned v0.3.1 BookFactory passes the real Grail dry-load", (t) => {
   const result = dryLoadFixture(t, provenance.fixed.fixture);
 
   assert.deepEqual(result, { ok: true });
+});
+
+test("Grail controls distinguish aliases, distinct duplicates, and no agents", (t) => {
+  const alias = dryLoadSources(t, {
+    "alias_agent.py": {
+      inline: `
+from agents.basic_agent import BasicAgent
+class CanonicalAgent(BasicAgent):
+    def __init__(self):
+        super().__init__("Canonical", {"name": "Canonical", "parameters": {"type": "object", "properties": {}}})
+    def perform(self, **kwargs):
+        return "ok"
+AliasAgent = CanonicalAgent
+`,
+    },
+  });
+  assert.deepEqual(alias, { ok: true });
+
+  const distinct = dryLoadSources(t, {
+    "first_agent.py": {
+      inline: `
+from agents.basic_agent import BasicAgent
+class FirstAgent(BasicAgent):
+    def __init__(self):
+        super().__init__("Shared", {"name": "Shared", "parameters": {"type": "object", "properties": {}}})
+    def perform(self, **kwargs):
+        return "first"
+`,
+    },
+    "second_agent.py": {
+      inline: `
+from agents.basic_agent import BasicAgent
+class SecondAgent(BasicAgent):
+    def __init__(self):
+        super().__init__("Shared", {"name": "Shared", "parameters": {"type": "object", "properties": {}}})
+    def perform(self, **kwargs):
+        return "second"
+`,
+    },
+  });
+  assert.equal(distinct.ok, false);
+  assert.match(distinct.error, /distinct duplicate registered name 'Shared'/);
+
+  const empty = dryLoadSources(t, {
+    "empty_agent.py": { inline: "VALUE = 1\n" },
+  });
+  assert.equal(empty.ok, false);
+  assert.match(empty.error, /empty_agent\.py: no valid agents/);
 });

@@ -366,7 +366,10 @@ for filepath in sorted(glob.glob(os.path.join(agents_dir, "*_agent.py"))):
         continue
     for name in loaded:
         if name in names:
-            failures.append(f"duplicate tool name {name!r} in {os.path.basename(filepath)} and {names[name]}")
+            failures.append(
+                f"distinct duplicate registered name {name!r} "
+                f"in {os.path.basename(filepath)} and {names[name]}"
+            )
         else:
             names[name] = os.path.basename(filepath)
 

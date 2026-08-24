@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -9,6 +10,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const typescript = path.resolve(desktop, '..');
@@ -22,6 +24,20 @@ const metadata = JSON.parse(
   readFileSync(path.join(desktop, 'package.json'), 'utf8'),
 );
 const electronVersion = String(metadata.devDependencies.electron).replace(/^[^\d]*/, '');
+const require = createRequire(import.meta.url);
+
+if (process.platform !== 'win32') {
+  for (const packageName of [
+    '@ffmpeg-installer/ffmpeg',
+    '@ffprobe-installer/ffprobe',
+  ]) {
+    const binary = require(packageName).path;
+    if (!existsSync(binary)) {
+      throw new Error(`Desktop media binary is missing: ${packageName}`);
+    }
+    chmodSync(binary, 0o755);
+  }
+}
 
 function runCommand(command, args, options = {}) {
   const result = spawnSync(command, args, {

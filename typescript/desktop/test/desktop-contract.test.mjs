@@ -148,12 +148,11 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
 });
 
 test('GitHub device authentication opens in the OS browser without relaxing renderer isolation', () => {
-  assert.match(main, /setWindowOpenHandler/);
-  assert.match(main, /shell\.openExternal\(url\)/);
-  assert.match(
-    main,
-    /setWindowOpenHandler\(\(\{ url \}\) => \{[\s\S]*return \{ action: 'deny' \}/,
-  );
+  assert.match(main, /setWindowOpenHandler\(\(\) => \(\{ action: 'deny' \}\)\)/);
+  assert.doesNotMatch(main, /shell\.openExternal\(url\)/);
+  assert.match(main, /shell\.openExternal\(GITHUB_DEVICE_LOGIN_URL\)/);
+  assert.match(preload, /openGithubDeviceLogin:\s*\(\) =>/);
+  assert.doesNotMatch(preload, /github-device-login',\s*\w+/);
   assert.match(runtimeEntry, /getCopilotAuthStateService/);
 });
 

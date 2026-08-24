@@ -13,7 +13,10 @@
  *   auth.remove    — Remove a saved profile
  */
 
-import { AuthProfileStore } from '../../auth/profiles.js';
+import {
+  AuthProfileStore,
+  type AuthProfile,
+} from '../../auth/profiles.js';
 import {
   requestDeviceCode,
   pollForAccessToken,
@@ -23,6 +26,11 @@ import {
   CopilotAuthStateService,
   type CopilotAuthState,
 } from '../../auth/copilot-auth-state.js';
+import {
+  resolveVerifiedGitHubIdentity,
+  type VerifiedGitHubIdentity,
+} from '../../auth/github-identity.js';
+import { CopilotTokenError } from '../../providers/copilot-token.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -41,40 +49,20 @@ interface ProfileInfo {
   createdAt: string;
 }
 
-// In-memory map of pending device-code flows (keyed by device_code)
-const pendingFlows = new Map<
-  string,
-  {
-    deviceCode: string;
-    expiresAt: number;
-    intervalMs: number;
-    resolved: boolean;
-    controller: AbortController;
-    userCode: string;
-    verificationUri: string;
-    persisted?: boolean;
-    username?: string;
-    authState?: CopilotAuthState;
-  }
->();
+interface LoginFlowDescriptor {
+  userCode: string;
+  verificationUri: string;
+  deviceCode: string;
+}
 
-/**
- * Fetch the GitHub username for a given access token.
- */
-async function fetchGitHubUsername(token: string): Promise<string | undefined> {
-  try {
-    const res = await fetch('https://api.github.com/user', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-      },
-    });
-    if (!res.ok) return undefined;
-    const json = (await res.json()) as { login?: string };
-    return json.login;
-  } catch {
-    return undefined;
-  }
+interface PendingLoginFlow extends LoginFlowDescriptor {
+  expiresAt: number;
+  intervalMs: number;
+  resolved: boolean;
+  controller: AbortController;
+  persisted?: boolean;
+  username?: string;
+  authState?: CopilotAuthState;
 }
 
 export function registerAuthMethods(
@@ -88,22 +76,52 @@ export function registerAuthMethods(
   const pollForAccessTokenImpl = (
     _deps?.pollForAccessToken ?? pollForAccessToken
   ) as typeof pollForAccessToken;
-  const fetchGitHubUsernameImpl = (
-    _deps?.fetchGitHubUsername ?? fetchGitHubUsername
-  ) as typeof fetchGitHubUsername;
+  const resolveGitHubIdentityImpl = (
+    _deps?.resolveGitHubIdentity ?? resolveVerifiedGitHubIdentity
+  ) as (
+    token: string,
+    fetchImpl?: typeof fetch,
+    signal?: AbortSignal,
+  ) => Promise<VerifiedGitHubIdentity>;
   const authStateService = (
     _deps?.copilotAuthStateService ?? new CopilotAuthStateService()
   ) as CopilotAuthStateService;
+  const pendingFlows = new Map<string, PendingLoginFlow>();
+  let pendingFlowCreation: Promise<LoginFlowDescriptor> | undefined;
+  let credentialGeneration = 0;
 
   // If a profile already exists, notify the caller so the provider can use it
   const onTokenUpdate = _deps?.onAuthTokenUpdate as (
     (token: string | null) => void
   ) | undefined;
+  const verifyStoredProfile = async (
+    profile: AuthProfile | undefined,
+  ): Promise<CopilotAuthState> => {
+    if (!profile?.token) return authStateService.needsSignIn();
+    try {
+      const identity = await resolveGitHubIdentityImpl(profile.token);
+      if (identity.login !== profile.id) {
+        throw new CopilotTokenError('exchange-error');
+      }
+      return authStateService.check(profile.token, identity.login);
+    } catch (error) {
+      return authStateService.reportFailure(error);
+    }
+  };
   const existingProfile = store.get('copilot');
   if (existingProfile?.token) {
-    void authStateService.check(existingProfile.token, existingProfile.id)
+    const generation = credentialGeneration;
+    void verifyStoredProfile(existingProfile)
       .then((state) => {
-        if (state.status === 'ready') onTokenUpdate?.(existingProfile.token!);
+        if (
+          state.status === 'ready'
+          && generation === credentialGeneration
+          && store.get('copilot')?.id === existingProfile.id
+        ) {
+          onTokenUpdate?.(existingProfile.token!);
+        } else if (generation === credentialGeneration) {
+          onTokenUpdate?.(null);
+        }
       });
   } else if (store.hasPersistedState()) {
     authStateService.needsSignIn();
@@ -115,9 +133,15 @@ export function registerAuthMethods(
   );
 
   server.registerMethod<void, CopilotAuthState>('auth.check', async () => {
+    const generation = credentialGeneration;
     const profile = store.get('copilot');
-    const state = await authStateService.check(profile?.token, profile?.id);
-    if (state.status === 'ready' && profile?.token) {
+    const state = await verifyStoredProfile(profile);
+    if (
+      state.status === 'ready'
+      && profile?.token
+      && generation === credentialGeneration
+      && store.get('copilot')?.id === profile.id
+    ) {
       onTokenUpdate?.(profile.token);
     }
     return state;
@@ -150,21 +174,9 @@ export function registerAuthMethods(
     };
   });
 
-  // ── auth.login — start device code flow ────────────────────────────────────
-  server.registerMethod<void, { userCode: string; verificationUri: string; deviceCode: string }>(
-    'auth.login',
-    async () => {
-      const activeFlow = Array.from(pendingFlows.values()).find(
-        (flow) => !flow.resolved && Date.now() <= flow.expiresAt,
-      );
-      if (activeFlow) {
-        return {
-          userCode: activeFlow.userCode,
-          verificationUri: activeFlow.verificationUri,
-          deviceCode: activeFlow.deviceCode,
-        };
-      }
-
+  const createDeviceFlow = (): Promise<LoginFlowDescriptor> => {
+    if (pendingFlowCreation) return pendingFlowCreation;
+    const creation = (async (): Promise<LoginFlowDescriptor> => {
       authStateService.checking();
       let device;
       try {
@@ -177,9 +189,7 @@ export function registerAuthMethods(
       const expiresAt = Date.now() + device.expires_in * 1000;
       const intervalMs = Math.max(1000, device.interval * 1000);
       const controller = new AbortController();
-
-      // Store the pending flow
-      pendingFlows.set(device.device_code, {
+      const flow: PendingLoginFlow = {
         deviceCode: device.device_code,
         expiresAt,
         intervalMs,
@@ -187,40 +197,42 @@ export function registerAuthMethods(
         controller,
         userCode: device.user_code,
         verificationUri: device.verification_uri,
-      });
+      };
+      pendingFlows.set(device.device_code, flow);
 
-      // Start polling in the background
-      pollForAccessTokenImpl({
+      const generation = ++credentialGeneration;
+      void pollForAccessTokenImpl({
         deviceCode: device.device_code,
         intervalMs,
         expiresAt,
         signal: controller.signal,
       })
         .then(async (token) => {
-          const flow = pendingFlows.get(device.device_code);
-          if (!flow) return;
-
-          // Verify entitlement before making this identity active. The token is
-          // never returned over RPC and is persisted only in the existing
-          // credential store.
-          const username = (
-            await fetchGitHubUsernameImpl(token)
-          ) ?? `account-${Date.now()}`;
           if (pendingFlows.get(device.device_code) !== flow) return;
-          const state = await authStateService.check(
+          const identity = await resolveGitHubIdentityImpl(
             token,
-            username,
+            undefined,
             controller.signal,
           );
           if (pendingFlows.get(device.device_code) !== flow) return;
-          flow.username = username;
+          const state = await authStateService.check(
+            token,
+            identity.login,
+            controller.signal,
+          );
+          if (pendingFlows.get(device.device_code) !== flow) return;
+          flow.username = identity.login;
           flow.authState = state;
           flow.resolved = true;
 
-          if (state.status === 'ready') {
-            store.remove('copilot', username);
+          if (state.status === 'ready' && generation === credentialGeneration) {
+            const replacingActive = store.get('copilot')?.id === identity.login;
+            store.remove('copilot', identity.login, {
+              promoteReplacement: false,
+            });
+            if (replacingActive) onTokenUpdate?.(null);
             store.add({
-              id: username,
+              id: identity.login,
               provider: 'copilot',
               type: 'device-code',
               token,
@@ -228,24 +240,39 @@ export function registerAuthMethods(
             });
             flow.persisted = true;
             onTokenUpdate?.(token);
-          } else if (state.status === 'no-entitlement') {
-            store.remove('copilot', username);
+          } else if (
+            state.status === 'no-entitlement'
+            && generation === credentialGeneration
+          ) {
+            store.remove('copilot', identity.login, {
+              promoteReplacement: false,
+            });
             store.add({
-              id: username,
+              id: identity.login,
               provider: 'copilot',
               type: 'device-code',
               token,
               default: false,
             }, { autoDefault: false });
             flow.persisted = true;
+          } else if (
+            state.status === 'ready'
+            || state.status === 'no-entitlement'
+          ) {
+            flow.authState = {
+              status: 'error',
+              code: 'COPILOT_AUTH_ERROR',
+              message: 'This sign-in was superseded by a newer account change.',
+              retryable: true,
+              action: 'retry',
+              checkedAt: new Date().toISOString(),
+            };
           }
         })
-        .catch((err) => {
-          const flow = pendingFlows.get(device.device_code);
-          if (flow) {
-            flow.authState = authStateService.reportFailure(err);
-            flow.resolved = true;
-          }
+        .catch((error) => {
+          if (pendingFlows.get(device.device_code) !== flow) return;
+          flow.authState = authStateService.reportFailure(error);
+          flow.resolved = true;
         });
 
       return {
@@ -253,6 +280,29 @@ export function registerAuthMethods(
         verificationUri: device.verification_uri,
         deviceCode: device.device_code,
       };
+    })();
+    pendingFlowCreation = creation;
+    void creation.finally(() => {
+      if (pendingFlowCreation === creation) pendingFlowCreation = undefined;
+    }).catch(() => undefined);
+    return creation;
+  };
+
+  // ── auth.login — start device code flow ────────────────────────────────────
+  server.registerMethod<void, LoginFlowDescriptor>(
+    'auth.login',
+    async () => {
+      const activeFlow = Array.from(pendingFlows.values()).find(
+        (flow) => !flow.resolved && Date.now() <= flow.expiresAt,
+      );
+      if (activeFlow) {
+        return {
+          userCode: activeFlow.userCode,
+          verificationUri: activeFlow.verificationUri,
+          deviceCode: activeFlow.deviceCode,
+        };
+      }
+      return createDeviceFlow();
     }
   );
 
@@ -328,8 +378,13 @@ export function registerAuthMethods(
     async (params) => {
       const profile = store.get('copilot', params.id);
       if (!profile?.token) return { ok: false };
-      const state = await authStateService.check(profile.token, profile.id);
-      if (state.status !== 'ready') return { ok: false };
+      const generation = ++credentialGeneration;
+      const state = await verifyStoredProfile(profile);
+      if (
+        state.status !== 'ready'
+        || generation !== credentialGeneration
+        || !store.get('copilot', profile.id)
+      ) return { ok: false };
       const ok = store.setDefault('copilot', params.id);
       if (ok) onTokenUpdate?.(profile.token);
       return { ok };
@@ -340,22 +395,35 @@ export function registerAuthMethods(
   server.registerMethod<{ id: string }, { ok: boolean }>(
     'auth.remove',
     async (params) => {
-      const activeProfileId = store.get('copilot')?.id;
-      const ok = store.remove('copilot', params.id);
-      if (ok && activeProfileId === params.id && onTokenUpdate) {
-        const replacement = store.get('copilot');
-        if (replacement?.token) {
-          const state = await authStateService.check(
-            replacement.token,
-            replacement.id,
-          );
-          if (state.status === 'ready') onTokenUpdate(replacement.token);
-        } else {
+      const activeProfile = store.get('copilot');
+      const removingActive = activeProfile?.id === params.id;
+      const generation = ++credentialGeneration;
+      if (removingActive) onTokenUpdate?.(null);
+      const ok = store.remove('copilot', params.id, {
+        promoteReplacement: false,
+      });
+      if (!ok) return { ok: false };
+
+      if (removingActive) {
+        const replacement = store.list('copilot').find(
+          (profile) => typeof profile.token === 'string' && profile.token.length > 0,
+        );
+        if (!replacement?.token) {
           authStateService.needsSignIn();
-          onTokenUpdate(null);
+          return { ok: true };
+        }
+
+        const state = await verifyStoredProfile(replacement);
+        if (
+          state.status === 'ready'
+          && generation === credentialGeneration
+          && store.get('copilot', replacement.id)
+        ) {
+          store.setDefault('copilot', replacement.id);
+          onTokenUpdate?.(replacement.token);
         }
       }
-      return { ok };
+      return { ok: true };
     }
   );
 }

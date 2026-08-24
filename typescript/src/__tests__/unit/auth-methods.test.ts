@@ -71,6 +71,10 @@ describe('auth.remove live token updates', () => {
       {
         dataDir,
         copilotAuthStateService: new CopilotAuthStateService(async () => undefined),
+        resolveGitHubIdentity: async (token: string) => ({
+          id: token === 'token-first' ? 1 : 2,
+          login: token === 'token-first' ? 'first' : 'second',
+        }),
         onAuthTokenUpdate: (token: string | null) => tokenUpdates.push(token),
       },
     );
@@ -80,7 +84,7 @@ describe('auth.remove live token updates', () => {
     tokenUpdates.length = 0;
 
     await methods.get('auth.remove')?.({ id: 'first' }, {});
-    expect(tokenUpdates).toEqual(['token-second']);
+    expect(tokenUpdates).toEqual([null, 'token-second']);
 
     tokenUpdates.length = 0;
     await methods.get('auth.remove')?.({ id: 'second' }, {});
@@ -159,7 +163,10 @@ describe('auth.remove live token updates', () => {
           interval: 1,
         }),
         pollForAccessToken: async () => 'completed-token',
-        fetchGitHubUsername: async () => 'completed-user',
+        resolveGitHubIdentity: async () => ({
+          id: 1,
+          login: 'completed-user',
+        }),
         copilotAuthStateService: new CopilotAuthStateService(async () => undefined),
         onAuthTokenUpdate: (token: string | null) => tokenUpdates.push(token),
       },
@@ -200,7 +207,10 @@ describe('auth.remove live token updates', () => {
           interval: 1,
         }),
         pollForAccessToken: async () => 'wrong-account-secret-token',
-        fetchGitHubUsername: async () => 'wrong-account',
+        resolveGitHubIdentity: async () => ({
+          id: 2,
+          login: 'wrong-account',
+        }),
         copilotAuthStateService: new CopilotAuthStateService(async () => {
           throw new CopilotTokenError('no-entitlement', 403);
         }),
@@ -230,17 +240,32 @@ describe('auth.remove live token updates', () => {
     expect(tokenUpdates).toEqual([]);
   });
 
-  it('reuses one pending device flow instead of opening duplicate dialogs', async () => {
+  it('atomically reuses one pending device flow across concurrent windows', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-dedupe-'));
     cleanup.push(dataDir);
     const methods = new Map<string, Handler>();
-    const requestDeviceCode = vi.fn(async () => ({
-      device_code: 'dedupe-device',
-      user_code: 'ONE-FLOW',
-      verification_uri: 'https://github.com/login/device',
-      expires_in: 900,
-      interval: 1,
-    }));
+    let releaseDevice!: () => void;
+    const deviceGate = new Promise<void>((resolve) => {
+      releaseDevice = resolve;
+    });
+    const requestDeviceCode = vi.fn(async () => {
+      await deviceGate;
+      return {
+        device_code: 'dedupe-device',
+        user_code: 'ONE-FLOW',
+        verification_uri: 'https://github.com/login/device',
+        expires_in: 900,
+        interval: 1,
+      };
+    });
+    const pollForAccessToken = vi.fn(
+      async (params: { signal?: AbortSignal }) =>
+        new Promise<never>((_, reject) => {
+          params.signal?.addEventListener('abort', () => reject(
+            new DOMException('cancelled', 'AbortError'),
+          ), { once: true });
+        }),
+    );
     registerAuthMethods(
       {
         registerMethod(name, handler) {
@@ -250,19 +275,214 @@ describe('auth.remove live token updates', () => {
       {
         dataDir,
         requestDeviceCode,
-        pollForAccessToken: async (params: { signal?: AbortSignal }) =>
-          new Promise<never>((_, reject) => {
-            params.signal?.addEventListener('abort', () => reject(
-              new DOMException('cancelled', 'AbortError'),
-            ), { once: true });
-          }),
+        pollForAccessToken,
       },
     );
 
-    const first = await methods.get('auth.login')?.({}, {});
-    const second = await methods.get('auth.login')?.({}, {});
+    const pending = Promise.all([
+      methods.get('auth.login')?.({}, { window: 1 }),
+      methods.get('auth.login')?.({}, { window: 2 }),
+    ]);
+    await Promise.resolve();
+    expect(requestDeviceCode).toHaveBeenCalledOnce();
+    releaseDevice();
+    const [first, second] = await pending;
     expect(second).toEqual(first);
     expect(requestDeviceCode).toHaveBeenCalledOnce();
+    expect(pollForAccessToken).toHaveBeenCalledOnce();
     await methods.get('auth.cancel')?.({ deviceCode: 'dedupe-device' }, {});
+  });
+
+  it('clears the active runtime and leaves it clear when replacement verification fails', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-failed-replacement-'));
+    cleanup.push(dataDir);
+    writeFileSync(join(dataDir, 'auth-profiles.json'), JSON.stringify([
+      {
+        id: 'active',
+        provider: 'copilot',
+        type: 'device-code',
+        token: 'active-token',
+        default: true,
+        createdAt: '2026-08-15T00:00:00.000Z',
+      },
+      {
+        id: 'replacement',
+        provider: 'copilot',
+        type: 'device-code',
+        token: 'rejected-token',
+        default: false,
+        createdAt: '2026-08-15T00:00:01.000Z',
+      },
+    ]), { mode: 0o600 });
+    const methods = new Map<string, Handler>();
+    const updates: Array<string | null> = [];
+    registerAuthMethods({
+      registerMethod(name, handler) {
+        methods.set(name, handler as Handler);
+      },
+    }, {
+      dataDir,
+      copilotAuthStateService: new CopilotAuthStateService(async (token) => {
+        if (token === 'rejected-token') {
+          throw new CopilotTokenError('no-entitlement', 403);
+        }
+      }),
+      resolveGitHubIdentity: async (token: string) => ({
+        id: token === 'active-token' ? 1 : 2,
+        login: token === 'active-token' ? 'active' : 'replacement',
+      }),
+      onAuthTokenUpdate: (token: string | null) => updates.push(token),
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    updates.length = 0;
+
+    await methods.get('auth.remove')?.({ id: 'active' }, {});
+
+    expect(updates).toEqual([null]);
+    expect(await methods.get('auth.active')?.({}, {})).toBeNull();
+  });
+
+  it('does not reactivate a replacement removed by a concurrent request', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-concurrent-remove-'));
+    cleanup.push(dataDir);
+    writeFileSync(join(dataDir, 'auth-profiles.json'), JSON.stringify([
+      {
+        id: 'active',
+        provider: 'copilot',
+        type: 'device-code',
+        token: 'active-token',
+        default: true,
+        createdAt: '2026-08-15T00:00:00.000Z',
+      },
+      {
+        id: 'replacement',
+        provider: 'copilot',
+        type: 'device-code',
+        token: 'replacement-token',
+        default: false,
+        createdAt: '2026-08-15T00:00:01.000Z',
+      },
+    ]), { mode: 0o600 });
+    let releaseReplacement!: () => void;
+    const replacementGate = new Promise<void>((resolve) => {
+      releaseReplacement = resolve;
+    });
+    const methods = new Map<string, Handler>();
+    const updates: Array<string | null> = [];
+    registerAuthMethods({
+      registerMethod(name, handler) {
+        methods.set(name, handler as Handler);
+      },
+    }, {
+      dataDir,
+      copilotAuthStateService: new CopilotAuthStateService(async (token) => {
+        if (token === 'replacement-token') await replacementGate;
+      }),
+      resolveGitHubIdentity: async (token: string) => ({
+        id: token === 'active-token' ? 1 : 2,
+        login: token === 'active-token' ? 'active' : 'replacement',
+      }),
+      onAuthTokenUpdate: (token: string | null) => updates.push(token),
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    updates.length = 0;
+
+    const removeActive = methods.get('auth.remove')!({ id: 'active' }, {});
+    await Promise.resolve();
+    await methods.get('auth.remove')!({ id: 'replacement' }, {});
+    releaseReplacement();
+    await removeActive;
+
+    expect(updates).toEqual([null]);
+    expect(await methods.get('auth.active')?.({}, {})).toBeNull();
+  });
+
+  it('stores nothing when verified identity lookup repeatedly fails', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-identity-failure-'));
+    cleanup.push(dataDir);
+    const methods = new Map<string, Handler>();
+    let attempt = 0;
+    registerAuthMethods({
+      registerMethod(name, handler) {
+        methods.set(name, handler as Handler);
+      },
+    }, {
+      dataDir,
+      requestDeviceCode: async () => {
+        attempt += 1;
+        return {
+          device_code: `identity-failure-${attempt}`,
+          user_code: `FAIL-${attempt}`,
+          verification_uri: 'https://github.com/login/device',
+          expires_in: 900,
+          interval: 1,
+        };
+      },
+      pollForAccessToken: async () => `unpersisted-token-${attempt}`,
+      resolveGitHubIdentity: async () => {
+        throw new CopilotTokenError('offline');
+      },
+      copilotAuthStateService: new CopilotAuthStateService(async () => undefined),
+    });
+
+    for (let expectedAttempt = 1; expectedAttempt <= 2; expectedAttempt += 1) {
+      const login = await methods.get('auth.login')!({}, {}) as {
+        deviceCode: string;
+      };
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const result = await methods.get('auth.poll')!(
+        { deviceCode: login.deviceCode },
+        {},
+      );
+      expect(result).toMatchObject({
+        status: 'error',
+        auth: { status: 'offline' },
+      });
+      expect(await methods.get('auth.profiles')!({}, {})).toEqual([]);
+    }
+    expect(attempt).toBe(2);
+  });
+
+  it('starts a fresh single polling loop after a completed flow is consumed', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-retry-complete-'));
+    cleanup.push(dataDir);
+    const methods = new Map<string, Handler>();
+    let attempt = 0;
+    const requestDeviceCode = vi.fn(async () => {
+      attempt += 1;
+      return {
+        device_code: `complete-${attempt}`,
+        user_code: `DONE-${attempt}`,
+        verification_uri: 'https://github.com/login/device',
+        expires_in: 900,
+        interval: 1,
+      };
+    });
+    const pollForAccessToken = vi.fn(async () => `token-${attempt}`);
+    registerAuthMethods({
+      registerMethod(name, handler) {
+        methods.set(name, handler as Handler);
+      },
+    }, {
+      dataDir,
+      requestDeviceCode,
+      pollForAccessToken,
+      resolveGitHubIdentity: async () => ({ id: 5, login: 'octocat' }),
+      copilotAuthStateService: new CopilotAuthStateService(async () => undefined),
+    });
+
+    for (let expectedAttempt = 1; expectedAttempt <= 2; expectedAttempt += 1) {
+      const login = await methods.get('auth.login')!({}, {}) as {
+        deviceCode: string;
+      };
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await expect(methods.get('auth.poll')!(
+        { deviceCode: login.deviceCode },
+        {},
+      )).resolves.toMatchObject({ status: 'success' });
+    }
+
+    expect(requestDeviceCode).toHaveBeenCalledTimes(2);
+    expect(pollForAccessToken).toHaveBeenCalledTimes(2);
   });
 });

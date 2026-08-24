@@ -10,6 +10,7 @@ import { gateway } from '../services/gateway.js';
 import {
   beginCopilotSignIn,
   cancelCopilotSignIn,
+  openCopilotVerification,
   pollCopilotSignIn,
   type CopilotLoginFlow,
 } from '../services/copilot-auth.js';
@@ -482,9 +483,15 @@ export class OpenRappterAccounts extends LitElement {
           </div>
 
           <div class="modal-actions">
-            <a class="btn btn-primary" href="${flow.verificationUri}" target="_blank" rel="noopener">
+            <button
+              class="btn btn-primary"
+              @click=${() => void openCopilotVerification(flow).catch((error) => {
+                this.loginStatus = 'error';
+                this.loginMessage = (error as Error).message;
+              })}
+            >
               Open GitHub
-            </a>
+            </button>
             <button class="btn" @click=${() => this.cancelLogin()}>Cancel</button>
           </div>
         </div>

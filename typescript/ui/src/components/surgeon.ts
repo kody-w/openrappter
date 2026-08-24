@@ -13,6 +13,7 @@ import {
   beginCopilotSignIn,
   cancelCopilotSignIn,
   loadCopilotAuthState,
+  openCopilotVerification,
   pollCopilotSignIn,
   retryCopilotAuth,
   type CopilotAuthState,
@@ -1117,7 +1118,7 @@ export class OpenRappterSurgeon extends LitElement {
   /** Ask the patient directly, over the same public /chat wire a neighbor uses. */
   private async askThePatient(value: string): Promise<void> {
     const q = value.trim();
-    if (!q || this.busy) return;
+    if (!q || this.busy || this.copilotAuth.status !== 'ready') return;
     this.busy = true;
     this.error = null;
     this.input = '';
@@ -1131,6 +1132,7 @@ export class OpenRappterSurgeon extends LitElement {
       if (t) t.scrollTo({ top: t.scrollHeight, behavior: 'smooth' });
     } catch (error) {
       this.error = (error as Error).message;
+      this.copilotAuth = await loadCopilotAuthState();
     } finally {
       this.busy = false;
     }
@@ -1206,7 +1208,7 @@ export class OpenRappterSurgeon extends LitElement {
   }
 
   private renderCopilotAuth(): unknown {
-      if (this.mode !== 'surgeon' || this.copilotAuth.status === 'ready') return nothing;
+      if (this.copilotAuth.status === 'ready') return nothing;
       const signIn = this.copilotAuth.action === 'sign-in'
         || this.copilotAuth.status === 'needs-sign-in'
         || this.copilotAuth.status === 'no-entitlement';
@@ -1221,8 +1223,8 @@ export class OpenRappterSurgeon extends LitElement {
               this.copilotAuth = await retryCopilotAuth();
             }}>Retry Copilot</button>
           `}
-          <button @click=${() => { this.mode = 'patient'; this.error = null; }}>
-            Use local patient tools
+          <button @click=${() => this.navigate('presence')}>
+            View local health
           </button>
         </div>
       `;
@@ -1236,9 +1238,12 @@ export class OpenRappterSurgeon extends LitElement {
             <h3 id="copilot-login-title">Sign in with GitHub Copilot</h3>
             <p>Use the Copilot-enabled GitHub account you want OpenRappter to verify.</p>
             <div class="device-code">${this.loginFlow.userCode}</div>
-            <a href=${this.loginFlow.verificationUri} target="_blank" rel="noopener">
-              Open GitHub sign-in
-            </a>
+            <button @click=${() => {
+              if (!this.loginFlow) return;
+              void openCopilotVerification(this.loginFlow).catch((error) => {
+                this.error = (error as Error).message;
+              });
+            }}>Open GitHub sign-in</button>
             <p>Waiting for GitHub authorization and Copilot entitlement verification…</p>
             <div class="actions">
               <button @click=${this.cancelSignIn}>Cancel</button>
@@ -1501,7 +1506,8 @@ export class OpenRappterSurgeon extends LitElement {
           <p>
             This goes over <code>POST /chat</code> — the same public wire a
             brainstem or any neighbor would use, not a private back channel.
-            Copilot is not in this conversation.
+            This uses the configured AI backend. For deterministic local health,
+            open Anatomy instead.
           </p>
           <div class="starter-portals">
             ${[
@@ -1613,20 +1619,26 @@ export class OpenRappterSurgeon extends LitElement {
               <div class="surgeon-title">
                 <b>${this.mode === 'patient' ? 'OpenRappter' : 'GitHub Copilot'}</b>
                 <span>${this.mode === 'patient'
-                  ? 'the patient, answering for itself · over POST /chat'
+                  ? 'agent chat through the configured AI backend · POST /chat'
                   : 'Brain surgeon · adaptive agent mode'}</span>
               </div>
               <div class="toolbar" role="group" aria-label="Who you are talking to">
                 <button
                   class="tbtn${this.mode === 'surgeon' ? ' on' : ''}"
                   aria-pressed=${this.mode === 'surgeon'}
-                  ?disabled=${this.busy}
+                  ?disabled=${this.busy || this.copilotAuth.status !== 'ready'}
+                  title=${this.copilotAuth.status === 'ready'
+                    ? 'Talk to the Copilot surgeon'
+                    : this.copilotAuth.message}
                   @click=${() => { this.mode = 'surgeon'; this.error = null; }}
                 >⌘ Surgeon</button>
                 <button
                   class="tbtn${this.mode === 'patient' ? ' on' : ''}"
                   aria-pressed=${this.mode === 'patient'}
-                  ?disabled=${this.busy}
+                  ?disabled=${this.busy || this.copilotAuth.status !== 'ready'}
+                  title=${this.copilotAuth.status === 'ready'
+                    ? 'Talk to the configured agent backend'
+                    : this.copilotAuth.message}
                   @click=${() => { this.mode = 'patient'; this.error = null; }}
                 >🦖 Patient</button>
               </div>
@@ -1661,9 +1673,7 @@ export class OpenRappterSurgeon extends LitElement {
                     ? 'Ask OpenRappter itself…'
                     : 'Describe what OpenRappter needs…'}
                   .value=${this.input}
-                  ?disabled=${this.busy || (
-                    this.mode === 'surgeon' && this.copilotAuth.status !== 'ready'
-                  )}
+                  ?disabled=${this.busy || this.copilotAuth.status !== 'ready'}
                   @input=${(event: Event) => {
                     this.input = (event.target as HTMLTextAreaElement).value;
                   }}
@@ -1672,16 +1682,15 @@ export class OpenRappterSurgeon extends LitElement {
                 <button
                   class="send"
                   aria-label=${this.mode === 'patient' ? 'Send to OpenRappter' : 'Send to Copilot surgeon'}
-                  ?disabled=${this.busy || !this.input.trim() || (
-                    this.mode === 'surgeon' && this.copilotAuth.status !== 'ready'
-                  )}
+                  ?disabled=${this.busy || !this.input.trim()
+                    || this.copilotAuth.status !== 'ready'}
                   @click=${() => this.sendTurn()}
                 >↑</button>
               </div>
               <div class="composer-note">
                 ${this.mode === 'patient' ? html`
                   <span>Straight to the agent over <code>POST /chat</code> — the same wire a neighbor uses.</span>
-                  <span>Copilot is not in this conversation.</span>
+                  <span>This may use the configured Copilot backend.</span>
                 ` : html`
                   <span>Copilot shapes the next interface from this turn.</span>
                   <span>Mutations require explicit approval.</span>

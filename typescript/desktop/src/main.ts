@@ -42,6 +42,10 @@ import {
 } from './vibevoice.js';
 import { SECURE_RENDERER_PREFERENCES } from './window-security.js';
 import { waitForGatewayReady } from './gateway-ready.js';
+import {
+  GITHUB_DEVICE_LOGIN_URL,
+  isAllowedGithubDeviceLoginUrl,
+} from './external-url-policy.js';
 
 const packageRoot = path.join(
   import.meta.dirname,
@@ -1081,14 +1085,10 @@ function createWindow(): BrowserWindow {
     rendererReady = true;
     startDesktopCommandPump();
   });
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
-    return { action: 'deny' };
-  });
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, url) => {
     if (url !== pathToFileURL(uiIndex).href && !url.startsWith(uiRootUrl)) {
       event.preventDefault();
-      if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     }
   });
   window.webContents.on('render-process-gone', (_event, details) => {
@@ -1491,6 +1491,19 @@ if (!ownsInstanceLock) {
       ipcMain.handle('openrappter:show-and-tell', handleShowAndTell);
       ipcMain.handle('openrappter:narration', handleNarration);
       ipcMain.handle('openrappter:voice', handleVoice);
+      ipcMain.handle(
+        'openrappter:github-device-login',
+        async (event) => {
+          if (!trustedRenderer(event)) {
+            throw new Error('Untrusted desktop renderer.');
+          }
+          if (!isAllowedGithubDeviceLoginUrl(GITHUB_DEVICE_LOGIN_URL)) {
+            throw new Error('GitHub device login URL is not allowed.');
+          }
+          await shell.openExternal(GITHUB_DEVICE_LOGIN_URL);
+          return { opened: true };
+        },
+      );
       ipcMain.handle(
         'openrappter:desktop-control',
         async (event, request: unknown) => {

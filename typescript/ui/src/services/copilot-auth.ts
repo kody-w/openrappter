@@ -1,4 +1,5 @@
 import { gateway } from './gateway.js';
+import { desktopBridge } from './desktop.js';
 
 export type CopilotAuthStatus =
   | 'unknown'
@@ -103,6 +104,24 @@ export async function cancelCopilotSignIn(
 ): Promise<void> {
   if (activeFlow?.deviceCode === flow.deviceCode) activeFlow = null;
   await gateway.call('auth.cancel', { deviceCode: flow.deviceCode });
+}
+
+export async function openCopilotVerification(
+  flow: CopilotLoginFlow,
+): Promise<void> {
+  const desktop = desktopBridge();
+  if (desktop) {
+    await desktop.openGithubDeviceLogin();
+    return;
+  }
+  const opened = window.open(
+    flow.verificationUri,
+    '_blank',
+    'noopener,noreferrer',
+  );
+  if (!opened) {
+    throw new Error('Allow pop-ups for this page, then try GitHub sign-in again.');
+  }
 }
 
 /** Typed seam for XPedition #442; onboarding may finish only when this is true. */

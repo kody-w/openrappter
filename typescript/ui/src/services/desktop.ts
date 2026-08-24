@@ -14,6 +14,7 @@ export interface OpenRappterDesktopBridge {
     callback: (status: Record<string, unknown>) => void,
   ): () => void;
   voice(request: DesktopShowAndTellRequest): Promise<Record<string, unknown>>;
+  openGithubDeviceLogin(): Promise<{ opened: boolean }>;
   onVoiceStatus(
     callback: (status: Record<string, unknown>) => void,
   ): () => void;

@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   beginCopilotSignIn: vi.fn(),
   pollCopilotSignIn: vi.fn(),
   cancelCopilotSignIn: vi.fn(),
+  openCopilotVerification: vi.fn(),
+  askPatient: vi.fn(),
 }));
 
 vi.mock('../services/surgeon.js', () => mocks);
@@ -28,6 +30,10 @@ vi.mock('../services/copilot-auth.js', () => ({
   beginCopilotSignIn: mocks.beginCopilotSignIn,
   pollCopilotSignIn: mocks.pollCopilotSignIn,
   cancelCopilotSignIn: mocks.cancelCopilotSignIn,
+  openCopilotVerification: mocks.openCopilotVerification,
+}));
+vi.mock('../services/patient.js', () => ({
+  askPatient: mocks.askPatient,
 }));
 
 import '../components/surgeon.js';
@@ -182,7 +188,7 @@ describe('openrappter-surgeon', () => {
     expect(element.shadowRoot?.querySelector<HTMLButtonElement>('.send')?.disabled).toBe(true);
   });
 
-  it('labels earlier Copilot turns as cached and leaves local patient mode usable offline', async () => {
+  it('routes offline fallback only to deterministic local health without invoking a provider', async () => {
     const previous = result();
     mocks.loadCases.mockResolvedValue([previous.case]);
     mocks.loadCopilotAuthState.mockResolvedValue({
@@ -193,17 +199,35 @@ describe('openrappter-surgeon', () => {
       action: 'retry',
     });
     const element = document.createElement('openrappter-surgeon') as SurgeonElement;
+    const navigate = vi.fn();
+    element.addEventListener('navigate', navigate);
     document.body.append(element);
     await settle(element);
 
     expect(element.shadowRoot?.textContent).toContain('Cached Copilot consultation');
+    const localHealth = Array.from(
+      element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.auth-banner button') ?? [],
+    ).find(button => button.textContent?.includes('View local health'));
+    expect(localHealth).toBeTruthy();
+    localHealth!.click();
+    expect((navigate.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      view: 'presence',
+    });
+
     const patientMode = Array.from(
       element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.tbtn') ?? [],
     ).find(button => button.textContent?.includes('Patient'));
+    expect(patientMode?.disabled).toBe(true);
     patientMode!.click();
     await settle(element);
+    await (element as unknown as {
+      askThePatient(value: string): Promise<void>;
+    }).askThePatient('must not reach the stale provider');
     expect(element.shadowRoot?.querySelector<HTMLTextAreaElement>('textarea')?.disabled)
-      .toBe(false);
+      .toBe(true);
+    expect(mocks.askPatient).not.toHaveBeenCalled();
+    expect(mocks.sendTurn).not.toHaveBeenCalled();
+    expect(element.shadowRoot?.textContent).not.toContain('Use local patient tools');
   });
 });
 

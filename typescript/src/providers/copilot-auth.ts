@@ -17,6 +17,7 @@
 export const GITHUB_CLIENT_ID = 'Iv1.b507a08c87ecfe98';
 const DEVICE_CODE_URL = 'https://github.com/login/device/code';
 const ACCESS_TOKEN_URL = 'https://github.com/login/oauth/access_token';
+export const GITHUB_DEVICE_VERIFICATION_URL = 'https://github.com/login/device';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,23 @@ export interface DeviceCodeResponse {
   verification_uri: string;
   expires_in: number;
   interval: number;
+}
+
+export function isAllowedGithubDeviceVerificationUri(value: string): boolean {
+  if (value !== GITHUB_DEVICE_VERIFICATION_URL) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:'
+      && url.hostname === 'github.com'
+      && url.port === ''
+      && url.username === ''
+      && url.password === ''
+      && url.pathname === '/login/device'
+      && url.search === ''
+      && url.hash === '';
+  } catch {
+    return false;
+  }
 }
 
 type DeviceTokenResponse =
@@ -56,14 +74,22 @@ export async function requestDeviceCode(options?: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
     body,
+    redirect: 'error',
   });
 
+  if (res.url && res.url !== DEVICE_CODE_URL) {
+    throw new Error('GitHub device code response came from an unexpected URL');
+  }
   if (!res.ok) {
     throw new Error(`GitHub device code request failed: HTTP ${res.status}`);
   }
 
   const json = (await res.json()) as DeviceCodeResponse;
-  if (!json.device_code || !json.user_code || !json.verification_uri) {
+  if (
+    !json.device_code
+    || !json.user_code
+    || !isAllowedGithubDeviceVerificationUri(json.verification_uri)
+  ) {
     throw new Error('GitHub device code response missing required fields');
   }
 

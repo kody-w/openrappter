@@ -1,6 +1,7 @@
 import { openrappterHome } from '../infra/openrappter-home.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 
 export interface AuthProfile {
   id: string;
@@ -26,7 +27,7 @@ export class AuthProfileStore {
   private ensureConfigDir(): void {
     const configDir = path.dirname(this.profilesPath);
     if (!fs.existsSync(configDir)) {
-      fs.mkdirSync(configDir, { recursive: true });
+      fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
     }
   }
 
@@ -102,7 +103,11 @@ export class AuthProfileStore {
     return true;
   }
 
-  remove(provider: string, id: string): boolean {
+  remove(
+    provider: string,
+    id: string,
+    options: { promoteReplacement?: boolean } = {},
+  ): boolean {
     const index = this.profiles.findIndex(
       (p) => p.provider === provider && p.id === id
     );
@@ -114,7 +119,7 @@ export class AuthProfileStore {
     this.profiles.splice(index, 1);
 
     // If we removed the default, make the first remaining profile default
-    if (wasDefault) {
+    if (wasDefault && options.promoteReplacement !== false) {
       const remaining = this.profiles.filter((p) => p.provider === provider);
       if (remaining.length > 0) {
         remaining[0].default = true;
@@ -141,23 +146,49 @@ export class AuthProfileStore {
   }
 
   save(): void {
+    const temporary = `${this.profilesPath}.${process.pid}.${randomUUID()}.tmp`;
+    const backup = `${this.profilesPath}.${process.pid}.${randomUUID()}.bak`;
     try {
       fs.writeFileSync(
-        this.profilesPath,
+        temporary,
         JSON.stringify(this.profiles, null, 2),
         { encoding: 'utf-8', mode: 0o600 }
       );
-      // The `mode` option above only applies when writeFileSync CREATES the
-      // file. On every subsequent save an existing file keeps whatever
-      // permissions it already had, so a profile store created before this
-      // option was added - or by an umask that allowed it - stays readable by
-      // everyone forever. Observed in the wild: -rw-r--r-- (0o644) on a file
-      // whose own writer specifies 0o600.
-      //
-      // chmod unconditionally. It is cheap, idempotent, and the failure it
-      // prevents is a credential file readable by every process on the box.
+      fs.chmodSync(temporary, 0o600);
+      if (process.platform === 'win32' && fs.existsSync(this.profilesPath)) {
+        fs.renameSync(this.profilesPath, backup);
+        try {
+          fs.renameSync(temporary, this.profilesPath);
+          fs.unlinkSync(backup);
+        } catch (error) {
+          try {
+            if (fs.existsSync(this.profilesPath)) {
+              fs.unlinkSync(this.profilesPath);
+            }
+          } catch {
+            // Restoration below will surface if the destination remains.
+          }
+          fs.renameSync(backup, this.profilesPath);
+          throw error;
+        }
+      } else {
+        fs.renameSync(temporary, this.profilesPath);
+      }
       fs.chmodSync(this.profilesPath, 0o600);
     } catch (error) {
+      try {
+        fs.unlinkSync(temporary);
+      } catch {
+        // The temporary file may not have been created.
+      }
+      try {
+        if (
+          fs.existsSync(backup)
+          && !fs.existsSync(this.profilesPath)
+        ) fs.renameSync(backup, this.profilesPath);
+      } catch {
+        // The original store is already intact or cannot be restored here.
+      }
       console.error('Failed to save auth profiles:', error);
     }
   }

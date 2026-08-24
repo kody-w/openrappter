@@ -1,0 +1,40 @@
+{
+  "schema": "openrappter-elevenlabs-voice-wire/1.0",
+  "ownership": "typescript-desktop",
+  "requests": [
+    { "action": "status" },
+    { "action": "credential.set", "apiKey": "[write-only]" },
+    { "action": "credential.test", "apiKey": "[write-only]" },
+    { "action": "credential.testStored" },
+    { "action": "credential.delete" },
+    { "action": "provider.set", "provider": "elevenlabs", "voice": "voice_id", "model": "model_id" },
+    { "action": "speak", "ticket": "[signed-final-assistant-text]" },
+    { "action": "preview" },
+    { "action": "smoke" },
+    { "action": "cancel" }
+  ],
+  "response": {
+    "credential": {
+      "present": true,
+      "masked": "••••••••",
+      "verified": true,
+      "verifiedAt": "2026-08-23T12:00:00.000Z"
+    },
+    "audio": {
+      "provider": "elevenlabs",
+      "mimeType": "audio/mpeg",
+      "voice": "voice_id",
+      "model": "model_id",
+      "durationSeconds": 1,
+      "sha256": "hex-only",
+      "bytes": "[ipc-binary]"
+    }
+  },
+  "forbiddenResponseFields": [
+    "apiKey",
+    "key",
+    "credentialValue",
+    "requestHeaders",
+    "providerBody"
+  ]
+}

@@ -27,6 +27,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  safeStorage,
   session,
   shell,
   Tray,
@@ -70,6 +71,8 @@ const gatewayToken =
   configuredGatewayToken && /^[0-9a-f]{64}$/i.test(configuredGatewayToken)
     ? configuredGatewayToken.toLowerCase()
     : randomBytes(32).toString('hex');
+/** Never exposed by preload; only desktop main and its owned gateway child know it. */
+const voiceTicketKey = randomBytes(32).toString('hex');
 const allowedActions = new Set([
   'start',
   'status',
@@ -99,6 +102,80 @@ let processingCommand = false;
 let rendererReady = false;
 let narrationService: NarrationService | undefined;
 let vibeVoiceService: VibeVoiceService | undefined;
+let secureCredentialStore:
+  | {
+      set(
+        name: string,
+        value: string,
+        metadata: { verifiedAt: string; provider: string },
+      ): void;
+      get(name: string): string | null;
+      describe(name: string): {
+        present: boolean;
+        masked?: string;
+        verifiedAt?: string;
+        provider?: string;
+      };
+      delete(name: string): boolean;
+    }
+  | undefined;
+let elevenLabsProvider:
+  | {
+      verify(signal?: AbortSignal): Promise<{
+        catalog: {
+          voices: Array<{ id: string; name: string; language: string }>;
+          models: Array<{ id: string; name: string; languages: string[] }>;
+          verifiedAt: string;
+        };
+        quota: { usedCharacters: number | null; limitCharacters: number | null };
+      }>;
+      client: {
+        primeCatalog(catalog: {
+          voices: Array<{ id: string; name: string; language: string }>;
+          models: Array<{ id: string; name: string; languages: string[] }>;
+          verifiedAt: string;
+        }): void;
+        synthesize(
+          text: string,
+          options: { voice: string; model: string; signal?: AbortSignal },
+        ): Promise<{
+          audio: Buffer;
+          mimeType: string;
+          voice: string;
+          model: string;
+          characters: number;
+          durationSeconds: number;
+          sha256: string;
+        }>;
+      };
+    }
+  | undefined;
+let elevenLabsVerification:
+  | {
+      catalog: {
+        voices: Array<{ id: string; name: string; language: string }>;
+        models: Array<{ id: string; name: string; languages: string[] }>;
+        verifiedAt: string;
+      };
+      quota: { usedCharacters: number | null; limitCharacters: number | null };
+    }
+  | undefined;
+let elevenLabsVerificationFailed = false;
+let voiceOutputQueue:
+  | {
+      enqueue<T>(
+        characters: number,
+        work: (signal: AbortSignal) => Promise<T>,
+      ): Promise<T>;
+      cancelAll(): void;
+      getStatus(): { active: boolean; queued: number; queuedCharacters: number };
+    }
+  | undefined;
+let selectedVoiceProvider: 'system' | 'local' | 'elevenlabs' = 'local';
+let selectedElevenLabsVoice: string | undefined;
+let selectedElevenLabsModel: string | undefined;
+let voiceEnabled = false;
+let voicePreferencesLoaded = false;
 let tray: Tray | undefined;
 let endpointFile: string | undefined;
 let smokeWatchdog: NodeJS.Timeout | undefined;
@@ -380,6 +457,7 @@ async function ensureGateway(): Promise<void> {
         OPENRAPPTER_DESKTOP_OWNER_PID: String(process.pid),
         OPENRAPPTER_PORT: String(gatewayPort),
         OPENRAPPTER_TOKEN: gatewayToken,
+        OPENRAPPTER_VOICE_TICKET_KEY: voiceTicketKey,
         ...(smokeRoot
           ? {
               HOME: smokeRoot,
@@ -679,13 +757,141 @@ async function handleVoice(
   request: unknown,
 ): Promise<unknown> {
   const input = validateTrustedRequest(event, request);
+  loadVoicePreferences();
   const action = input.action;
-  if (action === 'status') return vibeVoice().status();
-  if (action === 'stop') {
+  if (action === 'status') return voiceStatus();
+  if (action === 'stop' || action === 'cancel') {
+    voiceOutputQueue?.cancelAll();
     await vibeVoice().stop();
-    return vibeVoice().status();
+    return voiceStatus();
+  }
+  if (action === 'disable') {
+    voiceOutputQueue?.cancelAll();
+    voiceEnabled = false;
+    saveVoicePreferences();
+    return voiceStatus();
+  }
+  if (action === 'credential.set' || action === 'credential.test') {
+    let submitted = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+    delete input.apiKey;
+    if (submitted.length < 20 || submitted.length > 256) {
+      elevenLabsVerificationFailed = true;
+      throw new Error('The ElevenLabs credential is invalid.');
+    }
+    const runtime = await loadVoiceRuntime();
+    const candidate = new runtime.ElevenLabsTTS({
+      getApiKey: async () => submitted,
+    });
+    try {
+      const verified = await candidate.verify();
+      if (action === 'credential.set') {
+        const store = await credentialStore();
+        store.set('elevenlabs', submitted, {
+          verifiedAt: verified.catalog.verifiedAt,
+          provider: 'elevenlabs',
+        });
+        elevenLabsProvider = undefined;
+        elevenLabsVerification = verified;
+      }
+      elevenLabsVerificationFailed = false;
+      return {
+        success: true,
+        credential: {
+          present: action === 'credential.set'
+            ? true
+            : (await credentialStore()).describe('elevenlabs').present,
+          masked: '••••••••',
+          verifiedAt: verified.catalog.verifiedAt,
+          verified: true,
+        },
+        catalog: verified.catalog,
+        quota: verified.quota,
+      };
+    } catch (error) {
+      elevenLabsVerificationFailed = true;
+      throw safeVoiceError(error);
+    } finally {
+      submitted = '';
+    }
+  }
+  if (action === 'credential.testStored') {
+    try {
+      elevenLabsVerification = await elevenLabs().then((provider) => provider.verify());
+      elevenLabsVerificationFailed = false;
+      return voiceStatus();
+    } catch (error) {
+      elevenLabsVerificationFailed = true;
+      throw safeVoiceError(error);
+    }
+  }
+  if (action === 'credential.delete') {
+    voiceOutputQueue?.cancelAll();
+    (await credentialStore()).delete('elevenlabs');
+    elevenLabsProvider = undefined;
+    elevenLabsVerification = undefined;
+    elevenLabsVerificationFailed = false;
+    if (selectedVoiceProvider === 'elevenlabs') selectedVoiceProvider = 'local';
+    saveVoicePreferences();
+    return voiceStatus();
+  }
+  if (action === 'catalog') {
+    try {
+      const verification = await elevenLabs().then((provider) => provider.verify());
+      elevenLabsVerification = verification;
+      elevenLabsVerificationFailed = false;
+      return {
+        catalog: verification.catalog,
+        quota: verification.quota,
+      };
+    } catch (error) {
+      elevenLabsVerificationFailed = true;
+      throw safeVoiceError(error);
+    }
+  }
+  if (action === 'provider.set') {
+    const provider = input.provider;
+    if (provider !== 'system' && provider !== 'local' && provider !== 'elevenlabs') {
+      throw new Error('Unsupported voice provider.');
+    }
+    if (provider === 'elevenlabs') {
+      const credential = (await credentialStore()).describe('elevenlabs');
+      if (!credential.present || elevenLabsVerificationFailed) {
+        throw new Error('Verify an ElevenLabs credential before selecting this provider.');
+      }
+      const verification = (elevenLabsVerification ?? (
+        await elevenLabs().then((candidate) => candidate.verify())
+      ))!;
+      const voice = typeof input.voice === 'string' ? input.voice : verification.catalog.voices[0]?.id;
+      const model = typeof input.model === 'string' ? input.model : verification.catalog.models[0]?.id;
+      if (!verification.catalog.voices.some((candidate) => candidate.id === voice)) {
+        throw new Error('The selected ElevenLabs voice is unavailable.');
+      }
+      if (!verification.catalog.models.some((candidate) => candidate.id === model)) {
+        throw new Error('The selected ElevenLabs model is unavailable.');
+      }
+      selectedElevenLabsVoice = voice;
+      selectedElevenLabsModel = model;
+      elevenLabsVerification = verification;
+    }
+    selectedVoiceProvider = provider;
+    saveVoicePreferences();
+    return voiceStatus();
   }
   if (action === 'enable') {
+    if (selectedVoiceProvider === 'elevenlabs') {
+      const credential = (await credentialStore()).describe('elevenlabs');
+      if (!credential.present || elevenLabsVerificationFailed) {
+        throw new Error('Verify an ElevenLabs credential before enabling voice.');
+      }
+      voiceEnabled = true;
+      saveVoicePreferences();
+      return voiceStatus();
+    }
+    if (selectedVoiceProvider === 'system') {
+      voiceEnabled = true;
+      saveVoicePreferences();
+      return voiceStatus();
+    }
     const approval = await dialog.showMessageBox(mainWindow!, {
       type: 'warning',
       title: 'Enable local VibeVoice?',
@@ -702,10 +908,53 @@ async function handleVoice(
     if (approval.response !== 1) {
       throw new Error('VibeVoice setup was cancelled.');
     }
-    return vibeVoice().enable();
+    const status = await vibeVoice().enable();
+    voiceEnabled = status.state === 'ready';
+    saveVoicePreferences();
+    return voiceStatus();
+  }
+
+  if (action === 'preview' || action === 'smoke') {
+    if (selectedVoiceProvider !== 'elevenlabs') {
+      throw new Error('Select ElevenLabs before previewing its voice.');
+    }
+    const phrase = action === 'smoke'
+      ? 'OpenRappter voice check.'
+      : 'This is the selected OpenRappter voice.';
+    return synthesizeElevenLabs(phrase);
   }
   if (action !== 'speak') {
     throw new Error(`Unsupported voice action: ${String(action)}`);
+  }
+  if (!voiceEnabled) throw new Error('Voice mode is switched off.');
+  if (selectedVoiceProvider === 'system') {
+    throw new Error('System voice playback is owned by the renderer.');
+  }
+  if (selectedVoiceProvider === 'elevenlabs') {
+    const ticket = typeof input.ticket === 'string' ? input.ticket : '';
+    const runtime = await loadVoiceRuntime();
+    let authorized: { runId: string; text: string };
+    try {
+      authorized = runtime.verifySpeechTicket(ticket, voiceTicketKey);
+    } catch {
+      throw new Error('Invalid or expired assistant speech authorization.');
+    }
+    try {
+      return await synthesizeElevenLabs(authorized.text);
+    } catch (error) {
+      if (!vibeVoice().isInstalled()) throw error;
+      const fallbackVoice = 'en-Carter_man';
+      const audio = await vibeVoice().speak(authorized.text, fallbackVoice);
+      return {
+        status: 'success',
+        provider: 'local',
+        fallbackFrom: 'elevenlabs',
+        fallbackReason: (error as Error).message,
+        voice: fallbackVoice,
+        mimeType: 'audio/wav',
+        audio: new Uint8Array(audio),
+      };
+    }
   }
   if (!vibeVoice().isInstalled()) {
     throw new Error(
@@ -718,9 +967,247 @@ async function handleVoice(
   const audio = await vibeVoice().speak(text, voice);
   return {
     status: 'success',
+    provider: 'local',
     voice,
     mimeType: 'audio/wav',
     audio: new Uint8Array(audio),
+  };
+}
+
+function voicePreferencesPath(): string {
+  return path.join(app.getPath('userData'), 'voice-preferences.json');
+}
+
+function loadVoicePreferences(): void {
+  if (voicePreferencesLoaded) return;
+  voicePreferencesLoaded = true;
+  const file = voicePreferencesPath();
+  if (!existsSync(file)) return;
+  try {
+    const stat = lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) return;
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    if (
+      parsed.provider === 'system'
+      || parsed.provider === 'local'
+      || parsed.provider === 'elevenlabs'
+    ) {
+      selectedVoiceProvider = parsed.provider;
+    }
+    if (typeof parsed.voice === 'string' && /^[A-Za-z0-9_-]{2,128}$/.test(parsed.voice)) {
+      selectedElevenLabsVoice = parsed.voice;
+    }
+    if (typeof parsed.model === 'string' && /^[A-Za-z0-9_-]{2,128}$/.test(parsed.model)) {
+      selectedElevenLabsModel = parsed.model;
+    }
+    voiceEnabled = parsed.enabled === true;
+  } catch {
+    // Invalid non-secret preferences fall back to local voice, off.
+  }
+}
+
+function saveVoicePreferences(): void {
+  const file = voicePreferencesPath();
+  const directory = path.dirname(file);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const next = `${file}.${process.pid}.${randomBytes(8).toString('hex')}.next`;
+  writeFileSync(next, `${JSON.stringify({
+    schema: 'openrappter-voice-preferences/1.0',
+    provider: selectedVoiceProvider,
+    voice: selectedElevenLabsVoice,
+    model: selectedElevenLabsModel,
+    enabled: voiceEnabled,
+  })}\n`, { mode: 0o600, flag: 'wx' });
+  if (process.platform === 'win32' && existsSync(file)) unlinkSync(file);
+  renameSync(next, file);
+}
+
+async function loadVoiceRuntime(): Promise<{
+  ElevenLabsTTS: new (options: {
+    getApiKey: () => Promise<string | null>;
+  }) => NonNullable<typeof elevenLabsProvider>;
+  VoiceOutputQueue: new (options: {
+    maxQueued: number;
+    maxQueuedCharacters: number;
+  }) => NonNullable<typeof voiceOutputQueue>;
+  verifySpeechTicket(
+    ticket: string,
+    key: string,
+  ): { runId: string; text: string };
+  EncryptedCredentialStore: new (options: {
+    filePath: string;
+    cipher: {
+      isEncryptionAvailable(): boolean;
+      encryptString(value: string): Buffer;
+      decryptString(value: Buffer): string;
+    };
+  }) => NonNullable<typeof secureCredentialStore>;
+}> {
+  const [voice, security] = await Promise.all([
+    import(pathToFileURL(path.join(packageRoot, 'dist', 'voice', 'index.js')).href),
+    import(pathToFileURL(
+      path.join(packageRoot, 'dist', 'security', 'encrypted-credential-store.js'),
+    ).href),
+  ]);
+  return {
+    ...(voice as object),
+    ...(security as object),
+  } as Awaited<ReturnType<typeof loadVoiceRuntime>>;
+}
+
+async function credentialStore(): Promise<NonNullable<typeof secureCredentialStore>> {
+  if (secureCredentialStore) return secureCredentialStore;
+  const runtime = await loadVoiceRuntime();
+  secureCredentialStore = new runtime.EncryptedCredentialStore({
+    filePath: path.join(app.getPath('userData'), 'secure-credentials.json'),
+    cipher: {
+      isEncryptionAvailable: () =>
+        safeStorage.isEncryptionAvailable()
+        && (
+          process.platform !== 'linux'
+          || safeStorage.getSelectedStorageBackend() !== 'basic_text'
+        ),
+      encryptString: (value: string) => safeStorage.encryptString(value),
+      decryptString: (value: Buffer) => safeStorage.decryptString(value),
+    },
+  });
+  return secureCredentialStore;
+}
+
+async function elevenLabs(): Promise<NonNullable<typeof elevenLabsProvider>> {
+  if (elevenLabsProvider) return elevenLabsProvider;
+  const runtime = await loadVoiceRuntime();
+  elevenLabsProvider = new runtime.ElevenLabsTTS({
+    getApiKey: async () => (await credentialStore()).get('elevenlabs'),
+  });
+  if (elevenLabsVerification) {
+    elevenLabsProvider.client.primeCatalog(elevenLabsVerification.catalog);
+  }
+  return elevenLabsProvider;
+}
+
+async function outputQueue(): Promise<NonNullable<typeof voiceOutputQueue>> {
+  if (voiceOutputQueue) return voiceOutputQueue;
+  const runtime = await loadVoiceRuntime();
+  voiceOutputQueue = new runtime.VoiceOutputQueue({
+    maxQueued: 2,
+    maxQueuedCharacters: 5_000,
+  });
+  return voiceOutputQueue;
+}
+
+function safeVoiceError(error: unknown): Error {
+  const code = (
+    error
+    && typeof error === 'object'
+    && 'code' in error
+    && typeof error.code === 'string'
+  ) ? error.code : 'server_error';
+  const messages: Record<string, string> = {
+    invalid_key: 'The ElevenLabs credential is invalid.',
+    insufficient_quota: 'The ElevenLabs account has insufficient character quota.',
+    no_entitlement: 'The ElevenLabs account is not entitled to this operation.',
+    voice_unavailable: 'The selected ElevenLabs voice is unavailable.',
+    model_unavailable: 'The selected ElevenLabs model is unavailable.',
+    offline: 'ElevenLabs is unreachable while this device is offline.',
+    rate_limit: 'ElevenLabs rate limit reached. Try again later.',
+    timeout: 'The ElevenLabs request timed out.',
+    cancelled: 'Voice generation was cancelled.',
+    queue_full: 'The voice queue is full.',
+    audio_too_large: 'ElevenLabs returned audio beyond the safety limit.',
+    malformed_audio: 'ElevenLabs returned unsupported audio.',
+  };
+  return new Error(messages[code] ?? 'ElevenLabs is temporarily unavailable.');
+}
+
+async function synthesizeElevenLabs(text: string): Promise<Record<string, unknown>> {
+  const verification = (elevenLabsVerification ?? (
+    await elevenLabs().then((provider) => provider.verify())
+  ))!;
+  elevenLabsVerification = verification;
+  const voice = selectedElevenLabsVoice ?? verification.catalog.voices[0]?.id;
+  const model = selectedElevenLabsModel ?? verification.catalog.models[0]?.id;
+  if (!voice || !model) throw new Error('No verified ElevenLabs voice and model are available.');
+  try {
+    const result = await (await outputQueue()).enqueue(
+      text.length,
+      async (signal) => (await elevenLabs()).client.synthesize(text, {
+        voice,
+        model,
+        signal,
+      }),
+    );
+    return {
+      status: 'success',
+      provider: 'elevenlabs',
+      voice: result.voice,
+      model: result.model,
+      mimeType: result.mimeType,
+      audio: new Uint8Array(result.audio),
+      characters: result.characters,
+      durationSeconds: result.durationSeconds,
+      sha256: result.sha256,
+      estimatedCostUsd: Number((result.characters * 0.0003).toFixed(4)),
+      descriptor: {
+        kind: 'generated-speech',
+        provider: 'elevenlabs',
+        mimeType: result.mimeType,
+        sha256: result.sha256,
+        durationSeconds: result.durationSeconds,
+      },
+    };
+  } catch (error) {
+    if (
+      error
+      && typeof error === 'object'
+      && 'code' in error
+      && error.code === 'invalid_key'
+    ) {
+      elevenLabsVerificationFailed = true;
+    }
+    throw safeVoiceError(error);
+  }
+}
+
+async function voiceStatus(): Promise<Record<string, unknown>> {
+  const credential = (await credentialStore()).describe('elevenlabs');
+  const local = vibeVoice().status();
+  const elevenReady = credential.present && !elevenLabsVerificationFailed;
+  return {
+    ...local,
+    enabled: voiceEnabled,
+    provider: selectedVoiceProvider,
+    selectedVoice: selectedElevenLabsVoice,
+    selectedModel: selectedElevenLabsModel,
+    speaking: voiceOutputQueue?.getStatus().active ?? false,
+    queue: voiceOutputQueue?.getStatus() ?? {
+      active: false,
+      queued: 0,
+      queuedCharacters: 0,
+    },
+    providers: [
+      { id: 'system', name: 'System voice', available: true, configured: true },
+      {
+        id: 'local',
+        name: 'Microsoft VibeVoice Realtime 0.5B',
+        available: local.state === 'ready',
+        configured: local.state !== 'missing',
+      },
+      {
+        id: 'elevenlabs',
+        name: 'ElevenLabs',
+        available: elevenReady,
+        configured: credential.present,
+        verified: elevenReady,
+        verifiedAt: elevenReady ? credential.verifiedAt : undefined,
+        masked: credential.present ? credential.masked : undefined,
+      },
+    ],
+    catalog: elevenLabsVerification?.catalog,
+    quota: elevenLabsVerification?.quota,
+    disclosure:
+      'ElevenLabs receives only the exact final assistant text selected for speech. ' +
+      'User prompts and conversation history are never sent.',
   };
 }
 

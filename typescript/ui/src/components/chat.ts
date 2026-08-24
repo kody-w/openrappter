@@ -20,6 +20,7 @@ import {
   type EstateBuddy,
   type EstateBuddyEvidenceSource,
 } from '../services/estate-buddies.js';
+import './voice-settings.js';
 
 const AGENT_RUN_OVERALL_TIMEOUT_MS = 30 * 60_000;
 const RUN_ABORT_TIMEOUT_MS = 5_000;
@@ -1108,6 +1109,8 @@ export class OpenRappterChat extends LitElement {
   @state() private speechEnabled = false;
   @state() private speechStatus = 'idle';
   @state() private speechDetail = '';
+  @state() private voiceProvider: 'system' | 'local' | 'elevenlabs' = 'local';
+  @state() private voiceSettingsOpen = false;
   @state() private vibeState = 'missing';
   @state() private vibePhase = 'idle';
   @state() private vibeProgress: number | null = null;
@@ -1190,6 +1193,7 @@ export class OpenRappterChat extends LitElement {
           this.vibeState === 'ready' ? 'ready' : this.vibeState;
       });
       void desktop.voice({ action: 'status' }).then((status) => {
+        this.applyVoiceStatus(status);
         this.vibeState = String(status.state ?? 'missing');
         this.vibePhase = String(status.phase ?? 'idle');
         this.vibeProgress =
@@ -1206,6 +1210,20 @@ export class OpenRappterChat extends LitElement {
     this.speech.noteUserGesture();
   };
 
+  private applyVoiceStatus(status: Record<string, unknown>): void {
+    const provider = status.provider;
+    if (provider === 'system' || provider === 'local' || provider === 'elevenlabs') {
+      this.voiceProvider = provider;
+    }
+    if (typeof status.enabled === 'boolean') {
+      this.speechEnabled = status.enabled;
+      if (this.voiceProvider === 'system') {
+        this.speech.setEnabled(status.enabled);
+        if (status.enabled) this.speech.noteUserGesture();
+      }
+    }
+  }
+
   /**
    * Speak the spoken half of a reply.
    *
@@ -1213,17 +1231,20 @@ export class OpenRappterChat extends LitElement {
    * we stay quiet rather than falling back to the shown text — that fallback
    * is what makes assistants read markdown asterisks aloud.
    */
-  private async speakReply(data: { voiceText?: string }) {
+  private async speakReply(data: { voiceText?: string; voiceTicket?: string }) {
     const line = spokenLineFrom(data);
     if (!line) return;
     const desktop = desktopBridge();
-    if (desktop && this.speechEnabled) {
+    if (desktop && this.speechEnabled && this.voiceProvider !== 'system') {
       const generation = ++this.speechGeneration;
       this.speechStatus = 'speaking';
+      this.speechDetail = `${line.length} characters selected for speech`;
       try {
         const response = await desktop.voice({
           action: 'speak',
-          text: line,
+          ...(this.voiceProvider === 'elevenlabs'
+            ? { ticket: data.voiceTicket }
+            : { text: line }),
           voice: 'en-Carter_man',
         });
         if (
@@ -1244,9 +1265,11 @@ export class OpenRappterChat extends LitElement {
           audioBytes.byteOffset,
           audioBytes.byteOffset + audioBytes.byteLength,
         ) as ArrayBuffer;
-        const url = URL.createObjectURL(
-          new Blob([audioBuffer], { type: 'audio/wav' }),
-        );
+        const mimeType = typeof response.mimeType === 'string'
+          ? response.mimeType
+          : 'audio/wav';
+        if (!mimeType.startsWith('audio/')) throw new Error('Voice returned invalid audio.');
+        const url = URL.createObjectURL(new Blob([audioBuffer], { type: mimeType }));
         this.activeAudio?.pause();
         const audio = new Audio(url);
         this.activeAudio = audio;
@@ -1263,6 +1286,7 @@ export class OpenRappterChat extends LitElement {
         return;
       }
     }
+    if (!this.speechEnabled) return;
     const result = await this.speech.speak(line);
     this.speechStatus = result.state;
     this.speechDetail = result.detail?.reason ?? '';
@@ -1274,6 +1298,7 @@ export class OpenRappterChat extends LitElement {
       if (this.speechEnabled) {
         this.speechGeneration += 1;
         this.activeAudio?.pause();
+        await desktop.voice({ action: 'disable' }).catch(() => {});
         this.speechEnabled = false;
         this.speechStatus = 'ready';
         return;
@@ -1281,6 +1306,7 @@ export class OpenRappterChat extends LitElement {
       this.speechStatus = 'installing';
       try {
         const status = await desktop.voice({ action: 'enable' });
+        this.applyVoiceStatus(status);
         this.vibeState = String(status.state ?? 'ready');
         this.vibePhase = String(status.phase ?? 'idle');
         this.speechEnabled = this.vibeState === 'ready';
@@ -1310,7 +1336,11 @@ export class OpenRappterChat extends LitElement {
     const blocked = this.speechStatus === 'blocked-or-unknown';
     const speaking = this.speechStatus === 'speaking';
     const voice = desktop
-      ? 'Microsoft VibeVoice Realtime 0.5B'
+      ? this.voiceProvider === 'elevenlabs'
+        ? 'ElevenLabs'
+        : this.voiceProvider === 'system'
+          ? this.speech.voice?.name ?? 'system voice'
+          : 'Microsoft VibeVoice Realtime 0.5B'
       : this.speech.voice?.name;
 
     let glyph = '🔇';
@@ -1339,8 +1369,13 @@ export class OpenRappterChat extends LitElement {
       ?disabled=${unavailable}
       @click=${this.toggleSpeech}
       title="${title}"
+      aria-label="${title}"
     >${glyph}</button>`;
   }
+
+  private handleVoiceStatusChange = (event: CustomEvent<Record<string, unknown>>) => {
+    this.applyVoiceStatus(event.detail);
+  };
 
   disconnectedCallback() {
     super.disconnectedCallback();
@@ -1477,6 +1512,7 @@ export class OpenRappterChat extends LitElement {
        * carries markdown; this one is short and conversational.
        */
       voiceText?: string;
+      voiceTicket?: string;
       errorMessage?: string;
     };
     if (!data.runId || this.closedRunIds.has(data.runId)) return;
@@ -2858,6 +2894,16 @@ export class OpenRappterChat extends LitElement {
         ${this.renderSessionPicker()}
         <div class="header-actions">
           ${this.renderSpeechToggle()}
+          ${desktopBridge()
+            ? html`<button
+                class="icon-btn ${this.voiceSettingsOpen ? 'active' : ''}"
+                @click=${() => (this.voiceSettingsOpen = !this.voiceSettingsOpen)}
+                title="Voice settings"
+                aria-label="Voice settings"
+                aria-haspopup="dialog"
+                aria-expanded=${this.voiceSettingsOpen}
+              >⚙️</button>`
+            : nothing}
           <button
             class="icon-btn ${this.focusMode ? 'active' : ''}"
             @click=${this.toggleFocusMode}
@@ -2872,6 +2918,13 @@ export class OpenRappterChat extends LitElement {
             : nothing}</button>
           <button class="header-btn" @click=${this.startNewChat}>+ New</button>
         </div>
+
+        ${this.voiceSettingsOpen
+          ? html`<openrappter-voice-settings
+              @voice-settings-close=${() => (this.voiceSettingsOpen = false)}
+              @voice-status-change=${this.handleVoiceStatusChange}
+            ></openrappter-voice-settings>`
+          : nothing}
       </div>
 
       ${this.error

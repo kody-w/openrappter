@@ -171,6 +171,7 @@ describe('flight recorder redaction of bare provider tokens', () => {
       // Not third-party credentials: the gateway's own bearer and the flight
       // recorder's id-hashing salt.
       'OPENRAPPTER_TOKEN',
+      'OPENRAPPTER_VOICE_TICKET_KEY',
       'OPENRAPPTER_FLIGHT_ID_KEY',
       'TEST_TOKEN',
     ]);

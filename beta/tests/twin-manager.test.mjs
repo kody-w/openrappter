@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -17,6 +18,8 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 import { TwinManager, twinManagerInternals } from "../electron/twin-manager.mjs";
+import { tester123EmailContract } from "../electron/twin-adaptation-controller.mjs";
+import { testPython } from "./_python.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (r) => (
@@ -26,6 +29,58 @@ const read = (r) => (
 test("twinSlug makes a safe agent-filename stem", () => {
   assert.equal(twinManagerInternals.twinSlug("JSON Doctor!"), "json-doctor");
   assert.equal(twinManagerInternals.twinSlug(""), "twin");
+});
+
+test("WorkIQ reuse gets a deterministic structured read-only email adapter", () => {
+  const provider = [
+    "import json, os, re, shutil, subprocess",
+    "from agents.basic_agent import BasicAgent",
+    "class WorkIQAgent(BasicAgent):",
+    "    def __init__(self):",
+    "        self.name = 'WorkIQ'",
+    "        self.metadata = {'name': self.name, 'parameters': {'type': 'object', 'properties': {}}}",
+    "        super().__init__(name=self.name, metadata=self.metadata)",
+    "    def perform(self, **kwargs):",
+    "        return 'No results found for your query.'",
+    "",
+  ].join("\n");
+  const adapted = twinManagerInternals.buildWorkIqEmailAdapter(provider);
+  assert.match(adapted, /class TwinReadOnlyEmailBindingAgent\(WorkIQAgent\)/);
+  assert.match(adapted, /MOLTER_SHADOW/);
+  assert.match(adapted, /"status": "auth_required"/);
+  assert.match(adapted, /"status": "no_data"/);
+  assert.match(adapted, /"status": "success", "messages": messages/);
+  assert.equal(
+    adapted,
+    twinManagerInternals.buildWorkIqEmailAdapter(provider),
+  );
+  const probe = spawnSync(
+    testPython(),
+    ["-c", [
+      "import importlib.util, json, sys, types",
+      "agents = types.ModuleType('agents')",
+      "basic = types.ModuleType('agents.basic_agent')",
+      "class BasicAgent:",
+      "    def __init__(self, name=None, metadata=None):",
+      "        self.name = name",
+      "        self.metadata = metadata",
+      "basic.BasicAgent = BasicAgent",
+      "agents.basic_agent = basic",
+      "sys.modules['agents'] = agents",
+      "sys.modules['agents.basic_agent'] = basic",
+      "spec = importlib.util.spec_from_file_location('molter_probe', 'frontier/rapplications/molter/agents/molter_agent.py')",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "ok, detail = module._verify(sys.stdin.read(), json.loads(sys.argv[1]), ['network', 'data_source', 'credential', 'shell'])",
+      "assert ok, detail",
+    ].join("\n"), JSON.stringify(tester123EmailContract())],
+    {
+      cwd: root,
+      encoding: "utf8",
+      input: adapted,
+    },
+  );
+  assert.equal(probe.status, 0, probe.stderr || probe.stdout);
 });
 
 test("TwinManager requires a store client and brainstem config", () => {
@@ -93,7 +148,38 @@ test("a failed twin hatch removes its twin and Molter directories", async (t) =>
   assert.deepEqual(readdirSync(path.join(betaHome, "molts")), []);
 });
 
-test("closing and stopping twins removes every per-hatch directory", async (t) => {
+test("failed adaptation rehydration aborts hatch before an unvalidated worker starts", async (t) => {
+  const temporary = mkdtempSync(path.join(tmpdir(), "rapp-twin-rehydrate-fail-"));
+  const betaHome = path.join(temporary, "home");
+  t.after(() => rmSync(temporary, { recursive: true, force: true }));
+  let starts = 0;
+  const manager = new TwinManager({
+    betaHome,
+    brainstemConfig: {},
+    createAdaptationController: () => ({
+      inspect: () => ({ capabilities: {} }),
+      rehydrate: () => ({ ok: false, reason: "duplicate tool collision" }),
+    }),
+    createWorkerProcess: () => ({
+      start: async () => { starts += 1; },
+      stop: async () => {},
+    }),
+    storeClient: {},
+  });
+  await assert.rejects(
+    () => manager.hatchLocal({
+      id: "unsafe-rehydrate",
+      agentSources: [{
+        filename: "unsafe_agent.py",
+        source: "class Unsafe: pass\n",
+      }],
+    }),
+    /rehydration failed closed/,
+  );
+  assert.equal(starts, 0);
+});
+
+test("closing removes workers but preserves stable Molter/adaptation history", async (t) => {
   const temporary = mkdtempSync(path.join(tmpdir(), "rapp-twin-cleanup-"));
   const betaHome = path.join(temporary, "home");
   t.after(() => rmSync(temporary, { recursive: true, force: true }));
@@ -132,12 +218,12 @@ test("closing and stopping twins removes every per-hatch directory", async (t) =
 
   await manager.close(first.id);
   assert.equal(existsSync(firstPaths.dir), false);
-  assert.equal(existsSync(firstPaths.molterHome), false);
+  assert.equal(existsSync(firstPaths.molterHome), true);
   assert.ok(stopped.has(first.id));
 
   await manager.stopAll();
   assert.equal(existsSync(secondPaths.dir), false);
-  assert.equal(existsSync(secondPaths.molterHome), false);
+  assert.equal(existsSync(secondPaths.molterHome), true);
   assert.ok(stopped.has(second.id));
   assert.equal(manager.twins.size, 0);
 });
@@ -201,6 +287,17 @@ test("main wires twins + store IPC and the Surgeon hatch tools", () => {
   assert.match(preload, /onTwinEvent:/);
   assert.match(surgeon, /name: "hatch_rapplication"/);
   assert.match(surgeon, /name: "list_rapplications"/);
+  assert.match(main, /beta:twin-adaptation-propose/);
+  assert.match(main, /beta:twin-adaptation-approve/);
+  assert.match(main, /dialog\.showMessageBox\(mainWindow/);
+  assert.match(main, /Approve exact candidate/);
+  assert.match(preload, /twinAdaptationInspect:/);
+  assert.match(surgeon, /name: "inspect_twin_adaptation"/);
+  assert.match(surgeon, /name: "propose_twin_adaptation"/);
+  assert.match(surgeon, /name: "stage_twin_adaptation"/);
+  assert.match(surgeon, /name: "rollback_twin_adaptation"/);
+  assert.doesNotMatch(surgeon, /name: "approve_twin_adaptation"/);
+  assert.doesNotMatch(surgeon, /name: "activate_twin_adaptation"/);
 });
 
 test("the herd renders a chat/work-log tile per twin", () => {
@@ -212,6 +309,9 @@ test("the herd renders a chat/work-log tile per twin", () => {
   assert.match(renderer, /function renderTwinChat/);      // the work-log/chat transcript
   assert.match(ui, /herd-tile\.twin/);
   assert.match(ui, /\.twin-chat/);
+  assert.match(renderer, /function renderTwinAdaptation/);
+  assert.match(renderer, /twinAdaptationApprove/);
+  assert.match(ui, /\.twin-adaptation/);
 });
 
 test("the Copilot Studio deploy twin is composed from the bundled Factory + Deploy agents (P2)", () => {
@@ -389,9 +489,11 @@ test("a rapplication's Molter home is stable across hatches, so a grown capabili
   // home to the hatch (id + random UUID) made rehydration impossible and
   // orphaned a directory per hatch; it is keyed to the rapplication instead.
   const source = read("electron/twin-manager.mjs");
-  assert.match(source, /const stableMolterHome = path\.join\(\s*this\.betaHome,\s*"molts",\s*twinSlug\(spec\.idBase\),\s*\)/);
+  assert.match(source, /const stableMolterHome = path\.join\([\s\S]{0,120}twinSlug\(spec\.idBase\)[\s\S]{0,80}sha256\(String\(spec\.idBase\)\)/);
   assert.match(source, /claimedByLiveTwin\s*\?[\s\S]{0,160}randomUUID\(\)[\s\S]{0,60}:\s*stableMolterHome/);
   // The ephemeral fallback exists only for a second LIVE twin of the same
   // rapplication, which cannot share one Molter state directory.
   assert.match(source, /\[\.\.\.this\.twins\.values\(\)\]\s*\.some\(\(existing\) => existing\?\.molterHome === stableMolterHome\)/);
+  assert.match(source, /readOwner\(stableMolterHome\)/);
+  assert.match(source, /molterLeasePath/);
 });

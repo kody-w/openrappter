@@ -1670,11 +1670,13 @@ function twinTileFor(twin) {
       <span class="twin-badge" title="rapplication twin — its own port &amp; loop">◈</span>
       <span class="tt"></span>
       <span class="hst">ready</span>
+      <button class="tw-adapt" type="button" title="Diagnose and adapt a capability safely">Adapt</button>
       <button class="tw-loop" type="button" title="Have the Brainstem loop with this twin toward a goal">⟳ Loop</button>
       <button class="tw-pop" type="button" title="Open the full rapplication UI">⤢ App</button>
       <span class="cl" title="Close twin">×</span>
     </div>
     <div class="twin-meta"></div>
+    <div class="twin-adaptation" hidden></div>
     <div class="twin-chat" aria-live="polite"></div>
     <button class="twin-signin" type="button" hidden>Sign in to continue →</button>
     <div class="twin-comp">
@@ -1702,11 +1704,28 @@ function twinTileFor(twin) {
     box.style.height = "auto";
     void window.brainstemBeta.twinLoop(twin.id, goal);
   });
+  tile.querySelector(".tw-adapt").addEventListener("click", async () => {
+    const box = tile.querySelector(".twin-comp textarea");
+    const request = box.value.trim()
+      || "Correct this twin so its declared capability returns real data instead of a ready acknowledgement.";
+    try {
+      await window.brainstemBeta.twinAdaptationPropose(twin.id, {
+        capability: /\b(email|mail|outlook|inbox)\b/i.test(request)
+          ? "email"
+          : "capability",
+        request,
+        signal: "explicit_correction",
+      });
+    } catch (error) {
+      showToast(error.message || String(error), "error");
+    }
+  });
   const textarea = tile.querySelector(".twin-comp textarea");
   tile.querySelector(".twin-signin").dataset.drive = `twin[${driveKey(twin.id)}].signin`;
   tile.querySelector(".cl").dataset.drive = `twin[${driveKey(twin.id)}].close`;
   tile.querySelector(".tw-pop").dataset.drive = `twin[${driveKey(twin.id)}].app`;
   tile.querySelector(".tw-loop").dataset.drive = `twin[${driveKey(twin.id)}].loop`;
+  tile.querySelector(".tw-adapt").dataset.drive = `twin[${driveKey(twin.id)}].adapt`;
   textarea.dataset.drive = `twin[${driveKey(twin.id)}].composer`;
   tile.querySelector(".tw-send").dataset.drive = `twin[${driveKey(twin.id)}].send`;
   const send = () => {
@@ -1795,6 +1814,104 @@ async function sendTwinMessage(id, text) {
   catch { /* surfaced as a twin-message error event */ }
 }
 
+function renderTwinAdaptation(tile, twin) {
+  const panel = tile.querySelector(".twin-adaptation");
+  const adaptation = twin.adaptation;
+  const current = Object.values(adaptation?.capabilities || {})
+    .find((item) => item.state) || null;
+  panel.hidden = !current;
+  if (!current) {
+    panel.replaceChildren();
+    return;
+  }
+  const recommendation = current.proposal;
+  const generation = current.generations?.find(
+    (item) => item.candidate_hash === current.staged_hash,
+  );
+  const added = generation?.permission_diff?.added?.join(", ") || "none";
+  const version = generation
+    ? `${generation.generation_name} · ${generation.candidate_hash.slice(0, 12)}…`
+    : "none staged";
+  const detail = recommendation?.reason
+    || (current.diagnosis?.signals?.stub
+      ? "Stub or missing data path detected."
+      : "");
+  panel.innerHTML = `
+    <div class="tw-adapt-head"><strong>Capability adaptation</strong><span>${escapeHtml(current.state)}</span></div>
+    <div>${escapeHtml(current.capability)} · ${escapeHtml(recommendation?.strategy || "diagnosing")}</div>
+    <div class="tw-adapt-detail">${escapeHtml(detail)}</div>
+    <div class="tw-adapt-detail">Permissions added: ${escapeHtml(added)}</div>
+    <div class="tw-adapt-detail">Staged: ${escapeHtml(version)} · history ${current.generations?.length || 0} · quarantined ${current.quarantine?.length || 0}</div>
+    <div class="tw-adapt-detail">Approval/health: ${escapeHtml(current.state)}</div>
+    <div class="tw-adapt-detail">Memory: ${escapeHtml(adaptation.memory_binding?.verified ? "verified" : "binding not yet verified")}</div>
+    <div class="tw-adapt-actions"></div>
+  `;
+  const actions = panel.querySelector(".tw-adapt-actions");
+  const button = (label, className, handler) => {
+    const control = document.createElement("button");
+    control.type = "button";
+    control.className = className;
+    control.textContent = label;
+    control.addEventListener("click", handler);
+    actions.appendChild(control);
+  };
+  if (current.state === "proposed") {
+    button("Stage", "tw-adapt-stage", async () => {
+      try {
+        await window.brainstemBeta.twinAdaptationStage(twin.id, {
+          capability: current.capability,
+        });
+      } catch (error) {
+        showToast(error.message || String(error), "error");
+      }
+    });
+  }
+  if (current.state === "approval_required" && generation) {
+    button("Approve exact diff", "tw-adapt-approve", async () => {
+      try {
+        await window.brainstemBeta.twinAdaptationApprove(
+          twin.id,
+          current.capability,
+          {
+            candidate_hash: generation.candidate_hash,
+            contract_hash: generation.behavior_contract_hash,
+            base_hash: generation.base_hash,
+            permission_diff: generation.permission_diff,
+          },
+        );
+      } catch (error) {
+        showToast(error.message || String(error), "error");
+      }
+    });
+  }
+  if (current.state === "activatable" && generation) {
+    button("Activate", "tw-adapt-activate", async () => {
+      try {
+        await window.brainstemBeta.twinAdaptationActivate(
+          twin.id,
+          current.capability,
+          generation.candidate_hash,
+        );
+      } catch (error) {
+        showToast(error.message || String(error), "error");
+      }
+    });
+  }
+  if (current.active_hash || ["failed", "quarantined"].includes(current.state)) {
+    button("Rollback", "tw-adapt-rollback", async () => {
+      try {
+        await window.brainstemBeta.twinAdaptationRollback(
+          twin.id,
+          current.capability,
+          "human requested rollback",
+        );
+      } catch (error) {
+        showToast(error.message || String(error), "error");
+      }
+    });
+  }
+}
+
 function updateTwinTile(tile, twin) {
   tile.querySelector(".tt").textContent = twin.name || twin.storeId || twin.id;
   const status = tile.querySelector(".hst");
@@ -1807,6 +1924,7 @@ function updateTwinTile(tile, twin) {
   const meta = tile.querySelector(".twin-meta");
   meta.textContent = `:${twin.port} · ${twin.license || "unlicensed"}${twin.rappid ? " · " + twin.rappid.slice(0, 22) + "…" : ""}`;
   tile.querySelector(".twin-signin").hidden = !needsAuth;
+  renderTwinAdaptation(tile, twin);
   renderTwinChat(tile, twin);
 }
 
@@ -1863,6 +1981,8 @@ function handleTwinEvent(event) {
       if (entry.chat.length > 200) entry.chat.splice(0, entry.chat.length - 200);   // bound long-lived memory
       if (entry.tileEl) renderTwinChat(entry.tileEl, entry.descriptor);
     }
+  } else if (event.type === "twin-adaptation") {
+    if (event.twin && twins.has(event.id)) upsertTwin(event.twin);
   } else if (event.type === "twin-closed") {
     const twin = twins.get(event.id);
     twin?.tileEl?.remove();

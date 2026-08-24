@@ -125,6 +125,39 @@ contextBridge.exposeInMainWorld("brainstemBeta", {
   twinHatch: (storeId, instruction) => ipcRenderer.invoke("beta:twin-hatch", storeId, instruction),
   twinHatchEgg: (payload) => ipcRenderer.invoke("beta:twin-hatch-egg", payload),
   twinChat: (id, prompt) => ipcRenderer.invoke("beta:twin-chat", id, prompt),
+  twinAdaptationInspect: (id, capability = null) => (
+    ipcRenderer.invoke("beta:twin-adaptation-inspect", id, capability)
+  ),
+  twinAdaptationPropose: (id, options = {}) => (
+    ipcRenderer.invoke("beta:twin-adaptation-propose", id, options)
+  ),
+  twinAdaptationStage: (id, options = {}) => (
+    ipcRenderer.invoke("beta:twin-adaptation-stage", id, options)
+  ),
+  twinAdaptationApprove: (id, capability, approval) => (
+    ipcRenderer.invoke(
+      "beta:twin-adaptation-approve",
+      id,
+      capability,
+      approval,
+    )
+  ),
+  twinAdaptationActivate: (id, capability, hash) => (
+    ipcRenderer.invoke(
+      "beta:twin-adaptation-activate",
+      id,
+      capability,
+      hash,
+    )
+  ),
+  twinAdaptationRollback: (id, capability, reason) => (
+    ipcRenderer.invoke(
+      "beta:twin-adaptation-rollback",
+      id,
+      capability,
+      reason,
+    )
+  ),
   twinRun: (id, instruction) => ipcRenderer.invoke("beta:twin-run", id, instruction),
   twinLoop: (id, goal) => ipcRenderer.invoke("beta:twin-loop", id, goal),
   twinClose: (id) => ipcRenderer.invoke("beta:twin-close", id),

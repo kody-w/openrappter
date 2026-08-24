@@ -273,6 +273,8 @@ function verifyMoltWithMolter({
   python,
   brainstemDir,
   source,
+  behaviorContract = null,
+  permissions = null,
   molterPath = MOLTER_AGENT_PATH,
 } = {}) {
   if (!python || !existsSync(python)) {
@@ -305,7 +307,9 @@ function verifyMoltWithMolter({
     "spec = importlib.util.spec_from_file_location('_frontier_molter_gate', sys.argv[1])",
     "module = importlib.util.module_from_spec(spec)",
     "spec.loader.exec_module(module)",
-    "ok, detail = module._verify(sys.stdin.read())",
+    "import json",
+    "payload = json.load(sys.stdin)",
+    "ok, detail = module._verify(payload['source'], payload.get('behavior_contract'), payload.get('permissions'))",
     "if not ok:",
     "    sys.stderr.write(str(detail.get('lesson') or detail))",
     "    raise SystemExit(1)",
@@ -324,7 +328,11 @@ function verifyMoltWithMolter({
         PYTHONPATH: pythonPath,
         PYTHONUTF8: "1",
       },
-      input: source,
+      input: JSON.stringify({
+        source,
+        behavior_contract: behaviorContract,
+        permissions,
+      }),
       maxBuffer: 1024 * 1024,
       timeout: 30_000,
     });
@@ -494,10 +502,12 @@ export class BetaRouteManager {
         agentDirectory,
       })
     ));
-    this.moltVerifier = moltVerifier || ((source) => verifyMoltWithMolter({
+    this.moltVerifier = moltVerifier || ((source, options = {}) => verifyMoltWithMolter({
       python: this.brainstemConfig.python,
       brainstemDir: this.brainstemConfig.brainstemDir,
       source,
+      behaviorContract: options.behaviorContract || null,
+      permissions: options.permissions || null,
     }));
     for (const directory of [
       this.routingRoot,

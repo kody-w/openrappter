@@ -7,8 +7,8 @@
     {
       "id": "molter",
       "name": "Molter \u2014 self-growing capabilities",
-      "version": "1.0.0",
-      "summary": "When the Brainstem lacks a capability, it searches the AIBAST catalog for a kindred agent, takes its shape, and molts it through verified generations until it fits \u2014 shedding failed skins with rollback and carrying each lesson forward. On device, headless.",
+      "version": "1.1.0",
+      "summary": "Diagnose before growth, prefer pinned RAR reuse, archive immutable staged generations, and activate only exact verified hashes after shadow and permission policy \u2014 with quarantine and rollback. On device, headless.",
       "category": "frontier \u00b7 self-improving",
       "tags": [
         "frontier",
@@ -19,8 +19,8 @@
       "manifest_name": "@frontier/molter",
       "singleton_filename": "molter_agent.py",
       "singleton_url": "https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/beta/frontier/rapplications/molter/agents/molter_agent.py",
-      "singleton_sha256": "3939d7726e48ae27c1619e2b7f399539ed99086ae4fcb1ced8d94b32e2e13065",
-      "singleton_bytes": 43496,
+      "singleton_sha256": "b67eebba7be7f5db301e1531ef72d86787d799b593d144bbab729b66734d0e49",
+      "singleton_bytes": 79685,
       "publisher": "AIBAST Frontier",
       "quality_tier": "frontier",
       "license": "MIT"

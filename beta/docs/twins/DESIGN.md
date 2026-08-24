@@ -12,6 +12,11 @@
 > is the cartridge **`rapp-cart/1.0`**, and per Art. XXV **chat is the only
 > wire** — twins add **no new route**.
 
+Safe state-aware capability adaptation is specified in
+[`ADAPTATION.md`](ADAPTATION.md). It composes immutable Molter generations,
+provider/skill bindings, and per-twin memory behind the same `/chat`-only wire;
+it never rewrites a running twin or adds a Brainstem management endpoint.
+
 ## The idea, in one paragraph
 
 This document's neighborhoods belong to one top-level AI estate. Under

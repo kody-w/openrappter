@@ -1,0 +1,14 @@
+{
+  "schema": "openrappter-candidate-index/v1",
+  "source_commit": "21e9dd8ec034ed510bef6a16823d2a556ecbef77",
+  "snapshots": [
+    {
+      "id": "nightly-20260824-0328",
+      "bundle_sha256": "26deb0c7b6ac06f926339ba886eb4b5dbf5fd1a8c35108fff03e0ff2149f7abf",
+      "path": "candidates/21e9dd8ec034ed510bef6a16823d2a556ecbef77/snapshot/nightly-20260824-0328",
+      "provenance_path": "candidates/21e9dd8ec034ed510bef6a16823d2a556ecbef77/snapshot/nightly-20260824-0328/provenance.json",
+      "source_date_epoch": 1787542090
+    }
+  ],
+  "releases": []
+}

@@ -1,0 +1,40 @@
+{
+  "schema": "openrappter-candidate-provenance/v1",
+  "channel": "candidate",
+  "stable": false,
+  "candidate_kind": "snapshot",
+  "candidate_id": "nightly-20260824-0328",
+  "source_tag": null,
+  "intended_release_tag": null,
+  "source_repository": "kody-w/openrappter",
+  "source_commit": "21e9dd8ec034ed510bef6a16823d2a556ecbef77",
+  "source_date_epoch": 1787542090,
+  "versions": {
+    "npm": "1.13.0",
+    "pypi": "1.13.0",
+    "runtime": "1.13.0",
+    "channel": "0.1.0-beta.11"
+  },
+  "files": [
+    {
+      "path": "install.ps1",
+      "sha256": "3a5cce54dfb9f3478821d4d616bb23af004f7866488cf5c6eb6ba8bbb72d6b4e"
+    },
+    {
+      "path": "install.sh",
+      "sha256": "ff71cd77b7bfe4105108dce85fffcb4cc4905715eee31a4d365edd7dad278fe4"
+    },
+    {
+      "path": "openrappter-1.13.0-py3-none-any.whl",
+      "sha256": "d7a1dd143b870f96e82baf210f7998ed95dc04f600e7ed310778c729192fb7fe"
+    },
+    {
+      "path": "openrappter-1.13.0.tar.gz",
+      "sha256": "d8676c4bf8fd12fca18505831577d281028b9ace5c8e73a8c77a41a7a4752c1c"
+    },
+    {
+      "path": "openrappter-1.13.0.tgz",
+      "sha256": "7a56928618a3972e40843201bc51ce8a8b967686885e61f06aab287ed9b4a344"
+    }
+  ]
+}

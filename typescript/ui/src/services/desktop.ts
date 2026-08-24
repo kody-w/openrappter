@@ -10,6 +10,7 @@ export interface OpenRappterDesktopBridge {
   showAndTell(request: DesktopShowAndTellRequest): Promise<Record<string, unknown>>;
   desktopControl(request: DesktopShowAndTellRequest): Promise<Record<string, unknown>>;
   narration(request: DesktopShowAndTellRequest): Promise<Record<string, unknown>>;
+  buddyEvidence(request: DesktopShowAndTellRequest): Promise<Record<string, unknown>>;
   onNarrationStatus(
     callback: (status: Record<string, unknown>) => void,
   ): () => void;

@@ -5,6 +5,7 @@ import '../components/chat.js';
 import { gateway } from '../services/gateway.js';
 
 interface TestChatElement extends HTMLElement {
+  updateComplete: Promise<boolean>;
   activeRunId: string | null;
   sessionKey: string | null;
   sending: boolean;
@@ -16,6 +17,7 @@ interface TestChatElement extends HTMLElement {
     content: string;
     timestamp: number;
     streaming: boolean;
+    commitState?: 'pending' | 'committed' | 'cancelled' | 'error';
   }>;
   handleChatEvent(payload: unknown): void;
   armRunDeadline(runId: string): void;
@@ -24,8 +26,16 @@ interface TestChatElement extends HTMLElement {
   handleSend(): Promise<void>;
 }
 
+async function settle(element: TestChatElement): Promise<void> {
+  await Promise.resolve();
+  await element.updateComplete;
+  await Promise.resolve();
+  await element.updateComplete;
+}
+
 describe('chat component terminal events', () => {
   afterEach(() => {
+    document.body.replaceChildren();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -41,6 +51,7 @@ describe('chat component terminal events', () => {
         content: '',
         timestamp: 1,
         streaming: true,
+        commitState: 'pending',
       },
       {
         id: 'current-run',
@@ -48,6 +59,7 @@ describe('chat component terminal events', () => {
         content: '',
         timestamp: 2,
         streaming: true,
+        commitState: 'pending',
       },
     ];
 
@@ -57,6 +69,7 @@ describe('chat component terminal events', () => {
       state: 'aborted',
     });
     expect(chat.messages[0].streaming).toBe(false);
+    expect(chat.messages[0].commitState).toBe('cancelled');
     expect(chat.messages[1].streaming).toBe(true);
     expect(chat.activeRunId).toBe('current-run');
     expect(chat.sending).toBe(true);
@@ -67,6 +80,7 @@ describe('chat component terminal events', () => {
       state: 'aborted',
     });
     expect(chat.messages[1].streaming).toBe(false);
+    expect(chat.messages[1].commitState).toBe('cancelled');
     expect(chat.activeRunId).toBeNull();
     expect(chat.sending).toBe(false);
 
@@ -77,6 +91,124 @@ describe('chat component terminal events', () => {
       message: { content: [{ type: 'text', text: 'late result' }] },
     });
     expect(chat.messages[1].content).toBe('');
+  });
+
+  it('buffers deltas off-screen and atomically commits the final message', () => {
+    const chat = document.createElement('openrappter-chat') as TestChatElement;
+    chat.activeRunId = 'run-1';
+    chat.sessionKey = 'session-1';
+    chat.sending = true;
+    chat.messages = [{
+      id: 'run-1',
+      role: 'assistant',
+      content: '',
+      timestamp: 1,
+      streaming: true,
+      commitState: 'pending',
+    }];
+
+    chat.handleChatEvent({
+      runId: 'run-1',
+      sessionKey: 'session-1',
+      state: 'delta',
+      message: { content: [{ type: 'text', text: 'half ' }] },
+    });
+    chat.handleChatEvent({
+      runId: 'run-1',
+      sessionKey: 'session-1',
+      state: 'delta',
+      message: { content: [{ type: 'text', text: 'sentence' }] },
+    });
+
+    expect(chat.messages[0].content).toBe('');
+    expect(chat.messages[0].commitState).toBe('pending');
+
+    chat.handleChatEvent({
+      runId: 'run-1',
+      sessionKey: 'session-1',
+      state: 'final',
+      message: { content: [{ type: 'text', text: 'Complete answer.' }] },
+    });
+
+    expect(chat.messages[0].content).toBe('Complete answer.');
+    expect(chat.messages[0].streaming).toBe(false);
+    expect(chat.messages[0].commitState).toBe('committed');
+  });
+
+  it('uses a buffered response only when the final event omits duplicate text', () => {
+    const chat = document.createElement('openrappter-chat') as TestChatElement;
+    chat.activeRunId = 'run-1';
+    chat.sessionKey = 'session-1';
+    chat.sending = true;
+    chat.messages = [{
+      id: 'run-1',
+      role: 'assistant',
+      content: '',
+      timestamp: 1,
+      streaming: true,
+      commitState: 'pending',
+    }];
+
+    for (const text of ['Complete ', 'answer.']) {
+      chat.handleChatEvent({
+        runId: 'run-1',
+        sessionKey: 'session-1',
+        state: 'delta',
+        message: { content: [{ type: 'text', text }] },
+      });
+    }
+    chat.handleChatEvent({
+      runId: 'run-1',
+      sessionKey: 'session-1',
+      state: 'final',
+    });
+
+    expect(chat.messages[0].content).toBe('Complete answer.');
+    expect(chat.messages[0].commitState).toBe('committed');
+  });
+
+  it('renders presence instead of partial language, then one committed bubble', async () => {
+    vi.spyOn(gateway, 'call').mockResolvedValue([]);
+    const chat = document.createElement('openrappter-chat') as TestChatElement;
+    chat.activeRunId = 'run-1';
+    chat.sessionKey = 'session-1';
+    chat.sending = true;
+    chat.messages = [{
+      id: 'run-1',
+      role: 'assistant',
+      content: '',
+      timestamp: 1,
+      streaming: true,
+      commitState: 'pending',
+    }];
+    document.body.append(chat);
+    await settle(chat);
+
+    chat.handleChatEvent({
+      runId: 'run-1',
+      sessionKey: 'session-1',
+      state: 'delta',
+      message: { content: [{ type: 'text', text: 'unfinished thought' }] },
+    });
+    await settle(chat);
+
+    const pendingText = chat.shadowRoot?.textContent ?? '';
+    expect(pendingText).toContain('RAPPID is responding');
+    expect(pendingText).not.toContain('unfinished thought');
+    expect(chat.shadowRoot?.querySelector('[role="status"]')).toBeTruthy();
+
+    chat.handleChatEvent({
+      runId: 'run-1',
+      sessionKey: 'session-1',
+      state: 'final',
+      message: { content: [{ type: 'text', text: '**Complete answer.**' }] },
+    });
+    await settle(chat);
+
+    expect(chat.shadowRoot?.textContent).toContain('Complete answer.');
+    expect(chat.shadowRoot?.textContent).not.toContain('RAPPID is responding');
+    expect(chat.shadowRoot?.querySelector('.message.assistant.committed strong'))
+      .toBeTruthy();
   });
 
   it('cancels a run at the bounded overall deadline', async () => {

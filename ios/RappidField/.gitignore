@@ -1,0 +1,19 @@
+# XcodeGen output — regenerate with `xcodegen generate`.
+RappidField.xcodeproj/
+Sources/App/Info.plist
+Tests/RappidFieldTests/Info.plist
+
+# Build products.
+.build/
+.build-release/
+build/
+DerivedData/
+*.xcuserdatad
+xcuserdata/
+
+# Local verification artefacts.
+Tools/parity-dump
+Tools/*.png
+Tools/*.txt
+Tools/parity-vectors.json
+.DS_Store

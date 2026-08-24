@@ -373,6 +373,18 @@ describe('index.html content', () => {
     const found = agents.filter(a => body.includes(a));
     expect(found.length).toBeGreaterThanOrEqual(5);
   });
+
+  it('publishes the Quantum RAPPID growth contract without private specimen data', () => {
+    const text = doc.body.textContent!;
+    expect(doc.getElementById('quantum-rappids')).not.toBeNull();
+    expect(text).toContain('Quantum RAPPID');
+    expect(text).toContain('Σ unique bytes');
+    expect(text).toContain('Frame height');
+    expect(text).toContain('append-only');
+    expect(text).toContain('Self-steer leash');
+    expect(text).not.toContain('e479d694-8712-4e77-aa22-2ec4d4e57089');
+    expect(text).not.toContain('8eba4082733ebbe6');
+  });
 });
 
 /* ── 6. docs.html content ── */

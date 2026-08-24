@@ -9,6 +9,7 @@ import {
   mediaUploads,
   type MediaUploadProgress,
 } from '../services/media-ingest.js';
+import { gateway } from '../services/gateway.js';
 
 interface SessionSummary {
   id: string;
@@ -31,6 +32,42 @@ interface Analysis {
   intent: string;
   approved: boolean;
   steps: AnalysisStep[];
+}
+
+interface SkillPlan {
+  revision: number;
+  title: string;
+  intent: string;
+  approved: boolean;
+  steps: Array<{
+    id: string;
+    title: string;
+    detail: string;
+    requiresConfirmation: boolean;
+    riskCategories: string[];
+  }>;
+  values: Array<{
+    id: string;
+    label: string;
+    example: string;
+    exampleMasked: boolean;
+    required: boolean;
+  }>;
+  openQuestions: string[];
+}
+
+interface RappidChoice {
+  rappid: string;
+  displayName: string;
+  lifecycleStage: string;
+}
+
+interface BuiltArtifact {
+  sessionId: string;
+  kind: 'skill' | 'automation';
+  name: string;
+  path: string;
+  contentHash: string;
 }
 
 @customElement('openrappter-show-and-tell')
@@ -313,11 +350,15 @@ export class OpenRappterShowAndTell extends LitElement {
   @state() private sessions: SessionSummary[] = [];
   @state() private session: SessionSummary | null = null;
   @state() private analysis: Analysis | null = null;
+  @state() private plan: SkillPlan | null = null;
+  @state() private planIntent = '';
   @state() private sessionTitle = '';
   @state() private intent = '';
   @state() private note = '';
   @state() private captureLabel = '';
-  @state() private buildTarget = 'skill';
+  @state() private buildTarget = 'rappid';
+  @state() private rappids: RappidChoice[] = [];
+  @state() private selectedRappid = '';
   @state() private narrationState = 'missing';
   @state() private narrationPhase = 'idle';
   @state() private narrationProgress: number | null = null;
@@ -346,6 +387,7 @@ export class OpenRappterShowAndTell extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     void this.refresh();
+    void this.refreshRappids();
     const desktop = desktopBridge();
     if (desktop) {
       this.narrationCleanup = desktop.onNarrationStatus((status) => {
@@ -622,6 +664,11 @@ export class OpenRappterShowAndTell extends LitElement {
         this.analysis = analysis;
         this.intent = analysis.intent;
       }
+      const plan = result.plan as SkillPlan | undefined;
+      if (plan) {
+        this.plan = plan;
+        this.planIntent = plan.intent;
+      }
       this.message = success;
       await this.refresh();
     } catch (error) {
@@ -635,6 +682,71 @@ export class OpenRappterShowAndTell extends LitElement {
       const listed = await this.call({ action: 'list' }, false);
       this.sessions = (listed.sessions as SessionSummary[] | undefined) ?? [];
       await this.refreshStatus();
+    } catch (error) {
+      this.error = (error as Error).message;
+    }
+  }
+
+  private async refreshRappids(): Promise<void> {
+    try {
+      this.rappids = await gateway.call<RappidChoice[]>('rappid.list');
+      if (
+        !this.selectedRappid ||
+        !this.rappids.some((item) => item.rappid === this.selectedRappid)
+      ) {
+        this.selectedRappid = this.rappids[0]?.rappid ?? '';
+      }
+    } catch {
+      // The recorder remains useful before the Quantum RAPPID service exists.
+      this.rappids = [];
+      this.selectedRappid = '';
+    }
+  }
+
+  private async buildReusableBehavior(): Promise<void> {
+    if (!this.session || !this.analysis?.approved) return;
+    if (!this.plan?.approved) {
+      this.error = 'Propose, review, and approve the reusable plan before building.';
+      return;
+    }
+    if (this.buildTarget === 'rappid' && !this.selectedRappid) {
+      this.error = 'Select a Quantum RAPPID before attaching a skill dimension.';
+      return;
+    }
+    try {
+      const target = this.buildTarget === 'rappid'
+        ? 'skill'
+        : this.buildTarget;
+      const result = await this.call({
+        action: 'build',
+        session_id: this.session.id,
+        target,
+      });
+      const artifacts = (result.artifacts as BuiltArtifact[] | undefined) ?? [];
+      if (this.buildTarget === 'rappid') {
+        const skill = artifacts.find((artifact) => artifact.kind === 'skill');
+        if (!skill) {
+          throw new Error('Show-and-Tell did not produce a skill artifact.');
+        }
+        this.busy = true;
+        try {
+          await gateway.call('rappid.attach-skill', {
+            rappid: this.selectedRappid,
+            sessionId: skill.sessionId,
+            name: skill.name,
+            artifactPath: skill.path,
+            contentHash: skill.contentHash,
+          });
+        } finally {
+          this.busy = false;
+        }
+        this.message =
+          'Skill built, verified, and appended as a RAPPID dimension frame.';
+        await this.refreshRappids();
+      } else {
+        this.message = 'Artifacts built and installed.';
+      }
+      await this.refresh();
     } catch (error) {
       this.error = (error as Error).message;
     }
@@ -671,6 +783,9 @@ export class OpenRappterShowAndTell extends LitElement {
     const detail = result.analysis_detail as Analysis | null | undefined;
     this.analysis = detail ?? null;
     this.intent = detail?.intent ?? this.session?.intentHint ?? '';
+    const plan = result.plan_detail as SkillPlan | null | undefined;
+    this.plan = plan ?? null;
+    this.planIntent = plan?.intent ?? '';
   }
 
   private async selectSession(id: string): Promise<void> {
@@ -1048,37 +1163,182 @@ export class OpenRappterShowAndTell extends LitElement {
                         <section class="card">
                           <div class="card-head">
                             <div>
-                              <div class="eyebrow">Package</div>
-                              <h3>Build reusable behavior</h3>
+                              <div class="eyebrow">Plan</div>
+                              <h3>${this.plan?.title ?? 'Propose reusable behavior'}</h3>
                             </div>
+                            ${this.plan
+                              ? html`<span class="state">${this.plan.approved ? 'approved' : `revision ${this.plan.revision}`}</span>`
+                              : nothing}
                           </div>
-                          <div class="row">
-                            <label>
-                              Artifact
-                              <select
-                                .value=${this.buildTarget}
-                                @change=${(event: Event) => {
-                                  this.buildTarget = (event.target as HTMLSelectElement).value;
-                                }}
-                              >
-                                <option value="skill">Skill</option>
-                                <option value="automation">Automation</option>
-                                <option value="all">Skill + automation</option>
-                              </select>
-                            </label>
+                          ${!this.plan
+                            ? html`
+                                <p class="lede">
+                                  Lift one demonstration into editable values, risk-gated
+                                  steps, and an explicit trigger contract. This turn builds nothing.
+                                </p>
+                                <div class="actions">
+                                  <button
+                                    ?disabled=${this.busy}
+                                    @click=${() => void this.act(
+                                      { action: 'bundle', session_id: this.session?.id },
+                                      'Evidence bundle verified.',
+                                    )}
+                                  >Inspect evidence bundle</button>
+                                  <button
+                                    class="primary"
+                                    ?disabled=${this.busy}
+                                    @click=${() => void this.act(
+                                      { action: 'propose', session_id: this.session?.id },
+                                      'Plan proposed. Review it before approval.',
+                                    )}
+                                  >Propose plan</button>
+                                </div>
+                              `
+                            : html`
+                                <label>
+                                  Trigger-bearing intent
+                                  <textarea
+                                    .value=${this.planIntent}
+                                    ?disabled=${this.plan.approved}
+                                    @input=${(event: InputEvent) => {
+                                      this.planIntent =
+                                        (event.target as HTMLTextAreaElement).value;
+                                    }}
+                                  ></textarea>
+                                </label>
+                                <div class="steps">
+                                  ${this.plan.steps.map((step, index) => html`
+                                    <div class="step">
+                                      <div class="step-number">${index + 1}</div>
+                                      <div>
+                                        <strong>${step.title}</strong>
+                                        <p>${step.detail}</p>
+                                        ${step.requiresConfirmation
+                                          ? html`<span class="tool">confirm · ${step.riskCategories.join(', ')}</span>`
+                                          : nothing}
+                                      </div>
+                                    </div>
+                                  `)}
+                                </div>
+                                ${this.plan.values.length
+                                  ? html`
+                                      <p class="lede" style="margin-top:.75rem">
+                                        Editable inputs:
+                                        ${this.plan.values.map((value) => html`
+                                          <code>{{${value.id}}}</code>${value.required ? '*' : ''}
+                                        `)}
+                                      </p>
+                                    `
+                                  : nothing}
+                                ${this.plan.openQuestions.length
+                                  ? html`
+                                      <p class="lede" style="margin-top:.75rem">
+                                        Open questions: ${this.plan.openQuestions.join(' · ')}
+                                      </p>
+                                    `
+                                  : nothing}
+                                <div class="actions">
+                                  ${!this.plan.approved
+                                    ? html`
+                                        <button
+                                          ?disabled=${this.busy}
+                                          @click=${() => void this.act(
+                                            {
+                                              action: 'revise_plan',
+                                              session_id: this.session?.id,
+                                              intent: this.planIntent,
+                                            },
+                                            'Plan updated. Re-read it before approval.',
+                                          )}
+                                        >Save plan edit</button>
+                                        <button
+                                          class="primary"
+                                          ?disabled=${this.busy}
+                                          @click=${() => void this.act(
+                                            {
+                                              action: 'revise_plan',
+                                              session_id: this.session?.id,
+                                              approve: true,
+                                            },
+                                            'Plan approved.',
+                                          )}
+                                        >Approve unchanged plan</button>
+                                      `
+                                    : html`
+                                        <button
+                                          ?disabled=${this.busy}
+                                          @click=${() => void this.act(
+                                            {
+                                              action: 'export',
+                                              session_id: this.session?.id,
+                                            },
+                                            'Private marketplace package exported.',
+                                          )}
+                                        >Export marketplace</button>
+                                      `}
+                                </div>
+                              `}
+                        </section>
+
+                        ${this.plan?.approved
+                          ? html`
+                            <section class="card">
+                              <div class="card-head">
+                                <div>
+                                  <div class="eyebrow">Package</div>
+                                  <h3>Build reusable behavior</h3>
+                                </div>
+                              </div>
+                              <div class="row">
+                                <label>
+                                  Artifact
+                                  <select
+                                    .value=${this.buildTarget}
+                                    @change=${(event: Event) => {
+                                      this.buildTarget = (event.target as HTMLSelectElement).value;
+                                    }}
+                                  >
+                                    <option value="skill">Skill</option>
+                                    <option value="automation">Automation</option>
+                                    <option value="all">Skill + automation</option>
+                                    <option value="rappid">Skill → RAPPID dimension</option>
+                                  </select>
+                                </label>
                             <button
                               class="primary"
-                              ?disabled=${this.busy}
-                              @click=${() => void this.act(
-                                {
-                                  action: 'build',
-                                  session_id: this.session?.id,
-                                  target: this.buildTarget,
-                                },
-                                'Artifacts built and installed.',
+                              ?disabled=${this.busy || (
+                                this.buildTarget === 'rappid' &&
+                                !this.selectedRappid
                               )}
+                              @click=${() => void this.buildReusableBehavior()}
                             >Build</button>
                           </div>
+                          ${this.buildTarget === 'rappid'
+                            ? html`
+                                <label style="margin-top:.75rem">
+                                  Attach approved skill to
+                                  <select
+                                    .value=${this.selectedRappid}
+                                    @change=${(event: Event) => {
+                                      this.selectedRappid =
+                                        (event.target as HTMLSelectElement).value;
+                                    }}
+                                  >
+                                    <option value="">Select a Quantum RAPPID</option>
+                                    ${this.rappids.map((rappid) => html`
+                                      <option value=${rappid.rappid}>
+                                        ${rappid.displayName} · ${rappid.lifecycleStage}
+                                      </option>
+                                    `)}
+                                  </select>
+                                </label>
+                                <p class="lede" style="margin-top:.55rem">
+                                  Only the privacy-scanned generated skill and its
+                                  content hash are attached. Raw captures and
+                                  narration remain in the private recorder store.
+                                </p>
+                              `
+                            : nothing}
                           <div class="actions">
                             <button
                               ?disabled=${this.busy}
@@ -1095,7 +1355,9 @@ export class OpenRappterShowAndTell extends LitElement {
                               )}
                             >Validate artifacts</button>
                           </div>
-                        </section>
+                            </section>
+                          `
+                          : nothing}
                       `
                     : nothing}
                 `

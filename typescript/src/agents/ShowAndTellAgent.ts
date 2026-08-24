@@ -14,13 +14,17 @@ import { openrappterPath } from '../infra/openrappter-home.js';
 import {
   analyzeShowAndTellSession,
   assertContextCaptureAvailable,
+  buildSessionBundle,
   buildShowAndTellArtifacts,
+  buildSkillPlan,
   captureExplicitFrame,
+  exportShowAndTellMarketplace,
   isPrivateContext,
   privacyReducedUrl,
   readActiveContext,
   replayPlan,
   reviseAnalysis,
+  revisePlan,
   sanitizeShowAndTellText,
   showAndTellRoot,
   ShowAndTellStore,
@@ -86,6 +90,7 @@ export class ShowAndTellAgent extends BasicAgent {
   private provider: LLMProvider | null;
   private readonly localSurface: boolean;
   private readonly resolveMediaAsset: (assetId: string) => Promise<VerifiedMediaAsset>;
+  private readonly isolatedOutputRoot: string | null;
 
   constructor(options: ShowAndTellAgentOptions = {}) {
     const metadata: AgentMetadata = {
@@ -106,8 +111,12 @@ export class ShowAndTellAgent extends BasicAgent {
               'media',
               'stop',
               'analyze',
+              'bundle',
+              'propose',
               'review',
+              'revise_plan',
               'build',
+              'export',
               'replay',
               'test',
               'list',
@@ -145,7 +154,25 @@ export class ShowAndTellAgent extends BasicAgent {
           },
           steps_json: {
             type: 'string',
-            description: 'Edited analysis steps as a JSON array.',
+            description:
+              'Edited analysis steps, or edited plan steps for revise_plan, as a JSON array.',
+          },
+          values_json: {
+            type: 'string',
+            description:
+              'Edited plan values as a JSON array. Each entry needs a known value id.',
+          },
+          marketplace_name: {
+            type: 'string',
+            description: 'Marketplace directory name for the export action.',
+          },
+          plugin_name: {
+            type: 'string',
+            description: 'Plugin directory name for the export action.',
+          },
+          skill_name: {
+            type: 'string',
+            description: 'Skill directory name for the export action.',
           },
           feedback: {
             type: 'string',
@@ -166,8 +193,9 @@ export class ShowAndTellAgent extends BasicAgent {
           },
           target: {
             type: 'string',
-            enum: ['skill', 'automation', 'all'],
-            description: 'Artifact to build from an approved analysis.',
+            enum: ['skill', 'automation', 'all', 'rappid'],
+            description:
+              'Artifact to build from an approved plan. `rappid` builds the skill and returns its path and content hash for a Quantum RAPPID dimension without attaching it.',
           },
           poll_interval_ms: {
             type: 'integer',
@@ -216,6 +244,7 @@ export class ShowAndTellAgent extends BasicAgent {
         return media.resolveAsset(assetId);
       };
     }
+    this.isolatedOutputRoot = options.root ? path.resolve(options.root) : null;
   }
 
   setProvider(provider: LLMProvider | null): void {
@@ -265,11 +294,23 @@ export class ShowAndTellAgent extends BasicAgent {
         case 'analyze':
           result = await this.analyze(kwargs);
           break;
+        case 'bundle':
+          result = await this.bundle(kwargs);
+          break;
+        case 'propose':
+          result = await this.propose(kwargs);
+          break;
         case 'review':
           result = await this.review(kwargs);
           break;
+        case 'revise_plan':
+          result = await this.revisePlanAction(kwargs);
+          break;
         case 'build':
           result = await this.build(kwargs);
+          break;
+        case 'export':
+          result = await this.exportMarketplace(kwargs);
           break;
         case 'replay':
           result = await this.replay(kwargs);
@@ -395,7 +436,17 @@ export class ShowAndTellAgent extends BasicAgent {
     }
     const events = await this.store.events(session.id);
     const analysis = await this.store.getAnalysis(session.id);
+    const plan = await this.store.getPlan(session.id);
     const artifacts = await this.store.artifacts(session.id);
+    const planSummary = plan
+      ? {
+          revision: plan.revision,
+          approved: plan.approved,
+          step_count: plan.steps.length,
+          value_count: plan.values.length,
+          open_questions: plan.openQuestions.length,
+        }
+      : null;
     if (!this.localSurface) {
       return {
         status: 'success',
@@ -415,6 +466,7 @@ export class ShowAndTellAgent extends BasicAgent {
               step_count: analysis.steps.length,
             }
           : null,
+        plan: planSummary,
         artifact_count: artifacts.length,
       };
     }
@@ -439,6 +491,8 @@ export class ShowAndTellAgent extends BasicAgent {
           }
         : null,
       analysis_detail: analysis,
+      plan: planSummary,
+      plan_detail: plan,
       artifacts,
       collector_healthy:
         !['recording', 'stopping'].includes(session.state) ||
@@ -741,18 +795,162 @@ export class ShowAndTellAgent extends BasicAgent {
     };
   }
 
+  private async bundle(kwargs: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const session = await this.requireCompletedSession(kwargs.session_id);
+    const bundle = buildSessionBundle(session, await this.store.events(session.id));
+    return {
+      status: 'success',
+      action: 'bundle',
+      session_id: session.id,
+      bundle,
+    };
+  }
+
+  /**
+   * Phase one of two: propose exactly one reviewable plan and build nothing.
+   *
+   * Analysis is a reading of the recording. A plan is an offer: these steps,
+   * these editable values, these steps that will stop and ask. Returning the
+   * offer and acting on it in the same turn would make the review decorative,
+   * so this action never writes an artifact.
+   */
+  private async propose(kwargs: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const session = await this.requireCompletedSession(kwargs.session_id);
+    const analysis = await this.store.getAnalysis(session.id);
+    if (!analysis) {
+      throw new Error('Analyze the Show-and-Tell session before proposing a plan.');
+    }
+    await this.store.appendEvent(
+      session.id,
+      'plan.proposal.requested',
+      'show-and-tell',
+      {},
+    );
+    const bundle = buildSessionBundle(session, await this.store.events(session.id));
+    const plan = buildSkillPlan(analysis, bundle, {
+      previous: await this.store.getPlan(session.id),
+    });
+    await this.store.savePlan(plan);
+    await getFlightRecorder().record({
+      kind: 'show-and-tell.proposed',
+      source: 'show-and-tell',
+      status: 'success',
+      agentName: this.name,
+      metadata: {
+        sessionId: session.id,
+        planRevision: plan.revision,
+        stepCount: plan.steps.length,
+        valueCount: plan.values.length,
+        openQuestions: plan.openQuestions.length,
+      },
+    });
+    return {
+      status: 'success',
+      action: 'propose',
+      session_id: session.id,
+      plan,
+      proposal_only: true,
+      built: false,
+      message:
+        'One plan proposed. Review the steps, values, and open questions, then approve it with `openrappter show-and-tell revise-plan [session] --approve` before building.',
+      data_slush: {
+        source_agent: this.name,
+        session_id: session.id,
+        plan_revision: plan.revision,
+        plan_approved: false,
+      },
+    };
+  }
+
+  private async revisePlanAction(
+    kwargs: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const session = await this.requireCompletedSession(kwargs.session_id);
+    const current = await this.store.getPlan(session.id);
+    if (!current) {
+      throw new Error('Propose a Show-and-Tell plan before revising it.');
+    }
+    if (
+      kwargs.approve === true &&
+      !(await this.store.consumeConsent(kwargs.consent_token, 'approve'))
+    ) {
+      return {
+        status: 'error',
+        action: 'revise_plan',
+        code: 'local_approval_required',
+        message:
+          'Plan approval requires `openrappter show-and-tell revise-plan [session] --approve` in an interactive local terminal.',
+      };
+    }
+    const revised = revisePlan(current, {
+      title: kwargs.title,
+      intent: kwargs.intent,
+      stepsJson: kwargs.steps_json,
+      valuesJson: kwargs.values_json,
+      feedback: kwargs.feedback ?? kwargs.query,
+      approve: kwargs.approve === true,
+    });
+    await this.store.savePlan(revised);
+    return {
+      status: 'success',
+      action: 'revise_plan',
+      session_id: session.id,
+      plan: revised,
+      message: revised.approved
+        ? 'Plan approved. It can now build a skill, automation, or marketplace export.'
+        : 'Plan updated but not approved.',
+    };
+  }
+
   private async build(kwargs: Record<string, unknown>): Promise<Record<string, unknown>> {
     const session = await this.requireCompletedSession(kwargs.session_id);
     const analysis = await this.store.getAnalysis(session.id);
     if (!analysis) throw new Error('Analyze and approve the session before building.');
-    const target =
-      kwargs.target === 'automation' || kwargs.target === 'all'
+    const requested =
+      kwargs.target === 'automation' ||
+      kwargs.target === 'all' ||
+      kwargs.target === 'rappid'
         ? kwargs.target
         : 'skill';
+    const target = requested === 'rappid' ? 'skill' : requested;
+    const plan = await this.store.getPlan(session.id);
+    if (
+      !plan
+      && (await this.store.events(session.id)).some(
+        (event) => event.type === 'plan.proposal.requested',
+      )
+    ) {
+      return {
+        status: 'error',
+        action: 'build',
+        code: 'plan_missing',
+        session_id: session.id,
+        message:
+          'A plan proposal was requested but its review record is missing. Propose it again before building.',
+      };
+    }
+    if (plan && !plan.approved) {
+      return {
+        status: 'error',
+        action: 'build',
+        code: 'plan_not_approved',
+        session_id: session.id,
+        plan_revision: plan.revision,
+        message:
+          'A plan is proposed for this session but not approved. Review it and approve it with `openrappter show-and-tell revise-plan [session] --approve` before building.',
+      };
+    }
     const artifacts = await buildShowAndTellArtifacts(
       this.store,
       analysis,
       target,
+      plan,
+      this.isolatedOutputRoot
+        ? {
+            skills: path.join(this.isolatedOutputRoot, 'skills'),
+            automations: path.join(this.isolatedOutputRoot, 'automations'),
+          }
+        : {},
     );
     await getFlightRecorder().record({
       kind: 'show-and-tell.built',
@@ -762,18 +960,104 @@ export class ShowAndTellAgent extends BasicAgent {
       metadata: {
         sessionId: session.id,
         targets: artifacts.map((artifact) => artifact.kind),
+        planRevision: plan?.revision ?? null,
       },
     });
+    const skill = artifacts.find((artifact) => artifact.kind === 'skill');
+    if (requested === 'rappid' && !skill) {
+      throw new Error('The build did not produce a skill artifact to offer as a dimension.');
+    }
     return {
       status: 'success',
       action: 'build',
       session_id: session.id,
       artifacts,
+      ...(requested === 'rappid' && skill
+        ? {
+            // Handed back for the caller to attach. Show-and-Tell does not
+            // write to a Quantum RAPPID itself: minting and appending frames
+            // belong to that subsystem, and this agent has no business
+            // deciding an organism grew.
+            rappid_dimension: {
+              kind: 'skill',
+              sessionId: skill.sessionId,
+              name: skill.name,
+              artifactPath: skill.path,
+              contentHash: skill.contentHash,
+              planRevision: plan?.revision ?? null,
+              privacyScanned: true,
+              attached: false,
+            },
+          }
+        : {}),
       message: `Built ${artifacts.map((artifact) => artifact.kind).join(' and ')}.`,
       data_slush: {
         source_agent: this.name,
         session_id: session.id,
         artifact_paths: artifacts.map((artifact) => artifact.path),
+      },
+    };
+  }
+
+  private async exportMarketplace(
+    kwargs: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const session = await this.requireCompletedSession(kwargs.session_id);
+    const plan = await this.store.getPlan(session.id);
+    if (!plan) {
+      throw new Error('Propose and approve a Show-and-Tell plan before exporting it.');
+    }
+    if (!plan.approved) {
+      return {
+        status: 'error',
+        action: 'export',
+        code: 'plan_not_approved',
+        session_id: session.id,
+        plan_revision: plan.revision,
+        message:
+          'Approve the plan with `openrappter show-and-tell revise-plan [session] --approve` before exporting it.',
+      };
+    }
+    const exported = await exportShowAndTellMarketplace(this.store, plan, {
+      ...(this.isolatedOutputRoot
+        ? { root: path.join(this.isolatedOutputRoot, 'marketplace') }
+        : {}),
+      marketplaceName: sanitizeShowAndTellText(kwargs.marketplace_name, 64) || undefined,
+      pluginName: sanitizeShowAndTellText(kwargs.plugin_name, 64) || undefined,
+      skillName: sanitizeShowAndTellText(kwargs.skill_name, 64) || undefined,
+    });
+    await getFlightRecorder().record({
+      kind: 'show-and-tell.exported',
+      source: 'show-and-tell',
+      status: 'success',
+      agentName: this.name,
+      metadata: {
+        sessionId: session.id,
+        planRevision: plan.revision,
+        pluginName: exported.export.pluginName,
+      },
+    });
+    return {
+      status: 'success',
+      action: 'export',
+      session_id: session.id,
+      artifact: exported.artifact,
+      marketplace: {
+        root: exported.export.root,
+        marketplaceName: exported.export.marketplaceName,
+        pluginName: exported.export.pluginName,
+        skillName: exported.export.skillName,
+        files: exported.export.files,
+        contentHash: exported.export.contentHash,
+        attribution: exported.export.attribution,
+      },
+      published: false,
+      message:
+        'Marketplace layout written locally and validated. Nothing was published; publishing stays a separate, deliberate step.',
+      data_slush: {
+        source_agent: this.name,
+        session_id: session.id,
+        marketplace_path: exported.artifact.path,
       },
     };
   }

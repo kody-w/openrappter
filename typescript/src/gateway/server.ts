@@ -28,10 +28,16 @@ import type {
 import { RPC_ERROR, GatewayEvents } from './types.js';
 import { askBrainstem } from './brainstem-client.js';
 import { registerShowcaseMethods } from './methods/showcase-methods.js';
+import { registerRappidMethods } from './methods/rappid-methods.js';
 import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
+import { registerEstateBuddyMethods } from './methods/estate-buddy-methods.js';
+import type {
+  EstateBuddyEvidenceDraft,
+  EstateBuddyEvidenceInput,
+} from './estate-buddy-evidence-types.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
 import {
@@ -429,6 +435,9 @@ export class GatewayServer {
   private agentList?: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[];
   private cronStore: Record<string, unknown>[] = [];
   private surgeonService?: SurgeonService;
+  private estateBuddyAnalyzer?: (
+    input: EstateBuddyEvidenceInput,
+  ) => Promise<EstateBuddyEvidenceDraft>;
   /**
    * The approval queue `exec.pending`/`exec.respond` serve.
    *
@@ -771,6 +780,14 @@ export class GatewayServer {
 
   setSurgeonService(service: SurgeonService): void {
     this.surgeonService = service;
+  }
+
+  setEstateBuddyAnalyzer(
+    analyzer: (
+      input: EstateBuddyEvidenceInput,
+    ) => Promise<EstateBuddyEvidenceDraft>,
+  ): void {
+    this.estateBuddyAnalyzer = analyzer;
   }
 
   /** Override the approval engine served by `exec.*` (tests, embedders). */
@@ -3546,6 +3563,7 @@ export class GatewayServer {
 
     // Showcase methods
     registerShowcaseMethods(this);
+    registerRappidMethods(this, { dataDir: this.dataDir });
     if (this.surgeonService) {
       registerSurgeonMethods(this, this.surgeonService);
     }
@@ -3558,6 +3576,13 @@ export class GatewayServer {
 
     // Backup & restore methods
     registerBackupMethods(this, { dataDir: this.dataDir });
+
+    // The local-network estate remains owned by RAPP-Herdr. The gateway
+    // exposes its verified roster/chat/create receipts without duplicating
+    // device credentials or SSH routing in OpenRappter.
+    registerEstateBuddyMethods(this, {
+      analyzer: this.estateBuddyAnalyzer,
+    });
 
     // Zen streaming (live terminal screens relayed to browsers).
     //

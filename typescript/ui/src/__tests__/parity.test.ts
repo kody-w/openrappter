@@ -119,6 +119,9 @@ describe('OpenRappter anatomy compatibility surfaces', () => {
     'config.get',
     'config.set',
     'config.apply',
+    'rings.get',
+    'rings.preview',
+    'rings.apply',
   ];
 
   it('openrappter services reference all required RPC methods', () => {
@@ -142,6 +145,7 @@ describe('OpenRappter anatomy compatibility surfaces', () => {
     'cron.ts',
     'logs.ts',
     'presence.ts',
+    'release-rings.ts',
   ];
 
   it('openrappter has all required controller services', () => {

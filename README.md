@@ -41,6 +41,20 @@ Works on macOS, Linux, WSL & Windows. Installs Node.js (if needed), clones the r
 
 Or try the quickstart demo: `git clone https://github.com/kody-w/openrappter.git && cd openrappter && ./quickstart.sh`
 
+### Select an exact release ring
+
+Stable is the safe default. To select a maintained pointer:
+
+```bash
+curl -fsSL https://kody-w.github.io/openrappter/install.sh |
+  bash -s -- --ring beta
+```
+
+`--ring` overrides `OPENRAPPTER_RING`. The five values are `stable`, `beta`,
+`canary`, `alpha`, and `nightly`. Resolution validates a closed manifest and
+installs an exact checksummed artifact or source commit; unavailable rings fail
+closed rather than falling back. See [release ring semantics and safety](docs/release-rings.md).
+
 ---
 
 ## Try the beta in a browser

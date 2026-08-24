@@ -1,0 +1,57 @@
+name: Release Constitution Gate
+on:
+  workflow_call:
+    inputs:
+      commit: { required: true, type: string }
+      tag: { required: true, type: string }
+      version: { required: true, type: string }
+      artifact_name: { required: false, type: string, default: '' }
+      discover_artifact: { required: false, type: boolean, default: false }
+permissions:
+  contents: read
+jobs:
+  constitution:
+    name: Release Constitution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: kody-w/openrappter-release-train
+          ref: ce7fffe31d8cff3c66db1a0749596ec22fe064eb
+          path: authority
+      - if: inputs.artifact_name != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: release-dist
+      - env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          DISCOVER_ARTIFACT: ${{ inputs.discover_artifact }}
+        run: |
+          set -euo pipefail
+          artifact_url=null; install_url=null; artifact_sha=null; provenance=null
+          if [ -n "${{ inputs.artifact_name }}" ]; then
+            tarball="release-dist/openrappter-${RELEASE_VERSION}.tgz"
+            test -f "$tarball"
+            test -s "$tarball"
+          fi
+          python - "$artifact_url" "$install_url" "$artifact_sha" "$provenance" <<'PY'
+          import json,os,sys
+          def value(raw): return None if raw == "null" else raw
+          json.dump({
+            "schema":"openrappter-release/v1","mode":"normal",
+            "source_commit":os.environ["RELEASE_COMMIT"],
+            "source_tag":os.environ["RELEASE_TAG"],
+            "intended_release_tag":os.environ["RELEASE_TAG"],
+            "channel_version":None,
+            "version":os.environ["RELEASE_VERSION"],
+            "artifact_url":value(sys.argv[1]),"install_url":value(sys.argv[2]),
+            "artifact_sha256":value(sys.argv[3]),"artifact_provenance":value(sys.argv[4]),
+            "rollback_receipt":None,
+          },open("release.json","w"))
+          PY
+          args=(--policy authority/contracts/release-constitution-v1.json --release release.json --remote --discover-artifact)
+          if [ -n "${{ inputs.artifact_name }}" ]; then args+=(--local-artifacts-dir release-dist); fi
+          python authority/scripts/release_gate.py "${args[@]}"

@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, type Stats } from 'node:fs';
 import {
   chmod,
   link,
+  lstat,
   mkdir,
   open,
   readFile,
@@ -280,13 +281,13 @@ function detectMedia(header: Buffer, declaredMime?: string): DetectedMedia {
   if (
     header.length >= 12
     && header.subarray(0, 4).equals(Buffer.from([0x00, 0x00, 0x00, 0x18]))
-    && header.subarray(4, 8).toString('ascii') === 'ftyp'
+    && header.subarray(4, 8).equals(Buffer.from('ftyp'))
   ) {
     // A 24-byte ftyp atom is common but not mandatory, so fall through to the
     // generic ISO-BMFF check when the atom length differs.
   }
-  if (header.length >= 12 && header.subarray(4, 8).toString('ascii') === 'ftyp') {
-    const brand = header.subarray(8, 12).toString('ascii');
+  if (header.length >= 12 && header.subarray(4, 8).equals(Buffer.from('ftyp'))) {
+    const brand = header.subarray(8, 12).toString('latin1');
     const audio = /^M4A|^M4B|^F4A/.test(brand) || declaredMime?.startsWith('audio/');
     return audio
       ? { kind: 'audio', mimeType: 'audio/mp4', format: 'iso-bmff-audio' }
@@ -296,25 +297,25 @@ function detectMedia(header: Buffer, declaredMime?: string): DetectedMedia {
           format: brand === 'qt  ' ? 'quicktime' : 'iso-bmff',
         };
   }
-  if (header.length >= 12 && header.subarray(0, 4).toString('ascii') === 'RIFF') {
-    const form = header.subarray(8, 12).toString('ascii');
+  if (header.length >= 12 && header.subarray(0, 4).equals(Buffer.from('RIFF'))) {
+    const form = header.subarray(8, 12).toString('latin1');
     if (form === 'WAVE') return { kind: 'audio', mimeType: 'audio/wav', format: 'wav' };
     if (form === 'WEBP') return { kind: 'image', mimeType: 'image/webp', format: 'webp' };
   }
-  if (header.subarray(0, 4).toString('ascii') === 'fLaC') {
+  if (header.subarray(0, 4).equals(Buffer.from('fLaC'))) {
     return { kind: 'audio', mimeType: 'audio/flac', format: 'flac' };
   }
-  if (header.subarray(0, 4).toString('ascii') === 'OggS') {
+  if (header.subarray(0, 4).equals(Buffer.from('OggS'))) {
     return { kind: 'audio', mimeType: 'audio/ogg', format: 'ogg' };
   }
-  if (header.subarray(0, 4).toString('ascii') === 'MThd') {
+  if (header.subarray(0, 4).equals(Buffer.from('MThd'))) {
     return { kind: 'midi', mimeType: 'audio/midi', format: 'midi' };
   }
-  if (header.subarray(0, 4).toString('ascii') === 'caff') {
+  if (header.subarray(0, 4).equals(Buffer.from('caff'))) {
     return { kind: 'audio', mimeType: 'audio/x-caf', format: 'caf' };
   }
   if (
-    header.subarray(0, 3).toString('ascii') === 'ID3'
+    header.subarray(0, 3).equals(Buffer.from('ID3'))
     || (header.length >= 2 && header[0] === 0xff && (header[1] & 0xe0) === 0xe0)
   ) {
     return { kind: 'audio', mimeType: 'audio/mpeg', format: 'mpeg-audio' };
@@ -341,7 +342,7 @@ function detectMedia(header: Buffer, declaredMime?: string): DetectedMedia {
   if (header.length >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) {
     return { kind: 'image', mimeType: 'image/jpeg', format: 'jpeg' };
   }
-  if (header.subarray(0, 4).toString('ascii').startsWith('GIF8')) {
+  if (header.subarray(0, 4).equals(Buffer.from('GIF8'))) {
     return { kind: 'image', mimeType: 'image/gif', format: 'gif' };
   }
   throw new Error(
@@ -654,12 +655,25 @@ export class MediaIngestService {
   async ingestLocalFile(input: LocalMediaIngest): Promise<VerifiedMediaAsset> {
     await this.ensureInitialized();
     if (!path.isAbsolute(input.sourcePath)) throw new Error('Local media source must be absolute.');
+    const pathBefore = await lstat(input.sourcePath);
+    if (pathBefore.isSymbolicLink() || !pathBefore.isFile()) {
+      throw new Error('Selected media is not a direct regular file.');
+    }
     const flags = fsConstants.O_RDONLY | noFollowFlag();
     const source = await open(input.sourcePath, flags);
     let uploadId: string | undefined;
     try {
       const before = await source.stat();
-      if (!before.isFile()) throw new Error('Selected media is not a regular file.');
+      const pathAfterOpen = await lstat(input.sourcePath);
+      if (
+        !before.isFile()
+        || pathAfterOpen.isSymbolicLink()
+        || !pathAfterOpen.isFile()
+        || !sameIdentity(identityOf(pathBefore), before)
+        || !sameIdentity(identityOf(pathAfterOpen), before)
+      ) {
+        throw new Error('Selected media path changed before ingest started.');
+      }
       if (before.nlink !== 1) throw new Error('Hard-linked media sources are not accepted.');
       if (isSparse(before)) throw new Error('Sparse media sources are not accepted.');
       if (before.size !== input.expectedSize) {
@@ -724,8 +738,12 @@ export class MediaIngestService {
       }
 
       const after = await source.stat();
+      const pathAfterRead = await lstat(input.sourcePath);
       if (
         !sameIdentity(identityOf(before), after)
+        || pathAfterRead.isSymbolicLink()
+        || !pathAfterRead.isFile()
+        || !sameIdentity(identityOf(before), pathAfterRead)
         || after.size !== before.size
         || after.mtimeMs !== before.mtimeMs
         || after.ctimeMs !== before.ctimeMs
@@ -762,13 +780,26 @@ export class MediaIngestService {
     const digest = assetId.startsWith('sha256:') ? assetId.slice(7) : assetId;
     assertDigest(digest, 'Asset digest');
     const file = this.blobPath(digest);
-    const fileStats = await stat(file);
-    if (!fileStats.isFile() || fileStats.nlink !== 1) {
-      throw new Error('Verified media asset is not a private regular file.');
+    const pathBefore = await lstat(file);
+    if (pathBefore.isSymbolicLink() || !pathBefore.isFile()) {
+      throw new Error('Verified media asset is not a direct private regular file.');
     }
     const headerHandle = await open(file, fsConstants.O_RDONLY | noFollowFlag());
     let detected: DetectedMedia;
+    let fileStats: Stats;
     try {
+      fileStats = await headerHandle.stat();
+      const pathAfterOpen = await lstat(file);
+      if (
+        !fileStats.isFile()
+        || fileStats.nlink !== 1
+        || pathAfterOpen.isSymbolicLink()
+        || !pathAfterOpen.isFile()
+        || !sameIdentity(identityOf(pathBefore), fileStats)
+        || !sameIdentity(identityOf(pathAfterOpen), fileStats)
+      ) {
+        throw new Error('Verified media asset identity changed.');
+      }
       const header = Buffer.alloc(64 * 1024);
       const { bytesRead } = await headerHandle.read(header, 0, header.length, 0);
       detected = detectMedia(header.subarray(0, bytesRead));

@@ -77,6 +77,10 @@ test('large media uses Electron safe path handoff and descriptor-safe main-proce
   assert.match(mediaIngest, /partStats\.nlink !== 1/);
   assert.match(mediaIngest, /Selected media changed while it was being ingested/);
   assert.doesNotMatch(preload, /readAsDataURL|arrayBuffer\(/);
+  assert.match(main, /OPENRAPPTER_DESKTOP_MEDIA_SMOKE_FILE/);
+  assert.match(main, /DOM\.setFileInputFiles/);
+  assert.match(main, /runDesktopMediaSmoke/);
+  assert.match(main, /result\.fileReaderCalls !== 0/);
 });
 
 test('local tell and voice models bootstrap privately', () => {

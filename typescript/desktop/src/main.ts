@@ -1312,6 +1312,142 @@ async function stopOwnedShowSessions(): Promise<void> {
   desktopOwnedSessions.clear();
 }
 
+interface CdpNode {
+  nodeId?: number;
+  nodeName?: string;
+  attributes?: string[];
+  children?: CdpNode[];
+  shadowRoots?: CdpNode[];
+  contentDocument?: CdpNode;
+}
+
+function findFileInputNode(node: CdpNode): number | undefined {
+  if (node.nodeName === 'INPUT' && node.nodeId && node.attributes) {
+    for (let index = 0; index < node.attributes.length; index += 2) {
+      if (
+        node.attributes[index] === 'class'
+        && node.attributes[index + 1]?.split(/\s+/).includes('hidden-input')
+      ) {
+        return node.nodeId;
+      }
+    }
+  }
+  for (const child of [
+    ...(node.children ?? []),
+    ...(node.shadowRoots ?? []),
+    ...(node.contentDocument ? [node.contentDocument] : []),
+  ]) {
+    const found = findFileInputNode(child);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+async function runDesktopMediaSmoke(
+  window: BrowserWindow,
+  fixturePath: string,
+): Promise<Record<string, unknown>> {
+  const fixture = path.resolve(fixturePath);
+  const fixtureStats = lstatSync(fixture);
+  if (
+    !fixtureStats.isFile()
+    || fixtureStats.isSymbolicLink()
+    || fixtureStats.nlink !== 1
+  ) {
+    throw new Error('Desktop media smoke fixture must be one direct regular file.');
+  }
+  await window.webContents.executeJavaScript(`
+    (async () => {
+      const app = document.querySelector('openrappter-app');
+      app.navigate('chat');
+      await app.updateComplete;
+      const chat = app.shadowRoot.querySelector('openrappter-chat');
+      await chat.updateComplete;
+      return Boolean(chat?.shadowRoot?.querySelector('.hidden-input'));
+    })()
+  `);
+  await window.webContents.executeJavaScript(`
+    (() => {
+      const original = FileReader.prototype.readAsDataURL;
+      window.__openrappterMediaSmokeReader = { calls: 0, original };
+      FileReader.prototype.readAsDataURL = function (...args) {
+        window.__openrappterMediaSmokeReader.calls += 1;
+        return original.apply(this, args);
+      };
+    })()
+  `);
+  const debug = window.webContents.debugger;
+  const attachedHere = !debug.isAttached();
+  if (attachedHere) debug.attach('1.3');
+  try {
+    await debug.sendCommand('DOM.enable');
+    const document = await debug.sendCommand('DOM.getDocument', {
+      depth: -1,
+      pierce: true,
+    }) as { root: CdpNode };
+    const inputNodeId = findFileInputNode(document.root);
+    if (!inputNodeId) throw new Error('Desktop media smoke file input was not found.');
+    await debug.sendCommand('DOM.setFileInputFiles', {
+      files: [fixture],
+      nodeId: inputNodeId,
+    });
+    return await window.webContents.executeJavaScript(`
+      (async () => {
+        const app = document.querySelector('openrappter-app');
+        const chat = app.shadowRoot.querySelector('openrappter-chat');
+        const input = chat.shadowRoot.querySelector('.hidden-input');
+        const readerProof = window.__openrappterMediaSmokeReader;
+        try {
+          if (!chat.attachments?.length) {
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          const deadline = Date.now() + 120000;
+          while (Date.now() < deadline) {
+            const attachment = chat.attachments?.[0];
+            if (attachment?.error) throw new Error(attachment.error);
+            if (attachment?.asset) {
+              const started = await window.openrappterDesktop.showAndTell({
+                action: 'start',
+                intent: 'Desktop exact large-media handoff smoke',
+                poll_interval_ms: 60000,
+                max_duration_ms: 60000,
+                __smoke: true
+              });
+              const attached = await window.openrappterDesktop.showAndTell({
+                action: 'media',
+                session_id: started.session.id,
+                asset_id: attachment.asset.id
+              });
+              const stopped = await window.openrappterDesktop.showAndTell({
+                action: 'stop',
+                session_id: started.session.id
+              });
+              return {
+                mediaHandoff: true,
+                filename: attachment.filename,
+                size: attachment.asset.size,
+                digest: attachment.asset.digest,
+                phase: attachment.upload?.status?.phase,
+                fileReaderCalls: readerProof.calls,
+                showAndTell:
+                  attached.status === 'success' &&
+                  stopped.session.state === 'stopped'
+              };
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+          throw new Error('Desktop media smoke ingest timed out.');
+        } finally {
+          FileReader.prototype.readAsDataURL = readerProof.original;
+          delete window.__openrappterMediaSmokeReader;
+        }
+      })()
+    `) as Record<string, unknown>;
+  } finally {
+    if (attachedHere && debug.isAttached()) debug.detach();
+  }
+}
+
 function createWindow(): BrowserWindow {
   if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
     console.log(`OPENRAPPTER_DESKTOP_SMOKE create-window ui=${uiIndex}`);
@@ -1508,7 +1644,12 @@ function createWindow(): BrowserWindow {
             protocol: location.protocol,
           };
         })()
-      `).then((result) => {
+      `).then(async (result) => {
+        const mediaFixture = process.env.OPENRAPPTER_DESKTOP_MEDIA_SMOKE_FILE;
+        const mediaResult = mediaFixture
+          ? await runDesktopMediaSmoke(window, mediaFixture)
+          : {};
+        Object.assign(result, mediaResult);
         console.log(`OPENRAPPTER_DESKTOP_SMOKE ${JSON.stringify(result)}`);
         const required = [
           'bridge',
@@ -1522,6 +1663,9 @@ function createWindow(): BrowserWindow {
           'hotLoadedAgents',
           'recorderLifecycle',
         ] as const;
+        const mediaRequired = mediaFixture
+          ? ['mediaHandoff', 'showAndTell'] as const
+          : [];
         if (
           (
             result.smokeScope !== 'boot' &&
@@ -1532,6 +1676,16 @@ function createWindow(): BrowserWindow {
           (
             result.smokeScope !== 'boot' &&
             !fullRequired.every((key) => result[key] === true)
+          ) ||
+          !mediaRequired.every((key) => result[key] === true) ||
+          (
+            mediaFixture &&
+            (
+              result.fileReaderCalls !== 0 ||
+              result.filename !== path.basename(mediaFixture) ||
+              result.size !== lstatSync(mediaFixture).size ||
+              result.phase !== 'complete'
+            )
           )
         ) {
           process.exitCode = 1;

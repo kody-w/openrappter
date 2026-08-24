@@ -60,3 +60,12 @@ to `privatePath`.
 This typed seam is intended for XPedition and other shells without coupling
 ingest to them. Organism eggs carry the descriptor and content through their
 own archive policy; media ingest does not depend on egg code.
+
+## Release regression proof
+
+From `typescript/`, run `npm run test:media-release`. It generates the exact
+reported filename at 100 MiB + 1 byte from the checked-in valid MP4 fixture,
+then drives the compiled local ingest, real ffprobe validation,
+content-addressed finalization, media processor, Show-and-Tell event store, and
+authenticated gateway Chat handoff. The fixture and finalized artifact remain
+under `.media-release-smoke-artifacts/` for byte/hash inspection.

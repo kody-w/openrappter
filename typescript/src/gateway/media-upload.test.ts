@@ -173,6 +173,10 @@ describe('authenticated resumable media RPC', () => {
     expect(replay.receivedBytes).toBe(first.length);
 
     ws.close();
+    const outsider = await connect(TOKEN, 'different-media-browser');
+    await expect(request(outsider, 'media.upload.status', { uploadId }))
+      .rejects.toThrow(/not owned/);
+    outsider.close();
     ws = await connect(TOKEN, 'media-browser');
     const resumed = await request(ws, 'media.upload.status', { uploadId });
     expect(resumed).toMatchObject({
@@ -260,6 +264,21 @@ describe('authenticated resumable media RPC', () => {
         data: Buffer.alloc(1024 * 1024 + 1).toString('base64'),
       }],
     })).rejects.toThrow(/Direct attachments are limited/);
+    await expect(request(ws, 'media.upload.chunk', {
+      uploadId: '00000000-0000-4000-8000-000000000999',
+      offset: 0,
+      data: 'A===',
+      chunkDigest: '0'.repeat(64),
+    })).rejects.toThrow(/bounded transport policy/);
+    await expect(request(ws, 'chat.send', {
+      sessionKey: 'asset-traversal',
+      message: 'Do not resolve this',
+      attachments: [{
+        type: 'file',
+        mimeType: 'video/mp4',
+        assetId: 'sha256:../../etc/passwd',
+      }],
+    })).rejects.toThrow(/digest/);
 
     const ids: string[] = [];
     for (let index = 0; index < 3; index += 1) {

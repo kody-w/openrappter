@@ -32,6 +32,7 @@ import ipaddress
 import hashlib
 import platform
 import types
+import builtins
 from datetime import datetime, timezone
 from urllib.parse import urlencode, urlsplit
 
@@ -1548,6 +1549,11 @@ def _create_trusted_basic_agent_boundary():
     trusted_class = module.BasicAgent
     class_attributes = dict(trusted_class.__dict__)
     class_bases = tuple(trusted_class.__bases__)
+    builtins_dictionary = builtins.__dict__
+    builtins_attributes = dict(builtins_dictionary)
+    trusted_list = list
+    trusted_set = set
+    trusted_all = all
     function_states = {}
     for name, value in class_attributes.items():
         function = (
@@ -1605,8 +1611,11 @@ def _create_trusted_basic_agent_boundary():
 
     def same_mapping_identity(current, expected):
         return (
-            set(current) == set(expected)
-            and all(current[name] is value for name, value in expected.items())
+            trusted_set(current) == trusted_set(expected)
+            and trusted_all(
+                current[name] is value
+                for name, value in expected.items()
+            )
         )
 
     def same_tuple_identity(current, expected):
@@ -1621,6 +1630,11 @@ def _create_trusted_basic_agent_boundary():
         )
 
     def violation():
+        if not same_mapping_identity(
+            builtins_dictionary,
+            builtins_attributes,
+        ):
+            return "interpreter builtins changed"
         for alias in aliases:
             candidate = sys.modules.get(alias)
             if candidate is not module:
@@ -1710,6 +1724,10 @@ def _create_trusted_basic_agent_boundary():
         return None
 
     def restore():
+        for name in trusted_list(builtins_dictionary):
+            if name not in builtins_attributes:
+                builtins_dictionary.pop(name, None)
+        builtins_dictionary.update(builtins_attributes)
         current_names = set(trusted_class.__dict__)
         for name in current_names - set(class_attributes):
             if name not in {"__dict__", "__weakref__"}:
@@ -1793,10 +1811,22 @@ def _is_agent_cartridge_file(filepath):
 
 
 def _is_kernel_agent_filename(filename):
-    normalized = os.path.normcase(os.path.basename(filename))
+    normalized = os.path.basename(filename).casefold()
     return normalized in {
-        os.path.normcase(name) for name in _KERNEL_AGENT_FILENAMES
+        name.casefold() for name in _KERNEL_AGENT_FILENAMES
     }
+
+
+def _aliases_kernel_agent_path(filepath, directory=None):
+    root = directory or os.path.dirname(filepath) or AGENTS_PATH
+    kernel_path = os.path.join(root, "basic_agent.py")
+    try:
+        return os.path.exists(filepath) and os.path.samefile(
+            filepath,
+            kernel_path,
+        )
+    except (OSError, ValueError):
+        return False
 
 
 def _agent_cartridge_files(directory=None):
@@ -3367,7 +3397,13 @@ def agents_delete(filename):
         safe_name += '.py'
     # basic_agent.py is the shared base class every agent imports — deleting it breaks
     # all of them. It isn't a usable agent and the UI never lists it, so refuse.
-    if _is_kernel_agent_filename(safe_name):
+    if (
+        _is_kernel_agent_filename(safe_name)
+        or _aliases_kernel_agent_path(
+            os.path.join(AGENTS_PATH, safe_name),
+            AGENTS_PATH,
+        )
+    ):
         return jsonify({"error": "basic_agent.py is the shared base class and cannot be deleted."}), 400
     filepath = os.path.join(AGENTS_PATH, safe_name)
     if os.path.exists(filepath):
@@ -3398,7 +3434,13 @@ def agents_import():
     # Ensure it matches the glob pattern *_agent.py
     if not safe_name.endswith('_agent.py'):
         safe_name = safe_name[:-3] + '_agent.py'
-    if _is_kernel_agent_filename(safe_name):
+    if (
+        _is_kernel_agent_filename(safe_name)
+        or _aliases_kernel_agent_path(
+            os.path.join(AGENTS_PATH, safe_name),
+            AGENTS_PATH,
+        )
+    ):
         return jsonify({
             "error": "basic_agent.py is the shared base class and cannot be replaced.",
         }), 400

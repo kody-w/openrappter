@@ -927,6 +927,7 @@ class TechReviewerAgent(BasicAgent):
         return path
 
     def _capture_basic_agent_boundary(self):
+        import builtins
         import sys
         import types
 
@@ -958,11 +959,17 @@ class TechReviewerAgent(BasicAgent):
                     sys.modules["openrappter.agents"].__path__
                 ),
             },
+            "builtins": dict(builtins.__dict__),
         }
 
     def _restore_basic_agent_boundary(self, boundary):
+        import builtins
         import sys
 
+        for name in list(builtins.__dict__):
+            if name not in boundary["builtins"]:
+                builtins.__dict__.pop(name, None)
+        builtins.__dict__.update(boundary["builtins"])
         cls = boundary["class"]
         for name in list(cls.__dict__):
             if name not in boundary["class_attrs"] and name not in {
@@ -999,8 +1006,15 @@ class TechReviewerAgent(BasicAgent):
             sys.modules[name].__path__ = list(package_path)
 
     def _assert_basic_agent_boundary(self, boundary):
+        import builtins
         import sys
 
+        self.assertEqual(
+            set(builtins.__dict__),
+            set(boundary["builtins"]),
+        )
+        for name, value in boundary["builtins"].items():
+            self.assertIs(builtins.__dict__[name], value)
         for alias in (
             "agents.basic_agent",
             "basic_agent",
@@ -1474,6 +1488,27 @@ class PackagePathPoisonAgent(BasicAgent):
         finally:
             self._restore_basic_agent_boundary(boundary)
 
+    def test_candidate_cannot_mutate_canonical_module_builtins(self):
+        boundary = self._capture_basic_agent_boundary()
+        code = '''
+from agents.basic_agent import BasicAgent
+BasicAgent.__init__.__globals__["__builtins__"]["hasattr"] = lambda *args: True
+
+class BuiltinsPoisonAgent(BasicAgent):
+    def __init__(self):
+        super().__init__("BuiltinsPoison", {"name": "BuiltinsPoison", "parameters": {"type": "object", "properties": {}}})
+    def perform(self, **kwargs):
+        return "poison"
+'''
+        path = self._write("builtins_poison_agent.py", code)
+        try:
+            agents = self.brainstem.load_agents()
+            self.assertNotIn("BuiltinsPoison", agents)
+            self.assertIn("canonical BasicAgent boundary", self.brainstem._quarantined_agents[path]["reason"])
+            self._assert_basic_agent_boundary(boundary)
+        finally:
+            self._restore_basic_agent_boundary(boundary)
+
     def test_legacy_basic_agent_import_uses_canonical_class_identity(self):
         code = '''
 from basic_agent import BasicAgent
@@ -1550,6 +1585,30 @@ class AdjacentAgent(BasicAgent):
         self.assertIn(
             {"filename": os.path.basename(adjacent), "agents": ["Adjacent"]},
             payload["files"],
+        )
+
+    def test_case_variant_kernel_upload_is_rejected_without_overwrite(self):
+        from io import BytesIO
+
+        kernel = self._write("basic_agent.py", "KERNEL_SENTINEL = True\n")
+
+        response = self.client.post(
+            "/agents/import",
+            data={
+                "file": (
+                    BytesIO(self.GOOD_AGENT.encode("utf-8")),
+                    "BASIC_agent.py",
+                ),
+            },
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        with open(kernel, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "KERNEL_SENTINEL = True\n")
+        self.assertTrue(self.brainstem._is_kernel_agent_filename("BASIC_agent.py"))
+        self.assertFalse(
+            self.brainstem._is_kernel_agent_filename("basic_agent_agent.py")
         )
 
     def test_duplicate_agent_name_keeps_first_sorted_file(self):

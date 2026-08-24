@@ -1251,6 +1251,9 @@ function createWindow(): BrowserWindow {
           if (!chat || !surgeon) {
             throw new Error('Copilot readiness fixture surfaces did not mount.');
           }
+          for (let attempt = 0; attempt < 50 && !surgeon.patient; attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
           chat.chatTarget = 'openrappter';
           surgeon.mode = 'surgeon';
           chat.messages = [

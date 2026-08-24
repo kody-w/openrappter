@@ -33,6 +33,7 @@ describe('Show-and-Tell narration lifecycle', () => {
       showAndTell: vi.fn(),
       desktopControl: vi.fn(),
       narration: vi.fn().mockReturnValue(download),
+      buddyEvidence: vi.fn(),
       onNarrationStatus: vi.fn().mockReturnValue(() => {}),
       voice: vi.fn(),
       onVoiceStatus: vi.fn().mockReturnValue(() => {}),

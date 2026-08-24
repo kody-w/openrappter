@@ -15,6 +15,7 @@ try:
     from openrappter.flight_recorder import ensure_flight_recorder_from_env
     from openrappter.show_and_tell import (
         ShowAndTellStore,
+        _write_private_text,
         analyze_session,
         assert_context_capture_available,
         build_artifacts,
@@ -28,6 +29,12 @@ try:
         spawn_collector,
         test_artifacts,
     )
+    from openrappter.show_and_tell_skill import (
+        build_session_bundle,
+        build_skill_plan,
+        revise_plan,
+    )
+    from openrappter.show_and_tell_marketplace import write_marketplace_export
     SHOW_AND_TELL_AVAILABLE = True
 except ModuleNotFoundError:
     # Brainstem/RAR loaders intentionally execute one agent file with only the
@@ -44,15 +51,20 @@ except ModuleNotFoundError:
     analyze_session = _unavailable
     assert_context_capture_available = _unavailable
     build_artifacts = _unavailable
+    build_session_bundle = _unavailable
+    build_skill_plan = _unavailable
     capture_explicit_frame = _unavailable
     is_private_context = _unavailable
     privacy_reduced_url = _unavailable
     read_active_context = _unavailable
     replay_plan = _unavailable
     revise_analysis = _unavailable
+    revise_plan = _unavailable
     show_and_tell_root = _unavailable
     spawn_collector = _unavailable
     test_artifacts = _unavailable
+    write_marketplace_export = _unavailable
+    _write_private_text = _unavailable
     ensure_flight_recorder_from_env = _unavailable
 
 
@@ -118,6 +130,10 @@ class ShowAndTellAgent(BasicAgent):
                             "stop",
                             "analyze",
                             "review",
+                            "bundle",
+                            "propose",
+                            "revise_plan",
+                            "export",
                             "build",
                             "replay",
                             "test",
@@ -148,6 +164,18 @@ class ShowAndTellAgent(BasicAgent):
                     "steps_json": {
                         "type": "string",
                         "description": "Edited step array as JSON.",
+                    },
+                    "values_json": {
+                        "type": "string",
+                        "description": "Edited plan value array as JSON.",
+                    },
+                    "plugin_name": {
+                        "type": "string",
+                        "description": "Marketplace plugin directory name for export.",
+                    },
+                    "skill_name": {
+                        "type": "string",
+                        "description": "Marketplace skill directory name for export.",
                     },
                     "feedback": {
                         "type": "string",
@@ -253,6 +281,10 @@ class ShowAndTellAgent(BasicAgent):
                 "stop": self._stop,
                 "analyze": self._analyze,
                 "review": self._review,
+                "bundle": self._bundle,
+                "propose": self._propose,
+                "revise_plan": self._revise_plan,
+                "export": self._export,
                 "build": self._build,
                 "replay": self._replay,
                 "test": self._test,
@@ -736,8 +768,52 @@ class ShowAndTellAgent(BasicAgent):
         analysis = self.store.get_analysis(session["id"])
         if not analysis:
             raise RuntimeError("Analyze and approve the session before building.")
+        plan = self.store.get_plan(session["id"])
+        if plan is None and any(
+            event["type"] == "plan.proposal.requested"
+            for event in self.store.events(session["id"])
+        ):
+            return {
+                "status": "error",
+                "action": "build",
+                "code": "plan_missing",
+                "message": (
+                    "A plan proposal was requested but its review record is missing. "
+                    "Propose it again before building."
+                ),
+            }
+        if plan is not None:
+            # A proposed plan is the thing that gets approved. Falling back to
+            # the analysis here would build text nobody reviewed as a plan.
+            if not plan.get("approved"):
+                return {
+                    "status": "error",
+                    "action": "build",
+                    "code": "plan_not_approved",
+                    "message": (
+                        "Approve the proposed Show-and-Tell plan before building "
+                        "from it."
+                    ),
+                }
+            if plan.get("analysisRevision") != analysis.get("revision"):
+                return {
+                    "status": "error",
+                    "action": "build",
+                    "code": "plan_stale",
+                    "message": (
+                        "The analysis changed after this plan was approved. "
+                        "Propose the plan again and approve the revision that "
+                        "matches it."
+                    ),
+                }
         target = kwargs.get("target", "skill")
-        artifacts = build_artifacts(self.store, analysis, target)
+        dimension_offer = target == "rappid"
+        artifacts = build_artifacts(
+            self.store,
+            analysis,
+            "skill" if dimension_offer else target,
+            plan=plan,
+        )
         ensure_flight_recorder_from_env().record(
             {
                 "kind": "show-and-tell.built",
@@ -750,7 +826,7 @@ class ShowAndTellAgent(BasicAgent):
                 },
             }
         )
-        return {
+        result = {
             "status": "success",
             "action": "build",
             "session_id": session["id"],
@@ -761,6 +837,151 @@ class ShowAndTellAgent(BasicAgent):
                 "session_id": session["id"],
                 "artifact_paths": [artifact["path"] for artifact in artifacts],
             },
+        }
+        if dimension_offer:
+            skill = next(
+                (item for item in artifacts if item["kind"] == "skill"), artifacts[0]
+            )
+            # Offered, never attached: a RAPPID grows by an approved append
+            # through the habitat, not by an agent deciding on its own.
+            result["rappid_dimension"] = {
+                "kind": "skill",
+                "sessionId": session["id"],
+                "name": skill["name"],
+                "artifactPath": skill["path"],
+                "contentHash": skill["contentHash"],
+                "attached": False,
+                "privacyScanned": True,
+            }
+        return result
+
+    def _bundle(self, **kwargs):
+        session = self._require_completed(kwargs.get("session_id"))
+        bundle = build_session_bundle(session, self.store.events(session["id"]))
+        return {
+            "status": "success",
+            "action": "bundle",
+            "session_id": session["id"],
+            "bundle": bundle,
+            "message": (
+                f"{bundle['stats']['segmentCount']} segment(s); "
+                f"{bundle['stats']['silentEvents']} event(s) went unexplained."
+            ),
+        }
+
+    def _propose(self, **kwargs):
+        session = self._require_completed(kwargs.get("session_id"))
+        analysis = self.store.get_analysis(session["id"])
+        if not analysis:
+            raise RuntimeError(
+                "Analyze the Show-and-Tell session before proposing a plan."
+            )
+        self.store.append_event(
+            session["id"],
+            "plan.proposal.requested",
+            "show-and-tell",
+            {},
+        )
+        bundle = build_session_bundle(session, self.store.events(session["id"]))
+        plan = build_skill_plan(
+            analysis,
+            bundle,
+            previous=self.store.get_plan(session["id"]),
+            now=int(time.time() * 1000),
+        )
+        self.store.save_plan(plan)
+        return {
+            "status": "success",
+            "action": "propose",
+            "session_id": session["id"],
+            "plan": plan,
+            # A proposal is a proposal: this turn writes no artifact at all.
+            "proposal_only": True,
+            "built": False,
+            "message": (
+                f"Proposed plan revision {plan['revision']} with "
+                f"{len(plan['values'])} editable value(s). Nothing was built."
+            ),
+        }
+
+    def _revise_plan(self, **kwargs):
+        session = self._require_completed(kwargs.get("session_id"))
+        plan = self.store.get_plan(session["id"])
+        if not plan:
+            raise RuntimeError("Propose a Show-and-Tell plan before revising it.")
+        approve = kwargs.get("approve") is True
+        if approve and not self.store.consume_consent(
+            kwargs.get("consent_token"), "approve"
+        ):
+            return {
+                "status": "error",
+                "action": "revise_plan",
+                "code": "local_approval_required",
+                "message": (
+                    "Approval requires the interactive local command "
+                    "`openrappter show-and-tell approve`."
+                ),
+            }
+        revised = revise_plan(
+            plan,
+            title=kwargs.get("title"),
+            intent=kwargs.get("intent"),
+            values_json=kwargs.get("values_json"),
+            steps_json=kwargs.get("steps_json"),
+            feedback=kwargs.get("feedback") or kwargs.get("query"),
+            approve=approve,
+            now=int(time.time() * 1000),
+        )
+        self.store.save_plan(revised)
+        return {
+            "status": "success",
+            "action": "revise_plan",
+            "session_id": session["id"],
+            "plan": revised,
+            "message": (
+                "Plan approved. It can now build or export."
+                if revised["approved"]
+                else "Plan updated but not approved."
+            ),
+        }
+
+    def _export(self, **kwargs):
+        session = self._require_completed(kwargs.get("session_id"))
+        plan = self.store.get_plan(session["id"])
+        if not plan:
+            raise RuntimeError("Propose a Show-and-Tell plan before exporting it.")
+        if not plan.get("approved"):
+            return {
+                "status": "error",
+                "action": "export",
+                "code": "plan_not_approved",
+                "message": "Approve the Show-and-Tell plan before exporting it.",
+            }
+        exported = write_marketplace_export(
+            plan,
+            lambda file, content: _write_private_text(Path(file), content),
+            plugin_name=kwargs.get("plugin_name"),
+            skill_name=kwargs.get("skill_name"),
+        )
+        artifact = self.store.record_artifact(
+            session["id"],
+            "marketplace",
+            exported["pluginName"],
+            Path(exported["marketplacePath"]),
+            exported["contentHash"],
+        )
+        return {
+            "status": "success",
+            "action": "export",
+            "session_id": session["id"],
+            "marketplace": exported,
+            "artifact": artifact,
+            # Writing a local directory is not publishing it anywhere.
+            "published": False,
+            "message": (
+                f"Exported {len(exported['files'])} file(s) to {exported['root']}. "
+                "Nothing was published."
+            ),
         }
 
     def _replay(self, **kwargs):

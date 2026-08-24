@@ -1,76 +1,308 @@
-/**
- * A direct line to the patient. — kody-w/openrappter#99
- *
- * Everything else on the surgeon screen is Copilot talking ABOUT OpenRappter.
- * This is OpenRappter answering for itself.
- *
- * It deliberately goes over `POST /chat` — the public wire — rather than an
- * internal RPC. That endpoint is byte-compatible with a RAPP brainstem across
- * every malformed case and was verified identical across three live peers, so
- * the owner's own dashboard reaches its agent through exactly the same door a
- * neighbor would use. If that door ever breaks, this breaks with it, which is
- * the point: no privileged back channel that keeps working while the wire
- * everyone else depends on is down.
- *
- * Same origin — the gateway serves this UI — so no host or token is needed here.
- */
+import { desktopBridge } from './desktop.js';
+import { gateway } from './gateway.js';
+
+export type PatientTransportStatus =
+  | 'checking'
+  | 'ready'
+  | 'offline'
+  | 'cors-blocked'
+  | 'unauthorized'
+  | 'timeout'
+  | 'server-error';
+
+export interface PatientTransportState {
+  status: PatientTransportStatus;
+  message: string;
+  retryable: boolean;
+}
 
 export interface PatientReply {
-  /** What the agent said. Senses are already split out by the envelope builder. */
   response: string;
   session_id: string;
   agent_logs: string;
-  /** Present only when the reply carried a spoken variant. */
   voice_response?: string;
-  /** The model that actually answered, which may differ from the one requested. */
   model?: string;
 }
 
-/** A turn generous enough for a tool-using answer, matching the surgeon's budget. */
-export const PATIENT_TURN_TIMEOUT_MS = 15 * 60_000;
+type TransportResult = {
+  status: number;
+  body: string;
+  error?: 'offline' | 'cors-blocked' | 'timeout' | 'server-error';
+};
 
-export async function askPatient(
+export const PATIENT_TURN_TIMEOUT_MS = 15 * 60_000;
+export const PATIENT_PROBE_TIMEOUT_MS = 8_000;
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+
+let state: PatientTransportState = {
+  status: 'checking',
+  message: 'Checking the public patient chat wire…',
+  retryable: false,
+};
+let probePromise: Promise<PatientTransportState> | undefined;
+let activeTurn: Promise<PatientReply> | undefined;
+let activeController: AbortController | undefined;
+
+export function getPatientTransportState(): PatientTransportState {
+  return { ...state };
+}
+
+export function cancelPatientRequest(): void {
+  activeController?.abort();
+  activeController = undefined;
+  const desktop = desktopBridge();
+  if (desktop) void desktop.patientChat({ action: 'cancel' }).catch(() => undefined);
+}
+
+export function probePatientTransport(
+  _force = false,
+): Promise<PatientTransportState> {
+  if (probePromise) return probePromise;
+  state = {
+    status: 'checking',
+    message: 'Checking the public patient chat wire…',
+    retryable: false,
+  };
+  probePromise = (async () => {
+    const result = await executeTransport({ action: 'probe' }, PATIENT_PROBE_TIMEOUT_MS);
+    state = classifyTransport(result, true);
+    return getPatientTransportState();
+  })().finally(() => {
+    probePromise = undefined;
+  });
+  return probePromise;
+}
+
+export function askPatient(
   userInput: string,
   sessionId?: string,
 ): Promise<PatientReply> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PATIENT_TURN_TIMEOUT_MS);
-  try {
-    const res = await fetch('/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      // `user_input` is the field the brainstem documents. Using it here keeps
-      // this client honest: it speaks the shared contract, not an openrappter
-      // dialect that happens to also be accepted.
-      body: JSON.stringify({
-        user_input: userInput,
-        ...(sessionId ? { session_id: sessionId } : {}),
-      }),
-    });
-
-    const text = await res.text();
-    let body: Record<string, unknown>;
+  if (activeTurn) return activeTurn;
+  activeTurn = (async () => {
+    const readiness = state.status === 'ready'
+      ? state
+      : await probePatientTransport();
+    if (readiness.status !== 'ready') {
+      throw new Error(readiness.message);
+    }
+    activeController = new AbortController();
+    const result = await executeTransport({
+      action: 'send',
+      userInput,
+      ...(sessionId ? { sessionId } : {}),
+    }, PATIENT_TURN_TIMEOUT_MS, activeController.signal);
+    const classified = classifyTransport(result, false);
+    if (classified.status !== 'ready') {
+      state = classified;
+      throw new Error(classified.message);
+    }
+    let reply: PatientReply;
     try {
-      body = JSON.parse(text) as Record<string, unknown>;
+      reply = parseReply(result.body);
     } catch {
-      throw new Error(`The patient answered with something that is not JSON (HTTP ${res.status}).`);
+      state = {
+        status: 'server-error',
+        message: 'Public patient chat returned a malformed response.',
+        retryable: true,
+      };
+      throw new Error(state.message);
     }
+    state = {
+      status: 'ready',
+      message: 'Public patient chat is ready.',
+      retryable: false,
+    };
+    return reply;
+  })().finally(() => {
+    activeTurn = undefined;
+    activeController = undefined;
+  });
+  return activeTurn;
+}
 
-    if (!res.ok) {
-      // A rejection on this wire is a bare {error}, exactly as the brainstem
-      // writes it — so surface that sentence rather than inventing one.
-      throw new Error(String(body.error ?? `HTTP ${res.status}`));
-    }
-
+async function executeTransport(
+  request:
+    | { action: 'probe' }
+    | { action: 'send'; userInput: string; sessionId?: string },
+  timeoutMs: number,
+  externalSignal?: AbortSignal,
+): Promise<TransportResult> {
+  const desktop = desktopBridge();
+  if (desktop) return desktop.patientChat(request);
+  if (location.protocol === 'file:') {
+    return { status: 0, body: '', error: 'cors-blocked' };
+  }
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  externalSignal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const target = resolveHostedChatUrl();
+  if (!target) {
+    clearTimeout(timer);
+    return { status: 0, body: '', error: 'cors-blocked' };
+  }
+  const crossOrigin = new URL(target).origin !== location.origin;
+  try {
+    const response = await fetch(target, {
+      method: request.action === 'probe' ? 'HEAD' : 'POST',
+      headers: request.action === 'send'
+        ? {
+            ...gateway.httpAuthHeaders(),
+            'Content-Type': 'application/json',
+          }
+        : gateway.httpAuthHeaders(),
+      body: request.action === 'send'
+        ? JSON.stringify({
+            user_input: request.userInput,
+            ...(request.sessionId ? { session_id: request.sessionId } : {}),
+          })
+        : undefined,
+      signal: controller.signal,
+      redirect: 'error',
+    });
     return {
-      response: String(body.response ?? ''),
-      session_id: String(body.session_id ?? ''),
-      agent_logs: String(body.agent_logs ?? ''),
-      ...(typeof body.voice_response === 'string' ? { voice_response: body.voice_response } : {}),
-      ...(typeof body.model === 'string' ? { model: body.model } : {}),
+      status: response.status,
+      body: request.action === 'probe'
+        ? ''
+        : await boundedResponseText(response),
+    };
+  } catch (error) {
+    return {
+      status: 0,
+      body: '',
+      error: controller.signal.aborted
+        ? 'timeout'
+        : error instanceof TypeError
+          ? (crossOrigin ? 'cors-blocked' : 'offline')
+          : 'server-error',
     };
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', abort);
+  }
+}
+
+function classifyTransport(
+  result: TransportResult,
+  probe: boolean,
+): PatientTransportState {
+  if (result.error === 'timeout') {
+    return {
+      status: 'timeout',
+      message: 'Public patient chat timed out. Retry the connection.',
+      retryable: true,
+    };
+  }
+  if (result.error === 'offline') {
+    return {
+      status: 'offline',
+      message: 'The public patient chat endpoint is offline or unreachable.',
+      retryable: true,
+    };
+  }
+  if (result.error === 'cors-blocked') {
+    return {
+      status: 'cors-blocked',
+      message: 'The configured patient chat endpoint is blocked by origin or mixed-content policy.',
+      retryable: true,
+    };
+  }
+  if (result.error === 'server-error') {
+    return {
+      status: 'server-error',
+      message: 'The public patient chat response exceeded safe bounds.',
+      retryable: true,
+    };
+  }
+  if (result.status === 401 || result.status === 403) {
+    return {
+      status: 'unauthorized',
+      message: 'The public patient chat endpoint rejected authentication.',
+      retryable: true,
+    };
+  }
+  if (result.status >= 500 || result.status === 0) {
+    return {
+      status: 'server-error',
+      message: 'The public patient chat endpoint is unavailable.',
+      retryable: true,
+    };
+  }
+  if (probe && result.status !== 204) {
+    return {
+      status: 'server-error',
+      message: 'The public patient chat readiness probe failed.',
+      retryable: true,
+    };
+  }
+  if (!probe && (result.status < 200 || result.status >= 300)) {
+    return {
+      status: 'server-error',
+      message: `Public patient chat failed (HTTP ${result.status}).`,
+      retryable: true,
+    };
+  }
+  return {
+    status: 'ready',
+    message: 'Public patient chat is ready.',
+    retryable: false,
+  };
+}
+
+function parseReply(text: string): PatientReply {
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error('Public patient chat returned a malformed response.');
+  }
+  if (
+    body.status === 'error'
+    || typeof body.response !== 'string'
+    || typeof body.session_id !== 'string'
+    || typeof body.agent_logs !== 'string'
+  ) {
+    throw new Error('Public patient chat returned an invalid response.');
+  }
+  return {
+    response: body.response,
+    session_id: body.session_id,
+    agent_logs: body.agent_logs,
+    ...(typeof body.voice_response === 'string'
+      ? { voice_response: body.voice_response }
+      : {}),
+    ...(typeof body.model === 'string' ? { model: body.model } : {}),
+  };
+}
+
+async function boundedResponseText(response: Response): Promise<string> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+    throw new Error('Public patient chat response is too large.');
+  }
+
+  const text = await response.text();
+  if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) {
+    throw new Error('Public patient chat response is too large.');
+  }
+  return text;
+}
+
+function resolveHostedChatUrl(): string | null {
+  const configured = import.meta.env.VITE_GATEWAY_URL;
+  if (!configured) return new URL('/chat', location.origin).href;
+  try {
+    const url = new URL(configured);
+    if (url.username || url.password) return null;
+    if (url.protocol === 'ws:') url.protocol = 'http:';
+    else if (url.protocol === 'wss:') url.protocol = 'https:';
+    else if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    if (location.protocol === 'https:' && url.protocol !== 'https:') return null;
+    url.pathname = '/chat';
+    url.search = '';
+    url.hash = '';
+    return url.href;
+  } catch {
+    return null;
   }
 }

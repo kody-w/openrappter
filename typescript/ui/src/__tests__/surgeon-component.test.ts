@@ -26,6 +26,9 @@ const mocks = vi.hoisted(() => ({
     state.status === 'ready' && state.model?.status === 'ready'
   ),
   askPatient: vi.fn(),
+  probePatientTransport: vi.fn(),
+  getPatientTransportState: vi.fn(),
+  cancelPatientRequest: vi.fn(),
 }));
 
 vi.mock('../services/surgeon.js', () => mocks);
@@ -42,6 +45,9 @@ vi.mock('../services/copilot-auth.js', () => ({
 }));
 vi.mock('../services/patient.js', () => ({
   askPatient: mocks.askPatient,
+  probePatientTransport: mocks.probePatientTransport,
+  getPatientTransportState: mocks.getPatientTransportState,
+  cancelPatientRequest: mocks.cancelPatientRequest,
 }));
 
 import '../components/surgeon.js';
@@ -125,6 +131,16 @@ describe('openrappter-surgeon', () => {
     mocks.loadPatient.mockResolvedValue(patient);
     mocks.loadCases.mockResolvedValue([]);
     mocks.sendTurn.mockResolvedValue(result());
+    mocks.probePatientTransport.mockResolvedValue({
+      status: 'ready',
+      message: 'Public patient chat is ready.',
+      retryable: false,
+    });
+    mocks.getPatientTransportState.mockReturnValue({
+      status: 'ready',
+      message: 'Public patient chat is ready.',
+      retryable: false,
+    });
     mocks.loadCopilotAuthState.mockResolvedValue({
       status: 'ready',
       code: 'COPILOT_READY',
@@ -208,6 +224,74 @@ describe('openrappter-surgeon', () => {
     await settle(element);
     expect(surgeon.getAttribute('aria-checked')).toBe('true');
     expect(element.shadowRoot?.activeElement).toBe(surgeon);
+  });
+
+  it('does not claim Patient READY when the exact public chat probe is unreachable', async () => {
+    mocks.probePatientTransport
+      .mockResolvedValueOnce({
+        status: 'offline',
+        message: 'The public patient chat endpoint is offline or unreachable.',
+        retryable: true,
+      })
+      .mockResolvedValueOnce({
+        status: 'ready',
+        message: 'Public patient chat is ready.',
+        retryable: false,
+      });
+    const element = document.createElement('openrappter-surgeon') as SurgeonElement;
+    document.body.append(element);
+    await settle(element);
+    const patientMode = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      '[data-mode="patient"]',
+    )!;
+
+    expect(patientMode.disabled).toBe(true);
+    expect(patientMode.dataset.state).toBe('transport-unavailable');
+    expect(patientMode.title).toContain('offline or unreachable');
+    expect(element.shadowRoot?.querySelector('.mode-status')?.textContent)
+      .not.toContain('Patient mode — public chat ready');
+    expect(element.shadowRoot?.textContent).toContain('Patient chat unavailable');
+    expect(mocks.askPatient).not.toHaveBeenCalled();
+
+    const retry = Array.from(
+      element.shadowRoot?.querySelectorAll<HTMLButtonElement>(
+        '.patient-transport-banner button',
+      ) ?? [],
+    ).find((button) => button.textContent?.includes('Retry public chat'));
+    retry!.click();
+    await settle(element);
+    expect(patientMode.disabled).toBe(false);
+  });
+
+  it('persists no patient turn when the public chat request fails', async () => {
+    mocks.askPatient.mockRejectedValueOnce(new Error(
+      'The public patient chat endpoint is offline or unreachable.',
+    ));
+    mocks.getPatientTransportState.mockReturnValue({
+      status: 'offline',
+      message: 'The public patient chat endpoint is offline or unreachable.',
+      retryable: true,
+    });
+    const element = document.createElement('openrappter-surgeon') as SurgeonElement;
+    document.body.append(element);
+    await settle(element);
+    const patientMode = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      '[data-mode="patient"]',
+    )!;
+    patientMode.click();
+    await settle(element);
+    const portal = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      '.starter-portals .portal',
+    )!;
+    portal.click();
+    await settle(element);
+
+    expect(mocks.askPatient).toHaveBeenCalledOnce();
+    expect(element.shadowRoot?.textContent).not.toContain('must not reach');
+    expect(element.shadowRoot?.querySelectorAll('.turn')).toHaveLength(0);
+    expect(element.shadowRoot?.textContent).toContain(
+      'The public patient chat endpoint is offline or unreachable.',
+    );
   });
 
   it('turns the production HTTP 401 into inline reauthentication without a fake answer', async () => {

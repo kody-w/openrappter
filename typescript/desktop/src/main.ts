@@ -46,6 +46,10 @@ import {
   GITHUB_DEVICE_LOGIN_URL,
   isAllowedGithubDeviceLoginUrl,
 } from './external-url-policy.js';
+import {
+  executePatientChatRequest,
+  type DesktopPatientChatRequest,
+} from './patient-chat.js';
 
 const packageRoot = path.join(
   import.meta.dirname,
@@ -93,6 +97,7 @@ let processingCommand = false;
 let rendererReady = false;
 let narrationService: NarrationService | undefined;
 let vibeVoiceService: VibeVoiceService | undefined;
+let patientChatController: AbortController | undefined;
 let tray: Tray | undefined;
 let endpointFile: string | undefined;
 let smokeWatchdog: NodeJS.Timeout | undefined;
@@ -1502,6 +1507,32 @@ if (!ownsInstanceLock) {
           }
           await shell.openExternal(GITHUB_DEVICE_LOGIN_URL);
           return { opened: true };
+        },
+      );
+      ipcMain.handle(
+        'openrappter:patient-chat',
+        async (event, request: DesktopPatientChatRequest) => {
+          if (!trustedRenderer(event)) {
+            throw new Error('Untrusted desktop renderer.');
+          }
+          if (request?.action === 'cancel') {
+            patientChatController?.abort();
+            patientChatController = undefined;
+            return { status: 204, body: '' };
+          }
+          patientChatController?.abort();
+          const controller = new AbortController();
+          patientChatController = controller;
+          const result = await executePatientChatRequest({
+            request,
+            gatewayOrigin,
+            gatewayToken,
+            signal: controller.signal,
+          });
+          if (patientChatController === controller) {
+            patientChatController = undefined;
+          }
+          return result;
         },
       );
       ipcMain.handle(

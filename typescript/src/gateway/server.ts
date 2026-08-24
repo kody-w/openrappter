@@ -1259,6 +1259,22 @@ export class GatewayServer {
     // as `/bones`; comparing the whole request target made the deep link fall
     // through to the SPA, which silently served a different page.
     const pathOnly = (req.url ?? '').split('?')[0];
+    if (pathOnly === '/chat' && req.method === 'HEAD') {
+      if (!this.resolveHttpAuthenticated(req, {})) {
+        res.writeHead(401, {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        });
+        res.end();
+        return;
+      }
+      res.writeHead(this.agentHandler ? 204 : 503, {
+        'X-OpenRappter-Chat-Ready': this.agentHandler ? '1' : '0',
+        ...corsHeaders,
+      });
+      res.end();
+      return;
+    }
     if ((pathOnly === '/bones' || pathOnly === '/bones/' || pathOnly === '/anatomy') && req.method === 'GET') {
       const page = renderAnatomyPage(readAnatomy(undefined, this.liveSignals()));
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders });

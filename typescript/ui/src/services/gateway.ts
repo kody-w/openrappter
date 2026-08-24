@@ -201,6 +201,12 @@ export class GatewayClient {
     if (creds.password !== undefined) this.password = creds.password;
   }
 
+  httpAuthHeaders(): Record<string, string> {
+    return {
+      ...(this.token ? { 'X-Gateway-Token': this.token } : {}),
+    };
+  }
+
   async connect(): Promise<void> {
     this.stopped = false;
     this.cancelReconnectTimer();

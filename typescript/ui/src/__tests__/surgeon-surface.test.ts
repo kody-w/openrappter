@@ -103,6 +103,7 @@ describe('OpenRappter surgeon resilience', () => {
         'unselected',
         'auth-unavailable',
         'model-unavailable',
+        'transport-unavailable',
         'disabled',
       ]) {
         expect(surgeon).toContain(`data-state='${state}'`);

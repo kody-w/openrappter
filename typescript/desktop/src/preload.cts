@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('openrappterDesktop', {
     ipcRenderer.invoke('openrappter:voice', request),
   openGithubDeviceLogin: () =>
     ipcRenderer.invoke('openrappter:github-device-login'),
+  patientChat: (request: DesktopShowAndTellRequest) =>
+    ipcRenderer.invoke('openrappter:patient-chat', request),
   onVoiceStatus: (
     callback: (status: Record<string, unknown>) => void,
   ) => {

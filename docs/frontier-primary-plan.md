@@ -75,6 +75,11 @@ restored shell's `frame-src` allowed loopback but not its packaged same-origin
 chat. The contract now pins `frame-src 'self'`; the repeated packaged run
 reported both `frontierChat:true` and `frontierPrimary:true`.
 
+The packaged smoke also posts a deliberately invalid, no-side-effect fixture
+request through the embedded chat bridge. It must receive the canonical
+Brainstem `/chat` validation envelope without invoking an agent; release
+evidence reports `brainstemChatWire:true`.
+
 Release gates cover the source DOM, hosted root package, deep links, explicit
 Legacy route, browser behavior, semantic controls, accessibility/responsive
 rules, Electron contracts, and real packaged smoke on Linux, macOS, and Windows.

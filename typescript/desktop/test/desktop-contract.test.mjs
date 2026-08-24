@@ -148,6 +148,9 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(main, /frontier-feature-content/);
   assert.match(main, /frontierPrimary/);
   assert.match(main, /frontierChat/);
+  assert.match(main, /brainstemChatWire/);
+  assert.match(main, /frontier-smoke-invalid/);
+  assert.match(main, /probe\.status === 400/);
   assert.match(main, /contentDocument\?\.getElementById\('model-select'\)/);
   assert.match(main, /contentDocument\?\.getElementById\('starter-prompts'\)/);
   assert.match(main, /document\.title === 'OpenRappter'/);

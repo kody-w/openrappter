@@ -1207,6 +1207,26 @@ function createWindow(): BrowserWindow {
             Boolean(chatFrame?.contentDocument?.getElementById('agents-btn')) &&
             Boolean(chatFrame?.contentDocument?.getElementById('voice-btn')) &&
             Boolean(chatFrame?.contentDocument?.getElementById('starter-prompts'));
+          let brainstemChatWire = false;
+          if (frontierChat) {
+            const probe = await chatFrame.contentWindow.fetch(
+              'http://127.0.0.1:7071/chat',
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  user_input: 123,
+                  session_id: 'frontier-smoke-invalid',
+                  conversation_history: [],
+                }),
+              }
+            );
+            const probeBody = await probe.json();
+            brainstemChatWire =
+              probe.status === 400 &&
+              typeof probeBody.error === 'string' &&
+              probeBody.error.length > 0;
+          }
           const smokeScope = ${JSON.stringify(
             process.env.OPENRAPPTER_DESKTOP_SMOKE_SCOPE ?? 'full',
           )};
@@ -1233,6 +1253,7 @@ function createWindow(): BrowserWindow {
               component:
                 document.documentElement.dataset.openrappterShell === 'frontier',
               frontierChat,
+              brainstemChatWire,
               narrationBridge: Boolean(narrationStatus.model),
               voiceBridge: Boolean(voiceStatus.state),
               gatewayUrl: window.openrappterDesktop.gatewayUrl,
@@ -1311,6 +1332,7 @@ function createWindow(): BrowserWindow {
             component:
               document.documentElement.dataset.openrappterShell === 'frontier',
             frontierChat,
+            brainstemChatWire,
             frontierPrimary:
               document.title === 'OpenRappter' &&
               frontierChat &&
@@ -1352,6 +1374,7 @@ function createWindow(): BrowserWindow {
           'bridge',
           'component',
           'frontierChat',
+          'brainstemChatWire',
           'narrationBridge',
           'voiceBridge',
         ] as const;

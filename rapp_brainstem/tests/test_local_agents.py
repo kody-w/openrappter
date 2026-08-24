@@ -1198,6 +1198,17 @@ class LegacyAgent(BasicAgent):
             "no valid agents",
         )
 
+    def test_basic_agent_module_is_kernel_infrastructure_not_a_cartridge(self):
+        path = self._write(
+            "basic_agent.py",
+            "class BasicAgent:\n"
+            "    def perform(self, **kwargs):\n"
+            "        raise NotImplementedError\n",
+        )
+
+        self.assertEqual(self.brainstem.load_agents(), {})
+        self.assertNotIn(path, self.brainstem._quarantined_agents)
+
     def test_duplicate_agent_name_keeps_first_sorted_file(self):
         first = self.GOOD_AGENT.replace('return "ok"', 'return "first"')
         second = self.GOOD_AGENT.replace('return "ok"', 'return "second"')

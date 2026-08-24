@@ -1925,7 +1925,11 @@ def load_agents():
     agents = {}
     registered_sources = {}
     pattern = os.path.join(AGENTS_PATH, "*_agent.py")
-    files = sorted(glob.glob(pattern))
+    files = [
+        filepath
+        for filepath in sorted(glob.glob(pattern))
+        if os.path.basename(filepath) != "basic_agent.py"
+    ]
 
     for filepath in files:
         loaded = _load_agent_from_file(filepath)

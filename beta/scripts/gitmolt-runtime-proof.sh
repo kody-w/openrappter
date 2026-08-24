@@ -550,7 +550,7 @@ if [ "$COLLISION_GATE_RC" -ne 0 ] \
     || [ "$COLLISION_COMPOSE_RC" -ne 0 ] \
     || [ "$LAST_AGENTS" != "$FACTORY_AGENTS" ] \
     || ! printf '%s' "$LAST_QUARANTINE" | grep -F \
-        "duplicate agent name 'HackerNews'" >/dev/null 2>&1 \
+        "distinct duplicate registered name 'HackerNews'" >/dev/null 2>&1 \
     || ! runtime_is_alive; then
     collision_ok=1
 fi

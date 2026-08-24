@@ -6,6 +6,7 @@ import {
   RINGS,
   RING_MANIFEST_URLS,
   compareSemVer,
+  parseCandidateBundleUrl,
   downloadAndVerify,
   fetchRingManifest,
   isVersionDowngrade,
@@ -114,6 +115,37 @@ describe('ring selection', () => {
       persistedRing: 'nightly',
     })).toBe('canary');
     expect(selectRing({ env: {}, persistedRing: 'beta' })).toBe('beta');
+  });
+
+  describe('closed candidate bundle URL', () => {
+    const fixture = JSON.parse(fs.readFileSync(path.resolve('..', 'contracts', 'candidate-url-v1.json'), 'utf8')).fixture;
+    it('parses the exact allowlisted fixture', () => {
+      expect(parseCandidateBundleUrl(fixture.url)).toEqual({
+        ref: fixture.ref, sourceCommit: fixture.source_commit, kind: fixture.kind,
+        candidateId: fixture.candidate_id, sha256: fixture.sha256,
+      });
+    });
+    it.each([
+      '?x=1', '#x', 'HOST', 'PORT', 'CREDS', 'REPO', 'REF', 'COMMIT', 'KIND',
+      'ID', 'HASH', 'TRAVERSAL', 'ENCODED', 'UNICODE', 'EXTRA',
+    ])('rejects candidate URL mutation %s', mutation => {
+      let value = fixture.url;
+      if (mutation === '?x=1' || mutation === '#x') value += mutation;
+      if (mutation === 'HOST') value = value.replace('raw.githubusercontent.com', 'evil.example');
+      if (mutation === 'PORT') value = value.replace('raw.githubusercontent.com', 'raw.githubusercontent.com:443');
+      if (mutation === 'CREDS') value = value.replace('https://', 'https://user@');
+      if (mutation === 'REPO') value = value.replace('/openrappter/', '/wrong/');
+      if (mutation === 'REF') value = value.replace(`/${fixture.ref}/`, `/${'g'.repeat(40)}/`);
+      if (mutation === 'COMMIT') value = value.replace(`/${fixture.source_commit}/`, `/${'g'.repeat(40)}/`);
+      if (mutation === 'KIND') value = value.replace('/release/', '/beta/');
+      if (mutation === 'ID') value = value.replace(`/${fixture.candidate_id}/`, '/-invalid/');
+      if (mutation === 'HASH') value = value.replace(fixture.sha256, 'f'.repeat(63));
+      if (mutation === 'TRAVERSAL') value = value.replace(`/${fixture.candidate_id}/`, '/../');
+      if (mutation === 'ENCODED') value = value.replace(`/${fixture.candidate_id}/`, '/%2e%2e/');
+      if (mutation === 'UNICODE') value = value.replace(`/${fixture.candidate_id}/`, '/täg/');
+      if (mutation === 'EXTRA') value = value.replace('.tar.gz', '/extra.tar.gz');
+      expect(() => parseCandidateBundleUrl(value)).toThrow();
+    });
   });
 
   describe('complete SemVer ordering', () => {

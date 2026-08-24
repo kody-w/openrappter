@@ -77,12 +77,12 @@ jobs:
           runtime_version="$(PYTHONPATH=python python -c 'from openrappter import __version__; print(__version__)')"
           if [ "$CANDIDATE_KIND" = release ]; then
             test "$INTENDED_RELEASE_TAG" = "v$ts_version"
-            candidate_id="$(python -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ[\"INTENDED_RELEASE_TAG\"],safe=\"._-\"))')"
+            candidate_id="$(python -c 'import base64,os; print(\"tag-\"+base64.urlsafe_b64encode(os.environ[\"INTENDED_RELEASE_TAG\"].encode()).decode().rstrip(\"=\"))')"
           else
             test -z "$INTENDED_RELEASE_TAG"
             candidate_id="${INPUT_CANDIDATE_ID:-snapshot-$SOURCE_DATE_EPOCH}"
           fi
-          printf '%s' "$candidate_id" | grep -Eq '^[A-Za-z0-9._%-]+$'
+          printf '%s' "$candidate_id" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
           echo "CANDIDATE_ID=$candidate_id" >> "$GITHUB_ENV"
           mkdir candidate
           (cd typescript && npm ci && npm run build && node scripts/pack-locked.mjs --pack-destination ../candidate)

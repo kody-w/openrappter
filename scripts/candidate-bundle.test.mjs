@@ -11,11 +11,11 @@ function fixture() {
   for (const name of ['openrappter-1.13.0.tgz', 'openrappter-1.13.0-py3-none-any.whl', 'openrappter-1.13.0.tar.gz', 'install.sh', 'install.ps1']) {
     fs.writeFileSync(path.join(root, name), name);
   }
-  return buildProvenance(root, 'a'.repeat(40), null, { npm: '1.13.0', pypi: '1.13.0', runtime: '1.13.0', channel: '0.1.0-beta.11' }, 'v1.13.0', 'release', 'v1.13.0', 1234567890);
+  return buildProvenance(root, 'a'.repeat(40), null, { npm: '1.13.0', pypi: '1.13.0', runtime: '1.13.0', channel: '0.1.0-beta.11' }, 'v1.13.0', 'release', 'tag-djEuMTMuMA', 1234567890);
 }
 test('candidate provenance is deterministic and complete', () => {
   const first = fixture();
-  const second = buildProvenance(root, 'a'.repeat(40), null, { npm: '1.13.0', pypi: '1.13.0', runtime: '1.13.0', channel: '0.1.0-beta.11' }, 'v1.13.0', 'release', 'v1.13.0', 1234567890);
+  const second = buildProvenance(root, 'a'.repeat(40), null, { npm: '1.13.0', pypi: '1.13.0', runtime: '1.13.0', channel: '0.1.0-beta.11' }, 'v1.13.0', 'release', 'tag-djEuMTMuMA', 1234567890);
   assert.deepEqual(first, second);
   verifyProvenance(root, first);
   fs.rmSync(root, { recursive: true, force: true });
@@ -30,7 +30,7 @@ test('same commit snapshot and release coexist while identical replay is idempot
   const commit = 'a'.repeat(40);
   const base = { schema: 'openrappter-candidate-index/v1', source_commit: commit, snapshots: [], releases: [] };
   const snapshot = { kind: 'snapshot', id: 'snapshot-1', bundle_sha256: 'b'.repeat(64), path: candidateStoragePath(commit, 'snapshot', 'snapshot-1'), source_date_epoch: 1 };
-  const release = { kind: 'release', id: 'v0.1.0-beta.11', bundle_sha256: 'c'.repeat(64), path: candidateStoragePath(commit, 'release', 'v0.1.0-beta.11'), source_date_epoch: 1 };
+  const release = { kind: 'release', id: 'tag-djEuMTMuMA', bundle_sha256: 'c'.repeat(64), path: candidateStoragePath(commit, 'release', 'tag-djEuMTMuMA'), source_date_epoch: 1 };
   const both = addCandidateIndexEntry(addCandidateIndexEntry(base, snapshot), release);
   assert.equal(both.snapshots.length, 1);
   assert.equal(both.releases.length, 1);
@@ -56,7 +56,7 @@ test('beta.11 provenance preserves dual package and channel identities', () => {
   });
   assert.equal(provenance.source_tag, null);
   assert.equal(provenance.intended_release_tag, 'v1.13.0');
-  assert.equal(provenance.candidate_id, 'v1.13.0');
+  assert.equal(provenance.candidate_id, 'tag-djEuMTMuMA');
   verifyProvenance(root, provenance);
   fs.rmSync(root, { recursive: true, force: true });
 });

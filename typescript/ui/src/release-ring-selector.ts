@@ -7,6 +7,7 @@ export {
   compareSemVer,
   loadReleaseRing,
   previewReleaseRing,
+  parseCandidateBundleUrl,
 } from './services/release-rings.js';
 export type {
   ReleaseRing,

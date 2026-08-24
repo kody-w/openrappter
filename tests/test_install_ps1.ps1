@@ -12,6 +12,17 @@ $env:OPENRAPPTER_VERSION = "9.9.9"
     if ((Compare-SemVer "1.9.8-beta.1" "1.9.8") -ne -1) { throw "release/prerelease ordering failed" }
     if ((Compare-SemVer "1.9.8-beta.2" "1.9.8-beta.10") -ne -1) { throw "numeric ordering failed" }
     if ((Compare-SemVer "1.9.8-2" "1.9.8-beta") -ne -1) { throw "numeric/lexical ordering failed" }
+    $candidate = "https://raw.githubusercontent.com/kody-w/openrappter/$("b"*40)/candidates/$("a"*40)/release/tag-djEuMTMuMA/$("c"*64).tar.gz"
+    if ((Parse-CandidateBundleUrl $candidate).CandidateId -ne "tag-djEuMTMuMA") { throw "candidate URL parser failed" }
+    try { Parse-CandidateBundleUrl "$candidate?mutable=1"; throw "candidate query accepted" } catch {
+        if ($_.Exception.Message -eq "candidate query accepted") { throw }
+    }
+    try { Parse-CandidateBundleUrl ($candidate.Replace("raw.githubusercontent.com", "RAW.GITHUBUSERCONTENT.COM")); throw "candidate host case accepted" } catch {
+        if ($_.Exception.Message -eq "candidate host case accepted") { throw }
+    }
+    try { Parse-CandidateBundleUrl ($candidate.Replace("raw.githubusercontent.com", "raw.githubusercontent.com:443")); throw "candidate port accepted" } catch {
+        if ($_.Exception.Message -eq "candidate port accepted") { throw }
+    }
 }
 
 & {

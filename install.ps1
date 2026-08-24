@@ -327,6 +327,21 @@ function Get-RingRepository {
     }
 }
 
+function Parse-CandidateBundleUrl {
+    param([Parameter(Mandatory)][string]$Value)
+    if ($Value -match '[%\\]' -or $Value -cnotmatch '^https://raw\.githubusercontent\.com/kody-w/openrappter/([0-9a-f]{40})/candidates/([0-9a-f]{40})/(snapshot|release)/([A-Za-z0-9][A-Za-z0-9._-]{0,127})/([0-9a-f]{64})\.tar\.gz$') {
+        throw "Candidate URL path rejected"
+    }
+    $uri = [Uri]$Value
+    if ($uri.UserInfo -or $uri.Port -ne 443 -or $uri.Query -or $uri.Fragment -or $Matches[4] -in @(".", "..")) {
+        throw "Candidate URL authority/query/id rejected"
+    }
+    return [pscustomobject]@{
+        Ref = $Matches[1]; SourceCommit = $Matches[2]; Kind = $Matches[3]
+        CandidateId = $Matches[4]; Sha256 = $Matches[5]
+    }
+}
+
 function Get-CanonicalJsonHash {
     param([Parameter(Mandatory)]$Value)
     New-Item -ItemType Directory -Path $HOME_DIR -Force | Out-Null
@@ -397,8 +412,13 @@ function Resolve-RingManifest {
     $releasePrefix = if ($m.source.tag) { "https://github.com/kody-w/openrappter/releases/download/$($m.source.tag)/" } else { "" }
     $npmBound = $m.artifact.provenance -eq "npm-registry-download-sha256" -and $m.artifact.url -eq $npmUrl -and $m.artifact.install_url -eq $npmUrl
     $releaseBound = $m.artifact.provenance -eq "github-release-download-sha256" -and $releasePrefix -and $m.artifact.url.StartsWith($releasePrefix) -and $m.artifact.install_url -eq $m.artifact.url
-    $candidatePattern = "^https://raw\.githubusercontent\.com/kody-w/openrappter/[0-9a-f]{40}/candidates/$($m.source.commit)/$($m.artifact.sha256)\.tar\.gz$"
-    $candidateBound = $m.artifact.provenance -eq "github-candidate-bundle-sha256" -and $m.artifact.url -match $candidatePattern -and $m.artifact.install_url -eq $m.artifact.url
+    $candidateBound = $false
+    if ($m.artifact.provenance -eq "github-candidate-bundle-sha256" -and $m.artifact.install_url -eq $m.artifact.url) {
+        try {
+            $candidate = Parse-CandidateBundleUrl $m.artifact.url
+            $candidateBound = $candidate.SourceCommit -eq $m.source.commit -and $candidate.Sha256 -eq $m.artifact.sha256
+        } catch { $candidateBound = $false }
+    }
     if (-not $npmBound -and -not $releaseBound -and -not $candidateBound) { throw "Artifact is not bound to canonical package/version" }
 
     if ((Get-CanonicalJsonHash $receipt) -ne $head.receipt_sha256 -or

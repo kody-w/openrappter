@@ -5,6 +5,41 @@ import { openrappterHome, openrappterPath } from './infra/openrappter-home.js';
 
 export const RINGS = ['stable', 'beta', 'canary', 'alpha', 'nightly'] as const;
 export type RingName = (typeof RINGS)[number];
+export interface CandidateBundleIdentity {
+  ref: string;
+  sourceCommit: string;
+  kind: 'snapshot' | 'release';
+  candidateId: string;
+  sha256: string;
+}
+
+export function parseCandidateBundleUrl(value: string): CandidateBundleIdentity {
+  const url = new URL(value);
+  if (
+    !value.startsWith('https://raw.githubusercontent.com/')
+    || url.protocol !== 'https:'
+    || url.hostname !== 'raw.githubusercontent.com'
+    || url.username || url.password || url.port || url.search || url.hash
+    || /[^\x20-\x7e]|%|\\/.test(url.pathname)
+  ) throw new Error('candidate URL origin/query/credentials/path encoding rejected');
+  const parts = url.pathname.replace(/^\//, '').split('/');
+  if (
+    parts.length !== 8 || parts[0] !== 'kody-w' || parts[1] !== 'openrappter'
+    || parts[3] !== 'candidates' || !/^[0-9a-f]{40}$/.test(parts[2])
+    || !/^[0-9a-f]{40}$/.test(parts[4])
+    || !['snapshot', 'release'].includes(parts[5])
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(parts[6])
+    || parts[6] === '.' || parts[6] === '..'
+    || !/^[0-9a-f]{64}\.tar\.gz$/.test(parts[7])
+  ) throw new Error('candidate URL repository/ref/path identity rejected');
+  return {
+    ref: parts[2],
+    sourceCommit: parts[4],
+    kind: parts[5] as 'snapshot' | 'release',
+    candidateId: parts[6],
+    sha256: parts[7].slice(0, 64),
+  };
+}
 
 export const RING_REPOSITORIES: Readonly<Record<RingName, string>> = {
   stable: 'kody-w/openrappter',
@@ -188,18 +223,23 @@ export function validateRingManifest(
       && releasePrefix !== ''
       && String(value.artifact.url).startsWith(releasePrefix)
       && value.artifact.install_url === value.artifact.url;
-    const candidate = value.artifact.provenance === 'github-candidate-bundle-sha256'
-      && value.artifact.install_url === value.artifact.url
-      && new RegExp(
-        `^https://raw\\.githubusercontent\\.com/kody-w/openrappter/[0-9a-f]{40}/candidates/${value.source.commit}/${value.artifact.sha256}\\.tar\\.gz$`,
-      ).test(String(value.artifact.url));
+    let candidate = false;
+    if (value.artifact.provenance === 'github-candidate-bundle-sha256' && value.artifact.install_url === value.artifact.url) {
+      try {
+        const parsed = parseCandidateBundleUrl(String(value.artifact.url));
+        candidate = parsed.sourceCommit === value.source.commit && parsed.sha256 === value.artifact.sha256;
+      } catch { candidate = false; }
+    }
     if (!npm && !release && !candidate) throw new Error('published artifact is not bound to canonical package/version');
   } else {
     const archive = value.artifact.url === `https://github.com/kody-w/openrappter/archive/${value.source.commit}.tar.gz`;
-    const candidate = value.artifact.provenance === 'github-candidate-bundle-sha256'
-      && new RegExp(
-        `^https://raw\\.githubusercontent\\.com/kody-w/openrappter/[0-9a-f]{40}/candidates/${value.source.commit}/${value.artifact.sha256}\\.tar\\.gz$`,
-      ).test(String(value.artifact.url));
+    let candidate = false;
+    if (value.artifact.provenance === 'github-candidate-bundle-sha256') {
+      try {
+        const parsed = parseCandidateBundleUrl(String(value.artifact.url));
+        candidate = parsed.sourceCommit === value.source.commit && parsed.sha256 === value.artifact.sha256;
+      } catch { candidate = false; }
+    }
     if ((!archive && !candidate) || value.artifact.install_url !== null) {
       throw new Error('nonpublished artifact is not exact canonical source');
     }

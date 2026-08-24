@@ -947,6 +947,15 @@ effective_channel() {
 # Validate a local manifest with Node, which is already a prerequisite before
 # either install method runs. Output is tab-separated:
 # version, artifact URL, SHA-256, source commit, status, reason.
+parse_candidate_bundle_url() {
+    local value="$1"
+    [[ "$value" != *"?"* && "$value" != *"#"* && "$value" != *"@"* && "$value" != *"%"* && "$value" != *"\\"* ]] || return 1
+    local pattern='^https://raw\.githubusercontent\.com/kody-w/openrappter/([0-9a-f]{40})/candidates/([0-9a-f]{40})/(snapshot|release)/([A-Za-z0-9][A-Za-z0-9._-]{0,127})/([0-9a-f]{64})\.tar\.gz$'
+    [[ "$value" =~ $pattern ]] || return 1
+    [[ "${BASH_REMATCH[4]}" != "." && "${BASH_REMATCH[4]}" != ".." ]] || return 1
+    printf '%s|%s|%s|%s|%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+}
+
 validate_ring_manifest_file() {
     local file="$1" expected_ring="$2"
     node - "$file" "$expected_ring" <<'NODE'
@@ -958,6 +967,13 @@ const closed = (v, keys, label) => {
       JSON.stringify(Object.keys(v).sort()) !== JSON.stringify(keys)) {
     throw new Error(`${label} is not closed`);
   }
+};
+const parseCandidate=(value)=>{
+  const u=new URL(value);
+  if(!value.startsWith('https://raw.githubusercontent.com/')||u.protocol!=='https:'||u.hostname!=='raw.githubusercontent.com'||u.username||u.password||u.port||u.search||u.hash||/[^\x20-\x7e]|%|\\/.test(u.pathname))throw Error('candidate URL rejected');
+  const p=u.pathname.replace(/^\//,'').split('/');
+  if(p.length!==8||p[0]!=='kody-w'||p[1]!=='openrappter'||p[3]!=='candidates'||!/^[0-9a-f]{40}$/.test(p[2])||!/^[0-9a-f]{40}$/.test(p[4])||!['snapshot','release'].includes(p[5])||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(p[6])||p[6]==='.'||p[6]==='..'||!/^[0-9a-f]{64}\.tar\.gz$/.test(p[7]))throw Error('candidate URL rejected');
+  return {ref:p[2],source:p[4],kind:p[5],id:p[6],sha:p[7].slice(0,64)};
 };
 try {
   const m = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -985,7 +1001,8 @@ try {
   if (m.status === 'published') {
     const npm = m.artifact.provenance === 'npm-registry-download-sha256' && m.artifact.url === npmUrl && m.artifact.install_url === npmUrl;
     const release = m.artifact.provenance === 'github-release-download-sha256' && releasePrefix && m.artifact.url.startsWith(releasePrefix) && m.artifact.install_url === m.artifact.url;
-    const candidate = m.artifact.provenance === 'github-candidate-bundle-sha256' && m.artifact.install_url === m.artifact.url && new RegExp(`^https://raw\\.githubusercontent\\.com/kody-w/openrappter/[0-9a-f]{40}/candidates/${m.source.commit}/${m.artifact.sha256}\\.tar\\.gz$`).test(m.artifact.url);
+    let candidate=false;
+    if(m.artifact.provenance==='github-candidate-bundle-sha256'&&m.artifact.install_url===m.artifact.url){try{const c=parseCandidate(m.artifact.url);candidate=c.source===m.source.commit&&c.sha===m.artifact.sha256;}catch{}}
     if (!npm && !release && !candidate) throw new Error('artifact is not bound to canonical package/version');
   }
   const fields = [m.version, m.artifact.url, m.artifact.sha256, m.source.commit, m.status, m.reason || '', m.promotion_id, m.artifact.provenance];

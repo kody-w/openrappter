@@ -118,6 +118,10 @@ assert_not_empty "$manifest_fields" "stable closed manifest validates"
 assert_eq "$(compare_semver 1.9.8-beta.1 1.9.8)" "-1" "same-core prerelease is older than release"
 assert_eq "$(compare_semver 1.9.8-beta.2 1.9.8-beta.10)" "-1" "numeric prerelease identifiers compare numerically"
 assert_eq "$(compare_semver 1.9.8-2 1.9.8-beta)" "-1" "numeric prerelease identifier precedes lexical"
+candidate_fixture="https://raw.githubusercontent.com/kody-w/openrappter/$(printf 'b%.0s' {1..40})/candidates/$(printf 'a%.0s' {1..40})/release/tag-djEuMTMuMA/$(printf 'c%.0s' {1..64}).tar.gz"
+assert_not_empty "$(parse_candidate_bundle_url "$candidate_fixture")" "candidate URL parser accepts exact closed fixture"
+((TESTS_RUN++)) || true
+if parse_candidate_bundle_url "${candidate_fixture}?mutable=1" >/dev/null 2>&1; then fail "candidate URL parser rejects query"; else pass "candidate URL parser rejects query"; fi
 CHANNEL="$saved_channel"
 CHANNEL_FILE="$saved_channel_file"
 LEGACY_CHANNEL_FILE="$saved_legacy_channel_file"

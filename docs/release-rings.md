@@ -55,6 +55,12 @@ Latest is resolved authority-first from that repository's monotonic
 Target-repository `main` manifests and pointers are informational only and
 cannot override or replay the authority head.
 
+Candidate bundle URLs use the pinned
+`openrappter-candidate-url/v1` owner/repository/ref/path grammar. Candidate IDs
+are closed ASCII path components; encoded traversal, Unicode, slashes, query
+strings, credentials, wrong kinds, extra segments, and mutable refs are never
+accepted.
+
 Before nightly, `build-candidate.yml` builds npm, wheel, sdist, and public
 installer bytes once from an exact green `main` commit. It stores the
 deterministic bundle on the public `candidates` branch and identifies it by the

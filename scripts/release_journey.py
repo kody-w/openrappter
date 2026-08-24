@@ -7,6 +7,9 @@ from pathlib import Path
 RINGS = ("nightly", "alpha", "canary", "beta", "stable")
 TRAIN = "kody-w/openrappter-release-train"
 
+def tag_candidate_id(tag: str) -> str:
+    return "tag-" + base64.urlsafe_b64encode(tag.encode()).decode().rstrip("=")
+
 def atomic_json(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(".new")
@@ -182,7 +185,7 @@ def run(args) -> int:
     state={"schema":"openrappter-release-journey/v1","phase":"start","source_commit":source,"versions":{"npm":npm,"pypi":pypi,"runtime":runtime,"channel":args.channel_version},"intended_release_tag":intended,"rings":{}}
     atomic_json(checkpoint,state)
     gh.workflow("kody-w/openrappter","build-candidate.yml",{"source_commit":source,"channel_version":args.channel_version,"intended_release_tag":intended,"candidate_kind":"release"})
-    gh.workflow(TRAIN,"observe-main.yml",{"candidate_kind":"release","candidate_id":intended})
+    gh.workflow(TRAIN,"observe-main.yml",{"candidate_kind":"release","candidate_id":tag_candidate_id(intended)})
     process_ring(gh,state,"nightly");atomic_json(checkpoint,state)
     for source_ring,ring in (("nightly","alpha"),("alpha","canary"),("canary","beta")):
         process_ring(gh,state,ring,source_ring);atomic_json(checkpoint,state)

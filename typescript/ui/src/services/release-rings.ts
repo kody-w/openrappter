@@ -3,6 +3,26 @@ import { gateway } from './gateway.js';
 export const RELEASE_RINGS = ['stable', 'beta', 'canary', 'alpha', 'nightly'] as const;
 export type ReleaseRing = (typeof RELEASE_RINGS)[number];
 
+export function parseCandidateBundleUrl(value: string) {
+  const url = new URL(value);
+  if (
+    !value.startsWith('https://raw.githubusercontent.com/')
+    || url.protocol !== 'https:' || url.hostname !== 'raw.githubusercontent.com'
+    || url.username || url.password || url.port || url.search || url.hash
+    || /[^\x20-\x7e]|%|\\/.test(url.pathname)
+  ) throw new Error('candidate URL rejected');
+  const parts = url.pathname.replace(/^\//, '').split('/');
+  if (
+    parts.length !== 8 || parts[0] !== 'kody-w' || parts[1] !== 'openrappter'
+    || parts[3] !== 'candidates' || !/^[0-9a-f]{40}$/.test(parts[2])
+    || !/^[0-9a-f]{40}$/.test(parts[4]) || !['snapshot', 'release'].includes(parts[5])
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(parts[6])
+    || parts[6] === '.' || parts[6] === '..'
+    || !/^[0-9a-f]{64}\.tar\.gz$/.test(parts[7])
+  ) throw new Error('candidate URL rejected');
+  return { ref: parts[2], sourceCommit: parts[4], kind: parts[5], candidateId: parts[6], sha256: parts[7].slice(0, 64) };
+}
+
 export function compareSemVer(left: string, right: string): -1 | 0 | 1 {
   const parse = (value: string) => {
     const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value);

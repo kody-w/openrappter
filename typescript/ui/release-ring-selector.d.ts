@@ -18,6 +18,9 @@ export interface ReleaseRingState {
   resolved: ReleaseRingStatus;
 }
 export declare function compareSemVer(left: string, right: string): -1 | 0 | 1;
+export declare function parseCandidateBundleUrl(value: string): {
+  ref: string; sourceCommit: string; kind: 'snapshot' | 'release'; candidateId: string; sha256: string;
+};
 export declare function loadReleaseRing(): Promise<ReleaseRingState>;
 export declare function previewReleaseRing(ring: ReleaseRing): Promise<ReleaseRingStatus>;
 export declare function applyReleaseRing(

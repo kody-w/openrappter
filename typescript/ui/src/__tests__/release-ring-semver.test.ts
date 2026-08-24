@@ -15,5 +15,7 @@ describe('release-ring SemVer ordering', () => {
     expect(parseCandidateBundleUrl(url)).toMatchObject({kind:'release',candidateId:'tag-djEuMTMuMA'});
     expect(() => parseCandidateBundleUrl(`${url}?mutable=1`)).toThrow();
     expect(() => parseCandidateBundleUrl(url.replace('raw.githubusercontent.com', 'raw.githubusercontent.com:443'))).toThrow();
+    expect(() => parseCandidateBundleUrl(`${url}\n`)).toThrow();
+    expect(() => parseCandidateBundleUrl(url.replace('/release/tag-djEuMTMuMA', ''))).toThrow();
   });
 });

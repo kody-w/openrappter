@@ -329,7 +329,7 @@ function Get-RingRepository {
 
 function Parse-CandidateBundleUrl {
     param([Parameter(Mandatory)][string]$Value)
-    if ($Value -match '[%\\]' -or $Value -cnotmatch '^https://raw\.githubusercontent\.com/kody-w/openrappter/([0-9a-f]{40})/candidates/([0-9a-f]{40})/(snapshot|release)/([A-Za-z0-9][A-Za-z0-9._-]{0,127})/([0-9a-f]{64})\.tar\.gz$') {
+    if ($Value -match '[^\x20-\x7E%\\]' -or $Value -cnotmatch '^https://raw\.githubusercontent\.com/kody-w/openrappter/([0-9a-f]{40})/candidates/([0-9a-f]{40})/(snapshot|release)/([A-Za-z0-9][A-Za-z0-9._-]{0,127})/([0-9a-f]{64})\.tar\.gz$') {
         throw "Candidate URL path rejected"
     }
     $uri = [Uri]$Value

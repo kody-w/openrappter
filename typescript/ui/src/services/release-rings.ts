@@ -6,7 +6,8 @@ export type ReleaseRing = (typeof RELEASE_RINGS)[number];
 export function parseCandidateBundleUrl(value: string) {
   const url = new URL(value);
   if (
-    !value.startsWith('https://raw.githubusercontent.com/')
+    !/^[\x20-\x7e]+$/.test(value)
+    || !value.startsWith('https://raw.githubusercontent.com/')
     || url.protocol !== 'https:' || url.hostname !== 'raw.githubusercontent.com'
     || url.username || url.password || url.port || url.search || url.hash
     || /[^\x20-\x7e]|%|\\/.test(url.pathname)

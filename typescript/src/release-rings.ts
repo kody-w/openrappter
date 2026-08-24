@@ -16,7 +16,8 @@ export interface CandidateBundleIdentity {
 export function parseCandidateBundleUrl(value: string): CandidateBundleIdentity {
   const url = new URL(value);
   if (
-    !value.startsWith('https://raw.githubusercontent.com/')
+    !/^[\x20-\x7e]+$/.test(value)
+    || !value.startsWith('https://raw.githubusercontent.com/')
     || url.protocol !== 'https:'
     || url.hostname !== 'raw.githubusercontent.com'
     || url.username || url.password || url.port || url.search || url.hash
@@ -175,7 +176,7 @@ export function validateRingManifest(
   if (typeof value.artifact.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(value.artifact.sha256)) {
     throw new Error('artifact SHA-256 is malformed');
   }
-  if (!['github-commit-archive-sha256', 'npm-registry-download-sha256', 'github-release-download-sha256'].includes(
+  if (!['github-commit-archive-sha256', 'npm-registry-download-sha256', 'github-release-download-sha256', 'github-candidate-bundle-sha256'].includes(
     String(value.artifact.provenance),
   )) throw new Error('checksum provenance is unknown');
   if (!['published', 'unpublished', 'disabled'].includes(String(value.status))) {

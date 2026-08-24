@@ -949,7 +949,7 @@ effective_channel() {
 # version, artifact URL, SHA-256, source commit, status, reason.
 parse_candidate_bundle_url() {
     local value="$1"
-    [[ "$value" != *"?"* && "$value" != *"#"* && "$value" != *"@"* && "$value" != *"%"* && "$value" != *"\\"* ]] || return 1
+    [[ "$value" != *$'\n'* && "$value" != *$'\r'* && "$value" != *$'\t'* && "$value" != *"?"* && "$value" != *"#"* && "$value" != *"@"* && "$value" != *"%"* && "$value" != *"\\"* ]] || return 1
     local pattern='^https://raw\.githubusercontent\.com/kody-w/openrappter/([0-9a-f]{40})/candidates/([0-9a-f]{40})/(snapshot|release)/([A-Za-z0-9][A-Za-z0-9._-]{0,127})/([0-9a-f]{64})\.tar\.gz$'
     [[ "$value" =~ $pattern ]] || return 1
     [[ "${BASH_REMATCH[4]}" != "." && "${BASH_REMATCH[4]}" != ".." ]] || return 1
@@ -970,7 +970,7 @@ const closed = (v, keys, label) => {
 };
 const parseCandidate=(value)=>{
   const u=new URL(value);
-  if(!value.startsWith('https://raw.githubusercontent.com/')||u.protocol!=='https:'||u.hostname!=='raw.githubusercontent.com'||u.username||u.password||u.port||u.search||u.hash||/[^\x20-\x7e]|%|\\/.test(u.pathname))throw Error('candidate URL rejected');
+  if(!/^[\x20-\x7e]+$/.test(value)||!value.startsWith('https://raw.githubusercontent.com/')||u.protocol!=='https:'||u.hostname!=='raw.githubusercontent.com'||u.username||u.password||u.port||u.search||u.hash||/[^\x20-\x7e]|%|\\/.test(u.pathname))throw Error('candidate URL rejected');
   const p=u.pathname.replace(/^\//,'').split('/');
   if(p.length!==8||p[0]!=='kody-w'||p[1]!=='openrappter'||p[3]!=='candidates'||!/^[0-9a-f]{40}$/.test(p[2])||!/^[0-9a-f]{40}$/.test(p[4])||!['snapshot','release'].includes(p[5])||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(p[6])||p[6]==='.'||p[6]==='..'||!/^[0-9a-f]{64}\.tar\.gz$/.test(p[7]))throw Error('candidate URL rejected');
   return {ref:p[2],source:p[4],kind:p[5],id:p[6],sha:p[7].slice(0,64)};

@@ -125,9 +125,26 @@ describe('ring selection', () => {
         candidateId: fixture.candidate_id, sha256: fixture.sha256,
       });
     });
+    it('accepts candidate provenance only when the closed URL binds source and bytes', () => {
+      const manifest = {
+        ...stable,
+        ring: 'beta',
+        source: { repository: 'kody-w/openrappter', commit: fixture.source_commit, tag: null },
+        artifact: {
+          url: fixture.url,
+          install_url: fixture.url,
+          sha256: fixture.sha256,
+          provenance: 'github-candidate-bundle-sha256',
+        },
+        predecessor: 'canary',
+        intended_release_tag: 'v1.9.8',
+        channel_version: '0.1.0-beta.11',
+      };
+      expect(validateRingManifest(manifest, 'beta')).toEqual(manifest);
+    });
     it.each([
       '?x=1', '#x', 'HOST', 'PORT', 'CREDS', 'REPO', 'REF', 'COMMIT', 'KIND',
-      'ID', 'HASH', 'TRAVERSAL', 'ENCODED', 'UNICODE', 'EXTRA',
+      'ID', 'HASH', 'LEGACY', 'TRAVERSAL', 'ENCODED', 'UNICODE', 'CONTROL', 'EXTRA',
     ])('rejects candidate URL mutation %s', mutation => {
       let value = fixture.url;
       if (mutation === '?x=1' || mutation === '#x') value += mutation;
@@ -140,9 +157,11 @@ describe('ring selection', () => {
       if (mutation === 'KIND') value = value.replace('/release/', '/beta/');
       if (mutation === 'ID') value = value.replace(`/${fixture.candidate_id}/`, '/-invalid/');
       if (mutation === 'HASH') value = value.replace(fixture.sha256, 'f'.repeat(63));
+      if (mutation === 'LEGACY') value = value.replace(`/release/${fixture.candidate_id}`, '');
       if (mutation === 'TRAVERSAL') value = value.replace(`/${fixture.candidate_id}/`, '/../');
       if (mutation === 'ENCODED') value = value.replace(`/${fixture.candidate_id}/`, '/%2e%2e/');
       if (mutation === 'UNICODE') value = value.replace(`/${fixture.candidate_id}/`, '/täg/');
+      if (mutation === 'CONTROL') value += '\n';
       if (mutation === 'EXTRA') value = value.replace('.tar.gz', '/extra.tar.gz');
       expect(() => parseCandidateBundleUrl(value)).toThrow();
     });

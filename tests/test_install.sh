@@ -118,10 +118,20 @@ assert_not_empty "$manifest_fields" "stable closed manifest validates"
 assert_eq "$(compare_semver 1.9.8-beta.1 1.9.8)" "-1" "same-core prerelease is older than release"
 assert_eq "$(compare_semver 1.9.8-beta.2 1.9.8-beta.10)" "-1" "numeric prerelease identifiers compare numerically"
 assert_eq "$(compare_semver 1.9.8-2 1.9.8-beta)" "-1" "numeric prerelease identifier precedes lexical"
-candidate_fixture="https://raw.githubusercontent.com/kody-w/openrappter/$(printf 'b%.0s' {1..40})/candidates/$(printf 'a%.0s' {1..40})/release/tag-djEuMTMuMA/$(printf 'c%.0s' {1..64}).tar.gz"
+mkdir -p "$TEST_SCRATCH/candidate-fixture"
+printf 'exact candidate artifact bytes\n' > "$TEST_SCRATCH/candidate-fixture/artifact.txt"
+tar -czf "$TEST_SCRATCH/candidate-fixture.tar.gz" -C "$TEST_SCRATCH/candidate-fixture" artifact.txt
+candidate_sha="$(sha256_of "$TEST_SCRATCH/candidate-fixture.tar.gz")"
+candidate_fixture="https://raw.githubusercontent.com/kody-w/openrappter/$(printf 'b%.0s' {1..40})/candidates/$(printf 'a%.0s' {1..40})/release/tag-djEuMTMuMA/${candidate_sha}.tar.gz"
 assert_not_empty "$(parse_candidate_bundle_url "$candidate_fixture")" "candidate URL parser accepts exact closed fixture"
+assert_eq "$(parse_candidate_bundle_url "$candidate_fixture" | cut -d'|' -f5)" "$candidate_sha" "candidate URL preserves real fixture SHA-256"
 ((TESTS_RUN++)) || true
 if parse_candidate_bundle_url "${candidate_fixture}?mutable=1" >/dev/null 2>&1; then fail "candidate URL parser rejects query"; else pass "candidate URL parser rejects query"; fi
+((TESTS_RUN++)) || true
+if parse_candidate_bundle_url "${candidate_fixture}"$'\n' >/dev/null 2>&1; then fail "candidate URL parser rejects control characters"; else pass "candidate URL parser rejects control characters"; fi
+legacy_candidate_fixture="${candidate_fixture/\/release\/tag-djEuMTMuMA/}"
+((TESTS_RUN++)) || true
+if parse_candidate_bundle_url "$legacy_candidate_fixture" >/dev/null 2>&1; then fail "candidate URL parser rejects legacy flat path"; else pass "candidate URL parser rejects legacy flat path"; fi
 CHANNEL="$saved_channel"
 CHANNEL_FILE="$saved_channel_file"
 LEGACY_CHANNEL_FILE="$saved_legacy_channel_file"

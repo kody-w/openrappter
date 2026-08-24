@@ -144,17 +144,22 @@ describe('Chat Controller', () => {
 
   it('sendChatMessageStreaming accumulates chunks and resolves final response', async () => {
     const client = createMockClient();
+    let state = createChatState();
+    const visibleDuringStream: string[] = [];
     (client.callStream as any) = vi.fn(async (method: string, params: Record<string, unknown>, onChunk: (r: any) => void) => {
       expect(method).toBe('agent');
       onChunk({ chunk: 'Hel' });
+      visibleDuringStream.push(state.streamContent);
       onChunk({ chunk: 'lo' });
+      visibleDuringStream.push(state.streamContent);
       return { sessionId: 's2', content: 'Hello' };
     });
-    const state = createChatState();
     state.client = client;
 
     const result = await sendChatMessageStreaming(state, 'hi');
+    expect(visibleDuringStream).toEqual(['', '']);
     expect(state.streamContent).toBe('Hello');
+    expect(state.pendingStreamContent).toBe('');
     expect(state.streaming).toBe(false);
     expect(state.sending).toBe(false);
     expect(result?.sessionId).toBe('s2');

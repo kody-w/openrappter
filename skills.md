@@ -256,7 +256,12 @@ python3 -m openrappter.cli [options]  # Direct
 | `show-and-tell stop` | Stop the active demonstration |
 | `show-and-tell analyze [--enhance]` | Reconstruct intent and ordered steps; optional Copilot refinement never sends frames |
 | `show-and-tell approve` | Locally approve the reviewed analysis |
-| `show-and-tell build --target <skill|automation|all>` | Build portable artifacts from the approved analysis |
+| `show-and-tell bundle` | Inspect the deterministic evidence bundle and honesty statistics |
+| `show-and-tell propose` | Create one editable plan without building anything |
+| `show-and-tell revise-plan [--steps file] [--values file]` | Edit the proposed plan without approving it |
+| `show-and-tell revise-plan --approve` | Locally approve the unchanged plan in a separate turn |
+| `show-and-tell export` | Export an approved plan as a private marketplace package |
+| `show-and-tell build --target <skill|automation|all|rappid>` | Build portable artifacts from the approved plan |
 | `show-and-tell replay` | Preview a side-effect-free replay plan |
 | `show-and-tell test` | Validate artifact integrity, privacy, and disabled defaults |
 

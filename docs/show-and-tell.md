@@ -14,13 +14,20 @@ openrappter show-and-tell stop
 openrappter show-and-tell analyze
 openrappter show-and-tell review --feedback "Make the verification step explicit"
 openrappter show-and-tell approve
+openrappter show-and-tell bundle
+openrappter show-and-tell propose
+openrappter show-and-tell revise-plan --intent "Publish only after every required check"
+openrappter show-and-tell revise-plan --approve
+openrappter show-and-tell export --plugin-name verified-release
 openrappter show-and-tell build --target all
 openrappter show-and-tell replay
 openrappter show-and-tell test
 ```
 
-`start`, `approve`, and `delete` require confirmation from an interactive local
-terminal. `analyze --enhance` has its own confirmation because it sends the
+`start`, analysis `approve`, plan `revise-plan --approve`, and `delete` require
+confirmation from an interactive local terminal. Plan edits and plan approval
+must be separate turns, so approval always binds the text the reviewer read.
+`analyze --enhance` has its own confirmation because it sends the
 privacy-safe textual summary to GitHub Copilot. A model, remote client, or
 background daemon cannot mint these one-use tokens.
 
@@ -34,6 +41,7 @@ capture.
 - active application and window changes
 - browser destinations with credentials, query strings, fragments, and
   opaque identifier-like path segments removed
+- local path examples reduced to `~/...` or `<absolute>/<basename>` before export
 - narration notes and explicit semantic observations
 - OpenRappter ComputerUse actions, excluding typed text
 - the validated active window only when `show-and-tell capture` is confirmed
@@ -66,7 +74,11 @@ Approval freezes the reviewed intent and ordered steps as the source for:
 - `~/.openrappter/skills/<name>/SKILL.md`
 - `~/.openrappter/skills/<name>/manifest.json`
 - `~/.openrappter/automations/<name>/automation.json`
+- `~/.openrappter/marketplace/<name>/...` for a private marketplace export
 
+`propose` first lifts demonstration-specific values into editable `{{value}}`
+tokens and marks risky steps for confirmation. Nothing builds in that turn.
+`revise-plan` edits that proposal; a separate `revise-plan --approve` freezes it.
 Skills tell the agent to prefer native APIs, CLI tools, filesystem operations,
 and browser tools over replaying pixels. Automations are created disabled.
 `show-and-tell replay` is always a dry run, and `show-and-tell test` checks files, hashes, privacy,

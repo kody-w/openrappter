@@ -14,9 +14,11 @@ import {
   assertPrivateDirectory,
   hardenPrivatePath,
 } from '../flight-recorder/permissions.js';
+import { sessionElapsedMs } from './clock.js';
 import { sanitizeShowAndTellValue } from './privacy.js';
 import {
   SHOW_AND_TELL_ANALYSIS_SCHEMA,
+  SHOW_AND_TELL_PLAN_SCHEMA,
   SHOW_AND_TELL_SCHEMA,
   type CreateSessionInput,
   type ShowAndTellAnalysis,
@@ -25,6 +27,7 @@ import {
   type ShowAndTellConsentPurpose,
   type ShowAndTellEvent,
   type ShowAndTellSession,
+  type ShowAndTellSkillPlan,
   type ShowAndTellState,
 } from './types.js';
 
@@ -72,6 +75,7 @@ interface EventRow {
   session_id: string;
   sequence: number;
   timestamp: number;
+  elapsed_ms: number | null;
   type: string;
   source: string;
   data_json: string;
@@ -79,6 +83,10 @@ interface EventRow {
 
 interface AnalysisRow {
   analysis_json: string;
+}
+
+interface PlanRow {
+  plan_json: string;
 }
 
 interface ArtifactRow {
@@ -129,6 +137,31 @@ function parseJsonObject(value: string): Record<string, unknown> {
       : {};
   } catch {
     return {};
+  }
+}
+
+/**
+ * Adds `show_events.elapsed_ms` to a database created before monotonic
+ * timing existed.
+ *
+ * The column is nullable on purpose: an older row has no honest monotonic
+ * value, and inventing one from its wall-clock timestamp would launder a
+ * guess into evidence. Readers report those rows as estimated instead.
+ *
+ * Both runtimes open the same file, so two processes can reach the migration
+ * at the same moment. Only SQLite's duplicate-column error is tolerated —
+ * that one means the other process won the race and the column now exists.
+ */
+function migrateEventElapsedColumn(db: Database): void {
+  const columns = db.prepare('PRAGMA table_info(show_events)').all() as Array<{
+    name?: unknown;
+  }>;
+  if (columns.some((column) => column.name === 'elapsed_ms')) return;
+  try {
+    db.exec('ALTER TABLE show_events ADD COLUMN elapsed_ms INTEGER');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/duplicate column name/i.test(message)) throw error;
   }
 }
 
@@ -192,6 +225,7 @@ export class ShowAndTellStore {
         session_id TEXT NOT NULL REFERENCES show_sessions(id) ON DELETE CASCADE,
         sequence INTEGER NOT NULL,
         timestamp INTEGER NOT NULL,
+        elapsed_ms INTEGER,
         type TEXT NOT NULL,
         source TEXT NOT NULL,
         data_json TEXT NOT NULL,
@@ -204,6 +238,13 @@ export class ShowAndTellStore {
         revision INTEGER NOT NULL,
         approved INTEGER NOT NULL DEFAULT 0,
         analysis_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS show_plans (
+        session_id TEXT PRIMARY KEY REFERENCES show_sessions(id) ON DELETE CASCADE,
+        revision INTEGER NOT NULL,
+        approved INTEGER NOT NULL DEFAULT 0,
+        plan_json TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS show_artifacts (
@@ -222,6 +263,7 @@ export class ShowAndTellStore {
         expires_at INTEGER NOT NULL
       );
     `);
+    migrateEventElapsedColumn(db);
     this.db = db;
     hardenPrivatePath(this.databasePath);
   }
@@ -487,32 +529,35 @@ export class ShowAndTellStore {
     const db = this.database();
     return this.immediate(() => {
       const session = db
-        .prepare('SELECT id FROM show_sessions WHERE id = ?')
-        .get(sessionId) as { id: string } | undefined;
+        .prepare('SELECT id, started_at FROM show_sessions WHERE id = ?')
+        .get(sessionId) as { id: string; started_at: number } | undefined;
       if (!session) throw new Error(`Show-and-Tell session not found: ${sessionId}`);
       const sequenceRow = db
         .prepare(
           'SELECT COALESCE(MAX(sequence), -1) + 1 AS sequence FROM show_events WHERE session_id = ?',
         )
         .get(sessionId) as { sequence: number };
+      const timestamp = Date.now();
       const event: ShowAndTellEvent = {
         id: randomUUID(),
         sessionId,
         sequence: sequenceRow.sequence,
-        timestamp: Date.now(),
+        timestamp,
+        elapsedMs: sessionElapsedMs(sessionId, session.started_at, timestamp),
         type: String(type).slice(0, 120),
         source: String(source).slice(0, 120),
         data: sanitizeShowAndTellValue(data),
       };
       db.prepare(`
         INSERT INTO show_events(
-          id, session_id, sequence, timestamp, type, source, data_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          id, session_id, sequence, timestamp, elapsed_ms, type, source, data_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         event.id,
         event.sessionId,
         event.sequence,
         event.timestamp,
+        event.elapsedMs,
         event.type,
         event.source,
         JSON.stringify(event.data),
@@ -534,6 +579,7 @@ export class ShowAndTellStore {
       sessionId: row.session_id,
       sequence: row.sequence,
       timestamp: row.timestamp,
+      elapsedMs: typeof row.elapsed_ms === 'number' ? row.elapsed_ms : null,
       type: row.type,
       source: row.source,
       data: parseJsonObject(row.data_json),
@@ -658,6 +704,48 @@ export class ShowAndTellStore {
     try {
       const analysis = JSON.parse(row.analysis_json) as ShowAndTellAnalysis;
       return analysis.schema === SHOW_AND_TELL_ANALYSIS_SCHEMA ? analysis : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async savePlan(plan: ShowAndTellSkillPlan): Promise<void> {
+    await this.initialize();
+    if (
+      plan.schema !== SHOW_AND_TELL_PLAN_SCHEMA ||
+      plan.sessionId.length === 0
+    ) {
+      throw new Error('Invalid Show-and-Tell skill plan.');
+    }
+    this.database()
+      .prepare(`
+        INSERT INTO show_plans(
+          session_id, revision, approved, plan_json, updated_at
+        ) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          revision = excluded.revision,
+          approved = excluded.approved,
+          plan_json = excluded.plan_json,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        plan.sessionId,
+        plan.revision,
+        plan.approved ? 1 : 0,
+        JSON.stringify(sanitizeShowAndTellValue(plan)),
+        plan.updatedAt,
+      );
+  }
+
+  async getPlan(sessionId: string): Promise<ShowAndTellSkillPlan | null> {
+    await this.initialize();
+    const row = this.database()
+      .prepare('SELECT plan_json FROM show_plans WHERE session_id = ?')
+      .get(sessionId) as PlanRow | undefined;
+    if (!row) return null;
+    try {
+      const plan = JSON.parse(row.plan_json) as ShowAndTellSkillPlan;
+      return plan.schema === SHOW_AND_TELL_PLAN_SCHEMA ? plan : null;
     } catch {
       return null;
     }

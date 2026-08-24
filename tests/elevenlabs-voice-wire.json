@@ -1,0 +1,65 @@
+{
+  "schema": "openrappter-elevenlabs-voice-wire/1.0",
+  "ownership": "typescript-desktop",
+  "requests": [
+    { "action": "status" },
+    { "action": "credential.set", "apiKey": "[write-only]" },
+    { "action": "credential.test", "apiKey": "[write-only]" },
+    { "action": "credential.testStored" },
+    { "action": "credential.delete" },
+    { "action": "settings.get" },
+    { "action": "settings.save", "settings": "[reviewed-display-settings-no-credentials]" },
+    { "action": "provider.set", "provider": "elevenlabs", "voice": "voice_id", "model": "model_id" },
+    { "action": "speak", "ticket": "[signed-final-assistant-text]" },
+    { "action": "preview" },
+    { "action": "smoke" },
+    { "action": "cancel" }
+  ],
+  "response": {
+    "credential": {
+      "present": true,
+      "masked": "••••••••",
+      "verified": true,
+      "verifiedAt": "2026-08-23T12:00:00.000Z"
+    },
+    "audio": {
+      "provider": "elevenlabs",
+      "mimeType": "audio/mpeg",
+      "voice": "voice_id",
+      "model": "model_id",
+      "durationSeconds": 1,
+      "sha256": "hex-only",
+      "bytes": "[ipc-binary]"
+    },
+    "conversation": {
+      "states": [
+        "idle",
+        "listening",
+        "endpointing",
+        "transcribing",
+        "sending",
+        "thinking",
+        "speaking",
+        "paused",
+        "cancelled",
+        "error",
+        "offline",
+        "auth",
+        "model-unavailable"
+      ],
+      "microphoneTransport": "local-electron-narration-only",
+      "sttAuthority": "shared-ref-counted-skills-recorder-narration-service",
+      "sttModel": "Xenova/whisper-small@2d67713f236afa48a18992566e7647f6ca848e13",
+      "sttQueue": "bounded-serial-cancellable",
+      "externalTurnInput": "final-transcript-only",
+      "externalTtsInput": "signed-final-assistant-text-only"
+    }
+  },
+  "forbiddenResponseFields": [
+    "apiKey",
+    "key",
+    "credentialValue",
+    "requestHeaders",
+    "providerBody"
+  ]
+}

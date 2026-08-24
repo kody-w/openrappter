@@ -238,3 +238,18 @@ buffer, no saved cutover, and no setting for any of it. Read every present-tense
 What does exist that this would build on: the opt-in Sense model in `../CONSTITUTION.md` Article II,
 and `probeMediaOrgan` in `../electron/video-tools.mjs`, which is the right shape for gating a large
 first-run download behind consent.
+
+### Desktop provider ownership
+
+The packaged TypeScript desktop now owns the optional ElevenLabs provider and
+its OS-encrypted credential boundary. This beta/Frontier shell intentionally
+does not duplicate that client, receive a raw key, or grow a parallel TTS path.
+Future XPedition/Grail work consumes the typed `VoiceSurfaceAdapter` and
+`VoiceAudioDescriptor` seam from `typescript/src/voice/integration.ts`; it must
+not reach into the provider or credential store. The local relay, station
+ident, and rolling-buffer design above remains a separate beta specification.
+The default Grail adapter and bounded back-and-forth conversation controller now
+live beside that seam in `typescript/src/voice/grail-adapter.ts` and
+`conversation.ts`. Pending shells remain untouched.
+Conversation STT is another owner of the existing Skills Recorder
+`NarrationService`; it does not launch or cache a second Whisper model.

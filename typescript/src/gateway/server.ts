@@ -61,6 +61,7 @@ import { buildChatEnvelope } from './chat-envelope.js';
 import { parseChatRequest } from './chat-request.js';
 import { buildTwinResponse, parseTwinEnvelope, sayText } from './twin-chat.js';
 import type { InstalledSkill } from '../skills/registry.js';
+import { createSpeechTicket } from '../voice/speech-ticket.js';
 
 /**
  * The part of `SkillsRegistry` the gateway needs.
@@ -211,6 +212,17 @@ function parseVoiceDelimiter(content: string): { text: string; voiceText: string
   const sentences = stripped.split(/(?<=[.!?])\s+/);
   const voiceText = sentences[0]?.trim() || "I've completed your request.";
   return { text: parsed.text || content.trim(), voiceText };
+}
+
+/** Bind remote synthesis to text that the authenticated gateway just emitted. */
+function speechTicket(runId: string, text: string): string | undefined {
+  const key = process.env.OPENRAPPTER_VOICE_TICKET_KEY;
+  if (!key || key.length < 32 || !text) return undefined;
+  try {
+    return createSpeechTicket({ runId, text, key });
+  } catch {
+    return undefined;
+  }
 }
 
 /** Resolve a session identifier from params that may use either the
@@ -3480,6 +3492,9 @@ export class GatewayServer {
           ? { role: 'assistant', content: [{ type: 'text', text }], timestamp: Date.now() }
           : undefined,
         voiceText: envelope.voice_response || undefined,
+        voiceTicket: envelope.voice_response
+          ? speechTicket(run.runId, envelope.voice_response)
+          : undefined,
         agentLogs: envelope.agent_logs || undefined,
         model: envelope.model,
       });
@@ -3548,6 +3563,7 @@ export class GatewayServer {
         state: 'final',
         message: finalText ? { role: 'assistant', content: [{ type: 'text', text: finalText }], timestamp: Date.now() } : undefined,
         voiceText: voiceText || undefined,
+        voiceTicket: voiceText ? speechTicket(run.runId, voiceText) : undefined,
         holo: allSenses.holo || undefined,
         senses: Object.keys(allSenses).length ? allSenses : undefined,
       });

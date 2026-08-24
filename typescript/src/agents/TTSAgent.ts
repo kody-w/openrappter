@@ -75,7 +75,6 @@ export class TTSAgent extends BasicAgent {
     if (!this.ttsService) {
       const { createTTSService } = await import('../voice/tts.js');
       this.ttsService = createTTSService({
-        elevenlabsKey: process.env.ELEVENLABS_API_KEY,
         openaiKey: process.env.OPENAI_API_KEY,
         useEdge: true, // Free, no API key needed
       });

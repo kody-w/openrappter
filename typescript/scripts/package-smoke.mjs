@@ -152,6 +152,9 @@ try {
     "dist/cli/show-and-tell.js",
     "dist/release-rings.js",
     "dist/gateway/release-ring-rpc.js",
+    "dist/voice/grail-adapter.js",
+    "dist/voice/conversation.js",
+    "dist/voice/vad.js",
   ]) {
     if (!packedFiles.has(required)) {
       throw new Error(`Tarball does not contain ${required}`);

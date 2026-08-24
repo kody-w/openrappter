@@ -374,6 +374,8 @@ export class OpenRappterShowAndTell extends LitElement {
   private narrationStopping = false;
   private narrationGeneration = 0;
   private narrationSessionId?: string;
+  private narrationLease = false;
+  private narrationRequestId = '';
   private statusGeneration = 0;
   @state() private sessionLoading = false;
 
@@ -414,6 +416,19 @@ export class OpenRappterShowAndTell extends LitElement {
     this.mediaRecorder?.stop();
     if (this.narrationTimer) clearTimeout(this.narrationTimer);
     this.mediaStream?.getTracks().forEach((track) => track.stop());
+    if (this.narrationRequestId) {
+      void desktopBridge()?.narration({
+        action: 'cancel',
+        request_id: this.narrationRequestId,
+      }).catch(() => {});
+    }
+    if (this.narrationLease) {
+      this.narrationLease = false;
+      void desktopBridge()?.narration({
+        action: 'release',
+        owner: 'skills-recorder',
+      }).catch(() => {});
+    }
     this.narrationGeneration += 1;
     super.disconnectedCallback();
   }
@@ -422,9 +437,32 @@ export class OpenRappterShowAndTell extends LitElement {
     const desktop = desktopBridge();
     if (!desktop) throw new Error('Narration requires OpenRappter Desktop.');
     if (this.narrationState === 'ready') return;
-    const status = await desktop.narration({ action: 'download' });
+    const status = await desktop.narration({
+      action: 'download',
+      owner: 'skills-recorder',
+    });
     this.narrationState = String(status.model ?? 'ready');
     this.narrationPhase = String(status.phase ?? 'idle');
+  }
+
+  private async acquireNarrationLease(): Promise<void> {
+    if (this.narrationLease) return;
+    const desktop = desktopBridge();
+    if (!desktop) throw new Error('Narration requires OpenRappter Desktop.');
+    await desktop.narration({
+      action: 'acquire',
+      owner: 'skills-recorder',
+    });
+    this.narrationLease = true;
+  }
+
+  private async releaseNarrationLease(): Promise<void> {
+    if (!this.narrationLease) return;
+    this.narrationLease = false;
+    await desktopBridge()?.narration({
+      action: 'release',
+      owner: 'skills-recorder',
+    }).catch(() => {});
   }
 
   private async startNarration(): Promise<void> {
@@ -434,7 +472,9 @@ export class OpenRappterShowAndTell extends LitElement {
     const sessionId = this.session.id;
     const generation = ++this.narrationGeneration;
     this.narrationSessionId = sessionId;
-    await this.ensureNarrationModel();
+    await this.acquireNarrationLease();
+    try {
+      await this.ensureNarrationModel();
     if (
       generation !== this.narrationGeneration ||
       this.session?.id !== sessionId ||
@@ -486,7 +526,11 @@ export class OpenRappterShowAndTell extends LitElement {
       this.message = 'Narration reached the 10-minute local limit.';
       void this.stopNarration();
     }, 10 * 60_000);
-    this.message = 'Narration is recording locally.';
+      this.message = 'Narration is recording locally.';
+    } catch (error) {
+      await this.releaseNarrationLease();
+      throw error;
+    }
   }
 
   private async stopNarration(): Promise<void> {
@@ -495,10 +539,12 @@ export class OpenRappterShowAndTell extends LitElement {
     const recorder = this.mediaRecorder;
     if (!recorder || recorder.state === 'inactive') {
       this.narrationSessionId = undefined;
+      await this.releaseNarrationLease();
       return;
     }
     const sessionId = this.narrationSessionId;
     if (!sessionId) {
+      await this.releaseNarrationLease();
       throw new Error('Narration is not bound to a recording session.');
     }
     this.narrationStopping = true;
@@ -535,8 +581,12 @@ export class OpenRappterShowAndTell extends LitElement {
       );
       const samples = this.resampleMono(decoded, 16_000);
       const desktop = desktopBridge()!;
+      const requestId = `recorder-${crypto.randomUUID()}`;
+      this.narrationRequestId = requestId;
       const transcript = await desktop.narration({
         action: 'transcribe',
+        owner: 'skills-recorder',
+        request_id: requestId,
         session_id: sessionId,
         language: 'en',
         duration_ms: Date.now() - this.narrationStartedAt,
@@ -551,6 +601,8 @@ export class OpenRappterShowAndTell extends LitElement {
         await context.close();
       }
     } finally {
+      this.narrationRequestId = '';
+      await this.releaseNarrationLease();
       this.narrationStopping = false;
       this.narrationSessionId = undefined;
     }

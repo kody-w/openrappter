@@ -6,14 +6,19 @@ export interface TTSProvider {
   name: string;
   synthesize(text: string, options?: TTSOptions): Promise<Buffer>;
   getVoices(): Promise<Voice[]>;
+  getModels?(): Promise<VoiceModel[]>;
   isAvailable(): Promise<boolean>;
 }
 
 export interface TTSOptions {
+  provider?: TTSProviderId;
   voice?: string;
+  model?: string;
   speed?: number;
   pitch?: number;
   format?: 'mp3' | 'wav' | 'ogg' | 'opus';
+  signal?: AbortSignal;
+  fallback?: boolean;
 }
 
 export interface Voice {
@@ -22,6 +27,23 @@ export interface Voice {
   language: string;
   gender?: 'male' | 'female' | 'neutral';
   preview?: string;
+}
+
+export interface VoiceModel {
+  id: string;
+  name: string;
+  languages: string[];
+}
+
+export type VoiceProviderId = 'system' | 'local' | 'elevenlabs';
+export type TTSProviderId = VoiceProviderId | 'openai' | 'edge';
+
+export interface VoiceProviderStatus {
+  id: VoiceProviderId;
+  name: string;
+  available: boolean;
+  configured: boolean;
+  verifiedAt?: string;
 }
 
 export interface TranscriptionProvider {
@@ -54,8 +76,9 @@ export interface TranscriptionSegment {
 
 export interface VoiceConfig {
   tts: {
-    provider: 'elevenlabs' | 'openai' | 'edge' | 'local';
+    provider: TTSProviderId;
     defaultVoice?: string;
+    defaultModel?: string;
     speed?: number;
     autoTTS?: boolean;
   };

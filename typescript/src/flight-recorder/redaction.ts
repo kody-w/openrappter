@@ -81,6 +81,8 @@ const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   // Lengths are deliberately tight, because blanking a value that was not a
   // secret costs the record its usefulness.
   /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b/,          // OpenAI, Anthropic
+  /\bsk_[A-Za-z0-9_-]{20,200}\b/,                       // ElevenLabs
+  /\bxi[_-][A-Za-z0-9_-]{20,200}\b/i,                   // ElevenLabs legacy
   /\bAIza[A-Za-z0-9_-]{35}\b/,                          // Google
   /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/,                   // Slack bot/user
   /\bxapp-[0-9]-[A-Za-z0-9-]{10,}\b/,                   // Slack app-level

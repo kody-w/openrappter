@@ -26,13 +26,14 @@ describe('Show-and-Tell narration lifecycle', () => {
       configurable: true,
       value: { getUserMedia },
     });
+    const narration = vi.fn().mockReturnValue(download);
     window.openrappterDesktop = {
       platform: 'darwin',
       gatewayUrl: 'ws://127.0.0.1:18791',
       gatewayToken: 'test',
       showAndTell: vi.fn(),
       desktopControl: vi.fn(),
-      narration: vi.fn().mockReturnValue(download),
+      narration,
       buddyEvidence: vi.fn(),
       onNarrationStatus: vi.fn().mockReturnValue(() => {}),
       voice: vi.fn(),
@@ -54,5 +55,13 @@ describe('Show-and-Tell narration lifecycle', () => {
 
     await expect(starting).rejects.toThrow(/cancelled|recording/i);
     expect(getUserMedia).not.toHaveBeenCalled();
+    expect(narration).toHaveBeenCalledWith({
+      action: 'acquire',
+      owner: 'skills-recorder',
+    });
+    expect(narration).toHaveBeenCalledWith({
+      action: 'release',
+      owner: 'skills-recorder',
+    });
   });
 });

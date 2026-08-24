@@ -343,7 +343,6 @@ function verifyMoltWithMolter({
 }
 
 const DRY_LOAD_SCRIPT = `
-import glob
 import importlib.util
 import os
 import sys
@@ -357,9 +356,7 @@ spec.loader.exec_module(brainstem)
 
 names = {}
 failures = []
-for filepath in sorted(glob.glob(os.path.join(agents_dir, "*_agent.py"))):
-    if os.path.basename(filepath) == "basic_agent.py":
-        continue
+for filepath in brainstem._agent_cartridge_files(agents_dir):
     loaded = brainstem._load_agent_from_file(filepath)
     if not loaded:
         failures.append(f"{os.path.basename(filepath)}: no valid agents")

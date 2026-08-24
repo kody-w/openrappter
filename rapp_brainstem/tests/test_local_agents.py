@@ -926,6 +926,63 @@ class TechReviewerAgent(BasicAgent):
             f.write(code)
         return path
 
+    def _capture_basic_agent_boundary(self):
+        import sys
+
+        self.brainstem._register_shims()
+        module = sys.modules["agents.basic_agent"]
+        return {
+            "class": module.BasicAgent,
+            "module": module,
+            "class_attrs": dict(module.BasicAgent.__dict__),
+        }
+
+    def _restore_basic_agent_boundary(self, boundary):
+        import sys
+
+        cls = boundary["class"]
+        for name in list(cls.__dict__):
+            if name not in boundary["class_attrs"] and name not in {
+                "__dict__",
+                "__weakref__",
+            }:
+                delattr(cls, name)
+        for name, value in boundary["class_attrs"].items():
+            if name not in {"__dict__", "__weakref__"}:
+                setattr(cls, name, value)
+        module = boundary["module"]
+        module.BasicAgent = cls
+        for alias in (
+            "agents.basic_agent",
+            "basic_agent",
+            "openrappter.agents.basic_agent",
+        ):
+            sys.modules[alias] = module
+        sys.modules["agents"].basic_agent = module
+        sys.modules["openrappter.agents"].basic_agent = module
+
+    def _assert_basic_agent_boundary(self, boundary):
+        import sys
+
+        for alias in (
+            "agents.basic_agent",
+            "basic_agent",
+            "openrappter.agents.basic_agent",
+        ):
+            self.assertIs(sys.modules[alias], boundary["module"])
+            self.assertIs(sys.modules[alias].BasicAgent, boundary["class"])
+        self.assertIs(sys.modules["agents"].basic_agent, boundary["module"])
+        self.assertIs(
+            sys.modules["openrappter.agents"].basic_agent,
+            boundary["module"],
+        )
+        self.assertEqual(
+            set(boundary["class"].__dict__),
+            set(boundary["class_attrs"]),
+        )
+        for name, value in boundary["class_attrs"].items():
+            self.assertIs(boundary["class"].__dict__[name], value)
+
     def test_bad_name_quarantined_good_still_loads(self):
         """A space in name (the canonical bad case) is quarantined; a healthy agent
         in the same directory still loads in the same sweep."""
@@ -1163,6 +1220,169 @@ AliasAgent = CanonicalAgent
             diagnostics[0]["message"],
         )
 
+    def test_factory_distinct_classes_at_same_source_are_not_aliases(self):
+        code = '''
+from agents.basic_agent import BasicAgent
+
+def factory():
+    class GeneratedAgent(BasicAgent):
+        def __init__(self):
+            self.name = "FactoryCollision"
+            self.metadata = {"name": self.name, "description": "factory", "parameters": {"type": "object", "properties": {}}}
+            super().__init__(name=self.name, metadata=self.metadata)
+        def perform(self, **kwargs):
+            return "ok"
+    return GeneratedAgent
+
+FirstAgent = factory()
+SecondAgent = factory()
+'''
+        path = self._write("factory_collision_agent.py", code)
+
+        agents = self.brainstem.load_agents()
+
+        self.assertNotIn("FactoryCollision", agents)
+        self.assertIn(path, self.brainstem._quarantined_agents)
+        self.assertIn(
+            "distinct duplicate registered name",
+            self.brainstem._quarantined_agents[path]["reason"],
+        )
+
+    def test_candidate_module_replacement_cannot_replace_canonical_basic_agent(self):
+        boundary = self._capture_basic_agent_boundary()
+        code = '''
+import sys
+import types
+
+fake = types.ModuleType("agents.basic_agent")
+class FakeBasicAgent:
+    def __init__(self, name=None, metadata=None):
+        self.name = name
+        self.metadata = metadata
+fake.BasicAgent = FakeBasicAgent
+sys.modules["agents.basic_agent"] = fake
+from agents.basic_agent import BasicAgent
+
+class ModulePoisonAgent(BasicAgent):
+    def __init__(self):
+        super().__init__("ModulePoison", {"name": "ModulePoison", "parameters": {"type": "object", "properties": {}}})
+    def perform(self, **kwargs):
+        return "poison"
+'''
+        path = self._write("module_poison_agent.py", code)
+        try:
+            agents = self.brainstem.load_agents()
+            self.assertNotIn("ModulePoison", agents)
+            self.assertIn("canonical BasicAgent boundary", self.brainstem._quarantined_agents[path]["reason"])
+            self._assert_basic_agent_boundary(boundary)
+        finally:
+            self._restore_basic_agent_boundary(boundary)
+
+    def test_candidate_module_attribute_mutation_is_rejected_and_restored(self):
+        boundary = self._capture_basic_agent_boundary()
+        code = '''
+import agents.basic_agent as canonical
+
+class FakeBasicAgent:
+    def __init__(self, name=None, metadata=None):
+        self.name = name
+        self.metadata = metadata
+canonical.BasicAgent = FakeBasicAgent
+from agents.basic_agent import BasicAgent
+
+class AttributePoisonAgent(BasicAgent):
+    def __init__(self):
+        super().__init__("AttributePoison", {"name": "AttributePoison", "parameters": {"type": "object", "properties": {}}})
+    def perform(self, **kwargs):
+        return "poison"
+'''
+        path = self._write("attribute_poison_agent.py", code)
+        try:
+            agents = self.brainstem.load_agents()
+            self.assertNotIn("AttributePoison", agents)
+            self.assertIn("canonical BasicAgent boundary", self.brainstem._quarantined_agents[path]["reason"])
+            self._assert_basic_agent_boundary(boundary)
+        finally:
+            self._restore_basic_agent_boundary(boundary)
+
+    def test_candidate_legacy_alias_mutation_is_rejected_and_restored(self):
+        boundary = self._capture_basic_agent_boundary()
+        code = '''
+import basic_agent as legacy
+
+class FakeBasicAgent:
+    def __init__(self, name=None, metadata=None):
+        self.name = name
+        self.metadata = metadata
+legacy.BasicAgent = FakeBasicAgent
+from basic_agent import BasicAgent
+
+class LegacyPoisonAgent(BasicAgent):
+    def __init__(self):
+        super().__init__("LegacyPoison", {"name": "LegacyPoison", "parameters": {"type": "object", "properties": {}}})
+    def perform(self, **kwargs):
+        return "poison"
+'''
+        path = self._write("legacy_poison_agent.py", code)
+        try:
+            agents = self.brainstem.load_agents()
+            self.assertNotIn("LegacyPoison", agents)
+            self.assertIn("canonical BasicAgent boundary", self.brainstem._quarantined_agents[path]["reason"])
+            self._assert_basic_agent_boundary(boundary)
+        finally:
+            self._restore_basic_agent_boundary(boundary)
+
+    def test_candidate_openrappter_alias_replacement_is_rejected_and_restored(self):
+        boundary = self._capture_basic_agent_boundary()
+        code = '''
+import sys
+import types
+
+fake = types.ModuleType("openrappter.agents.basic_agent")
+class FakeBasicAgent:
+    def __init__(self, name=None, metadata=None):
+        self.name = name
+        self.metadata = metadata
+fake.BasicAgent = FakeBasicAgent
+sys.modules["openrappter.agents.basic_agent"] = fake
+from openrappter.agents.basic_agent import BasicAgent
+
+class OpenRappterPoisonAgent(BasicAgent):
+    def __init__(self):
+        super().__init__("OpenRappterPoison", {"name": "OpenRappterPoison", "parameters": {"type": "object", "properties": {}}})
+    def perform(self, **kwargs):
+        return "poison"
+'''
+        path = self._write("openrappter_poison_agent.py", code)
+        try:
+            agents = self.brainstem.load_agents()
+            self.assertNotIn("OpenRappterPoison", agents)
+            self.assertIn("canonical BasicAgent boundary", self.brainstem._quarantined_agents[path]["reason"])
+            self._assert_basic_agent_boundary(boundary)
+        finally:
+            self._restore_basic_agent_boundary(boundary)
+
+    def test_candidate_cannot_add_attributes_to_canonical_basic_agent(self):
+        boundary = self._capture_basic_agent_boundary()
+        code = '''
+from agents.basic_agent import BasicAgent
+BasicAgent.poisoned_by_candidate = True
+
+class ClassAttributePoisonAgent(BasicAgent):
+    def __init__(self):
+        super().__init__("ClassAttributePoison", {"name": "ClassAttributePoison", "parameters": {"type": "object", "properties": {}}})
+    def perform(self, **kwargs):
+        return "poison"
+'''
+        path = self._write("class_attribute_poison_agent.py", code)
+        try:
+            agents = self.brainstem.load_agents()
+            self.assertNotIn("ClassAttributePoison", agents)
+            self.assertIn("canonical BasicAgent boundary", self.brainstem._quarantined_agents[path]["reason"])
+            self._assert_basic_agent_boundary(boundary)
+        finally:
+            self._restore_basic_agent_boundary(boundary)
+
     def test_legacy_basic_agent_import_uses_canonical_class_identity(self):
         code = '''
 from basic_agent import BasicAgent
@@ -1208,6 +1428,38 @@ class LegacyAgent(BasicAgent):
 
         self.assertEqual(self.brainstem.load_agents(), {})
         self.assertNotIn(path, self.brainstem._quarantined_agents)
+
+    def test_agents_endpoint_uses_the_same_kernel_exclusion_as_runtime(self):
+        marker = os.path.join(self._tmp, "kernel-executed")
+        kernel = self._write(
+            "basic_agent.py",
+            f"open({marker!r}, 'w').write('executed')\n"
+            "class BasicAgent:\n"
+            "    pass\n",
+        )
+        adjacent = self._write(
+            "basic_agent_agent.py",
+            '''
+from agents.basic_agent import BasicAgent
+class AdjacentAgent(BasicAgent):
+    def __init__(self):
+        super().__init__("Adjacent", {"name": "Adjacent", "parameters": {"type": "object", "properties": {}}})
+    def perform(self, **kwargs):
+        return "adjacent"
+''',
+        )
+
+        response = self.client.get("/agents")
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(os.path.exists(marker))
+        self.assertNotIn(kernel, self.brainstem._quarantined_agents)
+        self.assertNotIn("basic_agent.py", [item["filename"] for item in payload["files"]])
+        self.assertIn(
+            {"filename": os.path.basename(adjacent), "agents": ["Adjacent"]},
+            payload["files"],
+        )
 
     def test_duplicate_agent_name_keeps_first_sorted_file(self):
         first = self.GOOD_AGENT.replace('return "ok"', 'return "first"')

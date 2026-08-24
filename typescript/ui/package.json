@@ -4,8 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node ../scripts/build-ui.mjs",
-    "build:legacy": "tsc && vite build && vite build --config vite.selector.config.ts && node -e \"require('fs').copyFileSync('release-ring-selector.d.ts','dist/release-ring-selector.d.ts')\"",
+    "build": "tsc && vite build && vite build --config vite.selector.config.ts && node -e \"require('fs').copyFileSync('release-ring-selector.d.ts','dist/release-ring-selector.d.ts')\"",
     "preview": "vite preview",
     "test": "vitest run"
   },

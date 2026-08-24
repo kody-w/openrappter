@@ -1,12 +1,4 @@
 import { spawnSync } from 'node:child_process';
-import {
-  cpSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,17 +6,6 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const env = { ...process.env };
 const npmExecPath = env.npm_execpath;
-const uiRoot = path.join(packageRoot, 'ui');
-const frontierRoot = path.resolve(packageRoot, '..', 'beta', 'ui');
-const frontierIcon = path.resolve(packageRoot, '..', 'beta', 'build', 'icon.svg');
-const frontierChat = path.resolve(
-  packageRoot,
-  '..',
-  'rapp_brainstem',
-  'index.html',
-);
-const output = path.join(uiRoot, 'dist');
-const legacyOutput = path.join(uiRoot, '.legacy-dist');
 
 // Do not leak outer `npm pack --json/--dry-run` flags into nested installs.
 delete env.npm_config_json;
@@ -45,38 +26,4 @@ function run(args) {
 }
 
 run(['ci', '--prefix', 'ui', '--ignore-scripts', '--no-audit', '--no-fund']);
-run(['run', 'build:legacy', '--prefix', 'ui']);
-
-rmSync(legacyOutput, { recursive: true, force: true });
-renameSync(output, legacyOutput);
-mkdirSync(output, { recursive: true });
-cpSync(frontierRoot, output, { recursive: true });
-mkdirSync(path.join(output, 'frontier-chat'), { recursive: true });
-writeFileSync(
-  path.join(output, 'frontier-chat', 'index.html'),
-  readFileSync(frontierChat, 'utf8').replace(
-    '</head>',
-    '  <script src="../frontier-chat-bridge.js"></script>\n</head>',
-  ),
-);
-cpSync(legacyOutput, path.join(output, 'legacy'), { recursive: true });
-cpSync(frontierIcon, path.join(output, 'icon.svg'));
-for (const selectorAsset of [
-  'release-ring-selector.js',
-  'release-ring-selector.js.map',
-  'release-ring-selector.d.ts',
-]) {
-  cpSync(
-    path.join(legacyOutput, selectorAsset),
-    path.join(output, selectorAsset),
-  );
-}
-const builtIndex = path.join(output, 'index.html');
-writeFileSync(
-  builtIndex,
-  readFileSync(builtIndex, 'utf8').replace(
-    'href="../build/icon.svg"',
-    'href="icon.svg"',
-  ),
-);
-rmSync(legacyOutput, { recursive: true, force: true });
+run(['run', 'build', '--prefix', 'ui']);

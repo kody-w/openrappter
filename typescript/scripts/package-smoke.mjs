@@ -121,17 +121,6 @@ try {
   if (!packedFiles.has("ui/dist/index.html")) {
     throw new Error("Tarball does not contain ui/dist/index.html");
   }
-  for (const requiredUi of [
-    "ui/dist/frontier-features.js",
-    "ui/dist/frontier-chat-bridge.js",
-    "ui/dist/frontier-host-adapter.js",
-    "ui/dist/frontier-chat/index.html",
-    "ui/dist/legacy/index.html",
-  ]) {
-    if (!packedFiles.has(requiredUi)) {
-      throw new Error(`Tarball does not contain ${requiredUi}`);
-    }
-  }
   if (!packedFiles.has("npm-shrinkwrap.json")) {
     throw new Error("Tarball does not contain the reviewed dependency lock");
   }
@@ -193,76 +182,12 @@ try {
   ) {
     throw new Error("Installed package is missing ui/dist/index.html");
   }
-  const installedIndexText = readFileSync(installedIndex, "utf8");
-  const canonicalFrontierRoot = path.resolve(packageRoot, "..", "beta", "ui");
-  const canonicalIndexText = readFileSync(
-    path.join(canonicalFrontierRoot, "index.html"),
-    "utf8",
-  ).replace('href="../build/icon.svg"', 'href="icon.svg"');
-  if (installedIndexText !== canonicalIndexText) {
-    throw new Error(
-      "Installed root diverges from the canonical beta/ui Frontier source",
-    );
-  }
-  for (const sourceAsset of [
-    "frontier-chat-bridge.js",
-    "frontier-core.js",
-    "frontier-features.css",
-    "frontier-features.js",
-    "frontier-host-adapter.js",
-  ]) {
-    const canonical = readFileSync(path.join(canonicalFrontierRoot, sourceAsset));
-    const installed = readFileSync(
-      path.join(installedRoot, "ui", "dist", sourceAsset),
-    );
-    if (!canonical.equals(installed)) {
-      throw new Error(`Installed ${sourceAsset} diverges from beta/ui`);
-    }
-  }
-  const canonicalChat = readFileSync(
-    path.resolve(packageRoot, "..", "rapp_brainstem", "index.html"),
-    "utf8",
-  ).replace(
-    "</head>",
-    '  <script src="../frontier-chat-bridge.js"></script>\n</head>',
-  );
-  const installedChat = readFileSync(
-    path.join(installedRoot, "ui", "dist", "frontier-chat", "index.html"),
-    "utf8",
-  );
-  if (canonicalChat !== installedChat) {
-    throw new Error("Installed Frontier chat diverges from rapp_brainstem");
-  }
-  if (
-    !installedIndexText.includes('data-openrappter-shell="frontier"') ||
-    !installedIndexText.includes('id="brainstem"') ||
-    !installedIndexText.includes('id="surgeon"')
-  ) {
-    throw new Error("Installed package does not boot the Frontier primary interface");
-  }
-  const installedLegacy = path.join(
-    installedRoot,
-    "ui",
-    "dist",
-    "legacy",
-    "index.html",
-  );
-  if (
-    !existsSync(installedLegacy) ||
-    !readFileSync(installedLegacy, "utf8").includes("Legacy Patient Interface")
-  ) {
-    throw new Error("Installed package does not preserve the Legacy Patient Interface");
-  }
-  const selectorFile = path.join(
-    installedRoot,
-    "ui",
-    "dist",
-    "release-ring-selector.js",
-  );
-  if (
-    !existsSync(selectorFile) ||
-    !readFileSync(selectorFile, "utf8").includes("Apply for next update")
-  ) {
+  const installedAssets = path.join(installedRoot, "ui", "dist", "assets");
+  const uiJavascript = readdirSync(installedAssets)
+    .filter((name) => name.endsWith(".js"))
+    .map((name) => readFileSync(path.join(installedAssets, name), "utf8"))
+    .join("\n");
+  if (!uiJavascript.includes("Apply for next update")) {
     throw new Error("Installed UI does not contain the release-ring switcher");
   }
   const dom = new JSDOM("<!doctype html><body></body>", { url: "http://localhost" });
@@ -1062,7 +987,7 @@ try {
   }
 
   console.log(
-    `Package smoke passed: ${artifact.filename} includes the Frontier primary interface, Legacy Patient Interface, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2/v3`,
+    `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2/v3`,
   );
 } finally {
   rmSync(scratch, {

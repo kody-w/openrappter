@@ -1,85 +1,78 @@
-# Frontier Primary Interface Plan
+# Frontier Primary Application Provenance
 
-## Visual authority
+## Authority established from deployment
 
-The authoritative interface is the existing Frontier composition in
-`beta/ui`, backed by the real Brainstem chat in `rapp_brainstem/index.html`:
+The URL `https://kody-w.github.io/openrappter/beta/` is an installer landing,
+not a second browser renderer. Its command executes `beta/install.sh` from
+`kody-w/openrappter`. That installer launches the application rooted at
+`beta/`.
 
-- main OpenRappter chat on the left;
-- connection, model, settings, voice, registry, and agents controls above chat;
-- prompt chips, transcript import/export, tutorial, help, and `.py` drop;
-- GitHub Copilot multi-chat agent panel on the right, including prompt,
-  Show mode, herd, and deploy flows.
+The maintained application authority is therefore:
 
-OpenRappter is the application shell and personal organism. Its left-hand main
-conversation is always the Brainstem `POST /chat` wire, carrying
-`user_input`, `session_id`, and `conversation_history`; Brainstem owns memory,
-twins, tools, and the agent loop. The right GitHub Copilot panel is a separate
-specialized workspace and never replaces the main conversation transport.
+- repository: `kody-w/openrappter`;
+- application root: `beta/`;
+- Electron entrypoint: `beta/electron/bootstrap.mjs`;
+- renderer: `beta/ui/`;
+- preload and IPC: `beta/electron/preload.cjs` and `beta/electron/main.mjs`;
+- package workflow: `.github/workflows/frontier-desktop.yml`.
 
-No anatomy sidebar, operating-room shell, XP desktop, taskbar, Start menu,
-window manager, or iframe around the previous dashboard is introduced.
+The public `kody-w/rapp-brainstem` repository is a name/license pointer and
+does not contain the runtime source. The installed Brainstem source is selected
+by `beta/install.sh`: tagged OpenRappter releases use the same tag's
+`rapp_brainstem/`; development installs use the configured upstream kernel and
+the pinned, hash-verified bootstrap. It lives separately at
+`~/.openrappter/brainstem/src/rapp_brainstem`.
 
-## Default and migration
+The machine-readable record is
+`contracts/frontier-ui-provenance-v1.json`.
 
-1. `typescript/scripts/build-ui.mjs` copies canonical `beta/ui` to
-   `ui/dist`, which is both the hosted `/` and Electron renderer.
-2. The prior Lit patient/Copilot interface is built once into
-   `ui/dist/legacy` and labelled **Legacy Patient Interface**.
-3. Legacy is explicit, reversible, and retained for one migration release.
-4. Existing gateway, chat, memory, agent, skill, and configuration state is
-   never rewritten during the UI migration.
+## Direct package path
 
-![Before: the previous patient interface at the default route](./assets/frontier-before-primary.png)
+Both `.github/workflows/frontier-desktop.yml` and the desktop portion of
+`.github/workflows/release.yml` run Electron Builder from `beta/`. They no
+longer build the TypeScript patient host and copy Frontier HTML into it.
 
-## Native feature integration
+`beta/package.json` includes the authoritative `ui/**` and `electron/**` source
+directly. `beta/scripts/verify-frontier-package.mjs` compares every reviewed
+renderer/entrypoint digest against the extracted `app.asar`; a changed source,
+missing package byte, or mirror fails release.
 
-Added capabilities live in one Frontier-styled modal opened beside the current
-chat—not in another shell. It contains truthful adapters for:
+The former `typescript/ui` and `typescript/desktop` application is classified
+as the deprecated patient interface. It is not a Frontier mirror, is not the
+primary desktop artifact, and may not import, rewrite, or copy `beta/ui`.
 
-- Clever Girl v3;
-- release-ring state, preview, explicit apply, and receipts;
-- Grail / Quantum RAPPIDs;
-- seven Living Company data seams and deterministic Company Week;
-- whole-organism egg import/export;
-- adaptive twin versions and rollback;
-- large-media ingest;
-- Copilot auth/model and gateway `/health`;
-- continuous voice and ElevenLabs;
-- the OpenRappter Personal / separately operated hosted-service boundary.
+## Feature integration rule
 
-Missing dependencies report **unavailable** and never substitute a related but
-different format or fabricate success.
+New OpenRappter features are modules of the maintained Frontier application:
 
-## Control and safety contract
+- renderer modules live under `beta/ui`;
+- privileged behavior uses the existing context-isolated `brainstemBeta`
+  preload API;
+- main-process behavior belongs under `beta/electron`;
+- missing IPC reports unavailable instead of creating an alternate gateway or
+  renderer host.
 
-`openrappterFrontierSemantic` exposes only `open(feature)` and `snapshot()`.
-The desktop command compatibility plane can navigate, inspect state, and run
-the local fixture Company Week. Neither interface can approve, send, publish,
-submit, execute shell commands, import an egg, or bypass native authorization.
+The feature modal therefore consumes the existing `brainstemBeta` state,
+updater, twin, agent-file, and application IPC seams. It does not install a
+second hosted adapter, private RPC transport, or copied Brainstem chat.
 
-Living Company Week is deterministic and records zero external sends,
-publishes, submissions, or other side effects. CEO memo, expense, and meme
-artifacts remain private drafts.
+## Chat identity
 
-## Release evidence
+OpenRappter is the application shell and personal organism. The left main
+conversation is the installed Brainstem's exact `/chat` wire, including
+`user_input`, `session_id`, `conversation_history`, memory, twins, and the tool
+loop. The right GitHub Copilot multi-chat surface remains the specialized
+Frontier workspace.
 
-The initial Frontier-primary contract had six failures and one pass: the
-existing chat/Copilot composition was present, but the branch still booted the
-added anatomy shell and lacked the corrected Frontier module/package names.
-After correction, all seven contracts pass.
+## Drift gates
 
-The first real packaged Electron run then reproduced the exact launch path with
-`ERR_BLOCKED_BY_CSP`, `frontierChat:false`, and `frontierPrimary:false`: the
-restored shell's `frame-src` allowed loopback but not its packaged same-origin
-chat. The contract now pins `frame-src 'self'`; the repeated packaged run
-reported both `frontierChat:true` and `frontierPrimary:true`.
+`beta/tests/frontier-provenance.test.mjs` proves:
 
-The packaged smoke also posts a deliberately invalid, no-side-effect fixture
-request through the embedded chat bridge. It must receive the canonical
-Brainstem `/chat` validation envelope without invoking an agent; release
-evidence reports `brainstemChatWire:true`.
+1. Pages points to the maintained installer;
+2. desktop workflows package `beta/` directly;
+3. the TypeScript patient host cannot mirror Frontier;
+4. alternate host/chat adapters are absent;
+5. every authoritative source digest matches the reviewed provenance record.
 
-Release gates cover the source DOM, hosted root package, deep links, explicit
-Legacy route, browser behavior, semantic controls, accessibility/responsive
-rules, Electron contracts, and real packaged smoke on Linux, macOS, and Windows.
+The package workflow additionally extracts `app.asar` and byte-compares it to
+that same record.

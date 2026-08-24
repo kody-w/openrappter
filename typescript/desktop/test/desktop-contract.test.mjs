@@ -144,19 +144,7 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(runtimeInstaller, /'ci'/);
   assert.match(runtimeInstaller, /Desktop runtime dependency drifted/);
   assert.match(main, /OPENRAPPTER_DESKTOP_SMOKE/);
-  assert.match(main, /openrappterFrontierSemantic\.open\('show-and-tell'\)/);
-  assert.match(main, /frontier-feature-content/);
-  assert.match(main, /frontierPrimary/);
-  assert.match(main, /frontierChat/);
-  assert.match(main, /brainstemChatWire/);
-  assert.match(main, /frontier-smoke-invalid/);
-  assert.match(main, /probe\.status === 400/);
-  assert.match(main, /contentDocument\?\.getElementById\('model-select'\)/);
-  assert.match(main, /contentDocument\?\.getElementById\('starter-prompts'\)/);
-  assert.match(main, /document\.title === 'OpenRappter'/);
-  assert.match(main, /getElementById\('brainstem'\)/);
-  assert.match(main, /getElementById\('surgeon'\)/);
-  assert.doesNotMatch(main, /openrappterGrailSemantic/);
+  assert.match(main, /customElements\.whenDefined\('openrappter-show-and-tell'\)/);
 });
 
 // OPENRAPPTER_DESKTOP_SMOKE is a process-wide launch flag, and the release
@@ -217,7 +205,7 @@ test('only the agent install consent dialog answers to the smoke flag', () => {
 
 test('the smoke run never asks narration or voice to do the gated work', () => {
   const smokeScript = mainSource.slice(
-    mainSource.indexOf("document.documentElement.dataset.openrappterShell"),
+    mainSource.indexOf("customElements.whenDefined('openrappter-show-and-tell')"),
   );
   assert.ok(smokeScript.length > 1000, 'could not locate the smoke script');
   assert.match(smokeScript, /\.narration\(\{/);

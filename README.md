@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Frontier UI](./docs/frontier-primary-plan.md) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Frontier provenance](./docs/frontier-primary-plan.md) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -137,22 +137,17 @@ Your agent will clone the repo, install dependencies, start the gateway and UI, 
 
 A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copilot** as the cloud AI backbone. Copilot handles inference; your agent data (memory, config, state) stays local in `~/.openrappter/`.
 
-### Default interface: Frontier
+### Primary application: Frontier
 
-Hosted OpenRappter and the packaged Electron app boot the authoritative
-`beta/ui` Frontier interface: OpenRappter chat and its model, settings, voice,
-agents, prompt, import/export, tutorial, and help controls on the left, with
-the full GitHub Copilot multi-chat agent loop on the right. Added capabilities
-open in its existing panel/modal language rather than replacing that layout.
-OpenRappter is the application shell; the left main conversation always uses
-the Brainstem `POST /chat` contract, including session history and agent tools.
-The right Copilot panel remains a specialized workspace.
+OpenRappter installs and packages the maintained application directly from
+`beta/`: `beta/electron/bootstrap.mjs` launches the renderer in `beta/ui` and
+uses the context-isolated `brainstemBeta` IPC surface. The TypeScript Lit
+patient interface is deprecated and is not a Frontier mirror or release
+artifact.
 
-The previous Lit dashboard is packaged at `ui/dist/legacy` as
-**Legacy Patient Interface** for one migration release. The switch is reversible and
-does not rewrite gateway, memory, chat, agent, skill, or configuration state.
-See the [Frontier primary plan](./docs/frontier-primary-plan.md) for architecture,
-dependency seams, migration, and release evidence.
+The Pages beta URL is an installer landing. Its installer starts this exact
+application and the separately installed Brainstem `/chat` runtime. See the
+[Frontier provenance contract](./docs/frontier-primary-plan.md).
 
 ### Flight Recorder: one truthful local execution history
 

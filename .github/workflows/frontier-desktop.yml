@@ -10,10 +10,16 @@ name: Frontier desktop
 on:
   push:
     branches: [main]
-    paths: ['beta/**', '.github/workflows/frontier-desktop.yml']
+    paths:
+      - 'beta/**'
+      - 'contracts/frontier-ui-provenance-v1.json'
+      - '.github/workflows/frontier-desktop.yml'
     tags: ['v*-frontier']
   pull_request:
-    paths: ['beta/**', '.github/workflows/frontier-desktop.yml']
+    paths:
+      - 'beta/**'
+      - 'contracts/frontier-ui-provenance-v1.json'
+      - '.github/workflows/frontier-desktop.yml'
   workflow_dispatch:
 
 concurrency:
@@ -57,6 +63,20 @@ jobs:
       - name: Package
         working-directory: beta
         run: npm run ${{ matrix.script }}
+
+      - name: Prove packaged bytes came from authoritative Frontier
+        working-directory: beta
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$(find release -type d -name OpenRappter.app -print -quit)"
+          test -n "$app"
+          rm -rf .frontier-package-audit
+          npx --no-install asar extract \
+            "$app/Contents/Resources/app.asar" \
+            .frontier-package-audit
+          node scripts/verify-frontier-package.mjs .frontier-package-audit
+          rm -rf .frontier-package-audit
 
       - name: What was produced
         working-directory: beta

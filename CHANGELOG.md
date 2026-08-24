@@ -7,16 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- The existing Frontier chat and GitHub Copilot multi-chat composition is now
-  the default hosted and Electron interface, built from the single authoritative
-  `beta/ui` source. The prior Lit dashboard remains available as the reversible
-  Legacy Patient Interface for one migration release.
-- A native Frontier feature modal integrates health/auth/model state, Clever
-  Girl, release rings, Quantum RAPPIDs, Living Company Week, eggs, adaptive
-  twins, media, voice, bounded semantic controls, and fail-closed adapters.
-
 ### Fixed
 
 - Release preflight now accepts strict SemVer prerelease tags such as
@@ -352,6 +342,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is defence in depth for if that wrapper ever narrows.
 
 ### Added
+
+- Frontier is now packaged directly from the maintained `beta/` application.
+  Release gates hash authoritative renderer/IPC bytes and compare extracted
+  `app.asar` contents, while the TypeScript patient UI remains non-primary.
 
 - `python/tests/test_report_citations.py`, a citation gate that fails CI when a
   report's `Evidence:` bullet cites a code symbol absent from the source tree.

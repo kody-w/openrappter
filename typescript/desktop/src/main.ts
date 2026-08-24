@@ -266,13 +266,6 @@ async function focusWindow(view?: string): Promise<void> {
   if (view) {
     await window.webContents.executeJavaScript(`
       (async () => {
-        if (window.openrappterFrontierSemantic) {
-          const aliases = { presence: 'organism-status', health: 'organism-status' };
-          await window.openrappterFrontierSemantic.open(
-            aliases[${JSON.stringify(view)}] || ${JSON.stringify(view)}
-          );
-          return;
-        }
         const app = document.querySelector('openrappter-app');
         if (!app) throw new Error('OpenRappter app surface is not mounted.');
         app.navigate(${JSON.stringify(view)});
@@ -1176,68 +1169,33 @@ function createWindow(): BrowserWindow {
     window.webContents.once('did-finish-load', () => {
       void window.webContents.executeJavaScript(`
         (async () => {
+          await customElements.whenDefined('openrappter-show-and-tell');
+          const appElement = document.querySelector('openrappter-app');
           const deadline = Date.now() + 15000;
           while (
             Date.now() < deadline &&
-            (
-              document.documentElement.dataset.openrappterShell !== 'frontier' ||
-              !window.openrappterFrontierSemantic ||
-              !window.OpenRappterFrontierHost
-            )
+            (!appElement?.shadowRoot ||
+              /Waking the OpenRappter patient|patient is unreachable/.test(
+                appElement.shadowRoot.textContent || ''
+              ))
           ) {
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
-          if (
-            document.documentElement.dataset.openrappterShell !== 'frontier' ||
-            !window.openrappterFrontierSemantic
-          ) {
-            throw new Error('Frontier primary interface did not render');
-          }
-          const chatFrame = document.getElementById('brainstem');
-          const chatDeadline = Date.now() + 15000;
-          while (
-            Date.now() < chatDeadline &&
-            !chatFrame?.contentDocument?.getElementById('model-select')
-          ) {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-          }
-          const frontierChat =
-            Boolean(chatFrame?.contentDocument?.getElementById('chat')) &&
-            Boolean(chatFrame?.contentDocument?.getElementById('model-select')) &&
-            Boolean(chatFrame?.contentDocument?.getElementById('agents-btn')) &&
-            Boolean(chatFrame?.contentDocument?.getElementById('voice-btn')) &&
-            Boolean(chatFrame?.contentDocument?.getElementById('starter-prompts'));
-          let brainstemChatWire = false;
-          if (frontierChat) {
-            const probe = await chatFrame.contentWindow.fetch(
-              'http://127.0.0.1:7071/chat',
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  user_input: 123,
-                  session_id: 'frontier-smoke-invalid',
-                  conversation_history: [],
-                }),
-              }
-            );
-            const probeBody = await probe.json();
-            brainstemChatWire =
-              probe.status === 400 &&
-              typeof probeBody.error === 'string' &&
-              probeBody.error.length > 0;
+          if (!appElement?.shadowRoot) throw new Error('OpenRappter app did not render');
+          if (/patient is unreachable/.test(appElement.shadowRoot.textContent || '')) {
+            throw new Error('OpenRappter UI could not connect to the gateway');
           }
           const smokeScope = ${JSON.stringify(
             process.env.OPENRAPPTER_DESKTOP_SMOKE_SCOPE ?? 'full',
           )};
           let recorder = null;
-          let recorderSurfaceReady = false;
           if (smokeScope !== 'boot') {
-            await window.openrappterFrontierSemantic.open('show-and-tell');
-            recorder = document.getElementById('frontier-feature-content');
-            recorderSurfaceReady = /Show & Tell/.test(
-              recorder?.textContent || ''
+            appElement.navigate('show-and-tell');
+            await appElement.updateComplete;
+            recorder = appElement.shadowRoot.querySelector(
+              'openrappter-show-and-tell'
             );
+            await recorder?.updateComplete;
           }
           const info = await window.openrappterDesktop.getInfo();
           const narrationStatus = await window.openrappterDesktop.narration({
@@ -1250,10 +1208,7 @@ function createWindow(): BrowserWindow {
             return {
               smokeScope: 'boot',
               bridge: Boolean(window.openrappterDesktop),
-              component:
-                document.documentElement.dataset.openrappterShell === 'frontier',
-              frontierChat,
-              brainstemChatWire,
+              component: Boolean(customElements.get('openrappter-show-and-tell')),
               narrationBridge: Boolean(narrationStatus.model),
               voiceBridge: Boolean(voiceStatus.state),
               gatewayUrl: window.openrappterDesktop.gatewayUrl,
@@ -1329,18 +1284,10 @@ function createWindow(): BrowserWindow {
           return {
             smokeScope: 'full',
             bridge: Boolean(window.openrappterDesktop),
-            component:
-              document.documentElement.dataset.openrappterShell === 'frontier',
-            frontierChat,
-            brainstemChatWire,
-            frontierPrimary:
-              document.title === 'OpenRappter' &&
-              frontierChat &&
-              Boolean(document.getElementById('brainstem')) &&
-              Boolean(document.getElementById('surgeon')) &&
-              Boolean(document.getElementById('frontier-features')) &&
-              !document.getElementById('grail-sidebar'),
-            recorderSurface: recorderSurfaceReady,
+            component: Boolean(customElements.get('openrappter-show-and-tell')),
+            recorderSurface: /Show it once/.test(
+              recorder?.shadowRoot?.textContent || ''
+            ),
             recorderStatus: status.status,
             desktopControl:
               controlSnapshot.status === 'success' &&
@@ -1373,14 +1320,11 @@ function createWindow(): BrowserWindow {
         const required = [
           'bridge',
           'component',
-          'frontierChat',
-          'brainstemChatWire',
           'narrationBridge',
           'voiceBridge',
         ] as const;
         const fullRequired = [
           'recorderSurface',
-          'frontierPrimary',
           'desktopControl',
           'hotLoadedAgents',
           'recorderLifecycle',

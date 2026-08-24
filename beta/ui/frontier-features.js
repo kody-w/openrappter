@@ -5,10 +5,9 @@
     LivingCompanyWeek,
     classifyMedia,
     createSemanticController,
-    reviewImmutablePayload,
     truthfulUnavailable,
   } = global.OpenRappterFrontierCore;
-  const host = global.OpenRappterFrontierHost;
+  const native = global.brainstemBeta;
   const dialog = document.getElementById("frontier-features");
   const openButton = document.getElementById("frontier-features-tab");
   const closeButton = document.getElementById("frontier-features-close");
@@ -18,7 +17,6 @@
   const companyWeek = new LivingCompanyWeek();
   let activeFeature = null;
   let restoreFocus = null;
-  let ringPreview = null;
 
   const FEATURES = Object.freeze({
     "organism-status": {
@@ -76,13 +74,13 @@
   });
 
   const COMPANY_MODULES = Object.freeze([
-    ["Engineering", "system.status"],
-    ["Release Operations", "rings.get"],
-    ["Customer Signals", "channels.status"],
-    ["Documentation", "docs.status"],
-    ["Expenses", "expenses.drafts.list"],
-    ["Decisions", "decisions.list"],
-    ["RAPP Estate Health", "estate.buddies.list"],
+    ["Engineering", () => nativeCall("getState")],
+    ["Release Operations", async () => (await nativeCall("getState")).update],
+    ["Customer Signals", () => nativeCall("customerSignals")],
+    ["Documentation", () => nativeCall("documentationStatus")],
+    ["Expenses", () => nativeCall("expenseDrafts")],
+    ["Decisions", () => nativeCall("decisionQueue")],
+    ["RAPP Estate Health", () => nativeCall("estateHealth")],
   ]);
 
   function escapeHtml(value) {
@@ -93,9 +91,13 @@
       .replaceAll('"', "&quot;");
   }
 
-  async function rpc(method, params = {}) {
-    if (!host?.rpc) throw new Error(`${method} has no authenticated gateway adapter.`);
-    return host.rpc(method, params);
+  async function nativeCall(method, ...args) {
+    if (!native || typeof native[method] !== "function") {
+      throw new Error(
+        `${method} is unavailable because the maintained Frontier IPC does not expose it.`,
+      );
+    }
+    return native[method](...args);
   }
 
   async function attempt(name, operation) {
@@ -137,88 +139,91 @@
   }
 
   async function renderStatus(body) {
-    const [health, auth, model] = await Promise.all([
-      attempt("/health", () => host.health()),
-      attempt("Copilot auth", () => rpc("auth.status")),
-      attempt("Copilot model", () => rpc("backend.status")),
-    ]);
+    const state = await attempt("OpenRappter", () => nativeCall("getState"));
+    if (state.status !== "ready") {
+      body.innerHTML = card("OpenRappter", state);
+      return;
+    }
     body.innerHTML = [
-      card("Gateway /health", health),
-      card("Copilot auth", auth),
-      card("Copilot model", model),
+      card("Brainstem", {
+        status: state.value?.brainstem?.phase === "ready" ? "ready" : "unavailable",
+        value: state.value?.brainstem,
+        reason: state.value?.brainstem?.message,
+      }),
+      card("GitHub Copilot workspace", {
+        status: state.value?.copilot?.phase === "ready"
+          || state.value?.surgeon?.phase === "ready"
+          ? "ready"
+          : "unavailable",
+        value: state.value?.copilot || state.value?.surgeon,
+        reason: (state.value?.copilot || state.value?.surgeon)?.message,
+      }),
+      card("Application update", {
+        status: state.value?.update ? "ready" : "unavailable",
+        value: state.value?.update,
+        reason: "No update state was returned.",
+      }),
     ].join("");
   }
 
   async function renderCleverGirl(body) {
     body.innerHTML = card(
       "Clever Girl v3",
-      await attempt("Clever Girl v3", () => rpc("clever-girl.status")),
+      await attempt("Clever Girl v3", () => nativeCall("cleverGirlStatus")),
     );
   }
 
   async function renderReleaseRings(body) {
-    const state = await attempt("Release rings", () => rpc("rings.get"));
-    body.innerHTML = `${card("Current ring", state)}
+    const state = await attempt(
+      "Released application source",
+      async () => (await nativeCall("getState")).update,
+    );
+    body.innerHTML = `${card("Current release source", state)}
       <article class="frontier-card">
-        <h2>Preview and apply</h2>
-        <p>Selection changes nothing. Non-stable or older rings require explicit acknowledgement.</p>
+        <h2>Check and install</h2>
+        <p>The maintained updater resolves a published, commit-pinned release. This panel does not implement ring resolution.</p>
         <div class="frontier-actions">
-          <select id="frontier-ring-select" aria-label="Release ring">
-            <option value="stable">stable</option>
-            <option value="beta">beta</option>
-            <option value="canary">canary</option>
-            <option value="alpha">alpha</option>
-            <option value="nightly">nightly</option>
-          </select>
-          <button id="frontier-ring-preview" type="button">Preview</button>
+          <button id="frontier-update-check" type="button">Check published source</button>
           <label><input id="frontier-ring-confirm" type="checkbox">
-            I reviewed this ring and any downgrade warning.</label>
-          <button id="frontier-ring-apply" type="button" disabled>Apply for next update</button>
+            I reviewed the exact update receipt.</label>
+          <button id="frontier-update-install" type="button" disabled>Update and restart</button>
         </div>
-        <pre id="frontier-ring-result" class="frontier-result">No preview requested.</pre>
+        <pre id="frontier-ring-result" class="frontier-result">No update check requested.</pre>
       </article>`;
-    const select = body.querySelector("#frontier-ring-select");
-    const previewButton = body.querySelector("#frontier-ring-preview");
+    const checkButton = body.querySelector("#frontier-update-check");
     const confirm = body.querySelector("#frontier-ring-confirm");
-    const applyButton = body.querySelector("#frontier-ring-apply");
+    const installButton = body.querySelector("#frontier-update-install");
     const result = body.querySelector("#frontier-ring-result");
-    const invalidate = () => {
-      ringPreview = null;
+    let reviewedUpdate = null;
+    checkButton.addEventListener("click", async () => {
+      checkButton.disabled = true;
       confirm.checked = false;
-      applyButton.disabled = true;
-      result.textContent = "Selection changed. Preview and review again.";
-    };
-    select.addEventListener("change", invalidate);
-    previewButton.addEventListener("click", async () => {
-      previewButton.disabled = true;
+      installButton.disabled = true;
       try {
-        ringPreview = await rpc("rings.preview", { ring: select.value });
-        result.textContent = JSON.stringify(ringPreview, null, 2);
-        const warning = select.value !== "stable" || ringPreview?.olderThanCurrent === true;
-        applyButton.disabled = ringPreview?.canApply !== true || (warning && !confirm.checked);
+        reviewedUpdate = await nativeCall("checkForUpdates");
+        result.textContent = JSON.stringify(reviewedUpdate, null, 2);
+        installButton.disabled = reviewedUpdate?.phase !== "available";
       } catch (cause) {
-        ringPreview = null;
-        result.textContent = `Preview unavailable: ${String(cause?.message || cause)}`;
+        reviewedUpdate = null;
+        result.textContent = `Update check unavailable: ${String(cause?.message || cause)}`;
       } finally {
-        previewButton.disabled = false;
+        checkButton.disabled = false;
       }
     });
     confirm.addEventListener("change", () => {
-      const warning = select.value !== "stable" || ringPreview?.olderThanCurrent === true;
-      applyButton.disabled = ringPreview?.canApply !== true || (warning && !confirm.checked);
+      installButton.disabled =
+        reviewedUpdate?.phase !== "available" || !confirm.checked;
     });
-    applyButton.addEventListener("click", async () => {
-      applyButton.disabled = true;
+    installButton.addEventListener("click", async () => {
+      installButton.disabled = true;
       try {
-        const receipt = await rpc("rings.apply", {
-          ring: select.value,
-          allowDowngrade: ringPreview?.olderThanCurrent === true && confirm.checked,
-        });
-        result.textContent = receipt?.applied === true
-          ? JSON.stringify(receipt, null, 2)
-          : "No applied receipt was returned; nothing changed.";
+        result.textContent = JSON.stringify(
+          await nativeCall("installUpdate"),
+          null,
+          2,
+        );
       } catch (cause) {
-        result.textContent = `Apply unavailable: ${String(cause?.message || cause)}`;
+        result.textContent = `Update unavailable: ${String(cause?.message || cause)}`;
       }
     });
   }
@@ -238,9 +243,9 @@
   }
 
   async function renderLivingCompany(body) {
-    const modules = await Promise.all(COMPANY_MODULES.map(async ([name, method]) => [
+    const modules = await Promise.all(COMPANY_MODULES.map(async ([name, operation]) => [
       name,
-      await attempt(name, () => rpc(method)),
+      await attempt(name, operation),
     ]));
     const snapshot = companyWeek.snapshot();
     body.innerHTML = `${modules.map(([name, result]) => card(name, result)).join("")}
@@ -309,7 +314,10 @@
       if (!list) throw new Error("Native twin list is unavailable.");
       return list();
     });
-    const versions = await attempt("Adaptive twin versions", () => rpc("twin.versions"));
+    const versions = await attempt(
+      "Adaptive twin versions",
+      () => nativeCall("twinVersions"),
+    );
     body.innerHTML = card("Current twins", current) + card("Version history and rollback", versions);
   }
 
@@ -350,8 +358,8 @@
 
   async function renderVoice(body) {
     const [status, providers] = await Promise.all([
-      attempt("Continuous voice", () => rpc("voice.mode.status")),
-      attempt("Voice providers", () => rpc("tts.providers")),
+      attempt("Continuous voice", () => nativeCall("voiceStatus")),
+      attempt("Voice providers", () => nativeCall("voiceProviders")),
     ]);
     body.innerHTML = `${card("Continuous voice", status)}${card("Providers / ElevenLabs", providers)}
       <article class="frontier-card"><h2>Primary controls</h2>
@@ -396,12 +404,15 @@
     else if (feature === "voice") await renderVoice(body);
     else if (feature === "about") renderAbout(body);
     else if (feature === "show-and-tell") {
-      await renderGatewayFeature(body, "Show & Tell", () =>
-        host.showAndTell({ action: "status" }));
+      await renderGatewayFeature(
+        body,
+        "Show & Tell",
+        () => nativeCall("showAndTellStatus"),
+      );
     } else if (feature === "agents") {
-      await renderGatewayFeature(body, "Agents", () => rpc("agents.list"));
+      await renderGatewayFeature(body, "Agents", () => nativeCall("listAgentFiles"));
     } else if (feature === "skills") {
-      await renderGatewayFeature(body, "Skills", () => rpc("skills.list"));
+      await renderGatewayFeature(body, "Skills", () => nativeCall("skillsList"));
     }
   }
 
@@ -430,8 +441,20 @@
     restoreFocus = null;
   }
 
-  function openLegacyPatient() {
-    location.href = host?.legacyUrl || "./legacy/index.html";
+  async function openLegacyPatient() {
+    try {
+      await nativeCall("openLegacyPatient");
+    } catch (cause) {
+      const body = featureFrame({
+        title: "Legacy Patient Interface",
+        description: "Deprecated and never part of the Frontier renderer.",
+      });
+      body.innerHTML = card(
+        "Legacy Patient Interface",
+        truthfulUnavailable("Legacy Patient Interface", cause?.message || cause),
+      );
+      if (!dialog.open) dialog.showModal();
+    }
   }
 
   global.openrappterFrontierSemantic = createSemanticController(
@@ -482,7 +505,7 @@
 
   openButton.addEventListener("click", () => void openDialog());
   closeButton.addEventListener("click", closeDialog);
-  legacyButton.addEventListener("click", openLegacyPatient);
+  legacyButton.addEventListener("click", () => void openLegacyPatient());
   nav.addEventListener("click", (event) => {
     const button = event.target.closest("[data-frontier-feature]");
     if (button) void renderFeature(button.dataset.frontierFeature);

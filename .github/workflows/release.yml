@@ -231,33 +231,25 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 22
+          node-version: '24.19.0'
           cache: npm
-          cache-dependency-path: |
-            typescript/package-lock.json
-            typescript/ui/package-lock.json
-            typescript/desktop/package-lock.json
+          cache-dependency-path: beta/package-lock.json
 
-      - name: Install and build OpenRappter core
-        working-directory: typescript
-        run: |
-          npm ci
-          npm run build
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
 
-      - name: Install, compile, and test Electron desktop
-        working-directory: typescript/desktop
+      - name: Install authoritative Brainstem test runtime
+        run: python -m pip install --quiet -r rapp_brainstem/requirements.txt
+
+      - name: Install and test authoritative Frontier desktop
+        working-directory: beta
         run: |
-          npm ci
-          npm run build
+          npm ci --ignore-scripts
+          node node_modules/electron/install.js
+          npm run check
           npm test
           npm audit --audit-level=high
-
-      - name: Run real Electron smoke
-        working-directory: typescript/desktop
-        run: |
-          sudo chown root:root node_modules/electron/dist/chrome-sandbox
-          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
-          xvfb-run -a env OPENRAPPTER_DESKTOP_SMOKE=1 ./node_modules/.bin/electron .
 
   build-electron-artifacts:
     name: Build Electron ${{ matrix.os }}
@@ -269,35 +261,49 @@ jobs:
         include:
           - os: mac
             runner: macos-14
-          - os: win
-            runner: windows-latest
-          - os: linux
-            runner: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 22
+          node-version: '24.19.0'
           cache: npm
-          cache-dependency-path: |
-            typescript/package-lock.json
-            typescript/ui/package-lock.json
-            typescript/desktop/package-lock.json
+          cache-dependency-path: beta/package-lock.json
 
-      - name: Build OpenRappter core and UI
-        working-directory: typescript
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+
+      - name: Install authoritative Brainstem smoke runtime
+        run: python -m pip install --quiet -r rapp_brainstem/requirements.txt
+
+      - name: Prepare isolated Brainstem smoke checkout
+        shell: bash
         run: |
-          npm ci
-          npm run build
+          set -euo pipefail
+          smoke="$RUNNER_TEMP/openrappter-frontier-smoke"
+          mkdir -p "$smoke/brainstem/src"
+          cp -R rapp_brainstem "$smoke/brainstem/src/rapp_brainstem"
+          git -C "$smoke/brainstem/src" init --quiet
+          git -C "$smoke/brainstem/src" config user.name smoke
+          git -C "$smoke/brainstem/src" config user.email smoke@example.invalid
+          git -C "$smoke/brainstem/src" add rapp_brainstem
+          git -C "$smoke/brainstem/src" commit --quiet -m smoke
+          {
+            echo "OPENRAPPTER_HOME=$smoke"
+            echo "OPENRAPPTER_INSTANCE=release-smoke"
+            echo "BRAINSTEM_HOME=$smoke/brainstem"
+            echo "BRAINSTEM_BETA_HOME=$smoke/desktop"
+            echo "BRAINSTEM_BETA_SOURCE_DIR=$smoke/brainstem/src/rapp_brainstem"
+            echo "BRAINSTEM_BETA_PYTHON=$(command -v python)"
+          } >> "$GITHUB_ENV"
 
-      - name: Install desktop dependencies
-        working-directory: typescript/desktop
-        run: npm ci
-
-      - name: Build desktop source
-        working-directory: typescript/desktop
-        run: npm run build
+      - name: Install authoritative Frontier dependencies
+        working-directory: beta
+        run: |
+          npm ci --ignore-scripts
+          node node_modules/electron/install.js
+          npm run check
 
       - name: Prepare macOS notarization key
         id: notarization
@@ -317,8 +323,8 @@ jobs:
           chmod 600 "$key_path"
           printf 'path=%s\n' "$key_path" >> "$GITHUB_OUTPUT"
 
-      - name: Build signed desktop distributions
-        working-directory: typescript/desktop
+      - name: Build signed authoritative Frontier distributions
+        working-directory: beta
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.os != 'linux' && 'true' || 'false' }}
           CSC_LINK: ${{ matrix.os == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || matrix.os == 'win' && secrets.WINDOWS_CERTIFICATE_P12_BASE64 || '' }}
@@ -340,16 +346,32 @@ jobs:
             test -n "$CSC_LINK"
             test -n "$CSC_KEY_PASSWORD"
           fi
-          npx --no-install electron-builder --publish never
+          npm run prepare:media
+          npx --no-install electron-builder --${{ matrix.os }} --publish never
+
+      - name: Prove packaged bytes came from authoritative Frontier
+        if: matrix.os == 'mac'
+        working-directory: beta
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$(find release -type d -name OpenRappter.app -print -quit)"
+          test -n "$app"
+          rm -rf .frontier-package-audit
+          npx --no-install asar extract \
+            "$app/Contents/Resources/app.asar" \
+            .frontier-package-audit
+          node scripts/verify-frontier-package.mjs .frontier-package-audit
+          rm -rf .frontier-package-audit
 
       - name: Smoke packaged macOS application
         if: matrix.os == 'mac'
-        working-directory: typescript/desktop
+        working-directory: beta
         shell: bash
         run: |
           set -euo pipefail
           app_binary="$(
-            find dist \
+            find release \
               -maxdepth 5 \
               -type f \
               -path '*/OpenRappter.app/Contents/MacOS/OpenRappter' \
@@ -357,29 +379,38 @@ jobs:
               -quit
           )"
           test -n "$app_binary"
-          OPENRAPPTER_DESKTOP_SMOKE=1 "$app_binary"
+          BRAINSTEM_BETA_SMOKE_READY_FILE="$RUNNER_TEMP/frontier-ready.json" \
+          BRAINSTEM_BETA_SMOKE_EXIT_MS=1000 \
+            "$app_binary"
+          test -s "$RUNNER_TEMP/frontier-ready.json"
 
       - name: Smoke packaged Linux application
         if: matrix.os == 'linux'
-        working-directory: typescript/desktop
+        working-directory: beta
         shell: bash
         run: |
           set -euo pipefail
-          test -x dist/linux-unpacked/openrappter
-          sudo chown root:root dist/linux-unpacked/chrome-sandbox
-          sudo chmod 4755 dist/linux-unpacked/chrome-sandbox
-          xvfb-run -a env OPENRAPPTER_DESKTOP_SMOKE=1 \
-            dist/linux-unpacked/openrappter
+          test -x release/linux-unpacked/openrappter
+          sudo chown root:root release/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 release/linux-unpacked/chrome-sandbox
+          xvfb-run -a env \
+            BRAINSTEM_BETA_SMOKE_READY_FILE="$RUNNER_TEMP/frontier-ready.json" \
+            BRAINSTEM_BETA_SMOKE_EXIT_MS=1000 \
+            release/linux-unpacked/openrappter
+          test -s "$RUNNER_TEMP/frontier-ready.json"
 
       - name: Smoke packaged Windows application
         if: matrix.os == 'win'
         timeout-minutes: 5
-        working-directory: typescript/desktop
+        working-directory: beta
         shell: pwsh
         run: |
-          $env:OPENRAPPTER_DESKTOP_SMOKE = "1"
-          $env:OPENRAPPTER_DESKTOP_SMOKE_SCOPE = "boot"
-          .\dist\win-unpacked\OpenRappter.exe
+          $env:BRAINSTEM_BETA_SMOKE_READY_FILE = "$env:RUNNER_TEMP\frontier-ready.json"
+          $env:BRAINSTEM_BETA_SMOKE_EXIT_MS = "1000"
+          .\release\win-unpacked\OpenRappter.exe
+          if (-not (Test-Path $env:BRAINSTEM_BETA_SMOKE_READY_FILE)) {
+            throw "Packaged Frontier did not report ready."
+          }
 
       - name: Require signed and notarized macOS release
         if: matrix.os == 'mac'
@@ -387,7 +418,7 @@ jobs:
         run: |
           set -euo pipefail
           app_path="$(
-            find typescript/desktop/dist \
+            find beta/release \
               -maxdepth 3 \
               -type d \
               -name 'OpenRappter.app' \
@@ -403,7 +434,7 @@ jobs:
         if: matrix.os == 'win'
         shell: pwsh
         run: |
-          $installers = Get-ChildItem typescript/desktop/dist/*.exe
+          $installers = Get-ChildItem beta/release/*.exe
           if ($installers.Count -eq 0) {
             throw "No Windows installer was produced."
           }
@@ -424,10 +455,10 @@ jobs:
         with:
           name: desktop-${{ matrix.os }}-${{ needs.preflight.outputs.version }}
           path: |
-            typescript/desktop/dist/*.dmg
-            typescript/desktop/dist/*.zip
-            typescript/desktop/dist/*.exe
-            typescript/desktop/dist/*.AppImage
+            beta/release/*.dmg
+            beta/release/*.zip
+            beta/release/*.exe
+            beta/release/*.AppImage
           if-no-files-found: error
           retention-days: 14
 

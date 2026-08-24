@@ -11,6 +11,11 @@ live model or the network, (c) drives the app the way the AI drives it — throu
 bus — and (d) fails only when behavior changed. The same suite runs locally and in CI on
 macOS, Windows, and Linux.
 
+New journeys use the closed
+[`openrappter-ui-plan/1.0`](../SEMANTIC-UI-PLANS.md) action catalog. A source
+regex, coordinate click, arbitrary selector, or direct IPC call cannot mark a
+new visible feature covered.
+
 ## Why today's tests do not get there
 
 - There is **no fake model**. Every script that drives the real app needs a signed-in Copilot

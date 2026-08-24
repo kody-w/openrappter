@@ -1310,6 +1310,62 @@ test("production DOM fallbacks perform the drag without test adapters", async ()
   assert.equal(fixture.state.get("tile-7").surface, "binder");
 });
 
+test("semantic console plans are closed, bounded, deterministic, and model-free", async () => {
+  const fixture = makeFixture();
+  fixture.document.body.textContent = "OpenRappter ready";
+  const result = await fixture.rapp.semanticRun({
+    schema: "openrappter-ui-plan/1.0",
+    name: "console-smoke",
+    actions: [
+      { action: "inspect_state", target: "shell" },
+      { action: "click_known", handle: "@tiles.surface.arena" },
+      { action: "assert_visible_text", text: "OpenRappter ready" },
+      {
+        action: "assert_state",
+        handle: "@tiles.surface.arena",
+        state: "enabled",
+      },
+    ],
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.ran, 4);
+  assert.equal(fixture.currentSurface, "arena");
+  assert.equal(fixture.modelCalls, 0);
+
+  for (const action of [
+    { action: "javascript", source: "alert(1)" },
+    { action: "click_known", selector: "#send" },
+    { action: "click_known", handle: "@unknown.control" },
+    { action: "install", id: "bookfactory", approved: true },
+  ]) {
+    const rejected = await fixture.rapp.semanticRun({
+      schema: "openrappter-ui-plan/1.0",
+      actions: [action],
+    });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.reason, "bad_plan");
+  }
+});
+
+test("semantic console rejects simultaneous plans", async () => {
+  const fixture = makeFixture();
+  const first = fixture.rapp.semanticRun({
+    schema: "openrappter-ui-plan/1.0",
+    actions: [{
+      action: "assert_visible_text",
+      text: "never-visible",
+      timeoutMs: 100,
+    }],
+  });
+  const second = await fixture.rapp.semanticRun({
+    schema: "openrappter-ui-plan/1.0",
+    actions: [{ action: "inspect_state" }],
+  });
+  assert.equal(second.ok, false);
+  assert.equal(second.reason, "simultaneous_plan");
+  assert.equal((await first).ok, false);
+});
+
 test("cross-frame drags use the real Brainstem source and target handlers", async () => {
   const { shell } = makeCrossFrameFixture();
   const parked = await shell.rapp(
@@ -1392,6 +1448,14 @@ test("the shell and injected rapplication frames install the same Autopilot modu
     classicSource,
   });
   assert.match(installation, /function createAutopilot/);
+  assert.match(installation, /__openrappterSemanticControlEnabled = false/);
+  const semanticInstallation = createAutopilotInstallationSource({
+    capability: "test-capability",
+    classicSource,
+    semanticControl: true,
+  });
+  assert.match(semanticInstallation, /__openrappterSemanticControlEnabled = true/);
+  assert.match(classicSource, /window\.openrappter = Object\.freeze/);
   assert.match(
     instrumentRappUi("<html><head></head></html>", {
       autopilotSource: installation,

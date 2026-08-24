@@ -40,6 +40,9 @@ protocol as `not-claimed`.
 - the included `BrainstemUiDriver` agent can operate the actual visible
   frontend with an animated cursor, clicks, typing, narration, and waits so the
   user can watch or follow along;
+- agents and tests can run closed, bounded JSON journeys through the same
+  driver with [`openrappter-ui-plan/1.0`](docs/SEMANTIC-UI-PLANS.md), without
+  coordinates, arbitrary selectors, JavaScript evaluation, or direct IPC;
 - an Electron desktop window owns the local UI;
 - the GitHub Copilot CLI is bundled through `@github/copilot-sdk` and connected
   over stdio with a bounded startup timeout;

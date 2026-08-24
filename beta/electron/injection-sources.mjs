@@ -9,6 +9,7 @@ export const FORCE_MODE_BOOTSTRAP =
 export function createAutopilotInstallationSource({
   capability,
   classicSource,
+  semanticControl = false,
 }) {
   return `/* Added by the OpenRappter host: the RAPP Autopilot driver
    (rapp-autopilot/1.0), which installs window.rapp as an allowlisted command
@@ -17,6 +18,7 @@ export function createAutopilotInstallationSource({
    adds no capability this interface does not already offer a person. */
 ;(() => {
 window.__rappAutopilotCapability = ${JSON.stringify(capability)};
+window.__openrappterSemanticControlEnabled = ${semanticControl === true};
 ${String(classicSource || "")}
 })();`;
 }

@@ -3220,6 +3220,7 @@ export async function startUiDriverServer({
     pid: process.pid,
     brainstemRuntimeFingerprint,
     runtimeFingerprint,
+    semanticControl: env.OPENRAPPTER_SEMANTIC_CONTROL === "1",
     startedAt,
     tracePath,
   });

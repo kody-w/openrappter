@@ -4,5 +4,6 @@ import "./ambient-self-report.e2e.test.mjs";
 import "./boot.e2e.test.mjs";
 import "./dimension-tiles.e2e.test.mjs";
 import "./lineage-words.e2e.test.mjs";
+import "./semantic-bookfactory.e2e.test.mjs";
 import "./store-hatch.e2e.test.mjs";
 import "./surgeon-concurrent.e2e.test.mjs";

@@ -783,6 +783,7 @@ test("real server enforces auth, body, heartbeat, conditions, and traces", async
   });
   const metadata = JSON.parse(readFileSync(driver.metadataPath, "utf8"));
   assert.equal(metadata.version, 2);
+  assert.equal(metadata.semanticControl, false);
 
   const unauthorized = await postCommand(
     metadata,

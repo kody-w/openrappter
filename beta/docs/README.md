@@ -22,6 +22,7 @@ them, they win.
 | | |
 |---|---|
 | [AUTOPILOT-CLI.md](AUTOPILOT-CLI.md) | `rapp-autopilot/1.0` — a CLI interface with no command line, and an API, where one command costs a model call. |
+| [SEMANTIC-UI-PLANS.md](SEMANTIC-UI-PLANS.md) | Closed JSON journeys, explicit semantic-control mode, packaged CLI launch, redacted traces, and the no-coordinate test constitution. |
 | [UI-AUTOSTEER-PROTOCOL.md](UI-AUTOSTEER-PROTOCOL.md) | `rapp-ui-autosteer/1.0` — scan, inject, drive an embedded app through its own interface. |
 | [UI-DRIVER-V2.md](UI-DRIVER-V2.md) | The driver underneath: accurate, bounded, quiet. |
 | [RECAP-EXPORT.md](RECAP-EXPORT.md) | What an unattended run leaves behind, and how to publish it by hand. |

@@ -3,6 +3,19 @@ const COMMAND_LIMIT = 64;
 const RESULT_LIMIT_BYTES = 64 * 1024;
 const TEXT_LIMIT = 64 * 1024;
 const CHAT_READ_DEFAULT_TURNS = 50;
+const SEMANTIC_API_VERSION = "openrappter-ui/1.0";
+const SEMANTIC_ACTION_LIMIT = 40;
+const SEMANTIC_PLAN_BYTES = 64 * 1024;
+const SEMANTIC_ACTIONS = Object.freeze([
+  "inspect_state",
+  "select_store_item",
+  "hatch",
+  "wait_status",
+  "send_chat",
+  "click_known",
+  "assert_visible_text",
+  "assert_state",
+]);
 const SURFACES = Object.freeze(["herd", "arena", "binder"]);
 const SPEEDS = Object.freeze({
   natural: Object.freeze({ hoverMs: 240, moveMs: 720, steps: 12 }),
@@ -220,6 +233,7 @@ export function createAutopilot(ctx = {}) {
   const pendingMessages = new Map();
   let messageSequence = 0;
   let lastFoldedTileId = null;
+  let semanticPlanActive = false;
 
   function sleep(delayMs) {
     return new Promise((resolve) => {
@@ -2534,6 +2548,296 @@ export function createAutopilot(ctx = {}) {
 
   win?.addEventListener?.("message", receiveMessage);
 
+  function semanticFailure(message) {
+    throw new AutopilotInputError(
+      "plan",
+      `a closed ${SEMANTIC_API_VERSION} action plan`,
+      message,
+    );
+  }
+
+  function semanticText(value, label, maximum = TEXT_LIMIT) {
+    if (typeof value !== "string" || !value.trim()) {
+      semanticFailure(`${label} must be non-empty text.`);
+    }
+    if (new TextEncoder().encode(value).byteLength > maximum) {
+      semanticFailure(`${label} exceeds ${maximum} UTF-8 bytes.`);
+    }
+    return value;
+  }
+
+  function semanticId(value, label) {
+    if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
+      semanticFailure(`${label} is not a safe semantic id.`);
+    }
+    return value;
+  }
+
+  function semanticHandle(value, label) {
+    const requested = String(value || "");
+    if (!/^@?(?:shell|store|twin|brainstem|herd|arena|binder|tiles)[A-Za-z0-9_.%[\]-]*$/.test(requested)) {
+      semanticFailure(`${label} must be a known data-drive handle.`);
+    }
+    return requested.startsWith("@") ? requested : `@${requested}`;
+  }
+
+  function semanticTimeout(value, fallback = 30000) {
+    if (value === undefined) return fallback;
+    if (!Number.isInteger(value) || value < 100 || value > 120000) {
+      semanticFailure("timeoutMs must be an integer from 100 through 120000.");
+    }
+    return value;
+  }
+
+  function semanticClosed(value, allowed, label) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      semanticFailure(`${label} must be an object.`);
+    }
+    for (const key of Object.keys(value)) {
+      if (!allowed.includes(key)) semanticFailure(`${label} does not accept "${key}".`);
+    }
+  }
+
+  function normalizeSemanticAction(value, index) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      semanticFailure(`actions[${index}] must be an object.`);
+    }
+    if (!SEMANTIC_ACTIONS.includes(value.action)) {
+      semanticFailure(`actions[${index}].action must be one of ${SEMANTIC_ACTIONS.join(", ")}.`);
+    }
+    const allowed = {
+      inspect_state: ["action", "target", "limit"],
+      select_store_item: ["action", "id", "timeoutMs"],
+      hatch: ["action", "id", "timeoutMs"],
+      wait_status: ["action", "status", "timeoutMs", "twinId"],
+      send_chat: ["action", "text", "timeoutMs", "twinId", "waitText"],
+      click_known: ["action", "handle", "timeoutMs"],
+      assert_visible_text: ["action", "target", "text", "timeoutMs"],
+      assert_state: ["action", "handle", "state", "timeoutMs"],
+    }[value.action];
+    semanticClosed(value, allowed, `actions[${index}]`);
+    const action = { action: value.action };
+    if (value.target !== undefined && !["shell", "brainstem"].includes(value.target)) {
+      semanticFailure(`actions[${index}].target must be shell or brainstem.`);
+    }
+    if (value.id !== undefined) action.id = semanticId(value.id, `actions[${index}].id`);
+    if (value.twinId !== undefined) {
+      action.twinId = semanticId(value.twinId, `actions[${index}].twinId`);
+    }
+    if (value.handle !== undefined) {
+      action.handle = semanticHandle(value.handle, `actions[${index}].handle`);
+    }
+    if (value.text !== undefined) action.text = semanticText(value.text, `actions[${index}].text`);
+    if (value.waitText !== undefined) {
+      action.waitText = semanticText(value.waitText, `actions[${index}].waitText`, 4096);
+    }
+    action.target = value.target || "shell";
+    action.timeoutMs = semanticTimeout(value.timeoutMs);
+    action.limit = value.limit === undefined ? 60 : value.limit;
+    if (!Number.isInteger(action.limit) || action.limit < 1 || action.limit > 80) {
+      semanticFailure(`actions[${index}].limit must be an integer from 1 through 80.`);
+    }
+    if (value.status !== undefined) {
+      if (!["ready", "working", "needs-auth", "error"].includes(value.status)) {
+        semanticFailure(`actions[${index}].status is not supported.`);
+      }
+      action.status = value.status;
+    }
+    if (value.state !== undefined) {
+      if (!["visible", "enabled", "disabled", "focused"].includes(value.state)) {
+        semanticFailure(`actions[${index}].state is not supported.`);
+      }
+      action.state = value.state;
+    }
+    return action;
+  }
+
+  function normalizeSemanticPlan(plan) {
+    if (textBytes(plan) > SEMANTIC_PLAN_BYTES) {
+      semanticFailure(`plan exceeds ${SEMANTIC_PLAN_BYTES} bytes.`);
+    }
+    semanticClosed(plan, ["schema", "name", "timeoutMs", "actions"], "plan");
+    if (plan.schema !== "openrappter-ui-plan/1.0") {
+      semanticFailure('plan.schema must be "openrappter-ui-plan/1.0".');
+    }
+    if (
+      !Array.isArray(plan.actions)
+      || plan.actions.length < 1
+      || plan.actions.length > SEMANTIC_ACTION_LIMIT
+    ) {
+      semanticFailure(`plan.actions must contain 1 through ${SEMANTIC_ACTION_LIMIT} items.`);
+    }
+    const timeoutMs = plan.timeoutMs === undefined ? 10 * 60 * 1000 : plan.timeoutMs;
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 10 * 60 * 1000) {
+      semanticFailure("plan.timeoutMs must be an integer from 1000 through 600000.");
+    }
+    return {
+      actions: plan.actions.map(normalizeSemanticAction),
+      name: plan.name || "semantic-plan",
+      timeoutMs,
+    };
+  }
+
+  function semanticTwin(action, selectedTwinId) {
+    const twinId = action.twinId || selectedTwinId;
+    if (!twinId) semanticFailure(`${action.action} requires a prior hatch or twinId.`);
+    return twinId;
+  }
+
+  async function semanticRun(input) {
+    if (semanticPlanActive) {
+      return {
+        ok: false,
+        ran: 0,
+        reason: "simultaneous_plan",
+        error: "Another semantic UI plan is already active.",
+      };
+    }
+    let plan;
+    try {
+      plan = normalizeSemanticPlan(input);
+    } catch (error) {
+      return {
+        ok: false,
+        ran: 0,
+        reason: "bad_plan",
+        error: String(error?.message || error),
+      };
+    }
+    semanticPlanActive = true;
+    const deadline = Date.now() + plan.timeoutMs;
+    const results = [];
+    let selectedStoreId = null;
+    let selectedTwinId = null;
+    try {
+      for (const action of plan.actions) {
+        if (Date.now() >= deadline) throw new Error("Semantic UI plan exceeded its time budget.");
+        let result;
+        if (action.action === "inspect_state") {
+          result = action.target === "shell" || !isShellPage()
+            ? { outline: outline(action.limit), target: action.target }
+            : await requestFrame("ui.inspect", { target: action.target });
+        } else if (action.action === "click_known") {
+          result = await executeItem({
+            kind: "object",
+            value: { cmd: "ui.click", args: { handle: action.handle } },
+          }, { log: false });
+        } else if (action.action === "select_store_item") {
+          if (!action.id) semanticFailure("select_store_item requires id.");
+          const handle = `store[${encodeURIComponent(action.id)}].row`;
+          if (!findByHandle(handle)) {
+            const enter = findByHandle("shell.enter");
+            if (enter) await clickElement(enter);
+            const opened = await executeItem({
+              kind: "object",
+              value: { cmd: "herd.open", args: {} },
+            }, { log: false });
+            if (opened.ok === false) throw new Error(opened.error);
+            const store = findByHandle("shell.storeOpen");
+            if (!store) throw new Error("The visible RAPP Store control is unavailable.");
+            await clickElement(store);
+          }
+          await localWait(handle, undefined, action.timeoutMs);
+          selectedStoreId = action.id;
+          result = { id: action.id, selected: true };
+        } else if (action.action === "hatch") {
+          if (!action.id) semanticFailure("hatch requires id.");
+          if (selectedStoreId !== action.id) {
+            const handle = `store[${encodeURIComponent(action.id)}].row`;
+            if (!findByHandle(handle)) {
+              const enter = findByHandle("shell.enter");
+              if (enter) await clickElement(enter);
+              const opened = await executeItem({
+                kind: "object",
+                value: { cmd: "herd.open", args: {} },
+              }, { log: false });
+              if (opened.ok === false) throw new Error(opened.error);
+              const store = findByHandle("shell.storeOpen");
+              if (!store) throw new Error("The visible RAPP Store control is unavailable.");
+              await clickElement(store);
+            }
+            await localWait(handle, undefined, action.timeoutMs);
+            selectedStoreId = action.id;
+          }
+          const before = new Set(
+            [...(doc?.querySelectorAll?.("[data-twin-id]") || [])]
+              .map((element) => String(element.dataset?.twinId || ""))
+              .filter(Boolean),
+          );
+          const hatch = findByHandle(`store[${encodeURIComponent(action.id)}].hatch`);
+          if (!hatch) throw new Error(`The visible hatch control for "${action.id}" is unavailable.`);
+          await clickElement(hatch);
+          let twin = null;
+          const matched = await waitUntil(() => {
+            twin = [...(doc?.querySelectorAll?.("[data-twin-id]") || [])]
+              .find((element) => !before.has(String(element.dataset?.twinId || "")));
+            return Boolean(twin);
+          }, action.timeoutMs);
+          if (!matched) throw new Error(`Timed out waiting for "${action.id}" to hatch.`);
+          selectedTwinId = String(twin.dataset.twinId);
+          result = { id: action.id, twinId: selectedTwinId };
+        } else if (action.action === "wait_status") {
+          const twinId = semanticTwin(action, selectedTwinId);
+          if (!action.status) semanticFailure("wait_status requires status.");
+          const handle = `twin[${encodeURIComponent(twinId)}].tile`;
+          result = await localWait(handle, action.status, action.timeoutMs);
+        } else if (action.action === "send_chat") {
+          if (!action.text) semanticFailure("send_chat requires text.");
+          if (!action.twinId && !selectedTwinId) {
+            result = await localChatSend(action.text);
+          } else {
+            const twinId = semanticTwin(action, selectedTwinId);
+            const key = encodeURIComponent(twinId);
+            const composer = findByHandle(`twin[${key}].composer`);
+            const send = findByHandle(`twin[${key}].send`);
+            if (!composer || !send) throw new Error(`Twin "${twinId}" chat is unavailable.`);
+            setControlValue(composer, action.text);
+            await clickElement(send);
+            if (action.waitText) {
+              await localWait(`twin[${key}].tile`, action.waitText, action.timeoutMs);
+            }
+            result = { twinId, ...(action.waitText ? { matched: action.waitText } : {}) };
+          }
+        } else if (action.action === "assert_visible_text") {
+          const matched = await waitUntil(
+            () => normalizedText(doc?.body).includes(action.text),
+            action.timeoutMs,
+          );
+          if (!matched) throw new Error(`Visible text did not contain "${action.text}".`);
+          result = { matched: true };
+        } else if (action.action === "assert_state") {
+          if (!action.handle) semanticFailure("assert_state requires handle.");
+          const element = findByHandle(action.handle);
+          const actual = !element
+            ? "missing"
+            : element.disabled
+              ? "disabled"
+              : doc?.activeElement === element
+                ? "focused"
+                : "enabled";
+          if (
+            (action.state === "visible" && !element)
+            || (action.state !== "visible" && actual !== action.state)
+          ) {
+            throw new Error(`${action.handle} is ${actual}, not ${action.state}.`);
+          }
+          result = { actual, handle: action.handle };
+        }
+        results.push({ action: action.action, ok: true, result });
+      }
+      return { ok: true, plan: plan.name, ran: results.length, results };
+    } catch (error) {
+      results.push({
+        action: plan.actions[results.length]?.action || "(plan)",
+        ok: false,
+        error: String(error?.message || error),
+      });
+      return { ok: false, plan: plan.name, ran: results.length, results };
+    } finally {
+      semanticPlanActive = false;
+    }
+  }
+
   async function rapp(input) {
     let items;
     try {
@@ -2575,6 +2879,20 @@ export function createAutopilot(ctx = {}) {
     value: registry,
     writable: false,
   });
+  Object.defineProperties(rapp, {
+    semanticActions: {
+      configurable: false,
+      enumerable: true,
+      value: SEMANTIC_ACTIONS,
+      writable: false,
+    },
+    semanticRun: {
+      configurable: false,
+      enumerable: true,
+      value: semanticRun,
+      writable: false,
+    },
+  });
   return rapp;
 }
 
@@ -2590,4 +2908,12 @@ if (
     tiles: window.RappDimensionTiles,
     window,
   });
+  if (window.__openrappterSemanticControlEnabled === true) {
+    const ui = Object.freeze({
+      actions: window.rapp.semanticActions,
+      run: (plan) => window.rapp.semanticRun(plan),
+      version: SEMANTIC_API_VERSION,
+    });
+    window.openrappter = Object.freeze({ ui });
+  }
 }

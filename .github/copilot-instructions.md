@@ -1,5 +1,15 @@
 # Copilot Instructions for openrappter
 
+## Release Constitution
+
+All distribution workflows are governed by
+`openrappter-release-constitution/v1`. Do not create a publish path that skips
+the named `Release Constitution` check. Stable/tag/GitHub release/npm/PyPI and
+installer-channel publication require finalized immutable receipts for the
+same exact identity in order nightly → alpha → canary → beta. Rollback is only
+to an already-receipted artifact and also produces a receipt; there is no
+bypass flag. Local builds and normal development remain unaffected.
+
 ## Build, Test, and Lint
 
 ### TypeScript

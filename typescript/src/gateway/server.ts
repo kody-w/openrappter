@@ -33,6 +33,7 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
+import { registerReleaseRingMethods } from './release-ring-rpc.js';
 import { registerEstateBuddyMethods } from './methods/estate-buddy-methods.js';
 import type {
   EstateBuddyEvidenceDraft,
@@ -2593,6 +2594,7 @@ export class GatewayServer {
   }
 
   private registerBuiltInMethods(): void {
+    registerReleaseRingMethods(this);
     // Core
     const publicMethods: Array<[string, RpcMethodHandler]> = [
       ['status', async () => this.getStatus()],

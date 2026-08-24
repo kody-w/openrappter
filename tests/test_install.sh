@@ -8,6 +8,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_SCRIPT="$REPO_ROOT/install.sh"
+TEST_SCRATCH="$REPO_ROOT/.test-work"
+rm -rf "$TEST_SCRATCH"
+mkdir -p "$TEST_SCRATCH"
+trap 'rm -rf "$TEST_SCRATCH"' EXIT
 
 # ── Test Framework ──────────────────────────────────────────
 TESTS_RUN=0
@@ -66,6 +70,9 @@ assert_executable() {
 export OPENRAPPTER_INSTALL_SH_NO_RUN=1
 # shellcheck disable=SC1090
 source "$INSTALL_SCRIPT"
+# Sourcing the installer installs its own EXIT trap. Restore test cleanup while
+# still removing any installer scratch files it registered.
+trap 'cleanup_tmpfiles; rm -rf "$TEST_SCRATCH"' EXIT
 
 # Pre-load script content for content assertion tests
 script_content="$(cat "$INSTALL_SCRIPT")"
@@ -86,6 +93,48 @@ if diff -q "$INSTALL_SCRIPT" "$REPO_ROOT/docs/install.sh" &>/dev/null; then
 else
   fail "docs/install.sh does not match root install.sh"
 fi
+
+# ── Release ring selection and closed manifest ──
+printf "\n\033[1m▸ Release rings\033[0m\n"
+saved_channel="$CHANNEL"
+saved_channel_file="$CHANNEL_FILE"
+saved_legacy_channel_file="$LEGACY_CHANNEL_FILE"
+CHANNEL=""
+CHANNEL_FILE="$TEST_SCRATCH/ring"
+LEGACY_CHANNEL_FILE="$TEST_SCRATCH/channel"
+assert_eq "$(effective_channel)" "stable" "stable is the behavior-safe default"
+CHANNEL="beta"
+assert_eq "$(effective_channel)" "beta" "explicit selector wins over persisted/default ring"
+DRY_RUN=0
+persist_channel
+assert_eq "$(cat "$CHANNEL_FILE")" "beta" "installer persists the shared validated ring setting"
+CHANNEL=""
+assert_eq "$(effective_channel)" "beta" "persisted shared setting is selected"
+for ring in stable beta canary alpha nightly; do
+  assert_contains "$(ring_repository "$ring")" "kody-w/openrappter" "$ring maps to an allowlisted repository"
+done
+manifest_fields="$(validate_ring_manifest_file "$REPO_ROOT/.ring/manifest.json" stable)"
+assert_not_empty "$manifest_fields" "stable closed manifest validates"
+assert_eq "$(compare_semver 1.9.8-beta.1 1.9.8)" "-1" "same-core prerelease is older than release"
+assert_eq "$(compare_semver 1.9.8-beta.2 1.9.8-beta.10)" "-1" "numeric prerelease identifiers compare numerically"
+assert_eq "$(compare_semver 1.9.8-2 1.9.8-beta)" "-1" "numeric prerelease identifier precedes lexical"
+mkdir -p "$TEST_SCRATCH/candidate-fixture"
+printf 'exact candidate artifact bytes\n' > "$TEST_SCRATCH/candidate-fixture/artifact.txt"
+tar -czf "$TEST_SCRATCH/candidate-fixture.tar.gz" -C "$TEST_SCRATCH/candidate-fixture" artifact.txt
+candidate_sha="$(sha256_of "$TEST_SCRATCH/candidate-fixture.tar.gz")"
+candidate_fixture="https://raw.githubusercontent.com/kody-w/openrappter/$(printf 'b%.0s' {1..40})/candidates/$(printf 'a%.0s' {1..40})/release/tag-djEuMTMuMA/${candidate_sha}.tar.gz"
+assert_not_empty "$(parse_candidate_bundle_url "$candidate_fixture")" "candidate URL parser accepts exact closed fixture"
+assert_eq "$(parse_candidate_bundle_url "$candidate_fixture" | cut -d'|' -f5)" "$candidate_sha" "candidate URL preserves real fixture SHA-256"
+((TESTS_RUN++)) || true
+if parse_candidate_bundle_url "${candidate_fixture}?mutable=1" >/dev/null 2>&1; then fail "candidate URL parser rejects query"; else pass "candidate URL parser rejects query"; fi
+((TESTS_RUN++)) || true
+if parse_candidate_bundle_url "${candidate_fixture}"$'\n' >/dev/null 2>&1; then fail "candidate URL parser rejects control characters"; else pass "candidate URL parser rejects control characters"; fi
+legacy_candidate_fixture="${candidate_fixture/\/release\/tag-djEuMTMuMA/}"
+((TESTS_RUN++)) || true
+if parse_candidate_bundle_url "$legacy_candidate_fixture" >/dev/null 2>&1; then fail "candidate URL parser rejects legacy flat path"; else pass "candidate URL parser rejects legacy flat path"; fi
+CHANNEL="$saved_channel"
+CHANNEL_FILE="$saved_channel_file"
+LEGACY_CHANNEL_FILE="$saved_legacy_channel_file"
 
 # ── OS Detection ──
 printf "\n\033[1m▸ OS detection\033[0m\n"
@@ -235,8 +284,8 @@ fi
 # ── Launcher Script ──
 printf "\n\033[1m▸ Launcher script generation\033[0m\n"
 
-TEMP_BIN="$(mktemp -d)"
-trap 'rm -rf "$TEMP_BIN"' EXIT
+TEMP_BIN="$TEST_SCRATCH/bin"
+mkdir -p "$TEMP_BIN"
 
 create_launcher "$TEMP_BIN"
 assert_file_exists "$TEMP_BIN/$BIN_NAME" "launcher script is created"
@@ -350,9 +399,9 @@ assert_contains "$script_content" ".venv/bin/python" "launcher uses the isolated
 assert_contains "$script_content" "-m venv" "installer creates an isolated Python environment"
 assert_contains "$script_content" "--status" "script verifies with --status"
 assert_contains "$script_content" "OPENRAPPTER_INSTALL_SH_NO_RUN" "script supports no-run mode for testing"
-assert_contains "$script_content" "git pull" "script handles updates (idempotent)"
+assert_contains "$script_content" "fetch --depth 1 origin" "script handles exact source updates"
 assert_contains "$script_content" "--untracked-files=no" "runtime state does not block git updates"
-assert_contains "$script_content" "pull --ff-only" "git updates fail safely without rebasing"
+assert_contains "$script_content" "checkout --detach" "git installs detach at exact manifest commit"
 assert_contains "$script_content" "gum" "script supports gum UI"
 assert_contains "$script_content" "run_with_spinner" "script has spinner support"
 assert_contains "$script_content" "run_quiet_step" "script has quiet step support"
@@ -596,14 +645,16 @@ ck_hash() {
 ck_run() {
   # $1 = checksums body, $2 = target name; asset file is always created
   local dir
-  dir="$(mktemp -d)"
+  dir="$TEST_SCRATCH/check-$RANDOM-$TESTS_RUN"
+  mkdir -p "$dir"
   printf 'pretend tarball\n' > "$dir/$ck_asset"
   printf '%s' "$1" > "$dir/checksums.txt"
   ( cd "$dir" && verify_sha256sum_file checksums.txt "$2" ) && echo 0 || echo 1
   rm -rf "$dir"
 }
 
-ck_tmp="$(mktemp -d)"
+ck_tmp="$TEST_SCRATCH/checksum"
+mkdir -p "$ck_tmp"
 printf 'pretend tarball\n' > "$ck_tmp/$ck_asset"
 ck_good="$(ck_hash "$ck_tmp/$ck_asset")"
 rm -rf "$ck_tmp"

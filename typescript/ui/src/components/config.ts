@@ -8,6 +8,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 import { createConfigState, loadConfig, saveConfig, updateConfigRaw, type ConfigState } from '../services/config.js';
 import * as YAML from 'yaml';
+import './release-ring-switcher.js';
 
 // ── Section metadata ──
 
@@ -371,6 +372,8 @@ export class OpenRappterConfig extends LitElement {
         <h2>Configuration</h2>
         <p>Edit your OpenRappter configuration. Press Cmd+S to save.</p>
       </div>
+
+      <openrappter-release-ring-switcher></openrappter-release-ring-switcher>
 
       ${this.configState.error
         ? html`<div class="callout danger">${this.configState.error}</div>`

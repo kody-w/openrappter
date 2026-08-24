@@ -109,7 +109,7 @@ jobs:
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git fetch origin candidates:candidates 2>/dev/null || true
-          if git show-ref --verify --quiet refs/heads/candidates; then git switch candidates; else git switch --orphan candidates; git rm -rf .; fi
+          if git show-ref --verify --quiet refs/heads/candidates; then git switch candidates; else git switch --orphan candidates; git rm -rf . --ignore-unmatch; fi
           path="candidates/$SOURCE_COMMIT/$CANDIDATE_KIND/$CANDIDATE_ID"
           mkdir -p "$path"
           target="$path/$BUNDLE_SHA.tar.gz"

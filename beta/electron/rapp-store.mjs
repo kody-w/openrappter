@@ -18,16 +18,18 @@ import { compareBetaVersions } from "./update-manager.mjs";
 
 export const DEFAULT_STORE_URL = "https://kody-w.github.io/RAPP_Store/index.json";
 export const AIBAST_REGISTRY_URL = "https://microsoft.github.io/aibast-agents-library/registry.json";
+export const RAR_REGISTRY_URL = "https://kody-w.github.io/RAR/registry.json";
 export const STORE_SCHEMA = "rapp-store/1.0";
 export const AIBAST_REGISTRY_SCHEMA = "rapp-agent/1.0";
 export const AIBAST_RAW_BASE = "https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/";
 
-// The three RAR library sources the OpenRappter browser can point at. AIBAST is
+// The four RAR library sources the OpenRappter browser can point at. AIBAST is
 // the default; "custom" is any user-supplied RAR-compliant catalog URL
 // (either the rapp-store/1.0 index shape or an AIBAST-style registry.json).
 export const FRONTIER_STORE_URL = "https://microsoft.github.io/aibast-agents-library/beta/frontier/store/index.json";
 export const STORE_SOURCES = {
   aibast: { key: "aibast", label: "AIBAST RAR", url: AIBAST_REGISTRY_URL },
+  rar: { key: "rar", label: "RAPP Agent Registry", url: RAR_REGISTRY_URL },
   frontier: { key: "frontier", label: "OpenRappter Store", url: FRONTIER_STORE_URL },
   public: { key: "public", label: "Public RAR", url: DEFAULT_STORE_URL },
 };
@@ -40,6 +42,7 @@ export const STORE_SOURCES = {
 export const DEFAULT_STORE_URLS = Object.freeze([
   DEFAULT_STORE_URL,
   AIBAST_REGISTRY_URL,
+  RAR_REGISTRY_URL,
   FRONTIER_STORE_URL,
 ]);
 

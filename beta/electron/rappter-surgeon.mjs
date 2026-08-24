@@ -762,6 +762,108 @@ export class RappterSurgeon {
         },
       },
       {
+        name: "inspect_twin_adaptation",
+        description: "Inspect a twin's bounded adaptation state, diagnosis, permission diff, immutable versions, quarantine, rollback, and memory binding. Returns metadata only — never raw source, transcript content, payloads, or secrets.",
+        defer: "never",
+        skipPermission: true,
+        parameters: {
+          type: "object",
+          properties: {
+            twin_id: { type: "string" },
+            capability: { type: "string" },
+          },
+          required: ["twin_id"],
+        },
+        handler: ({ twin_id: twinId, capability = null }) => {
+          if (!this.twins?.adaptation_inspect) {
+            throw new Error("Twin adaptation is unavailable.");
+          }
+          return JSON.stringify(
+            this.twins.adaptation_inspect(twinId, capability),
+            null,
+            2,
+          );
+        },
+      },
+      {
+        name: "propose_twin_adaptation",
+        description: "Diagnose a user-requested twin capability correction before generating anything. Inventories loaded tools, RAR, bindings, auth/health and prefers a pinned REUSE/BIND (such as WorkIQ read-only email) over EXTEND, with GENERATE last. This cannot approve or activate elevated permissions.",
+        defer: "never",
+        skipPermission: true,
+        parameters: {
+          type: "object",
+          properties: {
+            twin_id: { type: "string" },
+            capability: { type: "string" },
+            request: { type: "string" },
+          },
+          required: ["twin_id", "capability", "request"],
+        },
+        handler: async ({ twin_id: twinId, capability, request }) => {
+          if (!this.twins?.adaptation_propose) {
+            throw new Error("Twin adaptation is unavailable.");
+          }
+          return JSON.stringify(
+            await this.twins.adaptation_propose(twinId, {
+              capability,
+              request,
+              signal: "explicit_correction",
+            }),
+            null,
+            2,
+          );
+        },
+      },
+      {
+        name: "stage_twin_adaptation",
+        description: "Stage the exact pinned REUSE/BIND candidate from an existing twin adaptation proposal. Runs verification and secretless mocked shadow cases but does not activate it. Elevated network/data/write/send/shell/credential permissions remain approval_required and this semantic tool cannot approve them.",
+        defer: "never",
+        skipPermission: true,
+        parameters: {
+          type: "object",
+          properties: {
+            twin_id: { type: "string" },
+            capability: { type: "string" },
+          },
+          required: ["twin_id", "capability"],
+        },
+        handler: async ({ twin_id: twinId, capability }) => {
+          if (!this.twins?.adaptation_stage) {
+            throw new Error("Twin adaptation is unavailable.");
+          }
+          return JSON.stringify(
+            await this.twins.adaptation_stage(twinId, { capability }),
+            null,
+            2,
+          );
+        },
+      },
+      {
+        name: "rollback_twin_adaptation",
+        description: "Quarantine a twin capability's current generation and atomically restore its last-known-good generation. This bounded semantic action can make the twin safer but cannot approve or activate elevated permissions.",
+        defer: "never",
+        skipPermission: true,
+        parameters: {
+          type: "object",
+          properties: {
+            twin_id: { type: "string" },
+            capability: { type: "string" },
+            reason: { type: "string" },
+          },
+          required: ["twin_id", "capability"],
+        },
+        handler: ({ twin_id: twinId, capability, reason = "semantic rollback" }) => {
+          if (!this.twins?.adaptation_rollback) {
+            throw new Error("Twin adaptation is unavailable.");
+          }
+          return JSON.stringify(
+            this.twins.adaptation_rollback(twinId, capability, reason),
+            null,
+            2,
+          );
+        },
+      },
+      {
         name: "loop_brainstem_with_twin",
         description: "Have the visible Brainstem loop with a hatched twin autonomously toward a goal — a genuine two-brain loop: the Brainstem plans each instruction over /chat, the twin executes it, the Brainstem reads the reply and plans the next, until the goal is met. Returns immediately; the back-and-forth streams into the twin's herd tile (labeled Brainstem ↔ the twin) so the user watches hands-off and can interject. Use when the user wants the Brainstem itself to drive a twin's work (not you). The twin must already be hatched (hatch_rapplication).",
         defer: "never",

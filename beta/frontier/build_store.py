@@ -25,8 +25,8 @@ RAPPLICATIONS = [
     {
         "id": "molter",
         "name": "Molter — self-growing capabilities",
-        "version": "1.0.0",
-        "summary": "When the Brainstem lacks a capability, it searches the AIBAST catalog for a kindred agent, takes its shape, and molts it through verified generations until it fits — shedding failed skins with rollback and carrying each lesson forward. On device, headless.",
+        "version": "1.1.0",
+        "summary": "Diagnose before growth, prefer pinned RAR reuse, archive immutable staged generations, and activate only exact verified hashes after shadow and permission policy — with quarantine and rollback. On device, headless.",
         "category": "frontier · self-improving",
         "tags": ["frontier", "capability", "evolution", "self-improving"],
         "singleton": "rapplications/molter/agents/molter_agent.py",

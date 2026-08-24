@@ -84,7 +84,12 @@ import {
   redactSensitiveValue,
 } from "./log-redaction.mjs";
 import { BetaRouteManager } from "./route-manager.mjs";
-import { isAllowedStoreSourceUrl, RappStoreClient, STORE_SOURCES } from "./rapp-store.mjs";
+import {
+  isAllowedStoreSourceUrl,
+  RappStoreClient,
+  RAR_REGISTRY_URL,
+  STORE_SOURCES,
+} from "./rapp-store.mjs";
 import { createTwinLedgerBridgeSource } from "./twin-ledger-bridge.mjs";
 import { TwinManager } from "./twin-manager.mjs";
 import {
@@ -2080,6 +2085,10 @@ const twinManager = new TwinManager({
   refreshAmbient: refreshAmbientBeforeTurn,
   routeManager,
   storeClient: rappStore,
+  rarClient: new RappStoreClient({
+    url: RAR_REGISTRY_URL,
+    fetchImpl: storeFetch,
+  }),
   // The Brainstem that plans a two-brain loop is whichever one is live now
   // (config URL, or a routed Brainstem once a route activates).
   brainstemUrl: () => state.url,
@@ -2474,6 +2483,18 @@ function ensureRappterSurgeon(sessionId = 1) {
         hatch: (storeId, instruction) => twinManager.hatch(storeId, { instruction: instruction || null }),
         list: () => twinManager.list(),
         list_store: () => rappStore.list(),
+        adaptation_inspect: (id, capability) => (
+          twinManager.adaptationInspect(id, capability)
+        ),
+        adaptation_propose: (id, options) => (
+          twinManager.adaptationPropose(id, options)
+        ),
+        adaptation_stage: (id, options) => (
+          twinManager.adaptationStage(id, options)
+        ),
+        adaptation_rollback: (id, capability, reason) => (
+          twinManager.adaptationRollback(id, capability, reason)
+        ),
         summon_dogg: (summonsFull, storeId, instruction) => (
           summonDoggNeighborhood({
             instruction,
@@ -3278,6 +3299,56 @@ function registerIpc() {
   ipcMain.handle("beta:twin-chat", async (event, id, prompt) => {
     assertTrustedIpc(event);
     return twinManager.chat(id, prompt, { author: "You" });
+  });
+  ipcMain.handle("beta:twin-adaptation-inspect", (event, id, capability) => {
+    assertTrustedIpc(event);
+    return twinManager.adaptationInspect(id, capability || null);
+  });
+  ipcMain.handle("beta:twin-adaptation-propose", async (event, id, options) => {
+    assertTrustedIpc(event);
+    return twinManager.adaptationPropose(id, options || {});
+  });
+  ipcMain.handle("beta:twin-adaptation-stage", async (event, id, options) => {
+    assertTrustedIpc(event);
+    return twinManager.adaptationStage(id, options || {});
+  });
+  ipcMain.handle("beta:twin-adaptation-approve", async (
+    event,
+    id,
+    capability,
+    approval,
+  ) => {
+    assertTrustedIpc(event);
+    const candidate = String(approval?.candidate_hash || "");
+    const added = Array.isArray(approval?.permission_diff?.added)
+      ? approval.permission_diff.added.join(", ")
+      : "unknown";
+    const confirmation = await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      buttons: ["Approve exact candidate", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      title: "Approve twin capability permissions",
+      message: `Approve ${String(capability || "capability")} adaptation?`,
+      detail: [
+        `Candidate: ${candidate.slice(0, 16)}…`,
+        `New permissions: ${added || "none"}`,
+        "This native confirmation cannot be completed by an agent or the web UI driver.",
+      ].join("\n"),
+    });
+    if (confirmation.response !== 0) {
+      return { ok: false, cancelled: true };
+    }
+    return twinManager.adaptationApprove(id, capability, approval || {});
+  });
+  ipcMain.handle("beta:twin-adaptation-activate", (event, id, capability, hash) => {
+    assertTrustedIpc(event);
+    return twinManager.adaptationActivate(id, capability, hash);
+  });
+  ipcMain.handle("beta:twin-adaptation-rollback", (event, id, capability, reason) => {
+    assertTrustedIpc(event);
+    return twinManager.adaptationRollback(id, capability, reason);
   });
   ipcMain.handle("beta:twin-run", async (event, id, instruction) => {
     assertTrustedIpc(event);

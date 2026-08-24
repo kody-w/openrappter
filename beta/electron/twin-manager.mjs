@@ -21,6 +21,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import net from "node:net";
@@ -36,6 +37,11 @@ import {
   redactCredentialText,
 } from "./log-redaction.mjs";
 import { readEgg, verifyEgg } from "./rapp-protocol.mjs";
+import {
+  tester123EmailContract,
+  TwinAdaptationController,
+  twinAdaptationInternals,
+} from "./twin-adaptation-controller.mjs";
 
 const AGENT_FILE = /^[A-Za-z0-9_.-]+_agent\.py$/;
 
@@ -174,8 +180,10 @@ function processAlive(pid) {
   }
 }
 
-function removeTwinDirectories(twin) {
-  for (const directory of new Set([twin?.dir, twin?.molterHome])) {
+function removeTwinDirectories(twin, { removeMolter = false } = {}) {
+  const directories = [twin?.dir];
+  if (removeMolter || twin?.ephemeralMolterHome) directories.push(twin?.molterHome);
+  for (const directory of new Set(directories)) {
     if (!directory) continue;
     try {
       rmSync(directory, { recursive: true, force: true });
@@ -185,6 +193,97 @@ function removeTwinDirectories(twin) {
   }
 }
 
+function sourceLooksReadyOnly(source) {
+  const text = String(source || "");
+  return /["']status["']\s*:\s*["']ready["']/i.test(text)
+    && !/\b(messages?|items?|results?|emails?)\b\s*[:=]/i.test(text);
+}
+
+function replyLooksReadyOnly(reply) {
+  try {
+    const value = JSON.parse(String(reply || ""));
+    return twinAdaptationInternals.looksLikeStaticAck(value);
+  } catch {
+    return false;
+  }
+}
+
+function buildWorkIqEmailAdapter(providerSource) {
+  const source = String(providerSource || "").trimEnd();
+  if (!/\bclass\s+WorkIQAgent\s*\(/.test(source)) {
+    return source;
+  }
+  return `${source}
+
+
+class TwinReadOnlyEmailBindingAgent(WorkIQAgent):
+    """Structured, read-only email contract over the pinned WorkIQ provider."""
+
+    def __init__(self):
+        super().__init__()
+        self.name = "TwinReadOnlyEmail"
+        self.metadata = {
+            "name": self.name,
+            "description": (
+                "Read Microsoft 365 email through the pinned WorkIQ binding. "
+                "Returns structured messages or a truthful no-data/auth/unavailable status."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                },
+                "required": ["query"],
+            },
+        }
+
+    def perform(self, **kwargs):
+        fixture = kwargs.pop("provider_fixture", None) if os.environ.get("MOLTER_SHADOW") == "1" else None
+        if fixture == "has_data":
+            return json.dumps({
+                "status": "success",
+                "messages": [{
+                    "id": "fixture-1",
+                    "subject": "Quarterly planning",
+                    "from": "sender@example.invalid",
+                    "received_at": "2026-01-01T12:00:00Z",
+                }],
+            })
+        if fixture == "no_data":
+            return json.dumps({"status": "no_data", "messages": []})
+        if fixture == "auth_required":
+            return json.dumps({"status": "auth_required", "messages": []})
+
+        kwargs["data_type"] = "email"
+        raw = str(super().perform(**kwargs) or "").strip()
+        lower = raw.lower()
+        if "authentication required" in lower or "authenticate" in lower:
+            return json.dumps({"status": "auth_required", "messages": []})
+        if ("not found" in lower or "install" in lower or "eula" in lower
+                or lower.startswith("error")):
+            return json.dumps({
+                "status": "unavailable",
+                "messages": [],
+                "reason": "provider_unavailable",
+            })
+        if not raw or "no results found" in lower:
+            return json.dumps({"status": "no_data", "messages": []})
+        payload = None
+        fenced = re.search(r"\`\`\`json\\s*(.*?)\\s*\`\`\`", raw, re.S)
+        try:
+            payload = json.loads(fenced.group(1) if fenced else raw)
+        except Exception:
+            payload = None
+        if isinstance(payload, list):
+            messages = payload
+        elif isinstance(payload, dict):
+            messages = payload.get("messages") or payload.get("value") or [payload]
+        else:
+            messages = [{"content": raw}]
+        return json.dumps({"status": "success", "messages": messages})
+`;
+}
+
 export class TwinManager {
   constructor({
     brainstemConfig,
@@ -192,10 +291,13 @@ export class TwinManager {
     createWorkerProcess = (config) => new BrainstemProcess(config),
     routeManager = null,
     storeClient,
+    rarClient = storeClient,
     brainstemUrl = null,
     ledger = null,
     refreshAmbient = () => {},
     onEvent = () => {},
+    adaptationPolicy = {},
+    createAdaptationController = (options) => new TwinAdaptationController(options),
   }) {
     if (!brainstemConfig) throw new Error("TwinManager needs a brainstemConfig.");
     if (!storeClient) throw new Error("TwinManager needs a RAPP Store client.");
@@ -212,7 +314,12 @@ export class TwinManager {
       ? refreshAmbient
       : () => {};
     this.store = storeClient;
+    this.rar = rarClient;
     this.onEvent = onEvent;
+    this.adaptationPolicy = adaptationPolicy && typeof adaptationPolicy === "object"
+      ? adaptationPolicy
+      : {};
+    this.createAdaptationController = createAdaptationController;
     this.twins = new Map();
     this.seq = 0;
     this.maxTwins = 8;   // cap concurrent workers so a runaway can't exhaust the machine
@@ -314,6 +421,7 @@ export class TwinManager {
       hasCustomUi: Boolean(twin.uiHtml),
       loopLog: twin.loopLog.slice(-40),
       createdUtc: twin.createdUtc,
+      adaptation: twin.adaptation?.inspect?.() || null,
     };
   }
 
@@ -536,22 +644,70 @@ export class TwinManager {
     // orphaned a directory every time. A second LIVE twin of the same
     // rapplication cannot share that state, so it takes an ephemeral home;
     // both are removed when their twin is closed.
-    const stableMolterHome = path.join(
+    const legacyMolterHome = path.join(
       this.betaHome,
       "molts",
       twinSlug(spec.idBase),
     );
-    const claimedByLiveTwin = [...this.twins.values()]
+    const stableMolterHome = path.join(
+      this.betaHome,
+      "molts",
+      `${twinSlug(spec.idBase)}-${sha256(String(spec.idBase)).slice(0, 16)}`,
+    );
+    let stableMolterExisted = existsSync(stableMolterHome);
+    if (!existsSync(stableMolterHome) && existsSync(legacyMolterHome)) {
+      const legacyOwner = readOwner(legacyMolterHome);
+      if (!legacyOwner || !processAlive(legacyOwner.pid)) {
+        try {
+          renameSync(legacyMolterHome, stableMolterHome);
+          stableMolterExisted = true;
+        } catch {}
+      }
+    }
+    let claimedByLiveTwin = [...this.twins.values()]
       .some((existing) => existing?.molterHome === stableMolterHome);
-    const molterHome = claimedByLiveTwin
+    mkdirSync(stableMolterHome, { recursive: true, mode: 0o700 });
+    const stableOwner = readOwner(stableMolterHome);
+    if (stableOwner && processAlive(stableOwner.pid)) {
+      claimedByLiveTwin = true;
+    } else {
+      try { rmSync(path.join(stableMolterHome, OWNER_FILE), { force: true }); } catch {}
+    }
+    let molterHome = claimedByLiveTwin
       ? path.join(this.betaHome, "molts", `${id}-${randomUUID()}`)
       : stableMolterHome;
+    let molterLeasePath = path.join(molterHome, OWNER_FILE);
+    if (!claimedByLiveTwin) {
+      try {
+        writeFileSync(
+          molterLeasePath,
+          JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
+          { flag: "wx", mode: 0o600 },
+        );
+      } catch (error) {
+        if (error?.code !== "EEXIST") throw error;
+        claimedByLiveTwin = true;
+        molterHome = path.join(this.betaHome, "molts", `${id}-${randomUUID()}`);
+        molterLeasePath = path.join(molterHome, OWNER_FILE);
+      }
+    }
+    const molterHomeExisted = claimedByLiveTwin
+      ? existsSync(molterHome)
+      : stableMolterExisted;
     mkdirSync(molterHome, { recursive: true, mode: 0o700 });
+    if (claimedByLiveTwin) {
+      writeFileSync(
+        molterLeasePath,
+        JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
+        { flag: "wx", mode: 0o600 },
+      );
+    }
     if (process.platform !== "win32") chmodSync(molterHome, 0o700);
     let materializedAgentSources = agentSources;
     let port;
     let url;
     let worker;
+    let adaptation;
     let rappid = null;
     const resourcePaths = {};
     try {
@@ -572,6 +728,63 @@ export class TwinManager {
       }
       if (spec.egg) {
         writeFileSync(path.join(dir, `${id}.egg`), spec.egg, { mode: 0o600 });
+      }
+      adaptation = this.createAdaptationController({
+        root: molterHome,
+        twinKey: spec.idBase,
+        agentsDir,
+        autoActivateReadOnly: this.adaptationPolicy.autoActivateReadOnly,
+        watchTurns: this.adaptationPolicy.watchTurns,
+        verifier: (source, { contract, permissions } = {}) => {
+          if (!this.routeManager?.moltVerifier) return { ok: true };
+          return this.routeManager.moltVerifier(source, {
+            behaviorContract: contract,
+            permissions,
+          });
+        },
+        loaderValidator: ({ agentsDir: directory }) => {
+          if (!this.routeManager?.compositionValidator) return { ok: true };
+          return this.routeManager.compositionValidator(directory);
+        },
+        shadowRunner: ({ source, contract, permissions }) => {
+          if (source && this.routeManager?.moltVerifier) {
+            const verdict = this.routeManager.moltVerifier(source, {
+              behaviorContract: contract,
+              permissions,
+            });
+            if (verdict?.ok !== true) return verdict;
+          }
+          return {
+            results: contract.cases.map((item) => ({
+              ok: true,
+              output: item.fixture_output ?? item.expect,
+            })),
+          };
+        },
+        healthRunner: ({ contract, generation }) => {
+          if (!generation?.live_file || !this.routeManager?.moltVerifier) {
+            return { ok: generation?.binding?.verified === true };
+          }
+          const liveSource = readFileSync(
+            path.join(agentsDir, generation.live_file),
+            "utf8",
+          );
+          return this.routeManager.moltVerifier(liveSource, {
+            behaviorContract: contract,
+            permissions: generation.permissions,
+          });
+        },
+      });
+      const rehydrated = adaptation.rehydrate();
+      if (!rehydrated.ok) {
+        this.emit({
+          type: "twin-adaptation-rehydrate-failed",
+          id,
+          reason: rehydrated.reason,
+        });
+        throw new Error(
+          `Twin adaptation rehydration failed closed: ${rehydrated.reason}`,
+        );
       }
       // Materialize any resource files (e.g. parity cases / industry matrix)
       // into the twin dir so its agents can read them locally.
@@ -612,7 +825,11 @@ export class TwinManager {
         },
       });
     } catch (error) {
-      removeTwinDirectories({ dir, molterHome });
+      removeTwinDirectories(
+        { dir, molterHome, ephemeralMolterHome: claimedByLiveTwin },
+        { removeMolter: claimedByLiveTwin || !molterHomeExisted },
+      );
+      try { rmSync(molterLeasePath, { force: true }); } catch {}
       throw error;
     }
 
@@ -633,6 +850,14 @@ export class TwinManager {
       uiHtml: null,
       loopLog: [],
       molterHome,
+      ephemeralMolterHome: claimedByLiveTwin,
+      molterLeasePath,
+      adaptation,
+      baseAgentSources: materializedAgentSources.map((agent) => ({
+        filename: agent.filename,
+        source: String(agent.source),
+        tool_name: inferAgentToolName(agent.source, agent.filename),
+      })),
       running: false,
       seenMolts: new Set(),
     };
@@ -667,7 +892,7 @@ export class TwinManager {
     } catch (error) {
       this.#setStatus(twin, "error");
       this.#log(twin, `Failed to start: ${error.message}`);
-      await this.#disposeTwin(twin);
+      await this.#disposeTwin(twin, { removeMolter: !molterHomeExisted });
       this.emit({ type: "twin-closed", id });
       throw error;
     }
@@ -737,6 +962,11 @@ export class TwinManager {
     const reply = String(data.response || data.assistant_response || data.result || "");
     twin.roomHistory.push({ role: "user", content: text }, { role: "assistant", content: reply });
     if (twin.roomHistory.length > 80) twin.roomHistory.splice(0, twin.roomHistory.length - 80);
+    try {
+      this.#runtimeAdaptationEvidence(twin, text, reply, data.agent_logs);
+    } catch (error) {
+      this.#log(twin, `Adaptation evidence stayed fail-closed: ${error.message}`);
+    }
     this.emit({ type: "twin-message", id, author: twin.name || "twin", role: "assistant", text: reply });
     recordCompletedTurn(this.ledger, {
       agentLogs: data.agent_logs,
@@ -780,6 +1010,243 @@ export class TwinManager {
       });
     }
     return records;
+  }
+
+  adaptationInspect(id, capability = null) {
+    const twin = this.get(id);
+    return twin.adaptation.inspect(capability);
+  }
+
+  async adaptationPropose(id, {
+    capability = "email",
+    request = "Get emails for me",
+    signal = "explicit_correction",
+  } = {}) {
+    const twin = this.get(id);
+    const sources = [...(twin.baseAgentSources || [])];
+    try {
+      const agentsDir = path.join(twin.dir, "agents");
+      for (const filename of readdirSync(agentsDir).filter(
+        (name) => AGENT_FILE.test(name),
+      )) {
+        if (sources.some((item) => item.filename === filename)) continue;
+        const loadedSource = readFileSync(path.join(agentsDir, filename), "utf8");
+        sources.push({
+          filename,
+          source: loadedSource,
+          tool_name: inferAgentToolName(loadedSource, filename),
+        });
+      }
+    } catch {
+      // A concurrently closing twin remains diagnosable from its hatch inventory.
+    }
+    let rar = [];
+    try {
+      const listed = await this.rar.list();
+      rar = Array.isArray(listed)
+        ? listed
+        : (listed?.agents || listed?.rapplications || []);
+    } catch {
+      // Diagnosis remains honest when the catalog is unavailable.
+    }
+    twin.adaptation.observe(capability, {
+      type: signal,
+      code: "user-requested-adaptation",
+    });
+    const result = twin.adaptation.diagnose(capability, {
+      request,
+      tools: sources.map((item) => item.tool_name).filter(Boolean),
+      stub_detected: sources.some((item) => sourceLooksReadyOnly(item.source)),
+      has_data_path: sources.some(
+        (item) => /\b(workiq|graph|outlook|mailbox|messages)\b/i.test(item.source)
+          && !sourceLooksReadyOnly(item.source),
+      ),
+      rar,
+      auth: "not_verified",
+      health: twin.status === "ready" ? "worker_ready" : twin.status,
+      permissions: Object.values(
+        twin.adaptation.inspect().capabilities || {},
+      ).flatMap((item) => (
+        item.generations?.find(
+          (generation) => generation.candidate_hash === item.active_hash,
+        )?.permissions || []
+      )),
+    });
+    this.emit({
+      type: "twin-adaptation",
+      id,
+      adaptation: result,
+      twin: this.descriptor(twin),
+    });
+    return result;
+  }
+
+  async adaptationStage(id, {
+    capability = "email",
+    source = null,
+    sourceHash = null,
+    toolName = "WorkIQ",
+    permissions = ["network", "data_source", "credential", "shell"],
+    behaviorContract = null,
+    binding = null,
+  } = {}) {
+    const twin = this.get(id);
+    const proposed = twin.adaptation.inspect(capability).capability?.proposal;
+    let candidateSource = source == null ? null : String(source);
+    let pinnedHash = sourceHash;
+    let selectedBinding = binding;
+    if (!candidateSource && proposed?.strategy === "REUSE_BIND") {
+      const cartridge = await this.rar.download(
+        proposed.catalog_id || proposed.capability_id,
+      );
+      candidateSource = String(cartridge.source || "");
+      pinnedHash = cartridge.sha256 || proposed.capability_hash;
+      selectedBinding = {
+        provider: {
+          id: proposed.capability_id,
+          sha256: pinnedHash,
+          mode: "read_only",
+          verified: true,
+        },
+        memory: {
+          recall: "ContextMemory",
+          save: "ManageMemory",
+          verified: false,
+        },
+        verified: true,
+      };
+    }
+    if (!selectedBinding) {
+      selectedBinding = {
+        provider: {
+          id: proposed?.capability_id || null,
+          sha256: pinnedHash || null,
+          mode: proposed?.mode || "least_privilege",
+          verified: Boolean(pinnedHash),
+        },
+        memory: {
+          recall: "ContextMemory",
+          save: "ManageMemory",
+          verified: false,
+        },
+        verified: Boolean(candidateSource),
+      };
+    }
+    if (pinnedHash && candidateSource && sha256(candidateSource) !== pinnedHash) {
+      throw new Error("Pinned reused capability bytes do not match their sha256.");
+    }
+    if (capability === "email"
+        && selectedBinding?.provider?.id === "@kody-w/workiq") {
+      candidateSource = buildWorkIqEmailAdapter(candidateSource);
+      if (/\bclass\s+TwinReadOnlyEmailBindingAgent\s*\(/.test(candidateSource)) {
+        toolName = "TwinReadOnlyEmail";
+      }
+    }
+    const result = twin.adaptation.stage(capability, {
+      source: candidateSource,
+      binding: selectedBinding,
+      behavior_contract: behaviorContract || tester123EmailContract(),
+      permissions,
+      tool_name: toolName,
+    });
+    this.mirrorMolts(twin);
+    this.emit({
+      type: "twin-adaptation",
+      id,
+      adaptation: result,
+      twin: this.descriptor(twin),
+    });
+    return result;
+  }
+
+  adaptationApprove(id, capability, approval) {
+    const twin = this.get(id);
+    const result = twin.adaptation.approve(capability, {
+      ...approval,
+      actor: "human-ui",
+      action_bound: true,
+    });
+    this.emit({
+      type: "twin-adaptation",
+      id,
+      adaptation: result,
+      twin: this.descriptor(twin),
+    });
+    return result;
+  }
+
+  adaptationActivate(id, capability, candidateHash) {
+    const twin = this.get(id);
+    const result = twin.adaptation.activate(capability, candidateHash);
+    this.emit({
+      type: "twin-adaptation",
+      id,
+      adaptation: result,
+      twin: this.descriptor(twin),
+    });
+    return result;
+  }
+
+  adaptationRollback(id, capability = "email", reason = "user requested rollback") {
+    const twin = this.get(id);
+    const result = twin.adaptation.rollback(capability, reason);
+    this.emit({
+      type: "twin-adaptation",
+      id,
+      adaptation: result,
+      twin: this.descriptor(twin),
+    });
+    return result;
+  }
+
+  #runtimeAdaptationEvidence(twin, prompt, reply, agentLogs = "") {
+    const capability = /\b(email|mail|outlook|inbox)\b/i.test(`${prompt} ${agentLogs}`)
+      ? "email"
+      : null;
+    const snapshot = twin.adaptation.inspect();
+    for (const entry of Object.values(snapshot.capabilities || {})) {
+      const active = entry.generations?.find(
+        (generation) => generation.candidate_hash === entry.active_hash,
+      );
+      const toolName = String(active?.detail?.tool_name || "");
+      const executed = toolName && String(agentLogs || "")
+        .toLowerCase()
+        .includes(toolName.toLowerCase());
+      if (entry.state === "healthy" && executed) {
+        twin.adaptation.recordRuntime(entry.capability, replyLooksReadyOnly(reply)
+          ? { type: "constant_output" }
+          : { type: "healthy_turn" });
+      }
+    }
+    if (!capability || !replyLooksReadyOnly(reply)) return;
+    if (!twin.readyEvidence) twin.readyEvidence = new Map();
+    const signature = sha256(String(reply));
+    const previous = twin.readyEvidence.get(capability);
+    twin.readyEvidence.set(capability, {
+      prompt: sha256(String(prompt)),
+      signature,
+    });
+    twin.adaptation.observe(capability, {
+      type: "constant_output",
+      code: signature.slice(0, 24),
+      tool: capability,
+    });
+    if (previous?.signature === signature
+        && previous.prompt !== sha256(String(prompt))) {
+      const observed = twin.adaptation.observe(capability, {
+        type: "constant_output",
+        code: signature.slice(0, 24),
+        tool: capability,
+      });
+      if (observed.accepted) {
+        this.emit({
+          type: "twin-adaptation",
+          id: twin.id,
+          adaptation: twin.adaptation.inspect(capability),
+          twin: this.descriptor(twin),
+        });
+      }
+    }
   }
 
   // A bounded autonomous loop driven by the Brainstem over /chat. P1 proves the
@@ -963,7 +1430,7 @@ export class TwinManager {
     await Promise.allSettled(twins.map((twin) => this.#disposeTwin(twin)));
   }
 
-  async #disposeTwin(twin) {
+  async #disposeTwin(twin, { removeMolter = false } = {}) {
     // Stop before deleting either directory; no live worker may still own them.
     twin.closed = true;
     twin.running = false;
@@ -971,7 +1438,11 @@ export class TwinManager {
     try { this.mirrorMolts(twin); } catch { /* preserve teardown */ }
     if (twin.worker) await twin.worker.stop().catch(() => {});
     try { this.mirrorMolts(twin); } catch { /* preserve teardown */ }
-    removeTwinDirectories(twin);
+    try {
+      const owner = readOwner(twin.molterHome);
+      if (owner?.pid === process.pid) rmSync(twin.molterLeasePath, { force: true });
+    } catch {}
+    removeTwinDirectories(twin, { removeMolter });
     this.pruneTwinLogs();
   }
 }
@@ -979,5 +1450,8 @@ export class TwinManager {
 export const twinManagerInternals = {
   allocatePort,
   discoverTwinMolts,
+  replyLooksReadyOnly,
+  sourceLooksReadyOnly,
+  buildWorkIqEmailAdapter,
   twinSlug,
 };

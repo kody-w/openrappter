@@ -45,6 +45,9 @@ plain `HEAD` / `PRIOR_HEAD` files and composed bytes are unchanged.
   in a **baseline manifest**: `ancestor_rappid → sha256 → source`.
 - **Molt.** A mutation of exactly one agent, produced by growth (the Molter's
   `generate` / `mutate`) or dropped in by a person. It descends from one ancestor.
+- **Staged generation.** A verified immutable molt that is not live. Growth
+  actions stage by default in beta.11; activation is a separate exact-hash
+  pointer move after shadow evaluation and permission policy.
 - **Ring.** One generation in an agent's lineage. Append-only; never deleted.
 - **Frame.** A ring made portable: a self-contained snapshot (`source` +
   lineage metadata + `rappid` + `sha256`) that can be hot-loaded on its own. Every
@@ -346,6 +349,11 @@ disabled state.
 9. **Promotion is gated, never forced.** Crossing an environment boundary is a
    three-way merge against a common ancestor: fast-forward or refuse-with-a-diff.
    Drift and conflicts fail at promotion time, never at runtime.
+10. **Adaptation is not in-place self-rewrite.** A twin may diagnose, stage,
+    shadow, and select immutable capability generations. New sensitive
+    permissions require action-bound human approval, and first-turn regression
+    restores the last-known-good head. See
+    [`twins/ADAPTATION.md`](twins/ADAPTATION.md).
 
 ## Cross-references
 

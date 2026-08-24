@@ -321,6 +321,137 @@ assert detail == {
 `);
 });
 
+test("molter behavior gate accepts structured fixture mail and truthful no-data/auth paths", () => {
+  runPython(importStub + String.raw`
+module = load(
+    "frontier/rapplications/molter/agents/molter_agent.py",
+    "molter_agent_email_contract",
+)
+source = """
+import json
+from agents.basic_agent import BasicAgent
+
+class FixtureMailAgent(BasicAgent):
+    def __init__(self):
+        self.name = "FixtureMail"
+        self.metadata = {
+            "name": self.name,
+            "parameters": {"type": "object", "properties": {
+                "provider_fixture": {"type": "string"}
+            }},
+        }
+        super().__init__(name=self.name, metadata=self.metadata)
+
+    def perform(self, **kwargs):
+        fixture = kwargs.get("provider_fixture")
+        if fixture == "has_data":
+            return json.dumps({"status": "success", "messages": [
+                {"id": "fixture-1", "subject": "Planning"}
+            ]})
+        if fixture == "auth_required":
+            return json.dumps({"status": "auth_required", "messages": []})
+        return json.dumps({"status": "no_data", "messages": []})
+"""
+contract = {
+    "name": "read_only_email",
+    "input_schema": {"type": "object"},
+    "output_schema": {"type": "object"},
+    "cases": [
+        {"id": "mail", "input": {"provider_fixture": "has_data"},
+         "expect": {"status": "success", "minimum_messages": 1}},
+        {"id": "none", "input": {"provider_fixture": "no_data"},
+         "expect": {"status": "no_data"}},
+        {"id": "auth", "input": {"provider_fixture": "auth_required"},
+         "expect": {"status": "auth_required"}},
+    ],
+}
+ok, detail = module._verify(source, contract, [])
+assert ok, detail
+assert detail["behavior_contract_sha256"]
+assert detail["permissions"] == []
+`);
+});
+
+test("molter behavior gate rejects ready-only stubs, timeout, spoofed exit, and undeclared network", () => {
+  runPython(importStub + String.raw`
+module = load(
+    "frontier/rapplications/molter/agents/molter_agent.py",
+    "molter_agent_behavior_refusals",
+)
+import os
+contract = {
+    "name": "email",
+    "input_schema": {"type": "object"},
+    "output_schema": {"type": "object"},
+    "cases": [
+        {"id": "a", "input": {"query": "first"},
+         "expect": {"status": "success"}},
+        {"id": "b", "input": {"query": "second"},
+         "expect": {"status": "no_data"}},
+    ],
+}
+stub = """
+from agents.basic_agent import BasicAgent
+class StubAgent(BasicAgent):
+    def __init__(self):
+        self.name = "Stub"
+        self.metadata = {"name": self.name, "parameters": {"type": "object", "properties": {}}}
+        super().__init__(name=self.name, metadata=self.metadata)
+    def perform(self, **kwargs):
+        return '{"status":"ready","message":"Get emails for me"}'
+"""
+ok, detail = module._verify(stub, contract, [])
+assert not ok and detail["stage"] == "behavior", detail
+assert "ready-only" in detail["lesson"], detail
+
+network = stub.replace(
+    "from agents.basic_agent import BasicAgent",
+    "import requests\nfrom agents.basic_agent import BasicAgent")
+ok, detail = module._verify(network, contract, [])
+assert not ok and detail["stage"] == "permissions", detail
+assert "undeclared permission" in detail["lesson"] and "network" in detail["lesson"], detail
+
+spoof = stub.replace(
+    "return '{\"status\":\"ready\",\"message\":\"Get emails for me\"}'",
+    "import os\n        os._exit(73)")
+ok, detail = module._verify(spoof, contract, [])
+assert not ok and detail["stage"] == "permissions", detail
+assert "spoof" in detail["lesson"], detail
+
+exec_spoof = stub.replace(
+    "return '{\"status\":\"ready\",\"message\":\"Get emails for me\"}'",
+    "import os, sys\n        os.execv(sys.executable, [sys.executable, '-c', 'raise SystemExit(73)'])")
+ok, detail = module._verify(exec_spoof, contract, [])
+assert not ok and detail["stage"] == "permissions", detail
+assert "execv" in detail["lesson"], detail
+
+module.BEHAVIOR_TIMEOUT = 0.1
+slow = stub.replace(
+    "return '{\"status\":\"ready\",\"message\":\"Get emails for me\"}'",
+    "import time\n        time.sleep(5)\n        return '{\"status\":\"no_data\",\"messages\":[]}'")
+ok, detail = module._verify(slow, contract, [])
+assert not ok and detail["stage"] == "behavior", detail
+assert "timeout" in detail["lesson"], detail
+
+writer = stub.replace(
+    "return '{\"status\":\"ready\",\"message\":\"Get emails for me\"}'",
+    "open('shadow-side-effect', 'w').write('bad')\n        return '{\"status\":\"no_data\",\"messages\":[]}'")
+ok, detail = module._verify(writer, contract, [])
+assert not ok and detail["stage"] == "permissions", detail
+assert "write_external" in detail["lesson"], detail
+assert not os.path.exists("shadow-side-effect")
+
+hidden_shell = stub.replace(
+    "from agents.basic_agent import BasicAgent",
+    "import os\nfrom agents.basic_agent import BasicAgent").replace(
+    "return '{\"status\":\"ready\",\"message\":\"Get emails for me\"}'",
+    "os.system('echo unsafe')\n        return '{\"status\":\"no_data\",\"messages\":[]}'")
+ok, detail = module._verify(hidden_shell, contract, [])
+assert not ok and detail["stage"] == "permissions", detail
+assert "shell" in detail["lesson"], detail
+`);
+});
+
 test("molter verifier rejects candidate stdout that asserts success", () => {
   runPython(importStub + String.raw`
 module = load(
@@ -624,6 +755,108 @@ finally:
         os.environ.pop("BRAINSTEM_BETA_TWIN", None)
     else:
         os.environ["BRAINSTEM_BETA_TWIN"] = prior
+`);
+});
+
+test("Molter chat cannot enable legacy activation or roll back to an unapproved staged generation", () => {
+  runPython(importStub + String.raw`
+import hashlib
+import os
+import tempfile
+
+home = tempfile.mkdtemp()
+twin = os.path.join(home, "twins", "molter-1", "agents")
+os.makedirs(twin)
+os.environ["MOLTER_HOME"] = os.path.join(home, "molter")
+os.environ["BRAINSTEM_BETA_TWIN"] = "molter-1"
+os.environ.pop("MOLTER_LEGACY_COMPAT", None)
+module = load(
+    "frontier/rapplications/molter/agents/molter_agent.py",
+    "molter_approval_boundary",
+)
+module.LIVE_DIR = twin
+module.HOME = os.environ["MOLTER_HOME"]
+module.MOLTS = os.path.join(module.HOME, "molts")
+module.STATE_FILE = os.path.join(module.HOME, "state.json")
+module.ACTIVE_FILE = os.path.join(module.HOME, "ACTIVE.json")
+module.LOCK_FILE = os.path.join(module.HOME, ".state.lock")
+agent = module.MolterAgent()
+properties = agent.metadata["parameters"]["properties"]
+assert "activate_immediately" not in properties
+assert "compatibility_mode" not in properties
+source = """
+from agents.basic_agent import BasicAgent
+class NetworkAgent(BasicAgent):
+    def __init__(self):
+        self.name = "Network"
+        self.metadata = {"name": self.name, "parameters": {"type": "object", "properties": {}}}
+        super().__init__(name=self.name, metadata=self.metadata)
+    def perform(self, **kwargs):
+        return "ok"
+"""
+behavior_contract = {
+    "name": "network",
+    "input_schema": {"type": "object"},
+    "output_schema": {"type": "string"},
+    "cases": [
+        {"id": "one", "input": {}, "expect": "ok"},
+        {"id": "two", "input": {"query": "two"}, "expect": "ok"},
+    ],
+}
+gen, meta = agent._record_molt(
+    "network", source, (True, {"ok": True, "tool_name": "Network"}),
+    "staged only", None, "generation",
+    behavior_contract=behavior_contract, permissions=["network"])
+digest = hashlib.sha256(source.encode()).hexdigest()
+assert "REFUSED: elevated permissions" in agent._activate({
+    "capability": "network",
+    "to_generation": gen,
+    "generation_hash": digest,
+})
+assert "not a previously healthy active molt" in agent._rollback({
+    "capability": "network",
+    "to_generation": gen,
+})
+reply = agent.perform(
+    action="generate",
+    capability="network",
+    source=source,
+    compatibility_mode=True,
+    activate_immediately=True,
+)
+assert "requires a complete behavior_contract" in reply, reply
+assert os.listdir(twin) == [], os.listdir(twin)
+
+safe_generations = []
+for index in range(3):
+    safe_source = source.replace("NetworkAgent", f"SafeAgent{index}").replace(
+        'self.name = "Network"', f'self.name = "Safe{index}"')
+    safe_gen, safe_meta = agent._record_molt(
+        "safe", safe_source,
+        (True, {"ok": True, "tool_name": f"Safe{index}"}),
+        f"safe {index}", safe_generations[-1][0] if safe_generations else None,
+        "generation", permissions=[])
+    agent._go_live(
+        "safe", safe_source, f"Safe{index}", safe_gen,
+        generation_hash=safe_meta["sha256"])
+    safe_generations.append((safe_gen, safe_meta, safe_source))
+assert "generation 1" in agent._rollback({"capability": "safe"})
+assert "generation 0" in agent._rollback({"capability": "safe"})
+
+active_archive = os.path.join(module.MOLTS, "safe", "gen-000", "agent.py")
+os.chmod(active_archive, 0o600)
+open(active_archive, "w", encoding="utf-8").write("tampered")
+os.remove(os.path.join(twin, "safe_agent.py"))
+restored = agent._rehydrate_live()
+state = module._load_state()["capabilities"]["safe"]
+assert state["live_generation"] == 1, (restored, state)
+assert state["last_known_good_generation"] == 1, state
+assert "SafeAgent1" in open(os.path.join(twin, "safe_agent.py"), encoding="utf-8").read()
+with module._state_lock():
+    shared = module._load_state()
+    shared["capabilities"]["safe"]["molts"][0].pop("note", None)
+    module._save_state(shared)
+assert "Molt history for 'safe'" in agent._molt_log({"capability": "safe"})
 `);
 });
 

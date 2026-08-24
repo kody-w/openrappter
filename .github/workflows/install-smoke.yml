@@ -32,6 +32,14 @@ permissions:
   contents: read
 
 jobs:
+  powershell-contract:
+    name: PowerShell precedence and SemVer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./tests/test_install_ps1.ps1
+
   unit-tests:
     name: Unit tests (install.sh functions)
     runs-on: ubuntu-latest
@@ -177,4 +185,10 @@ jobs:
       - name: Copy install.sh to Docker context
         run: cp install.sh tests/install/docker/git-method/install.sh
       - name: Build and run git method test
-        run: docker build --no-cache -t openrappter-test-git tests/install/docker/git-method/
+        env:
+          AUTHORITY_REF: 1985eb8cd4d3b80155bcc0c6bc0a0622de7f47ec
+        run: >-
+          docker build --no-cache
+          --build-arg AUTHORITY_REF="$AUTHORITY_REF"
+          -t openrappter-test-git
+          tests/install/docker/git-method/

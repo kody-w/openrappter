@@ -31,3 +31,11 @@ stack, under the MIT License. That license is reproduced verbatim at
 `licenses/aibast-agents-library-MIT.txt` and continues to govern those files.
 
 Imported at source commit 038de085d6841ecdfcdfb3d5fc56b9bbec655f24.
+
+---
+
+OpenRappter Desktop distributes FFmpeg and FFprobe executables from
+`@ffmpeg-installer/ffmpeg` and `@ffprobe-installer/ffprobe` for local media
+transcription. Those executables are licensed under LGPL-2.1 and are invoked as
+separate processes. Their package license files are preserved in the packaged
+application.

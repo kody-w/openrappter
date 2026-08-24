@@ -871,6 +871,8 @@ INSTALL_DIR="${OPENRAPPTER_HOME:-$HOME/.openrappter}"
 MIN_NODE=20
 MIN_PYTHON_MINOR=10
 BIN_NAME="openrappter"
+# Retained for installer compatibility assertions and downstream sourcing.
+# shellcheck disable=SC2034
 NPM_PACKAGE="openrappter"
 
 # Install method: "npm", "git", or "" (auto-detect/prompt)
@@ -882,9 +884,18 @@ OPT_SET_NPM_PREFIX=false
 # Train order, least-stable first. Each ring owns one npm dist-tag; only
 # `stable` owns `latest`, so a prerelease can never be served to a plain
 # `npm install openrappter`.
-RING_ORDER="canary nightly alpha beta stable"
-CHANNEL="${OPENRAPPTER_CHANNEL:-}"
-CHANNEL_FILE="${INSTALL_DIR}/channel"
+RING_ORDER="stable beta canary alpha nightly"
+CHANNEL="${OPENRAPPTER_RING:-${OPENRAPPTER_CHANNEL:-}}"
+CHANNEL_FILE="${INSTALL_DIR}/ring"
+LEGACY_CHANNEL_FILE="${INSTALL_DIR}/channel"
+OPT_ALLOW_DOWNGRADE="${OPENRAPPTER_ALLOW_DOWNGRADE:-false}"
+RESOLVED_RING_VERSION=""
+RESOLVED_RING_ARTIFACT=""
+RESOLVED_RING_SHA256=""
+RESOLVED_RING_COMMIT=""
+RESOLVED_RING_STATUS=""
+RESOLVED_RING_REASON=""
+RESOLVED_RING_PROVENANCE=""
 
 # OPENRAPPTER_BETA predates rings and used to resolve a `beta` dist-tag that
 # nothing ever published, so it silently failed. Keep it working as an alias.
@@ -892,14 +903,17 @@ if [[ -z "$CHANNEL" && "${OPENRAPPTER_BETA:-0}" == "1" ]]; then
     CHANNEL="beta"
 fi
 
-# Map a ring to its npm PACKAGE. Each prerelease ring ships as its own package,
-# so nothing a ring publishes can ever be served to `npm install openrappter`.
-# Production is unreachable from ring work rather than merely guarded.
-ring_package() {
+# A ring maps to one repository only. The branch path is merely where the
+# current pointer is fetched; release identity comes exclusively from the
+# validated 40-hex commit, exact version, artifact URL, and SHA-256 inside it.
+ring_repository() {
     case "$1" in
-        canary|nightly|alpha|beta) printf '%s-%s\n' "$NPM_PACKAGE" "$1" ;;
-        stable)                    printf '%s\n' "$NPM_PACKAGE" ;;
-        *)                         return 1 ;;
+        stable)  printf 'kody-w/openrappter\n' ;;
+        beta)    printf 'kody-w/openrappter-beta\n' ;;
+        canary)  printf 'kody-w/openrappter-canary\n' ;;
+        alpha)   printf 'kody-w/openrappter-alpha\n' ;;
+        nightly) printf 'kody-w/openrappter-nightly\n' ;;
+        *) return 1 ;;
     esac
 }
 
@@ -921,37 +935,184 @@ effective_channel() {
         printf '%s\n' "$CHANNEL"
         return 0
     fi
-    if [[ -r "$CHANNEL_FILE" ]]; then
-        local saved
-        saved="$(tr -d '[:space:]' < "$CHANNEL_FILE" 2>/dev/null || true)"
+    local setting saved
+    for setting in "$CHANNEL_FILE" "$LEGACY_CHANNEL_FILE"; do
+        [[ -r "$setting" ]] || continue
+        saved="$(tr -d '[:space:]' < "$setting" 2>/dev/null || true)"
         if [[ -n "$saved" ]] && is_valid_ring "$saved"; then
             printf '%s\n' "$saved"
             return 0
         fi
-    fi
+        if [[ -n "$saved" ]]; then
+            ui_error "Persisted release ring is invalid: $saved"
+            return 1
+        fi
+    done
     printf 'stable\n'
 }
 
-# Precedence: explicit OPENRAPPTER_VERSION > ring package > production.
-# The version pin applies WITHIN the selected ring's package, so pinning a
-# version on a prerelease ring still cannot pull from production.
+# Validate a local manifest with Node, which is already a prerequisite before
+# either install method runs. Output is tab-separated:
+# version, artifact URL, SHA-256, source commit, status, reason.
+parse_candidate_bundle_url() {
+    local value="$1"
+    [[ "$value" != *$'\n'* && "$value" != *$'\r'* && "$value" != *$'\t'* && "$value" != *"?"* && "$value" != *"#"* && "$value" != *"@"* && "$value" != *"%"* && "$value" != *"\\"* ]] || return 1
+    local pattern='^https://raw\.githubusercontent\.com/kody-w/openrappter/([0-9a-f]{40})/candidates/([0-9a-f]{40})/(snapshot|release)/([A-Za-z0-9][A-Za-z0-9._-]{0,127})/([0-9a-f]{64})\.tar\.gz$'
+    [[ "$value" =~ $pattern ]] || return 1
+    [[ "${BASH_REMATCH[4]}" != "." && "${BASH_REMATCH[4]}" != ".." ]] || return 1
+    printf '%s|%s|%s|%s|%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+}
+
+validate_ring_manifest_file() {
+    local file="$1" expected_ring="$2"
+    node - "$file" "$expected_ring" <<'NODE'
+const fs = require('node:fs');
+const [file, expected] = process.argv.slice(2);
+const rings = ['nightly', 'alpha', 'canary', 'beta', 'stable'];
+const closed = (v, keys, label) => {
+  if (!v || typeof v !== 'object' || Array.isArray(v) ||
+      JSON.stringify(Object.keys(v).sort()) !== JSON.stringify(keys)) {
+    throw new Error(`${label} is not closed`);
+  }
+};
+const parseCandidate=(value)=>{
+  const u=new URL(value);
+  if(!/^[\x20-\x7e]+$/.test(value)||!value.startsWith('https://raw.githubusercontent.com/')||u.protocol!=='https:'||u.hostname!=='raw.githubusercontent.com'||u.username||u.password||u.port||u.search||u.hash||/[^\x20-\x7e]|%|\\/.test(u.pathname))throw Error('candidate URL rejected');
+  const p=u.pathname.replace(/^\//,'').split('/');
+  if(p.length!==8||p[0]!=='kody-w'||p[1]!=='openrappter'||p[3]!=='candidates'||!/^[0-9a-f]{40}$/.test(p[2])||!/^[0-9a-f]{40}$/.test(p[4])||!['snapshot','release'].includes(p[5])||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(p[6])||p[6]==='.'||p[6]==='..'||!/^[0-9a-f]{64}\.tar\.gz$/.test(p[7]))throw Error('candidate URL rejected');
+  return {ref:p[2],source:p[4],kind:p[5],id:p[6],sha:p[7].slice(0,64)};
+};
+try {
+  const m = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const top=Object.keys(m).sort().join(',');
+  const current='artifact,channel_version,intended_release_tag,predecessor,promoted_at,promotion_id,reason,receipt,ring,schema,source,status,version';
+  const legacy='artifact,predecessor,promoted_at,promotion_id,reason,receipt,ring,schema,source,status,version';
+  if(top!==current&&top!==legacy)throw new Error('manifest is not closed');
+  closed(m.source, ['commit','repository','tag'], 'source');
+  closed(m.artifact, ['install_url','provenance','sha256','url'], 'artifact');
+  if (m.schema !== 'openrappter-ring/v1' || m.ring !== expected) throw new Error('wrong schema or ring');
+  if (m.source.repository !== 'kody-w/openrappter' || !/^[0-9a-f]{40}$/.test(m.source.commit)) throw new Error('unauthorized source');
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(m.version)) throw new Error('bad version');
+  if (!/^[0-9a-f]{64}$/.test(m.artifact.sha256)) throw new Error('bad SHA-256');
+  if (!/^[0-9a-f]{64}$/.test(m.promotion_id)) throw new Error('missing authority promotion id');
+  if (m.intended_release_tag!=null&&!/^v[0-9][0-9A-Za-z.+-]*$/.test(m.intended_release_tag))throw new Error('bad intended release tag');
+  for (const u of [m.artifact.url, m.artifact.install_url].filter(Boolean)) {
+    const parsed = new URL(u);
+    if (parsed.protocol !== 'https:' || !['github.com','registry.npmjs.org','raw.githubusercontent.com'].includes(parsed.hostname)) throw new Error('unauthorized URL');
+  }
+  if (!['published','unpublished','disabled'].includes(m.status)) throw new Error('bad status');
+  if (new Date(m.promoted_at) > new Date(Date.now() + 300000)) throw new Error('future manifest');
+  if (m.status === 'published' && !m.artifact.install_url) throw new Error('published manifest has no install URL');
+  const npmUrl = `https://registry.npmjs.org/openrappter/-/openrappter-${m.version}.tgz`;
+  const releasePrefix = m.source.tag ? `https://github.com/kody-w/openrappter/releases/download/${m.source.tag}/` : '';
+  if (m.status === 'published') {
+    const npm = m.artifact.provenance === 'npm-registry-download-sha256' && m.artifact.url === npmUrl && m.artifact.install_url === npmUrl;
+    const release = m.artifact.provenance === 'github-release-download-sha256' && releasePrefix && m.artifact.url.startsWith(releasePrefix) && m.artifact.install_url === m.artifact.url;
+    let candidate=false;
+    if(m.artifact.provenance==='github-candidate-bundle-sha256'&&m.artifact.install_url===m.artifact.url){try{const c=parseCandidate(m.artifact.url);candidate=c.source===m.source.commit&&c.sha===m.artifact.sha256;}catch{}}
+    if (!npm && !release && !candidate) throw new Error('artifact is not bound to canonical package/version');
+  }
+  const fields = [m.version, m.artifact.url, m.artifact.sha256, m.source.commit, m.status, m.reason || '', m.promotion_id, m.artifact.provenance];
+  process.stdout.write(fields.map((v) => Buffer.from(String(v)).toString('base64')).join('|'));
+} catch (error) {
+  console.error(`ring manifest rejected: ${error.message}`);
+  process.exit(1);
+}
+NODE
+}
+
+resolve_ring_manifest() {
+    local ring="$1" repo head receipt manifest encoded authority_ref head_info
+    repo="$(ring_repository "$ring")" || return 2
+    authority_ref="${OPENRAPPTER_AUTHORITY_REF:-main}"
+    if [[ "$authority_ref" != "main" && ! "$authority_ref" =~ ^[0-9a-f]{40}$ ]]; then
+        ui_error "OPENRAPPTER_AUTHORITY_REF must be main or an immutable 40-hex commit"
+        return 2
+    fi
+    head="$(mktempfile)"
+    download_file "https://raw.githubusercontent.com/kody-w/openrappter-release-train/${authority_ref}/heads/${ring}.json" "$head" ||
+        { ui_error "Could not reach ${ring} authority head"; return 1; }
+    head_info="$(node - "$head" "$ring" "$repo" <<'NODE'
+const fs=require('node:fs'),[file,ring,repo]=process.argv.slice(2),h=JSON.parse(fs.readFileSync(file));
+const keys=['authority_commit','promotion_id','receipt_path','receipt_sha256','ring','schema','sequence','target_manifest_commit','target_manifest_sha256','target_repository'];
+if(JSON.stringify(Object.keys(h).sort())!==JSON.stringify(keys)||h.schema!=='openrappter-ring-head/v1'||h.ring!==ring||!Number.isSafeInteger(h.sequence)||h.sequence<1||h.target_repository!==repo||!/^[0-9a-f]{40}$/.test(h.authority_commit)||!/^[0-9a-f]{40}$/.test(h.target_manifest_commit)||!/^[0-9a-f]{64}$/.test(h.promotion_id)||!/^[0-9a-f]{64}$/.test(h.receipt_sha256)||!/^[0-9a-f]{64}$/.test(h.target_manifest_sha256)||h.receipt_path!==`receipts/${ring}/${h.promotion_id}.json`)process.exit(1);
+process.stdout.write([h.authority_commit,h.receipt_path,h.receipt_sha256,h.target_manifest_commit,h.target_manifest_sha256,h.promotion_id,String(h.sequence)].map(v=>Buffer.from(v).toString('base64')).join('|'));
+NODE
+    )" || { ui_error "Authority head rejected"; return 1; }
+    IFS='|' read -r _ac _rp _rsha _tc _msha _pid _seq <<< "$head_info"
+    local authority_commit receipt_path receipt_sha target_commit manifest_sha promotion_id sequence
+    authority_commit="$(printf '%s' "$_ac"|base64 --decode)"
+    receipt_path="$(printf '%s' "$_rp"|base64 --decode)"
+    receipt_sha="$(printf '%s' "$_rsha"|base64 --decode)"
+    target_commit="$(printf '%s' "$_tc"|base64 --decode)"
+    manifest_sha="$(printf '%s' "$_msha"|base64 --decode)"
+    promotion_id="$(printf '%s' "$_pid"|base64 --decode)"
+    sequence="$(printf '%s' "$_seq"|base64 --decode)"
+    receipt="$(mktempfile)"
+    download_file "https://raw.githubusercontent.com/kody-w/openrappter-release-train/${authority_commit}/${receipt_path}" "$receipt" ||
+        { ui_error "Immutable authority receipt unreachable"; return 1; }
+    manifest="$(mktempfile)"
+    download_file "https://raw.githubusercontent.com/${repo}/${target_commit}/.ring/manifest.json" "$manifest" ||
+        { ui_error "Immutable authority target manifest unreachable"; return 1; }
+    encoded="$(validate_ring_manifest_file "$manifest" "$ring")" || return 1
+    IFS='|' read -r _rv _ra _rs _rc _rst _rr _rpid _rprov <<< "$encoded"
+    RESOLVED_RING_VERSION="$(printf '%s' "$_rv" | base64 --decode)"
+    RESOLVED_RING_ARTIFACT="$(printf '%s' "$_ra" | base64 --decode)"
+    RESOLVED_RING_SHA256="$(printf '%s' "$_rs" | base64 --decode)"
+    RESOLVED_RING_COMMIT="$(printf '%s' "$_rc" | base64 --decode)"
+    RESOLVED_RING_STATUS="$(printf '%s' "$_rst" | base64 --decode)"
+    RESOLVED_RING_REASON="$(printf '%s' "$_rr" | base64 --decode)"
+    RESOLVED_RING_PROVENANCE="$(printf '%s' "$_rprov" | base64 --decode)"
+    local manifest_promotion_id
+    manifest_promotion_id="$(printf '%s' "$_rpid" | base64 --decode)"
+    [[ "$manifest_promotion_id" == "$promotion_id" ]] ||
+        { ui_error "Authority head promotion id differs from immutable manifest"; return 1; }
+    if ! node - "$manifest" "$receipt" "$ring" "$repo" "$receipt_sha" "$manifest_sha" "$promotion_id" "$target_commit" "$sequence" <<'NODE'
+const fs=require('node:fs'),crypto=require('node:crypto');
+const [mf,rf,ring,repo,receiptSha,manifestSha,promotionId,targetCommit,sequence]=process.argv.slice(2);
+const [m,r]=[mf,rf].map(f=>JSON.parse(fs.readFileSync(f)));
+const canon=v=>Array.isArray(v)?v.map(canon):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canon(v[k])])):v;
+const digest=v=>crypto.createHash('sha256').update(JSON.stringify(canon(v))).digest('hex');
+if(digest(r)!==receiptSha||digest(m)!==manifestSha||r.target_manifest_sha256!==manifestSha)throw Error('authority digest mismatch');
+if(r.schema!=='openrappter-promotion-receipt/v1'||r.target_repository!==repo||r.target_ring!==ring||r.promotion_id!==promotionId||m.promotion_id!==promotionId||r.target_manifest_commit!==targetCommit||(r.sequence!==undefined&&r.sequence!==Number(sequence)))throw Error('authority target mismatch');
+const a=m.artifact,s=m.source;
+if(r.source_repository!==s.repository||r.source_commit!==s.commit||r.source_tag!==s.tag||r.version!==m.version||r.artifact_url!==a.url||r.install_url!==a.install_url||r.artifact_sha256!==a.sha256||r.artifact_provenance!==a.provenance)throw Error('authority identity mismatch');
+NODE
+    then
+        ui_error "Immutable authority receipt does not authorize manifest"
+        return 1
+    fi
+    local sequences_file
+    sequences_file="${INSTALL_DIR}/ring-head-sequences.json"
+    mkdir -p "$INSTALL_DIR"
+    node - "$sequences_file" "$ring" "$sequence" <<'NODE'
+const fs=require('node:fs'),path=require('node:path'),[file,ring,raw]=process.argv.slice(2),sequence=Number(raw);
+let state={};if(fs.existsSync(file))state=JSON.parse(fs.readFileSync(file));
+const previous=state[ring]??0;if(sequence<previous)throw Error('authority head sequence rollback');
+if(sequence>previous){state[ring]=sequence;const tmp=`${file}.${process.pid}.new`;fs.writeFileSync(tmp,JSON.stringify(state,null,2)+'\n',{mode:0o600});fs.renameSync(tmp,file);}
+NODE
+    if [[ "$RESOLVED_RING_STATUS" != "published" ]]; then
+        ui_error "${ring} is ${RESOLVED_RING_STATUS}: ${RESOLVED_RING_REASON}"
+        return 1
+    fi
+    if [[ -n "${OPENRAPPTER_VERSION:-}" && "$OPENRAPPTER_VERSION" != "$RESOLVED_RING_VERSION" ]]; then
+        ui_error "OPENRAPPTER_VERSION must equal the ring's exact version ${RESOLVED_RING_VERSION}"
+        return 1
+    fi
+}
+
 resolve_pkg_spec() {
-    local ring pkg
+    local ring
     if ! ring="$(effective_channel)"; then
         ui_error "Unknown release ring: ${CHANNEL:-<empty>}"
         ui_error "Valid rings: ${RING_ORDER// /, }"
         return 2
     fi
-    pkg="$(ring_package "$ring")" || return 2
-
-    if [[ -n "${OPENRAPPTER_VERSION:-}" ]]; then
-        printf '%s@%s\n' "$pkg" "$OPENRAPPTER_VERSION"
-        return 0
-    fi
-    printf '%s@latest\n' "$pkg"
+    resolve_ring_manifest "$ring" || return 1
+    printf '%s\n' "$RESOLVED_RING_ARTIFACT"
 }
 
-# Remember the ring so `openrappter` upgrades stay on the same train car.
+# Remember the validated ring in the same setting read by the CLI and UI.
 persist_channel() {
     local ring
     ring="$(effective_channel)"
@@ -970,10 +1131,10 @@ Usage:
 
 Options:
   --method npm|git                   Install method (default: npm)
-  --channel <ring>                   Release ring: canary|nightly|alpha|beta|stable
-                                     Each ring is a separate npm package
-                                     (openrappter-<ring>); only stable installs
-                                     openrappter itself. Remembered across upgrades.
+  --ring <ring>                      Release ring: stable|beta|canary|alpha|nightly
+                                     Resolves a closed manifest to exact bytes.
+                                     --channel remains a deprecated alias.
+  --allow-downgrade                 Permit an explicitly selected older version
   --dir <path>                       Install directory for git method (default: ~/.openrappter)
   --dry-run                          Print what would happen (no changes)
   --verbose                          Print debug output
@@ -988,8 +1149,10 @@ Options:
 Environment variables:
   OPENRAPPTER_HOME=...              Install directory (default: ~/.openrappter)
   OPENRAPPTER_INSTALL_METHOD=npm|git Install method override
-  OPENRAPPTER_VERSION=1.4.0         Pin exact version (npm method; wins over --channel)
-  OPENRAPPTER_CHANNEL=beta          Release ring (same values as --channel)
+  OPENRAPPTER_RING=beta             Release ring (preferred environment selector)
+  OPENRAPPTER_CHANNEL=beta          Deprecated alias for OPENRAPPTER_RING
+  OPENRAPPTER_ALLOW_DOWNGRADE=true  Permit an older exact manifest version
+  OPENRAPPTER_AUTHORITY_REF=<40hex> Audit/test an authority head at an immutable revision
   OPENRAPPTER_BETA=1                Deprecated alias for OPENRAPPTER_CHANNEL=beta
   OPENRAPPTER_NO_PROMPT=true        Non-interactive mode
   OPENRAPPTER_DRY_RUN=1             Dry run mode
@@ -1020,6 +1183,10 @@ parse_args() {
                     exit 2
                 fi
                 shift 2
+                ;;
+            --allow-downgrade)
+                OPT_ALLOW_DOWNGRADE=true
+                shift
                 ;;
             --no-prompt)
                 OPT_NO_PROMPT=true
@@ -1677,15 +1844,85 @@ ensure_build_tools() {
 }
 
 # ── npm Global Install ─────────────────────────────────────
+compare_semver() {
+    node - "$1" "$2" <<'NODE'
+const parse = (value) => {
+  const m = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value);
+  if (!m) throw new Error(`invalid SemVer: ${value}`);
+  const pre = m[4]?.split('.') ?? null;
+  if (pre?.some((id) => /^\d+$/.test(id) && /^0\d+/.test(id))) throw new Error(`invalid SemVer: ${value}`);
+  return { core: m.slice(1, 4).map(Number), pre };
+};
+const a = parse(process.argv[2]);
+const b = parse(process.argv[3]);
+let result = 0;
+for (let i = 0; i < 3 && result === 0; i++) {
+  if (a.core[i] !== b.core[i]) result = a.core[i] < b.core[i] ? -1 : 1;
+}
+if (result === 0 && (a.pre !== null || b.pre !== null)) {
+  if (a.pre === null) result = 1;
+  else if (b.pre === null) result = -1;
+  else for (let i = 0; i < Math.max(a.pre.length, b.pre.length) && result === 0; i++) {
+    const x = a.pre[i], y = b.pre[i];
+    if (x === undefined) result = -1;
+    else if (y === undefined) result = 1;
+    else if (x !== y) {
+      const xn = /^\d+$/.test(x), yn = /^\d+$/.test(y);
+      if (xn && yn) result = BigInt(x) < BigInt(y) ? -1 : 1;
+      else if (xn !== yn) result = xn ? -1 : 1;
+      else result = x < y ? -1 : 1;
+    }
+  }
+}
+process.stdout.write(String(result));
+NODE
+}
+
 install_via_npm() {
     ui_info "Installing openrappter via npm (global)"
 
     # Determine version spec.
     # Precedence: explicit version > ring/channel dist-tag > stable (latest).
-    local pkg_spec ring
-    pkg_spec="$(resolve_pkg_spec)" || exit 2
+    local pkg_spec ring artifact actual current_version
+    resolve_pkg_spec >/dev/null || exit 2
     ring="$(effective_channel)"
-    ui_info "Release ring: ${ring} → ${pkg_spec}"
+    ui_info "Release ring: ${ring} → ${RESOLVED_RING_VERSION} @ ${RESOLVED_RING_COMMIT}"
+
+    current_version="$(npm list -g openrappter --depth=0 --json 2>/dev/null |
+        node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).dependencies?.openrappter?.version||"")}catch{}})' || true)"
+    if [[ -n "$current_version" && "$OPT_ALLOW_DOWNGRADE" != "true" ]]; then
+        if [[ "$(compare_semver "$RESOLVED_RING_VERSION" "$current_version")" == "-1" ]]; then
+            ui_error "Refusing downgrade ${current_version} → ${RESOLVED_RING_VERSION}; pass --allow-downgrade"
+            exit 2
+        fi
+    fi
+
+    artifact="$(mktempfile)"
+    download_file "$RESOLVED_RING_ARTIFACT" "$artifact" ||
+        { ui_error "Could not download exact ${ring} artifact"; exit 1; }
+    actual="$(sha256_of "$artifact")" ||
+        { ui_error "No SHA-256 tool available"; exit 1; }
+    if [[ "$actual" != "$RESOLVED_RING_SHA256" ]]; then
+        ui_error "Artifact checksum mismatch (expected ${RESOLVED_RING_SHA256}, got ${actual})"
+        exit 1
+    fi
+    if [[ "$RESOLVED_RING_PROVENANCE" == "github-candidate-bundle-sha256" ]]; then
+        local candidate_dir
+        candidate_dir="${INSTALL_DIR}/.candidate-${RESOLVED_RING_SHA256}"
+        rm -rf "$candidate_dir"
+        mkdir -p "$candidate_dir"
+        tar -xzf "$artifact" -C "$candidate_dir"
+        (cd "$candidate_dir" && sha256sum -c SHA256SUMS)
+        local candidate_packages=()
+        while IFS= read -r package; do candidate_packages+=("$package"); done < <(
+            find "$candidate_dir" -maxdepth 1 -type f -name 'openrappter-*.tgz' | sort
+        )
+        [[ "${#candidate_packages[@]}" -eq 1 ]] ||
+            { ui_error "Candidate bundle must contain exactly one npm tarball"; exit 1; }
+        pkg_spec="${candidate_packages[0]}"
+    else
+        pkg_spec="$artifact"
+    fi
 
     # Fix npm prefix if needed (Linux EACCES)
     if [[ "$OPT_SET_NPM_PREFIX" == "true" ]]; then
@@ -1704,8 +1941,7 @@ install_via_npm() {
         if retry 2 3 run_quiet_step "Retrying $pkg_spec" npm install -g "$pkg_spec" --no-fund --no-audit; then
             ui_success "npm install succeeded (after build tools)"
         else
-            ui_error "npm install -g $pkg_spec failed after retries"
-            echo "  Try manually: npm install -g $pkg_spec"
+            ui_error "npm install of verified ${ring} artifact failed after retries"
             echo "  Or use git method: curl ... | bash -s -- --method git"
             exit 1
         fi
@@ -2421,7 +2657,9 @@ setup_copilot_sdk() {
 
 # ── Install via Git (extracted from original main) ─────────
 install_via_git() {
-    local is_upgrade=false
+    local is_upgrade=false ring
+    ring="$(effective_channel)" || exit 2
+    resolve_ring_manifest "$ring" || exit 2
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         is_upgrade=true
     fi
@@ -2431,26 +2669,25 @@ install_via_git() {
         install_git
     fi
 
-    # Clone or update repo
+    # Clone or update the canonical repo, then detach at the exact manifest
+    # commit. `main` is never installed as a release identity.
     if [[ "$is_upgrade" == "true" ]]; then
-        ui_info "Updating existing git installation..."
-        cd "$INSTALL_DIR"
-        # Runtime state intentionally lives beside the checkout and is
-        # untracked. Only tracked edits should prevent a safe fast-forward.
-        if [[ -z "$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=no 2>/dev/null || true)" ]]; then
-            run_quiet_step "Updating repository" git -C "$INSTALL_DIR" pull --ff-only
-            ui_success "Updated to latest"
-        else
-            ui_warn "Repo has tracked local changes; skipping git pull"
-        fi
+        ui_info "Fetching exact ${ring} source ${RESOLVED_RING_COMMIT}..."
+        [[ -z "$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=no 2>/dev/null || true)" ]] ||
+            { ui_error "Repo has tracked local changes; refusing exact checkout"; exit 1; }
+        run_quiet_step "Fetching source commit" git -C "$INSTALL_DIR" fetch --depth 1 origin "$RESOLVED_RING_COMMIT"
     else
         if [[ -d "$INSTALL_DIR" ]]; then
             ui_warn "$INSTALL_DIR exists but is not a git repo — backing up"
             mv "$INSTALL_DIR" "${INSTALL_DIR}.bak.$(date +%s)"
         fi
-        run_quiet_step "Cloning openrappter" git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+        run_quiet_step "Cloning openrappter" git clone --no-checkout --filter=blob:none "$REPO_URL" "$INSTALL_DIR"
+        run_quiet_step "Fetching source commit" git -C "$INSTALL_DIR" fetch --depth 1 origin "$RESOLVED_RING_COMMIT"
         ui_success "Cloned to $INSTALL_DIR"
     fi
+    run_quiet_step "Checking out exact source" git -C "$INSTALL_DIR" checkout --detach "$RESOLVED_RING_COMMIT"
+    [[ "$(git -C "$INSTALL_DIR" rev-parse HEAD)" == "$RESOLVED_RING_COMMIT" ]] ||
+        { ui_error "Exact source checkout verification failed"; exit 1; }
 
     cd "$INSTALL_DIR"
 

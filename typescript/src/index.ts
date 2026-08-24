@@ -35,6 +35,7 @@ import { registerAgentsCommand } from './cli/agents.js';
 import { registerModelsCommand } from './cli/models.js';
 import { registerUpdateCommand } from './cli/update.js';
 import { registerHubCommands } from './cli/hubs.js';
+import { registerRingsCommand } from './cli/rings.js';
 import { tickCountFromFlag } from './infra/cli-args.js';
 import { portFromEnvironment, portFromFlag, portTypedOnCommandLine } from './infra/cli-port.js';
 import { watchOwnerProcess } from './infra/owner-watch.js';
@@ -540,6 +541,23 @@ async function startGatewayInProcess(opts?: {
       finishReason: 'stop' as const,
     };
   });
+
+  if (backend.provider) {
+    const { analyzeEstateBuddyEvidence } = await import(
+      './gateway/estate-buddy-analyzer.js'
+    );
+    const estateProvider = backend.kind === 'copilot-cli'
+      ? new (await import(
+        './providers/copilot-cli-direct.js'
+      )).CopilotCliDirectProvider({
+        model: backend.model,
+        exposeAgents: false,
+      })
+      : backend.provider;
+    server.setEstateBuddyAnalyzer(
+      (input) => analyzeEstateBuddyEvidence(estateProvider, input),
+    );
+  }
 
   const [
     { SurgeonService },
@@ -2599,6 +2617,7 @@ registerSkillsCommand(program);
 registerAgentsCommand(program);
 registerModelsCommand(program);
 registerUpdateCommand(program);
+registerRingsCommand(program);
 // `rappterhub` and `clawhub` are promised in the README but only implemented in
 // the Python runtime, and the installed launcher always prefers TypeScript when
 // `dist/` exists — so both documented commands reached the chat model instead

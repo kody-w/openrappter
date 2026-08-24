@@ -19,7 +19,10 @@ export interface ChatState {
   sessionId: string | null;
   sending: boolean;
   streaming: boolean;
+  /** Complete committed response. Never contains a partial transport delta. */
   streamContent: string;
+  /** Ephemeral CMR/1 buffer; callers must not render this field. */
+  pendingStreamContent: string;
   error: string | null;
 }
 
@@ -31,6 +34,7 @@ export function createChatState(): ChatState {
     sending: false,
     streaming: false,
     streamContent: '',
+    pendingStreamContent: '',
     error: null,
   };
 }
@@ -113,9 +117,11 @@ export async function sendChatMessage(
   }
 }
 
-/** Send a message using the streaming variant of `agent`, accumulating
- * chunks into `state.streamContent` as they arrive. Resolves with the
- * final `AgentResponse` once the server marks the stream `done`. */
+/** Send a streaming request while committing only one complete response.
+ *
+ * Transport chunks accumulate in `pendingStreamContent` for reconnect/liveness
+ * but never touch `streamContent` until the terminal frame arrives.
+ */
 export async function sendChatMessageStreaming(
   state: ChatState,
   message: string,
@@ -127,6 +133,7 @@ export async function sendChatMessageStreaming(
   state.sending = true;
   state.streaming = true;
   state.streamContent = '';
+  state.pendingStreamContent = '';
   state.error = null;
 
   try {
@@ -138,7 +145,7 @@ export async function sendChatMessageStreaming(
         ...sessionParams(state.sessionId),
       },
       (frame: StreamFrame) => {
-        if (frame.chunk) state.streamContent += frame.chunk;
+        if (frame.chunk) state.pendingStreamContent += frame.chunk;
       },
       {
         idleTimeoutMs: AGENT_STREAM_IDLE_TIMEOUT_MS,
@@ -147,11 +154,14 @@ export async function sendChatMessageStreaming(
       },
     );
     if (result?.sessionId) state.sessionId = result.sessionId;
+    state.streamContent = result?.content ?? state.pendingStreamContent;
     return result ?? null;
   } catch (err) {
     state.error = String(err);
+    state.streamContent = '';
     return null;
   } finally {
+    state.pendingStreamContent = '';
     state.sending = false;
     state.streaming = false;
   }

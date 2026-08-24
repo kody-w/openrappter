@@ -67,6 +67,8 @@ jobs:
       - run: npm run lint
       # vitest (esbuild) does not type-check — tsc is the only gate for type errors
       - run: npm run build
+      - name: Exercise packed candidate artifact and release-ring consumers
+        run: npm run test:package
       # One run, two reporters: the readable one for a human scanning the log,
       # and JSON so the skip budget below has something to check.
       - name: Run the suite

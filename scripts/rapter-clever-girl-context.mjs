@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import {
+  canonicalSchemaDigest,
+  validateBehavioralContractShape,
+} from './rapter-clever-girl-schema-validator.mjs';
 
 export const EVIDENCE_LIMITS = Object.freeze({
   maximumInputs: 64,
@@ -154,6 +158,7 @@ function capabilityEntry({
   sourceId,
   nativeDigest = '',
   opaqueName = false,
+  behavioralContract = null,
 }) {
   const matchName = safeCapabilityName(name);
   const publicName = opaqueName
@@ -171,7 +176,23 @@ function capabilityEntry({
     tokenHashes: tokens.hashes,
     sourceTypes: [sourceType],
     sourceIds: [sourceId],
+    contractQualified: behavioralContract !== null,
+    contractVersion: behavioralContract?.version ?? null,
+    contractTestCount: behavioralContract?.tests.length ?? 0,
+    contractDigest: behavioralContract?.digest ?? null,
+    contractConflict: false,
     limited: tokens.truncated,
+  };
+}
+
+function parseBehavioralContract(value) {
+  if (!validateBehavioralContractShape(value)) {
+    throw new EvidenceValidationError('CAPABILITY_CONTRACT_INVALID');
+  }
+  return {
+    version: value.version,
+    tests: value.tests,
+    digest: canonicalSchemaDigest(value),
   };
 }
 
@@ -184,13 +205,42 @@ function requirePlainObject(value, code) {
 
 export function parseEstateManifest(value, { sourceId, sourceDigest }) {
   const manifest = requirePlainObject(value, 'ESTATE_MANIFEST_INVALID');
+  let shape;
+  if (manifest.schema === 'rapp-monorepo/1.0') {
+    shape = {
+      sourceType: 'rapp-monorepo-manifest',
+      snapshotAt: manifest.captured_at,
+      repositories: manifest.repos,
+      notCaptured: manifest.not_captured,
+      repositoryName: (repository) => repository.repo,
+      revision: (repository) => repository.commit,
+      files: (repository) => repository.files,
+      bytes: (repository) => repository.bytes,
+      skippedLarge: (repository) => repository.skipped_large,
+      withheld: (repository) => repository.withheld,
+    };
+  } else if (manifest.schema === 'clevergirl-estate/1.0') {
+    shape = {
+      sourceType: 'generic-estate-manifest',
+      snapshotAt: manifest.capturedAt,
+      repositories: manifest.repositories,
+      notCaptured: manifest.notCaptured,
+      repositoryName: (repository) => repository.name,
+      revision: (repository) => repository.revision,
+      files: (repository) => repository.files,
+      bytes: (repository) => repository.bytes,
+      skippedLarge: (repository) => repository.skippedLarge,
+      withheld: (repository) => repository.withheld,
+    };
+  } else {
+    throw new EvidenceValidationError('ESTATE_MANIFEST_SCHEMA_UNSUPPORTED');
+  }
   if (
-    manifest.schema !== 'rapp-monorepo/1.0' ||
-    safeDateTime(manifest.captured_at) === null ||
-    !Array.isArray(manifest.repos) ||
-    manifest.repos.length < 1 ||
-    manifest.repos.length > EVIDENCE_LIMITS.maximumEstateRepositories ||
-    !Array.isArray(manifest.not_captured)
+    safeDateTime(shape.snapshotAt) === null ||
+    !Array.isArray(shape.repositories) ||
+    shape.repositories.length < 1 ||
+    shape.repositories.length > EVIDENCE_LIMITS.maximumEstateRepositories ||
+    !Array.isArray(shape.notCaptured)
   ) {
     throw new EvidenceValidationError('ESTATE_MANIFEST_INVALID');
   }
@@ -199,50 +249,62 @@ export function parseEstateManifest(value, { sourceId, sourceDigest }) {
   let withheldFiles = 0;
   let skippedLargeFiles = 0;
   const capabilities = [];
-  for (const repository of manifest.repos) {
+  for (const repository of shape.repositories) {
     requirePlainObject(repository, 'ESTATE_REPOSITORY_INVALID');
+    const repositoryName = shape.repositoryName(repository);
+    const revision = shape.revision(repository);
+    const files = shape.files(repository);
+    const bytes = shape.bytes(repository);
+    const skippedLarge = shape.skippedLarge(repository);
+    const withheld = shape.withheld(repository);
     if (
-      typeof repository.repo !== 'string' ||
-      !/^[A-Za-z0-9_.-]{1,100}$/.test(repository.repo) ||
-      names.has(repository.repo) ||
-      typeof repository.commit !== 'string' ||
-      !/^[0-9a-f]{40}$/.test(repository.commit) ||
-      !Number.isSafeInteger(repository.files) ||
-      repository.files < 0 ||
-      !Number.isSafeInteger(repository.bytes) ||
-      repository.bytes < 0 ||
-      !Array.isArray(repository.skipped_large) ||
-      !Array.isArray(repository.withheld)
+      typeof repositoryName !== 'string' ||
+      !/^[A-Za-z0-9_.-]{1,100}$/.test(repositoryName) ||
+      names.has(repositoryName) ||
+      typeof revision !== 'string' ||
+      !/^[A-Za-z0-9._:@/+~-]{1,128}$/.test(revision) ||
+      !Number.isSafeInteger(files) ||
+      files < 0 ||
+      !Number.isSafeInteger(bytes) ||
+      bytes < 0 ||
+      !Array.isArray(skippedLarge) ||
+      !Array.isArray(withheld)
     ) {
       throw new EvidenceValidationError('ESTATE_REPOSITORY_INVALID');
     }
-    names.add(repository.repo);
-    withheldFiles += repository.withheld.length;
-    skippedLargeFiles += repository.skipped_large.length;
+    if (
+      manifest.schema === 'rapp-monorepo/1.0' &&
+      !/^[0-9a-f]{40}$/.test(revision)
+    ) {
+      throw new EvidenceValidationError('ESTATE_REPOSITORY_INVALID');
+    }
+    names.add(repositoryName);
+    withheldFiles += withheld.length;
+    skippedLargeFiles += skippedLarge.length;
     const capability = capabilityEntry({
-        name: repository.repo,
-        text: repository.repo.replace(/[-_.]+/g, ' '),
+        name: repositoryName,
+        text: repositoryName.replace(/[-_.]+/g, ' '),
         sourceType: 'estate-repository',
         sourceId,
-        nativeDigest: repository.commit,
+        nativeDigest: revision,
         opaqueName: true,
       });
     delete capability.limited;
     capabilities.push(capability);
   }
 
-  const skippedRecords = manifest.not_captured.length;
+  const skippedRecords = shape.notCaptured.length;
   return {
     summary: {
       sourceId,
-      sourceType: 'rapp-monorepo-manifest',
+      sourceType: shape.sourceType,
       sourceDigest,
       status: skippedRecords > 0 || withheldFiles > 0 || skippedLargeFiles > 0 ? 'partial' : 'ok',
       schema: manifest.schema,
-      snapshotAt: safeDateTime(manifest.captured_at),
-      acceptedRecords: manifest.repos.length,
+      snapshotAt: safeDateTime(shape.snapshotAt),
+      acceptedRecords: shape.repositories.length,
       skippedRecords,
-      repositoryCount: manifest.repos.length,
+      repositoryCount: shape.repositories.length,
       withheldFiles,
       skippedLargeFiles,
     },
@@ -273,6 +335,14 @@ function catalogShape(value) {
         schema: catalog.schema,
         entries: catalog.capabilities,
         sourceType: 'normalized-capabilities',
+        requiresBehavioralContract: false,
+      };
+    case 'rapter-clever-girl.capabilities.v2':
+      return {
+        schema: catalog.schema,
+        entries: catalog.capabilities,
+        sourceType: 'behavioral-capabilities',
+        requiresBehavioralContract: true,
       };
     default:
       throw new EvidenceValidationError('CAPABILITY_CATALOG_SCHEMA_UNSUPPORTED');
@@ -339,6 +409,10 @@ export function parseCapabilityCatalog(value, { sourceId, sourceDigest }) {
           : typeof entry.singleton_sha256 === 'string'
             ? entry.singleton_sha256
             : '';
+    let behavioralContract = null;
+    if (shape.requiresBehavioralContract) {
+      behavioralContract = parseBehavioralContract(entry.behavioralContract);
+    }
     const catalogText = catalogEntryText(entry);
     const capability = capabilityEntry({
         name: rawName,
@@ -346,6 +420,7 @@ export function parseCapabilityCatalog(value, { sourceId, sourceDigest }) {
         sourceType: shape.sourceType,
         sourceId,
         nativeDigest,
+        behavioralContract,
       });
     if (catalogText.truncated || capability.limited) skippedRecords += 1;
     delete capability.limited;
@@ -482,12 +557,28 @@ function mergeStringArrays(left = [], right = []) {
   return [...new Set([...left, ...right])].sort((a, b) => a.localeCompare(b, 'en'));
 }
 
+function contractVariant(capability) {
+  if (
+    capability.contractQualified !== true ||
+    typeof capability.contractVersion !== 'string' ||
+    !/^sha256:[a-f0-9]{64}$/.test(capability.contractDigest ?? '')
+  ) {
+    return null;
+  }
+  return {
+    version: capability.contractVersion,
+    digest: capability.contractDigest,
+    testCount: capability.contractTestCount ?? 0,
+  };
+}
+
 export function mergeCapabilityCatalogs(catalogs) {
   const merged = new Map();
   for (const catalog of catalogs) {
     for (const capability of catalog?.capabilities ?? []) {
       const key = capability.matchName ?? capability.name;
       const current = merged.get(key);
+      const variant = contractVariant(capability);
       if (!current) {
         merged.set(key, {
           ...capability,
@@ -495,6 +586,12 @@ export function mergeCapabilityCatalogs(catalogs) {
           tokenHashes: [...capability.tokenHashes],
           sourceTypes: [...capability.sourceTypes],
           sourceIds: [...capability.sourceIds],
+          contractQualified: variant !== null,
+          contractVersion: variant?.version ?? null,
+          contractTestCount: variant?.testCount ?? 0,
+          contractDigest: variant?.digest ?? null,
+          contractConflict: false,
+          contractVariants: variant === null ? [] : [variant],
         });
         continue;
       }
@@ -502,6 +599,33 @@ export function mergeCapabilityCatalogs(catalogs) {
       current.tokenHashes = mergeStringArrays(current.tokenHashes, capability.tokenHashes);
       current.sourceTypes = mergeStringArrays(current.sourceTypes, capability.sourceTypes);
       current.sourceIds = mergeStringArrays(current.sourceIds, capability.sourceIds);
+      const variants = [
+        ...current.contractVariants,
+        ...(variant === null ? [] : [variant]),
+      ];
+      current.contractVariants = [
+        ...new Map(
+          variants.map((entry) => [
+            `${entry.version}:${entry.digest}`,
+            entry,
+          ]),
+        ).values(),
+      ].sort((left, right) =>
+        `${left.version}:${left.digest}`.localeCompare(
+          `${right.version}:${right.digest}`,
+          'en',
+        ));
+      current.contractConflict = current.contractVariants.length > 1;
+      current.contractQualified = current.contractVariants.length === 1;
+      current.contractVersion = current.contractQualified
+        ? current.contractVariants[0].version
+        : null;
+      current.contractDigest = current.contractQualified
+        ? current.contractVariants[0].digest
+        : null;
+      current.contractTestCount = current.contractQualified
+        ? current.contractVariants[0].testCount
+        : 0;
       if (current.sourceTypes.includes('estate-repository')) {
         current.name = opaqueEstateCapabilityName(key);
       }
@@ -532,7 +656,18 @@ function matchReason(match) {
   return 'Selected capability catalogs contain a lexical or topical overlap that requires inspection.';
 }
 
-export function matchCapabilities(patternType, capabilities, candidateTokenHashes) {
+function opaqueBehavioralCapabilityName(capabilityId) {
+  return `contract-capability-${sha256(
+    `behavioral-capability-name-v1:${capabilityId}`,
+  ).slice(0, 12)}`;
+}
+
+export function matchCapabilities(
+  patternType,
+  capabilities,
+  candidateTokenHashes,
+  { requireBehavioralContract = false } = {},
+) {
   const keywords = PATTERN_KEYWORDS[patternType] ?? [];
   const candidates = [];
   for (const capability of capabilities ?? []) {
@@ -553,15 +688,45 @@ export function matchCapabilities(patternType, capabilities, candidateTokenHashe
       Math.min(intersection, 8) * 250 +
       Math.round(similarity * 1_000);
     if (score < 700) continue;
-    const match = score >= 2_700 ? 'reuse' : score >= 1_700 ? 'extend' : 'possible-overlap';
-    candidates.push({
+    const lexicalMatch =
+      score >= 2_700 ? 'reuse' : score >= 1_700 ? 'extend' : 'possible-overlap';
+    const contractQualified = capability.contractQualified === true;
+    const contractConflict = capability.contractConflict === true;
+    const match =
+      requireBehavioralContract && !contractQualified
+        ? 'possible-overlap'
+        : lexicalMatch;
+    const candidate = {
       capabilityId: capability.capabilityId,
-      name: capability.name,
+      name: requireBehavioralContract
+        ? opaqueBehavioralCapabilityName(capability.capabilityId)
+        : capability.name,
       match,
-      reason: matchReason(match),
+      reason:
+        requireBehavioralContract && !contractQualified
+          ? 'Selected metadata overlaps, but reuse or extension requires a complete versioned behavioral capability contract.'
+          : matchReason(match),
       sourceTypes: capability.sourceTypes,
       score,
-    });
+    };
+    if (requireBehavioralContract) {
+      candidate.contractQualified = contractQualified;
+      candidate.contractConflict = contractConflict;
+      candidate.contractVersion = contractQualified
+        ? capability.contractVersion
+        : null;
+      candidate.contractTestCount = contractQualified
+        ? capability.contractTestCount
+        : 0;
+      candidate.contractDigest = contractQualified
+        ? capability.contractDigest
+        : null;
+      if (contractConflict) {
+        candidate.reason =
+          'Selected catalogs conflict on the complete behavioral contract identity for this capability name; reuse and extension are unqualified.';
+      }
+    }
+    candidates.push(candidate);
   }
   return candidates
     .sort((left, right) => {

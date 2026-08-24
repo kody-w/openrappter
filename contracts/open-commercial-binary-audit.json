@@ -171,6 +171,10 @@
     "sha256": "8c60a09baeef846fcb427f9e4f11d4d998c21529aa7d3a4b0781bb8db7d8ff7a",
     "reason": "Non-executable documentation screenshot."
   },
+  "docs/assets/frontier-before-primary.png": {
+    "sha256": "c76c6ef2d31f0f5e6e08f6c3e4ac4ec419183e6d090d2762ea806243535dccca",
+    "reason": "Non-executable documentation screenshot."
+  },
   "macos/dist/OpenRappter-Bar-1.4.0.dmg": {
     "sha256": "c6f8f134e98a6cfafffa50b4d890da35c289c521d15ee7a6d7b190d16c211996",
     "reason": "Non-executable historical signed release disk image."

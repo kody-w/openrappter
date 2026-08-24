@@ -46,7 +46,7 @@ chat—not in another shell. It contains truthful adapters for:
 - large-media ingest;
 - Copilot auth/model and gateway `/health`;
 - continuous voice and ElevenLabs;
-- the OpenRappter Personal / private RapterOS boundary.
+- the OpenRappter Personal / separately operated hosted-service boundary.
 
 Missing dependencies report **unavailable** and never substitute a related but
 different format or fabricate success.

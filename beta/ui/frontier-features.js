@@ -363,7 +363,7 @@
     body.innerHTML = `<article class="frontier-card" style="grid-column:1/-1">
       <h2>OpenRappter Personal</h2>
       <p>OpenRappter core rights follow this repository's Apache-2.0 license. The default personal organism is tenant-free and contains no proprietary billing or control-plane code.</p>
-      <h2 style="margin-top:14px">RapterOS boundary</h2>
+      <h2 style="margin-top:14px">Hosted service boundary</h2>
       <p>Hosted licensed business-organism tenancy and training are separate. Integration is through documented interfaces only.</p>
     </article>`;
   }

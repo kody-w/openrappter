@@ -100,62 +100,151 @@ const CONTENT_FINDING_ALLOWLIST = new Set([
   'typescript/src/__tests__/docs/open-commercial-boundary.test.ts',
 ]);
 
-const PRIVATE_IDENTITY_PATTERN =
-  /rapter(?:[\s._'"+-])*o(?:[\s._'"+-])*s|rapter(?:[\s._'"+-])*box/i;
-
-interface FindingPattern {
-  name: string;
-  pattern: RegExp;
+interface NormalizedViews {
+  raw: string;
+  slash: string;
+  token: string;
+  identifiers: string[];
+  invalidPercentEncoding: boolean;
 }
 
-const PRIVATE_CONTENT_PATTERNS: FindingPattern[] = [
-  {
-    name: 'private namespace, owner, package, import or host',
-    pattern: PRIVATE_IDENTITY_PATTERN,
-  },
-  {
-    name: 'private tenant, billing or control-plane runtime contract',
-    pattern:
-      /\b(?:TenantContext|TenantRepository|TenantStore|TenantScoped(?:Query|Repository)|BillingProvider|BillingWebhook|Entitlement(?:Contract|Provider|Service)|ControlPlane(?:Client|Server|Service|Repository))\b/i,
-  },
-  {
-    name: 'private runtime endpoint',
-    pattern:
-      /\/+(?:api\/)?(?:v\d+\/)?(?:control[-_]?plane|tenants?|billing|telemetry)(?=\/|[?#\s"'`)]|$)/i,
-  },
-  {
-    name: 'private telemetry hook',
-    pattern:
-      /\b(?:TenantTelemetryHook|BillingTelemetryHook|ControlPlaneTelemetry|CommercialTelemetryHook|PrivateTelemetryHook)\b/i,
-  },
-];
+function decodePercentLayers(value: string): {
+  value: string;
+  invalid: boolean;
+} {
+  let current = value;
+  let invalid = false;
+  for (let pass = 0; pass < 3; pass += 1) {
+    if (/%(?![0-9a-f]{2})/i.test(current)) invalid = true;
+    let changed = false;
+    const next = current.replace(/(?:%[0-9a-f]{2})+/gi, (encoded) => {
+      try {
+        const decoded = decodeURIComponent(encoded);
+        if (decoded !== encoded) changed = true;
+        return decoded;
+      } catch {
+        invalid = true;
+        return encoded;
+      }
+    });
+    current = next.normalize('NFKC');
+    if (!changed) break;
+  }
+  return { value: current, invalid };
+}
 
-const PRIVATE_PATH_PATTERNS: FindingPattern[] = [
-  {
-    name: 'private namespace or owner in tracked path',
-    pattern: PRIVATE_IDENTITY_PATTERN,
-  },
-  {
-    name: 'private runtime marker in tracked path',
-    pattern:
-      /(^|\/)(?:control[-_]?plane|tenants?|billing|telemetry)(?=\/|[._-]|$)/i,
-  },
-];
+function normalizedViews(input: string): NormalizedViews {
+  if (Buffer.byteLength(input, 'utf8') > MAX_TEXT_BYTES) {
+    throw new Error('Normalization input exceeds the bounded text limit');
+  }
+  const nfkc = input.normalize('NFKC');
+  const percent = decodePercentLayers(nfkc);
+  const slash = percent.value
+    .replace(/[\\\u2044\u2215\u29f8\uff0f]/gu, '/')
+    .replace(/[\u2010-\u2015\u2212\ufe63\uff0d]/gu, '-')
+    .normalize('NFKC')
+    .toLowerCase();
+  const camelSeparated = percent.value
+    .normalize('NFKC')
+    .replace(/([\p{Ll}\d])([\p{Lu}])/gu, '$1 $2');
+  const token = camelSeparated
+    .replace(/[\\\u2044\u2215\u29f8\uff0f]/gu, '/')
+    .replace(/[\u2010-\u2015\u2212\ufe63\uff0d]/gu, '-')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  const identifiers = slash
+    .match(/[\p{L}\p{N}_.$@/+:-]+/gu)
+    ?.map((identifier) => identifier.replace(/[^\p{L}\p{N}]+/gu, ''))
+    .filter(Boolean) ?? [];
+  return {
+    raw: nfkc.toLowerCase(),
+    slash,
+    token,
+    identifiers,
+    invalidPercentEncoding: percent.invalid,
+  };
+}
 
-function findings(content: string, patterns: FindingPattern[]): string[] {
-  return patterns
-    .filter(({ pattern }) => pattern.test(content))
-    .map(({ name }) => name);
+const PROTECTED_IDENTIFIER =
+  /rapteros|rapterbox|tenant(?:service|client|controller|context|repository|store)|billing(?:client|service|provider|webhook|controller)|controlplane(?:controller|client|service|server|repository)|telemetry(?:client|hook|endpoint|exporter|controller)/i;
+const PROTECTED_ENDPOINT =
+  /\/+(?:api\/)?(?:v\d+\/)?(?:control[-_]?plane|tenants?|billing|telemetry)(?=\/|[?#\s"'`)]|$)/i;
+
+function normalizedValueFindings(input: string): string[] {
+  const views = normalizedViews(input);
+  const result = new Set<string>();
+  if (
+    views.identifiers.some((identifier) => PROTECTED_IDENTIFIER.test(identifier)) ||
+    /\brapter\s+(?:os|box)\b/i.test(views.token)
+  ) {
+    result.add('protected private identifier');
+  }
+  if (PROTECTED_ENDPOINT.test(views.slash)) {
+    result.add('private runtime endpoint');
+  }
+  if (
+    views.invalidPercentEncoding &&
+    (
+      /(?:rapter|control|tenant|billing|telemetry)[\p{L}\p{N}._%+-]{0,32}%(?![0-9a-f]{2})/iu
+        .test(views.raw) ||
+      /%(?![0-9a-f]{2})[\p{L}\p{N}._%+-]{0,32}(?:os|box|plane|service|client|controller|context|repository|store|provider|webhook|hook|endpoint|exporter)/iu
+        .test(views.raw)
+    )
+  ) {
+    result.add('invalid percent encoding near a protected fragment');
+  }
+  return [...result];
+}
+
+const STRING_LITERAL =
+  String.raw`(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`;
+
+function literalValues(source: string): string[] {
+  const pattern = /(["'])((?:\\.|(?!\1)[\s\S])*)\1/g;
+  return [...source.matchAll(pattern)].map((match) =>
+    match[2]
+      .replace(/\\x([0-9a-f]{2})/gi, (_, hex: string) =>
+        String.fromCharCode(Number.parseInt(hex, 16)))
+      .replace(/\\u([0-9a-f]{4})/gi, (_, hex: string) =>
+        String.fromCharCode(Number.parseInt(hex, 16)))
+      .replace(/\\(["'\\/])/g, '$1')
+  );
+}
+
+function staticallyAssembledStrings(source: string): string[] {
+  const result = new Set<string>();
+  const plus = new RegExp(
+    `${STRING_LITERAL}(?:\\s*\\+\\s*${STRING_LITERAL})+`,
+    'gs',
+  );
+  const adjacent = new RegExp(
+    `${STRING_LITERAL}(?:\\s+${STRING_LITERAL})+`,
+    'gs',
+  );
+  const concat = new RegExp(
+    `${STRING_LITERAL}\\s*\\.concat\\(\\s*${STRING_LITERAL}(?:\\s*,\\s*${STRING_LITERAL})*\\s*\\)`,
+    'gs',
+  );
+  const join = new RegExp(
+    `\\[\\s*${STRING_LITERAL}(?:\\s*,\\s*${STRING_LITERAL})+\\s*\\]\\s*\\.join\\(\\s*${STRING_LITERAL}\\s*\\)`,
+    'gs',
+  );
+  for (const pattern of [plus, adjacent, concat]) {
+    for (const match of source.matchAll(pattern)) {
+      result.add(literalValues(match[0]).join(''));
+    }
+  }
+  for (const match of source.matchAll(join)) {
+    const values = literalValues(match[0]);
+    const separator = values.pop() ?? '';
+    result.add(values.join(separator));
+  }
+  return [...result];
 }
 
 function normalizedPathFindings(path: string): string[] {
-  let normalized = path.replaceAll('\\', '/');
-  try {
-    normalized = decodeURIComponent(normalized);
-  } catch {
-    // Invalid escapes remain visible to the raw-path patterns.
-  }
-  return findings(normalized.toLowerCase(), PRIVATE_PATH_PATTERNS);
+  return normalizedValueFindings(path);
 }
 
 const DEPENDENCY_MAP_KEYS = new Set([
@@ -183,14 +272,18 @@ function dependencyEntries(value: unknown): [string, string][] {
 }
 
 function textFindings(path: string, content: string): string[] {
-  const result = new Set(findings(content, PRIVATE_CONTENT_PATTERNS));
+  const result = new Set(normalizedValueFindings(content));
+  for (const assembled of staticallyAssembledStrings(content)) {
+    for (const finding of normalizedValueFindings(assembled)) {
+      result.add(`static assembly: ${finding}`);
+    }
+  }
   if (basename(path).endsWith('.json')) {
     const parsed = JSON.parse(content) as unknown;
     for (const [name, specifier] of dependencyEntries(parsed)) {
-      for (const finding of findings(
-        `${name}\n${specifier}`,
-        PRIVATE_CONTENT_PATTERNS,
-      )) result.add(`dependency: ${finding}`);
+      for (const finding of normalizedValueFindings(`${name}\n${specifier}`)) {
+        result.add(`dependency: ${finding}`);
+      }
     }
   }
   return [...result];
@@ -275,6 +368,20 @@ function auditRepository(
   return result;
 }
 
+const repositoryTrackedEntries = trackedEntries();
+const repositoryPackageRules = packageRules(repositoryTrackedEntries);
+let cachedRepositoryAudit: RepositoryAudit | undefined;
+
+function currentRepositoryAudit(): RepositoryAudit {
+  cachedRepositoryAudit ??= auditRepository(
+    repositoryTrackedEntries,
+    readBytes,
+    binaryAudit,
+    repositoryPackageRules,
+  );
+  return cachedRepositoryAudit;
+}
+
 describe('open core and separately operated service boundary', () => {
   it('accurately scopes the repository license and imported carve-outs', () => {
     expect(read('LICENSE')).toContain('Apache License');
@@ -311,13 +418,8 @@ describe('open core and separately operated service boundary', () => {
   });
 
   it('classifies every tracked file as content-scanned or binary-audited', () => {
-    const entries = trackedEntries();
-    const result = auditRepository(
-      entries,
-      readBytes,
-      binaryAudit,
-      packageRules(entries),
-    );
+    const entries = repositoryTrackedEntries;
+    const result = currentRepositoryAudit();
     expect(result.pathViolations).toEqual([]);
     expect(result.contentViolations).toEqual([]);
     expect(result.unsafeBinaries).toEqual([]);
@@ -391,11 +493,71 @@ describe('open core and separately operated service boundary', () => {
       '//public.example/api/control-plane',
     ];
     for (const mutation of endpointMutations) {
-      const normalized = mutation.replaceAll('\\', '/');
       expect(
-        textFindings('virtual.runtime', `fetch('${normalized}')`),
+        textFindings('virtual.runtime', `fetch('${mutation}')`),
         mutation,
       ).not.toEqual([]);
+    }
+  });
+
+  it('reviewer regression: normalizes raw protected identifiers and encodings internally', () => {
+    const rawSamples = [
+      'new TenantService()',
+      'billingClient.request()',
+      'class ControlPlaneController {}',
+      'telemetryClient.flush()',
+      "import('rapter%6fs/client')",
+      "fetch('/control%2dplane/jobs')",
+      "fetch('/ten%61nts/current')",
+      "import('rapter∕os/client')",
+      "import('ＲａｐｔｅｒＯＳ/client')",
+      "import('prefix-rapter_os-suffix/client')",
+      "import('rapter%ZZos/client')",
+    ];
+    for (const sample of rawSamples) {
+      expect(textFindings('virtual.raw', sample), sample).not.toEqual([]);
+    }
+
+    const rawPaths = [
+      'src/rapter%6fs/client.ts',
+      'src/Rapter∕OS/client.ts',
+      'src/tenant_service/client.ts',
+      'src/billing.client/client.ts',
+      'src/ControlPlaneController/client.ts',
+      'src/telemetry\\client/client.ts',
+    ];
+    for (const path of rawPaths) {
+      expect(normalizedPathFindings(path), path).not.toEqual([]);
+    }
+  });
+
+  it('reviewer regression: detects simple static string construction without execution', () => {
+    const constructions = [
+      "const value = 'rapter' + 'os';",
+      "value = 'rapter' 'box'",
+      "const value = 'rapter'.concat('os');",
+      "const value = ['rapter', 'os'].join('');",
+      "const value = ['/control', '-plane'].join('');",
+      "value = '/ten' + 'ants'",
+    ];
+    for (const construction of constructions) {
+      expect(
+        textFindings('virtual-construction.ts', construction),
+        construction,
+      ).not.toEqual([]);
+    }
+  });
+
+  it('does not reject safe prose that merely discusses ordinary concepts', () => {
+    const safeControls = [
+      'The tenant asked the service team about an invoice.',
+      'Telemetry helps a local client observe health.',
+      'A controller manages the public plane.',
+      'The billing cycle is described in user-facing documentation.',
+      'A raptor boxes its lunch before a flight.',
+    ];
+    for (const control of safeControls) {
+      expect(textFindings('safe-prose.md', control), control).toEqual([]);
     }
   });
 
@@ -419,7 +581,7 @@ describe('open core and separately operated service boundary', () => {
   });
 
   it('scans package fixtures, unknown lock formats and arbitrary text extensions', () => {
-    const rules = packageRules(trackedEntries());
+    const rules = repositoryPackageRules;
     const samples = [
       {
         path: 'beta/resources/fixtures/private.py',
@@ -449,8 +611,6 @@ describe('open core and separately operated service boundary', () => {
   });
 
   it('fails new unclassified text, executable binary and unaudited binary paths', () => {
-    const entries = trackedEntries();
-    const rules = packageRules(entries);
     const virtual = new Map<string, Buffer>([
       ['future/arbitrary.rules', Buffer.from('ordinary text')],
       ['future/executable', Buffer.from([0, 1, 2, 3])],
@@ -458,7 +618,6 @@ describe('open core and separately operated service boundary', () => {
       ['beta/resources/fixtures/private.png', Buffer.from([0, 1, 2, 3])],
     ]);
     const injected: TrackedEntry[] = [
-      ...entries,
       { mode: '100644', path: 'future/arbitrary.rules' },
       { mode: '100755', path: 'future/executable' },
       { mode: '100644', path: 'future/image.bin' },
@@ -468,7 +627,7 @@ describe('open core and separately operated service boundary', () => {
       injected,
       (path) => virtual.get(path) ?? readBytes(path),
       binaryAudit,
-      rules,
+      repositoryPackageRules,
     );
     expect(result.contentScanned).toContain('future/arbitrary.rules');
     expect(result.unsafeBinaries).toContain('future/executable');
@@ -478,13 +637,8 @@ describe('open core and separately operated service boundary', () => {
   });
 
   it('reverse inventory detects a newly tracked path omitted from prior results', () => {
-    const entries = trackedEntries();
-    const baseline = auditRepository(
-      entries,
-      readBytes,
-      binaryAudit,
-      packageRules(entries),
-    );
+    const entries = repositoryTrackedEntries;
+    const baseline = currentRepositoryAudit();
     const classified = new Set([
       ...baseline.contentScanned,
       ...baseline.binaryAudited,
@@ -497,12 +651,10 @@ describe('open core and separately operated service boundary', () => {
     expect(unaccounted).toEqual([injected]);
 
     const refreshed = auditRepository(
-      expanded,
-      (path) => path === injected
-        ? Buffer.from('ordinary new text format')
-        : readBytes(path),
+      [{ mode: '100644', path: injected }],
+      () => Buffer.from('ordinary new text format'),
       binaryAudit,
-      packageRules(entries),
+      repositoryPackageRules,
     );
     expect(refreshed.contentScanned).toContain(injected);
   });

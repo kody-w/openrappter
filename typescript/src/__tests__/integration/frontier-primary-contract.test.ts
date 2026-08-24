@@ -43,9 +43,22 @@ describe('Frontier-primary interface contract', () => {
     expect(brainstem).toContain('Drag & Drop .py Agents Here');
     expect(chatBridge).toContain('openrappter-frontier:api');
     expect(host).toContain('rpc("agent"');
+  });
+
+  it('routes the primary conversation only through the exact Brainstem /chat wire', () => {
+    expect(host).toContain('`${gatewayHttpBase}/chat`');
+    expect(host).toContain('body: rawBody');
+    expect(host.match(/rpc\("agent"/g)).toHaveLength(1);
+    expect(host).not.toContain('/api/agent');
+    expect(host).not.toContain('surgeon.turn');
+    expect(host).not.toContain('patient.chat');
+    expect(brainstem).toContain('body = { user_input: payload, conversation_history: requestHistory }');
+    expect(brainstem).toContain('body.session_id = sessionId');
+    expect(brainstem).toContain('d.agent_logs');
     expect(frontier).toContain('show-mode-preview');
     expect(frontier).toContain('deploy-copilot-studio');
     expect(frontier).toContain("frame-src 'self'");
+    expect(frontier).toContain('Brainstem /chat — OpenRappter main conversation');
   });
 
   it('adds features through the native Frontier panel without another shell', () => {

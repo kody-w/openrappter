@@ -140,10 +140,34 @@ describe('packaged Frontier browser integration', () => {
       gatewayUrl: 'ws://127.0.0.1:18791',
       gatewayToken: 'fixture-token',
     };
-    window.fetch = async () => ({
-      ok: true,
-      json: async () => ({ status: 'ok', version: 'fixture' }),
-    });
+    const fetchCalls: Array<{
+      url: string;
+      init?: { method?: string; headers?: Record<string, string>; body?: string };
+    }> = [];
+    window.fetch = async (url: string, init?: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: string;
+    }) => {
+      fetchCalls.push({ url, init });
+      if (url.endsWith('/chat')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            response: 'Brainstem fixture reply',
+            session_id: 'brainstem-session',
+            agent_logs: 'MemoryAgent > TwinAgent',
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ status: 'ok', version: 'fixture' }),
+      };
+    };
+    const rpcMethods: string[] = [];
     class FixtureSocket {
       static OPEN = 1;
       readyState = 1;
@@ -156,6 +180,7 @@ describe('packaged Frontier browser integration', () => {
       }
       send(raw: string) {
         const request = JSON.parse(raw);
+        rpcMethods.push(request.method);
         const payloads: Record<string, unknown> = {
           connect: {},
           'backend.status': { status: 'ready', model: 'fixture-model' },
@@ -180,11 +205,63 @@ describe('packaged Frontier browser integration', () => {
     });
     expect(state.url).toContain('frontier-chat/index.html');
     expect(state.url).toContain('frontierHost=1');
+    const frame = window.document.getElementById(
+      'brainstem',
+    ) as HTMLIFrameElement;
+    const responses: Array<Record<string, unknown>> = [];
+    frame.contentWindow!.postMessage = (message: Record<string, unknown>) => {
+      responses.push(message);
+    };
+    const chatBody = JSON.stringify({
+      user_input: 'Use my tools and memory.',
+      session_id: 'brainstem-session',
+      conversation_history: [
+        { role: 'user', content: 'Earlier turn' },
+        { role: 'assistant', content: 'Earlier reply' },
+      ],
+    });
+    window.dispatchEvent(new window.MessageEvent('message', {
+      source: frame.contentWindow,
+      data: {
+        type: 'openrappter-frontier:api',
+        id: 'chat-wire-1',
+        path: '/chat',
+        method: 'POST',
+        body: chatBody,
+      },
+    }));
+    for (let attempt = 0; attempt < 20 && responses.length === 0; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    const chatCall = fetchCalls.find((call) => call.url.endsWith('/chat'));
+    expect(chatCall).toMatchObject({
+      url: 'http://127.0.0.1:18791/chat',
+      init: {
+        method: 'POST',
+        body: chatBody,
+      },
+    });
+    expect(chatCall?.init?.headers).toMatchObject({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer fixture-token',
+    });
+    expect(responses.at(-1)).toMatchObject({
+      type: 'openrappter-frontier:api-result',
+      id: 'chat-wire-1',
+      status: 200,
+      body: {
+        response: 'Brainstem fixture reply',
+        session_id: 'brainstem-session',
+        agent_logs: 'MemoryAgent > TwinAgent',
+      },
+    });
+    expect(rpcMethods).not.toContain('/api/agent');
     const events: Array<{ type: string; content?: string }> = [];
     window.brainstemBeta.onSurgeonEvent((event: { type: string }) => events.push(event));
     await window.brainstemBeta.surgeonSend(1, 'fixture prompt');
     expect(events.map((event) => event.type)).toEqual(['response-start', 'done']);
     expect(events.at(-1)?.content).toBe('fixture Copilot reply');
+    expect(rpcMethods.filter((method) => method === 'agent')).toHaveLength(1);
   });
 
   it('runs deterministic Living Company Week with private drafts and no effects', async () => {

@@ -11,6 +11,12 @@ The authoritative interface is the existing Frontier composition in
 - GitHub Copilot multi-chat agent panel on the right, including prompt,
   Show mode, herd, and deploy flows.
 
+OpenRappter is the application shell and personal organism. Its left-hand main
+conversation is always the Brainstem `POST /chat` wire, carrying
+`user_input`, `session_id`, and `conversation_history`; Brainstem owns memory,
+twins, tools, and the agent loop. The right GitHub Copilot panel is a separate
+specialized workspace and never replaces the main conversation transport.
+
 No anatomy sidebar, operating-room shell, XP desktop, taskbar, Start menu,
 window manager, or iframe around the previous dashboard is introduced.
 

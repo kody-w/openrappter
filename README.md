@@ -144,6 +144,9 @@ Hosted OpenRappter and the packaged Electron app boot the authoritative
 agents, prompt, import/export, tutorial, and help controls on the left, with
 the full GitHub Copilot multi-chat agent loop on the right. Added capabilities
 open in its existing panel/modal language rather than replacing that layout.
+OpenRappter is the application shell; the left main conversation always uses
+the Brainstem `POST /chat` contract, including session history and agent tools.
+The right Copilot panel remains a specialized workspace.
 
 The previous Lit dashboard is packaged at `ui/dist/legacy` as
 **Legacy Patient Interface** for one migration release. The switch is reversible and

@@ -5,6 +5,10 @@
   const gatewayUrl = desktop?.gatewayUrl
     || `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
   const gatewayToken = desktop?.gatewayToken || null;
+  const gatewayHttpBase = gatewayUrl
+    .replace(/^wss:/, "https:")
+    .replace(/^ws:/, "http:")
+    .replace(/\/+$/, "");
   let socket = null;
   let ready = null;
   let sequence = 0;
@@ -93,17 +97,13 @@
   }
 
   async function health() {
-    const base = gatewayUrl
-      .replace(/^wss:/, "https:")
-      .replace(/^ws:/, "http:")
-      .replace(/\/+$/, "");
-    const response = await fetch(`${base}/health`, {
+    const response = await fetch(`${gatewayHttpBase}/health`, {
       headers: gatewayToken
         ? { Authorization: `Bearer ${gatewayToken}` }
         : {},
     });
     if (!response.ok) {
-      throw new Error(`Patient transport /health returned HTTP ${response.status}.`);
+      throw new Error(`Brainstem /health returned HTTP ${response.status}.`);
     }
     return response.json();
   }
@@ -197,7 +197,38 @@
       for (const subscriber of surgeonSubscribers) subscriber(event);
     }
 
+    async function postBrainstemChat(rawBody) {
+      const response = await fetch(`${gatewayHttpBase}/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(gatewayToken
+            ? { Authorization: ["Bearer", gatewayToken].join(" ") }
+            : {}),
+        },
+        body: rawBody,
+      });
+      let body;
+      try {
+        body = await response.json();
+      } catch {
+        body = {
+          error: `Brainstem /chat returned invalid JSON (HTTP ${response.status}).`,
+        };
+      }
+      return { status: response.status, body };
+    }
+
     async function handleFrontierApi(path, method, rawBody) {
+      if (path === "/chat/stream") {
+        return {
+          status: 404,
+          body: { error: "Streaming falls back to the exact Brainstem /chat wire." },
+        };
+      }
+      if (path === "/chat" && method === "POST") {
+        return postBrainstemChat(rawBody);
+      }
       let body = {};
       if (rawBody) {
         try {
@@ -209,29 +240,6 @@
       try {
         if (path === "/health") {
           return { status: 200, body: await health() };
-        }
-        if (path === "/chat/stream") {
-          return {
-            status: 404,
-            body: { error: "Streaming falls back to the authenticated chat adapter." },
-          };
-        }
-        if (path === "/chat" && method === "POST") {
-          const result = await rpc("agent", {
-            message: body.user_input,
-            sessionId: body.session_id,
-            conversationHistory: body.conversation_history,
-          });
-          return {
-            status: 200,
-            body: {
-              response: result?.content || "",
-              agent_logs: result?.agentLogs || null,
-              session_id: result?.sessionId || body.session_id || null,
-              voice_response: result?.voiceResponse || null,
-              model: result?.model || null,
-            },
-          };
         }
         if (path === "/models" && method === "GET") {
           const result = await rpc("models.available");

@@ -1,0 +1,280 @@
+#frontier-features-tab {
+  position: fixed;
+  z-index: 17;
+  top: 54px;
+  right: 0;
+  padding: 7px 9px;
+  border: 1px solid #30363d;
+  border-right: 0;
+  border-radius: 7px 0 0 7px;
+  background: #161b22;
+  color: #c9d1d9;
+  font: 600 11px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+#frontier-features-tab:hover {
+  border-color: #58a6ff;
+  color: #58a6ff;
+}
+
+#frontier-features {
+  width: min(960px, calc(100vw - 32px));
+  max-width: none;
+  height: min(700px, calc(100dvh - 32px));
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  background: #0d1117;
+  color: #e6edf3;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .65);
+}
+
+#frontier-features::backdrop {
+  background: rgba(1, 4, 9, .82);
+  backdrop-filter: blur(5px);
+}
+
+.frontier-features-head,
+.frontier-features-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #161b22;
+}
+
+.frontier-features-head {
+  border-bottom: 1px solid #30363d;
+}
+
+.frontier-features-head div {
+  display: grid;
+  gap: 2px;
+}
+
+.frontier-features-head strong {
+  font-size: 14px;
+}
+
+.frontier-features-head span,
+.frontier-features-foot span {
+  color: #8b949e;
+  font-size: 10.5px;
+}
+
+#frontier-features-close {
+  margin-left: auto;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #8b949e;
+  font-size: 19px;
+  cursor: pointer;
+}
+
+.frontier-features-layout {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  min-height: 0;
+  height: calc(100% - 102px);
+}
+
+#frontier-feature-nav {
+  overflow: auto;
+  padding: 9px;
+  border-right: 1px solid #30363d;
+  background: #0d1117;
+}
+
+#frontier-feature-nav button {
+  width: 100%;
+  margin: 1px 0;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #8b949e;
+  font: 12px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+#frontier-feature-nav button:hover,
+#frontier-feature-nav button[aria-current="page"] {
+  border-color: #30363d;
+  background: #161b22;
+  color: #e6edf3;
+}
+
+#frontier-feature-content {
+  overflow: auto;
+  padding: 20px;
+}
+
+.frontier-feature header {
+  margin-bottom: 16px;
+}
+
+.frontier-feature h1 {
+  margin: 0 0 5px;
+  font-size: 22px;
+}
+
+.frontier-feature h2 {
+  margin: 0 0 7px;
+  font-size: 13px;
+}
+
+.frontier-feature p {
+  margin: 0;
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.frontier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.frontier-card {
+  padding: 13px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #161b22;
+}
+
+.frontier-card strong {
+  display: block;
+  margin-top: 6px;
+}
+
+.frontier-card[data-state="ready"] strong {
+  color: #3fb950;
+}
+
+.frontier-card[data-state="unavailable"] strong,
+.frontier-card[data-state="error"] strong,
+.frontier-card[data-state="offline"] strong,
+.frontier-card[data-state="needs-sign-in"] strong,
+.frontier-card[data-state="no-entitlement"] strong {
+  color: #f85149;
+}
+
+.frontier-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.frontier-actions button,
+.frontier-actions select,
+.frontier-actions input,
+#frontier-legacy-patient {
+  min-height: 30px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #21262d;
+  color: #e6edf3;
+}
+
+.frontier-actions button,
+#frontier-legacy-patient {
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+.frontier-actions button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.frontier-actions label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #8b949e;
+  font-size: 11px;
+}
+
+.frontier-result {
+  max-height: 330px;
+  overflow: auto;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #010409;
+  color: #b1bac4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.frontier-features-foot {
+  border-top: 1px solid #30363d;
+}
+
+#frontier-legacy-patient {
+  flex: 0 0 auto;
+}
+
+#frontier-features-tab:focus-visible,
+#frontier-features button:focus-visible,
+#frontier-features input:focus-visible,
+#frontier-features select:focus-visible {
+  outline: 2px solid #58a6ff;
+  outline-offset: 2px;
+}
+
+@media (max-width: 660px) {
+  #frontier-features {
+    width: 100vw;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .frontier-features-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  #frontier-feature-nav {
+    display: flex;
+    gap: 4px;
+    border-right: 0;
+    border-bottom: 1px solid #30363d;
+  }
+
+  #frontier-feature-nav button {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .frontier-features-foot span {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #frontier-features *,
+  #frontier-features-tab {
+    animation: none !important;
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+
+@media (forced-colors: active) {
+  #frontier-features,
+  #frontier-features-tab,
+  .frontier-card,
+  .frontier-result {
+    forced-color-adjust: auto;
+  }
+}

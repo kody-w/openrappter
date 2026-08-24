@@ -1,4 +1,4 @@
-(function installGrailCore(global) {
+(function installFrontierCore(global) {
   "use strict";
 
   const MAX_MEDIA_BYTES = 100 * 1024 * 1024;
@@ -164,7 +164,7 @@
       snapshot: () => structuredClone(snapshot()),
       open: async (surface) => {
         if (!approved.has(surface)) {
-          throw new Error(`Unknown Grail surface: ${String(surface)}`);
+          throw new Error(`Unknown Frontier feature: ${String(surface)}`);
         }
         await open(surface);
         return structuredClone(snapshot());
@@ -172,7 +172,7 @@
     });
   }
 
-  global.OpenRappterGrailCore = Object.freeze({
+  global.OpenRappterFrontierCore = Object.freeze({
     MAX_MEDIA_BYTES,
     AUTH_STATES,
     MEDIA_STATES,

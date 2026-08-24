@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-await import("../ui/grail-core.js");
+await import("../ui/frontier-core.js");
 
 const {
   MAX_MEDIA_BYTES,
@@ -10,9 +10,9 @@ const {
   createSemanticController,
   reviewImmutablePayload,
   truthfulUnavailable,
-} = globalThis.OpenRappterGrailCore;
+} = globalThis.OpenRappterFrontierCore;
 
-describe("Frontier Grail core", () => {
+describe("Frontier primary core", () => {
   it("runs deterministic Living Company Week with zero side effects", () => {
     const first = new LivingCompanyWeek();
     const completed = first.run();
@@ -88,7 +88,10 @@ describe("Frontier Grail core", () => {
     assert.deepEqual(await controller.open("health"), {
       activeSurface: "health",
     });
-    await assert.rejects(() => controller.open("shell"), /Unknown Grail surface/);
+    await assert.rejects(
+      () => controller.open("shell"),
+      /Unknown Frontier feature/,
+    );
     for (const forbidden of [
       "approve",
       "send",

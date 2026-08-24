@@ -266,9 +266,9 @@ async function focusWindow(view?: string): Promise<void> {
   if (view) {
     await window.webContents.executeJavaScript(`
       (async () => {
-        if (window.openrappterGrailSemantic) {
-          const aliases = { presence: 'health' };
-          await window.openrappterGrailSemantic.open(
+        if (window.openrappterFrontierSemantic) {
+          const aliases = { presence: 'organism-status', health: 'organism-status' };
+          await window.openrappterFrontierSemantic.open(
             aliases[${JSON.stringify(view)}] || ${JSON.stringify(view)}
           );
           return;
@@ -1180,27 +1180,41 @@ function createWindow(): BrowserWindow {
           while (
             Date.now() < deadline &&
             (
-              document.documentElement.dataset.openrappterShell !== 'grail' ||
-              !window.openrappterGrailSemantic ||
-              !window.OpenRappterGrailHost
+              document.documentElement.dataset.openrappterShell !== 'frontier' ||
+              !window.openrappterFrontierSemantic ||
+              !window.OpenRappterFrontierHost
             )
           ) {
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
           if (
-            document.documentElement.dataset.openrappterShell !== 'grail' ||
-            !window.openrappterGrailSemantic
+            document.documentElement.dataset.openrappterShell !== 'frontier' ||
+            !window.openrappterFrontierSemantic
           ) {
-            throw new Error('Brainstem Frontier Grail did not render');
+            throw new Error('Frontier primary interface did not render');
           }
+          const chatFrame = document.getElementById('brainstem');
+          const chatDeadline = Date.now() + 15000;
+          while (
+            Date.now() < chatDeadline &&
+            !chatFrame?.contentDocument?.getElementById('model-select')
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+          const frontierChat =
+            Boolean(chatFrame?.contentDocument?.getElementById('chat')) &&
+            Boolean(chatFrame?.contentDocument?.getElementById('model-select')) &&
+            Boolean(chatFrame?.contentDocument?.getElementById('agents-btn')) &&
+            Boolean(chatFrame?.contentDocument?.getElementById('voice-btn')) &&
+            Boolean(chatFrame?.contentDocument?.getElementById('starter-prompts'));
           const smokeScope = ${JSON.stringify(
             process.env.OPENRAPPTER_DESKTOP_SMOKE_SCOPE ?? 'full',
           )};
           let recorder = null;
           let recorderSurfaceReady = false;
           if (smokeScope !== 'boot') {
-            await window.openrappterGrailSemantic.open('show-and-tell');
-            recorder = document.getElementById('grail-surface-panel');
+            await window.openrappterFrontierSemantic.open('show-and-tell');
+            recorder = document.getElementById('frontier-feature-content');
             recorderSurfaceReady = /Show & Tell/.test(
               recorder?.textContent || ''
             );
@@ -1217,7 +1231,8 @@ function createWindow(): BrowserWindow {
               smokeScope: 'boot',
               bridge: Boolean(window.openrappterDesktop),
               component:
-                document.documentElement.dataset.openrappterShell === 'grail',
+                document.documentElement.dataset.openrappterShell === 'frontier',
+              frontierChat,
               narrationBridge: Boolean(narrationStatus.model),
               voiceBridge: Boolean(voiceStatus.state),
               gatewayUrl: window.openrappterDesktop.gatewayUrl,
@@ -1294,13 +1309,15 @@ function createWindow(): BrowserWindow {
             smokeScope: 'full',
             bridge: Boolean(window.openrappterDesktop),
             component:
-              document.documentElement.dataset.openrappterShell === 'grail',
-            grailDefault:
+              document.documentElement.dataset.openrappterShell === 'frontier',
+            frontierChat,
+            frontierPrimary:
               document.title === 'OpenRappter' &&
-              document.body.textContent?.includes('Brainstem Frontier Grail') === true &&
-              Boolean(document.querySelector('[data-grail-surface="operating-room"]')) &&
-              Boolean(document.querySelector('[data-grail-surface="living-company"]')) &&
-              Boolean(document.querySelector('[data-grail-legacy]')),
+              frontierChat &&
+              Boolean(document.getElementById('brainstem')) &&
+              Boolean(document.getElementById('surgeon')) &&
+              Boolean(document.getElementById('frontier-features')) &&
+              !document.getElementById('grail-sidebar'),
             recorderSurface: recorderSurfaceReady,
             recorderStatus: status.status,
             desktopControl:
@@ -1334,12 +1351,13 @@ function createWindow(): BrowserWindow {
         const required = [
           'bridge',
           'component',
+          'frontierChat',
           'narrationBridge',
           'voiceBridge',
         ] as const;
         const fullRequired = [
           'recorderSurface',
-          'grailDefault',
+          'frontierPrimary',
           'desktopControl',
           'hotLoadedAgents',
           'recorderLifecycle',

@@ -15,8 +15,14 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const env = { ...process.env };
 const npmExecPath = env.npm_execpath;
 const uiRoot = path.join(packageRoot, 'ui');
-const grailRoot = path.resolve(packageRoot, '..', 'beta', 'ui');
-const grailIcon = path.resolve(packageRoot, '..', 'beta', 'build', 'icon.svg');
+const frontierRoot = path.resolve(packageRoot, '..', 'beta', 'ui');
+const frontierIcon = path.resolve(packageRoot, '..', 'beta', 'build', 'icon.svg');
+const frontierChat = path.resolve(
+  packageRoot,
+  '..',
+  'rapp_brainstem',
+  'index.html',
+);
 const output = path.join(uiRoot, 'dist');
 const legacyOutput = path.join(uiRoot, '.legacy-dist');
 
@@ -44,9 +50,17 @@ run(['run', 'build:legacy', '--prefix', 'ui']);
 rmSync(legacyOutput, { recursive: true, force: true });
 renameSync(output, legacyOutput);
 mkdirSync(output, { recursive: true });
-cpSync(grailRoot, output, { recursive: true });
+cpSync(frontierRoot, output, { recursive: true });
+mkdirSync(path.join(output, 'frontier-chat'), { recursive: true });
+writeFileSync(
+  path.join(output, 'frontier-chat', 'index.html'),
+  readFileSync(frontierChat, 'utf8').replace(
+    '</head>',
+    '  <script src="../frontier-chat-bridge.js"></script>\n</head>',
+  ),
+);
 cpSync(legacyOutput, path.join(output, 'legacy'), { recursive: true });
-cpSync(grailIcon, path.join(output, 'icon.svg'));
+cpSync(frontierIcon, path.join(output, 'icon.svg'));
 for (const selectorAsset of [
   'release-ring-selector.js',
   'release-ring-selector.js.map',

@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Frontier Grail](./docs/grail-default-plan.md) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Frontier UI](./docs/frontier-primary-plan.md) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -137,18 +137,18 @@ Your agent will clone the repo, install dependencies, start the gateway and UI, 
 
 A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copilot** as the cloud AI backbone. Copilot handles inference; your agent data (memory, config, state) stays local in `~/.openrappter/`.
 
-### Default interface: Brainstem Frontier Grail
+### Default interface: Frontier
 
 Hosted OpenRappter and the packaged Electron app boot the authoritative
-`beta/ui` **Brainstem Frontier Grail**. Its operating-room/anatomy sidebar
-provides native surfaces for the patient, Copilot Surgeon, Quantum RAPPIDs,
-Chat, Show & Tell, Channels, Sessions, Agents, Skills, Cron, Showcase, Zen,
-Accounts, Config, Devices, Health, Logs, and Living Company.
+`beta/ui` Frontier interface: OpenRappter chat and its model, settings, voice,
+agents, prompt, import/export, tutorial, and help controls on the left, with
+the full GitHub Copilot multi-chat agent loop on the right. Added capabilities
+open in its existing panel/modal language rather than replacing that layout.
 
 The previous Lit dashboard is packaged at `ui/dist/legacy` as
-**Legacy OpenRappter** for one migration release. The switch is reversible and
+**Legacy Patient Interface** for one migration release. The switch is reversible and
 does not rewrite gateway, memory, chat, agent, skill, or configuration state.
-See the [Grail default plan](./docs/grail-default-plan.md) for architecture,
+See the [Frontier primary plan](./docs/frontier-primary-plan.md) for architecture,
 dependency seams, migration, and release evidence.
 
 ### Flight Recorder: one truthful local execution history

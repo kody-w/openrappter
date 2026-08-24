@@ -144,12 +144,16 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(runtimeInstaller, /'ci'/);
   assert.match(runtimeInstaller, /Desktop runtime dependency drifted/);
   assert.match(main, /OPENRAPPTER_DESKTOP_SMOKE/);
-  assert.match(main, /openrappterGrailSemantic\.open\('show-and-tell'\)/);
-  assert.match(main, /data-grail-surface="operating-room"/);
-  assert.match(main, /grailDefault/);
+  assert.match(main, /openrappterFrontierSemantic\.open\('show-and-tell'\)/);
+  assert.match(main, /frontier-feature-content/);
+  assert.match(main, /frontierPrimary/);
+  assert.match(main, /frontierChat/);
+  assert.match(main, /contentDocument\?\.getElementById\('model-select'\)/);
+  assert.match(main, /contentDocument\?\.getElementById\('starter-prompts'\)/);
   assert.match(main, /document\.title === 'OpenRappter'/);
-  assert.match(main, /textContent\?\.includes\('Brainstem Frontier Grail'\)/);
-  assert.doesNotMatch(main, /document\.title\.includes\('Brainstem Frontier Grail'\)/);
+  assert.match(main, /getElementById\('brainstem'\)/);
+  assert.match(main, /getElementById\('surgeon'\)/);
+  assert.doesNotMatch(main, /openrappterGrailSemantic/);
 });
 
 // OPENRAPPTER_DESKTOP_SMOKE is a process-wide launch flag, and the release

@@ -15,7 +15,7 @@ Electron main process
   └─ exposes narrow context-isolated IPC methods
 
 Sandboxed renderer
-  └─ Brainstem Frontier Grail + native OpenRappter modules
+  └─ canonical Frontier chat + Copilot panel + native feature modal
 
 Packed OpenRappter runtime
   ├─ TypeScript gateway and agents
@@ -27,10 +27,10 @@ The system Node installation and Electron never share a native SQLite binary.
 `desktop/scripts/install-runtime.mjs` packs the current OpenRappter package,
 installs it under `desktop/runtime`, and rebuilds only that copy for Electron.
 
-`beta/ui` is the Grail renderer source used by both hosted and Electron builds.
-The package build places Grail at `ui/dist` and the prior Lit dashboard at
-`ui/dist/legacy`; Electron loads Grail by default. No copied shell or iframe is
-used to embed Legacy.
+`beta/ui` is the Frontier renderer source used by both hosted and Electron
+builds. The package build places Frontier at `ui/dist` and the prior Lit
+patient interface at `ui/dist/legacy`; Electron loads Frontier by default.
+No copied shell or iframe is used to embed Legacy.
 
 ## Development
 

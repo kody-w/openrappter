@@ -9,13 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Brainstem Frontier Grail is now the default hosted and Electron interface,
-  built from the single authoritative `beta/ui` source. The prior Lit dashboard
-  remains available as reversible Legacy OpenRappter for one migration release.
-- Native Grail surfaces integrate patient/model/transport state, all current
-  OpenRappter modules, Living Company Week, bounded semantic controls,
-  immutable approval review, onboarding/recovery, contrast modes, and
-  fail-closed dependency adapters.
+- The existing Frontier chat and GitHub Copilot multi-chat composition is now
+  the default hosted and Electron interface, built from the single authoritative
+  `beta/ui` source. The prior Lit dashboard remains available as the reversible
+  Legacy Patient Interface for one migration release.
+- A native Frontier feature modal integrates health/auth/model state, Clever
+  Girl, release rings, Quantum RAPPIDs, Living Company Week, eggs, adaptive
+  twins, media, voice, bounded semantic controls, and fail-closed adapters.
 
 ### Fixed
 

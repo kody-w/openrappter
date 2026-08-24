@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -80,7 +81,7 @@ test("every authoritative renderer byte matches its reviewed provenance digest",
   assert.ok(provenance);
   const reviewed = new Set(Object.keys(provenance.files));
   for (const [file, expected] of Object.entries(provenance.files)) {
-    const bytes = readFileSync(path.join(root, file));
+    const bytes = execFileSync("git", ["-C", root, "show", `HEAD:${file}`]);
     assert.equal(
       createHash("sha256").update(bytes).digest("hex"),
       expected,

@@ -294,6 +294,40 @@ describe('openrappter-surgeon', () => {
     );
   });
 
+  it('regression: health-ready Patient mode downgrades immediately after chat fetch failure', async () => {
+    mocks.askPatient.mockRejectedValueOnce(new Error(
+      'The public patient chat endpoint is offline or unreachable.',
+    ));
+    mocks.getPatientTransportState.mockReturnValue({
+      status: 'offline',
+      message: 'The public patient chat endpoint is offline or unreachable.',
+      retryable: true,
+    });
+    const element = document.createElement('openrappter-surgeon') as SurgeonElement;
+    document.body.append(element);
+    await settle(element);
+    const patientMode = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      '[data-mode="patient"]',
+    )!;
+    patientMode.click();
+    await settle(element);
+    element.shadowRoot?.querySelector<HTMLButtonElement>(
+      '.starter-portals .portal',
+    )!.click();
+    await settle(element);
+
+    expect(patientMode.disabled).toBe(true);
+    expect(patientMode.dataset.state).toBe('transport-unavailable');
+    expect(element.shadowRoot?.querySelector('.mode-status')?.textContent)
+      .not.toContain('public chat ready');
+    expect(element.shadowRoot?.querySelectorAll('.turn')).toHaveLength(0);
+
+    await (element as unknown as {
+      askThePatient(value: string): Promise<void>;
+    }).askThePatient('adjacent retry bypass');
+    expect(mocks.askPatient).toHaveBeenCalledOnce();
+  });
+
   it('turns the production HTTP 401 into inline reauthentication without a fake answer', async () => {
     mocks.sendTurn.mockRejectedValueOnce(new Error(
       'GitHub token does not have Copilot API access (HTTP 401). Sign in with a GitHub account that has Copilot enabled.',

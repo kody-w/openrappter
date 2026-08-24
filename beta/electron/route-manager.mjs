@@ -362,7 +362,7 @@ for filepath in sorted(glob.glob(os.path.join(agents_dir, "*_agent.py"))):
         continue
     loaded = brainstem._load_agent_from_file(filepath)
     if not loaded:
-        failures.append(f"{os.path.basename(filepath)} loaded no agents")
+        failures.append(f"{os.path.basename(filepath)}: no valid agents")
         continue
     for name in loaded:
         if name in names:
@@ -3163,6 +3163,7 @@ export class BetaRouteManager {
 }
 
 export const routeManagerInternals = {
+  dryLoadAgentDirectory,
   routedContextMemoryMoltSource,
   safeAgentFilename,
   slugFromFilename,

@@ -22,6 +22,7 @@ import glob
 import time
 import threading
 import importlib.util
+import inspect
 import subprocess
 import traceback
 import secrets
@@ -1523,6 +1524,8 @@ _quarantine_lock = threading.Lock()
 # (file, reason) pairs already flight-logged. load_agents() runs on every /chat, so
 # without this the same warn would be recorded on every request — memoize per process.
 _quarantine_logged = set()
+_agent_load_diagnostics = {}
+_MAX_AGENT_LOAD_DIAGNOSTICS_PER_FILE = 32
 
 
 def _validate_agent_instance(instance):
@@ -1641,6 +1644,48 @@ def _quarantine_snapshot():
         ]
 
 
+def _record_agent_load_diagnostic(filepath, kind, message):
+    """Record a bounded, source-free loader decision for tests and diagnostics."""
+    item = {"file": os.path.basename(filepath), "kind": kind, "message": message}
+    with _quarantine_lock:
+        diagnostics = _agent_load_diagnostics.setdefault(filepath, [])
+        if len(diagnostics) < _MAX_AGENT_LOAD_DIAGNOSTICS_PER_FILE:
+            diagnostics.append(item)
+    return item
+
+
+def _agent_load_diagnostics_snapshot():
+    with _quarantine_lock:
+        return [
+            dict(item)
+            for filepath in sorted(_agent_load_diagnostics)
+            for item in _agent_load_diagnostics[filepath]
+        ]
+
+
+def _agent_class_source_identity(cls):
+    """Stable identity for aliases and repeat discovery of one class definition."""
+    try:
+        source = inspect.getsourcefile(cls) or inspect.getfile(cls)
+        line = inspect.getsourcelines(cls)[1]
+        return (
+            os.path.normcase(os.path.realpath(source)),
+            line,
+            cls.__qualname__,
+        )
+    except (OSError, TypeError):
+        for member in vars(cls).values():
+            code = getattr(member, "__code__", None)
+            if code is None:
+                continue
+            return (
+                os.path.normcase(os.path.realpath(code.co_filename)),
+                code.co_firstlineno,
+                cls.__qualname__,
+            )
+        return None
+
+
 def _load_agent_from_file(filepath):
     """Load agent classes from a single .py file. Returns dict of name→instance.
     Auto-installs missing pip packages and shims cloud deps to local storage."""
@@ -1650,6 +1695,7 @@ def _load_agent_from_file(filepath):
     # a fixed cartridge stops showing as quarantined.
     with _quarantine_lock:
         _quarantined_agents.pop(filepath, None)
+        _agent_load_diagnostics.pop(filepath, None)
     brainstem_dir = os.path.dirname(os.path.abspath(__file__))
     if brainstem_dir not in sys.path:
         sys.path.insert(0, brainstem_dir)
@@ -1663,15 +1709,40 @@ def _load_agent_from_file(filepath):
             spec = importlib.util.spec_from_file_location(mod_name, filepath)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
+            from agents.basic_agent import BasicAgent as _BasicAgent
+            seen_classes = {}
+            registered_classes = {}
             for attr in dir(mod):
                 cls = getattr(mod, attr)
                 if (
                     isinstance(cls, type)
                     and cls.__module__ == mod.__name__
-                    and hasattr(cls, "perform")
-                    and attr not in ("BasicAgent", "object")
+                    and cls is not _BasicAgent
+                    and issubclass(cls, _BasicAgent)
                     and not attr.startswith("_")
                 ):
+                    source_identity = _agent_class_source_identity(cls)
+                    identity = ("object", id(cls))
+                    previous_attr = seen_classes.get(identity)
+                    if previous_attr is None and source_identity is not None:
+                        previous_attr = seen_classes.get(("source", source_identity))
+                    if previous_attr is not None:
+                        message = (
+                            "same class discovered twice (deduped): "
+                            f"{previous_attr} and {attr}"
+                        )
+                        _record_agent_load_diagnostic(
+                            filepath,
+                            "same-class-deduped",
+                            message,
+                        )
+                        print(
+                            f"[brainstem] {os.path.basename(filepath)}: {message}"
+                        )
+                        continue
+                    seen_classes[identity] = attr
+                    if source_identity is not None:
+                        seen_classes[("source", source_identity)] = attr
                     instance = cls()
                     # Hot-load boundary: a tool-illegal name or malformed metadata
                     # would ship into the tools array and 400 every /chat. On a
@@ -1684,13 +1755,20 @@ def _load_agent_from_file(filepath):
                     if instance.name in agents or instance.name in duplicate_names:
                         duplicate_names.add(instance.name)
                         agents.pop(instance.name, None)
+                        previous_class = registered_classes.get(
+                            instance.name,
+                            "(earlier class)",
+                        )
                         _quarantine_agent(
                             filepath,
                             cls.__name__,
-                            f"duplicate agent name {instance.name!r} within one file",
+                            "distinct duplicate registered name "
+                            f"{instance.name!r} within one file "
+                            f"({previous_class} and {cls.__name__})",
                         )
                         continue
                     agents[instance.name] = instance
+                    registered_classes[instance.name] = cls.__name__
             break  # success
         except ModuleNotFoundError as e:
             missing = _extract_package_name(e)
@@ -1704,6 +1782,11 @@ def _load_agent_from_file(filepath):
         except Exception as e:
             print(f"[brainstem] Failed to load {filepath}: {e}")
             break
+    if not agents:
+        with _quarantine_lock:
+            already_quarantined = filepath in _quarantined_agents
+        if not already_quarantined:
+            _quarantine_agent(filepath, "(none)", "no valid agents")
     return agents
 
 
@@ -1835,6 +1918,7 @@ def _auto_install(package):
 
 def load_agents():
     agents = {}
+    registered_sources = {}
     pattern = os.path.join(AGENTS_PATH, "*_agent.py")
     files = sorted(glob.glob(pattern))
 
@@ -1842,13 +1926,35 @@ def load_agents():
         loaded = _load_agent_from_file(filepath)
         for name, instance in loaded.items():
             if name in agents:
+                source_identity = _agent_class_source_identity(instance.__class__)
+                if (
+                    source_identity is not None
+                    and source_identity == registered_sources.get(name)
+                ):
+                    message = (
+                        "same class discovered twice (deduped): "
+                        f"registered name {name!r}"
+                    )
+                    _record_agent_load_diagnostic(
+                        filepath,
+                        "same-class-deduped",
+                        message,
+                    )
+                    print(
+                        f"[brainstem] {os.path.basename(filepath)}: {message}"
+                    )
+                    continue
                 _quarantine_agent(
                     filepath,
                     instance.__class__.__name__,
-                    f"duplicate agent name {name!r}; already registered by an earlier file",
+                    "distinct duplicate registered name "
+                    f"{name!r}; already registered by an earlier file",
                 )
                 continue
             agents[name] = instance
+            registered_sources[name] = _agent_class_source_identity(
+                instance.__class__
+            )
             print(f"[brainstem] Agent loaded: {name}")
 
     # Rebuild the quarantine registry to this sweep: drop entries for files that are
@@ -1856,6 +1962,8 @@ def load_agents():
     with _quarantine_lock:
         for gone in [f for f in _quarantined_agents if f not in files]:
             _quarantined_agents.pop(gone, None)
+        for gone in [f for f in _agent_load_diagnostics if f not in files]:
+            _agent_load_diagnostics.pop(gone, None)
 
     print(f"[brainstem] {len(agents)} agent(s) ready.")
     return agents
@@ -3164,6 +3272,7 @@ def health():
             "soul":   SOUL_PATH if soul_ok else "missing",
             "agents": list(agents.keys()),
             "quarantined": _quarantine_snapshot(),
+            "loader_diagnostics": _agent_load_diagnostics_snapshot(),
             "copilot": "no_access" if no_copilot else ("\u2713" if copilot_ok else "pending"),
             "copilot_username": _no_copilot_access.get("username") if no_copilot else None,
             "brainstem_dir": os.path.dirname(os.path.abspath(__file__)),
@@ -3176,6 +3285,7 @@ def health():
             "soul":   SOUL_PATH if soul_ok else "missing",
             "agents": list(agents.keys()),
             "quarantined": _quarantine_snapshot(),
+            "loader_diagnostics": _agent_load_diagnostics_snapshot(),
             "auth_error": "invalid_credentials" if invalid_credential else None,
         })
 
@@ -3379,6 +3489,7 @@ def diagnostics_report():
         },
         "agents_loaded": list(load_agents().keys()),
         "agents_quarantined": _quarantine_snapshot(),
+        "agent_loader_diagnostics": _agent_load_diagnostics_snapshot(),
         "server_events": events[-10:],
         "client_events": client_events[-10:] if client_events else [],
     }

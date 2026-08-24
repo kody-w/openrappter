@@ -2,6 +2,7 @@
 # re-verified against GitHub raw bytes — EOL conversion would break the pin
 # on a Windows checkout (autocrlf). Keep them byte-identical everywhere.
 frontier/rapplications/** -text
+tests/fixtures/bookfactory-hatch/*.py -text
 frontier/store/index.json -text
 
 # Frontier ring sources are matched and hashed byte-for-byte (lineage-store

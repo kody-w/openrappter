@@ -895,8 +895,10 @@ class TechReviewerAgent(BasicAgent):
         # Isolate quarantine + flight-log state so memoization/log assertions are clean.
         self._orig_quar = dict(brainstem._quarantined_agents)
         self._orig_logged = set(brainstem._quarantine_logged)
+        self._orig_diagnostics = dict(brainstem._agent_load_diagnostics)
         brainstem._quarantined_agents.clear()
         brainstem._quarantine_logged.clear()
+        brainstem._agent_load_diagnostics.clear()
         with brainstem._flight_log_lock:
             self._orig_flight = list(brainstem._flight_log)
             brainstem._flight_log.clear()
@@ -912,6 +914,8 @@ class TechReviewerAgent(BasicAgent):
         self.brainstem._quarantined_agents.update(self._orig_quar)
         self.brainstem._quarantine_logged.clear()
         self.brainstem._quarantine_logged.update(self._orig_logged)
+        self.brainstem._agent_load_diagnostics.clear()
+        self.brainstem._agent_load_diagnostics.update(self._orig_diagnostics)
         with self.brainstem._flight_log_lock:
             self.brainstem._flight_log[:] = self._orig_flight
         shutil.rmtree(self._tmp, ignore_errors=True)
@@ -1125,7 +1129,55 @@ class ThirdAgent(FirstAgent):
 
         self.assertNotIn("Duplicate", agents)
         self.assertIn(path, self.brainstem._quarantined_agents)
+        self.assertIn(
+            "distinct duplicate registered name",
+            self.brainstem._quarantined_agents[path]["reason"],
+        )
         self.assertIn("within one file", self.brainstem._quarantined_agents[path]["reason"])
+
+    def test_same_class_alias_is_deduplicated_by_identity(self):
+        code = '''
+from agents.basic_agent import BasicAgent
+
+class CanonicalAgent(BasicAgent):
+    def __init__(self):
+        self.name = "Canonical"
+        self.metadata = {"name": self.name, "description": "canonical", "parameters": {"type": "object", "properties": {}}}
+        super().__init__(name=self.name, metadata=self.metadata)
+    def perform(self, **kwargs):
+        return "ok"
+
+AliasAgent = CanonicalAgent
+'''
+        self._write("alias_agent.py", code)
+
+        agents = self.brainstem.load_agents()
+
+        self.assertEqual(agents["Canonical"].perform(), "ok")
+        self.assertEqual(self.brainstem._quarantine_snapshot(), [])
+        diagnostics = self.brainstem._agent_load_diagnostics_snapshot()
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0]["kind"], "same-class-deduped")
+        self.assertIn(
+            "same class discovered twice (deduped)",
+            diagnostics[0]["message"],
+        )
+
+    def test_perform_method_without_basic_agent_is_no_valid_agents(self):
+        path = self._write(
+            "duck_agent.py",
+            "class DuckAgent:\n"
+            "    def perform(self, **kwargs):\n"
+            "        return 'not a BasicAgent'\n",
+        )
+
+        agents = self.brainstem.load_agents()
+
+        self.assertEqual(agents, {})
+        self.assertEqual(
+            self.brainstem._quarantined_agents[path]["reason"],
+            "no valid agents",
+        )
 
     def test_duplicate_agent_name_keeps_first_sorted_file(self):
         first = self.GOOD_AGENT.replace('return "ok"', 'return "first"')
@@ -1137,7 +1189,10 @@ class ThirdAgent(FirstAgent):
 
         self.assertEqual(agents["GoodReviewer"].perform(), "first")
         self.assertIn(duplicate, self.brainstem._quarantined_agents)
-        self.assertIn("duplicate agent name", self.brainstem._quarantined_agents[duplicate]["reason"])
+        self.assertIn(
+            "distinct duplicate registered name",
+            self.brainstem._quarantined_agents[duplicate]["reason"],
+        )
 
     def test_missing_parameters_is_lenient(self):
         """Missing 'parameters' is fine — BasicAgent defaults it; the agent loads clean."""

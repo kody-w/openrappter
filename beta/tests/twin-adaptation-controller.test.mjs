@@ -215,6 +215,23 @@ test("TESTER123 stages pinned WorkIQ, proves fixture mail/truthful empty/auth, a
     }),
     /stale|not bound/,
   );
+  for (const mutated of [
+    { ...approval, action_bound: false },
+    { ...approval, contract_hash: "e".repeat(64) },
+    { ...approval, base_hash: "d".repeat(64) },
+    {
+      ...approval,
+      permission_diff: {
+        ...approval.permission_diff,
+        added: [...approval.permission_diff.added, "send"],
+      },
+    },
+  ]) {
+    assert.throws(
+      () => controller.approve("email", mutated),
+      /cannot approve|stale|not bound/,
+    );
+  }
   const approved = controller.approve("email", approval);
   assert.equal(approved.capability.state, "activatable");
   const healthy = controller.activate("email", generation.candidate_hash);
@@ -244,6 +261,7 @@ test("stub detector rejects a static ready handshake and rolls back without goin
       })),
     }),
   });
+
   proposeEmail(controller);
   const failed = controller.stage("email", {
     source: READY_ONLY_SOURCE,
@@ -255,6 +273,31 @@ test("stub detector rejects a static ready handshake and rolls back without goin
   assert.equal(failed.capability.active_hash, null);
   assert.equal(failed.capability.quarantine.length, 1);
   assert.match(failed.capability.quarantine[0].lesson, /stub|ready/i);
+});
+
+test("stub mutation matrix rejects adjacent ready/ack success disguises", () => {
+  const contract = tester123EmailContract();
+  for (const output of [
+    { status: "ready" },
+    { status: "ok", message: "accepted" },
+    { status: "accepted", ack: true },
+    { message: "acknowledged", acknowledged: true },
+  ]) {
+    const verdict = twinAdaptationInternals.verifyShadowResults(
+      contract,
+      contract.cases.map(() => ({ ok: true, output })),
+    );
+    assert.equal(verdict.ok, false, JSON.stringify(output));
+    assert.match(verdict.reason, /stub|ready/i);
+  }
+  const truthful = twinAdaptationInternals.verifyShadowResults(
+    contract,
+    contract.cases.map((item) => ({
+      ok: true,
+      output: item.fixture_output,
+    })),
+  );
+  assert.equal(truthful.ok, true);
 });
 
 test("shadow output must satisfy the declared schema before activation", (t) => {

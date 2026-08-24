@@ -1819,6 +1819,11 @@ def _register_shims():
             ba_mod.BasicAgent = _BA
             sys.modules["agents.basic_agent"] = ba_mod
             sys.modules["agents"].basic_agent = ba_mod
+        # Legacy/AIBAST cartridges import `basic_agent` directly. Point that
+        # spelling at the same module object so Python does not execute the
+        # class definition twice and manufacture an incompatible BasicAgent
+        # identity from the same source file.
+        sys.modules["basic_agent"] = sys.modules["agents.basic_agent"]
         # Shim: openrappter.agents.basic_agent → same BasicAgent
         if "openrappter" not in sys.modules:
             or_mod = types.ModuleType("openrappter")

@@ -1163,6 +1163,25 @@ AliasAgent = CanonicalAgent
             diagnostics[0]["message"],
         )
 
+    def test_legacy_basic_agent_import_uses_canonical_class_identity(self):
+        code = '''
+from basic_agent import BasicAgent
+
+class LegacyAgent(BasicAgent):
+    def __init__(self):
+        self.name = "Legacy"
+        self.metadata = {"name": self.name, "description": "legacy import", "parameters": {"type": "object", "properties": {}}}
+        super().__init__(name=self.name, metadata=self.metadata)
+    def perform(self, **kwargs):
+        return "ok"
+'''
+        self._write("legacy_agent.py", code)
+
+        agents = self.brainstem.load_agents()
+
+        self.assertEqual(agents["Legacy"].perform(), "ok")
+        self.assertEqual(self.brainstem._quarantine_snapshot(), [])
+
     def test_perform_method_without_basic_agent_is_no_valid_agents(self):
         path = self._write(
             "duck_agent.py",

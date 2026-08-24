@@ -2,20 +2,44 @@
  * Auth RPC methods — GitHub account login, switch, and removal
  *
  * Methods:
+ *   auth.status    — Read the shared typed Copilot auth state
+ *   auth.check     — Re-verify the active account's Copilot access
  *   auth.profiles  — List all saved GitHub auth profiles
  *   auth.active    — Get the current active profile
  *   auth.login     — Start device code flow (returns user_code + URL)
- *   auth.pollLogin — Poll for device code completion, save on success
+ *   auth.poll      — Poll device flow and entitlement verification
  *   auth.cancel    — Cancel a pending device code flow
  *   auth.switch    — Set a different profile as default
  *   auth.remove    — Remove a saved profile
  */
 
-import { AuthProfileStore } from '../../auth/profiles.js';
+import {
+  AuthProfileStore,
+  type AuthProfile,
+} from '../../auth/profiles.js';
 import {
   requestDeviceCode,
   pollForAccessToken,
 } from '../../providers/copilot-auth.js';
+import {
+  CopilotAuthUnavailableError,
+  CopilotAuthStateService,
+  type CopilotAuthState,
+} from '../../auth/copilot-auth-state.js';
+import {
+  resolveVerifiedGitHubIdentity,
+  type VerifiedGitHubIdentity,
+} from '../../auth/github-identity.js';
+import { CopilotTokenError } from '../../providers/copilot-token.js';
+import path from 'path';
+import { openrappterHome } from '../../infra/openrappter-home.js';
+import { retireMatchingLegacyCredentialCopies } from '../../auth/legacy-credential-migration.js';
+import {
+  CopilotModelStateService,
+  type CopilotModelState,
+} from '../../auth/copilot-model-state.js';
+import { resolveCopilotApiToken } from '../../providers/copilot-token.js';
+import { discoverCopilotModelCatalog } from '../../providers/copilot-model-catalog.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -34,65 +58,286 @@ interface ProfileInfo {
   createdAt: string;
 }
 
-// In-memory map of pending device-code flows (keyed by device_code)
-const pendingFlows = new Map<
-  string,
-  {
-    deviceCode: string;
-    expiresAt: number;
-    intervalMs: number;
-    resolved: boolean;
-    controller: AbortController;
-    token?: string;
-    username?: string;
-    error?: string;
-  }
->();
+interface LoginFlowDescriptor {
+  userCode: string;
+  verificationUri: string;
+  deviceCode: string;
+}
 
-/**
- * Fetch the GitHub username for a given access token.
- */
-async function fetchGitHubUsername(token: string): Promise<string | undefined> {
-  try {
-    const res = await fetch('https://api.github.com/user', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-      },
-    });
-    if (!res.ok) return undefined;
-    const json = (await res.json()) as { login?: string };
-    return json.login;
-  } catch {
-    return undefined;
-  }
+interface PendingLoginFlow extends LoginFlowDescriptor {
+  expiresAt: number;
+  intervalMs: number;
+  resolved: boolean;
+  controller: AbortController;
+  persisted?: boolean;
+  username?: string;
+  authState?: CopilotAuthState;
+}
+
+interface CredentialContext {
+  generation: number;
+  authGeneration: number;
+  signal: AbortSignal;
 }
 
 export function registerAuthMethods(
   server: MethodRegistrar,
   _deps?: Record<string, unknown>
 ): void {
-  const store = new AuthProfileStore(_deps?.dataDir as string | undefined);
+  const dataDir =
+    (_deps?.dataDir as string | undefined) ?? openrappterHome();
+  const store = (
+    _deps?.authProfileStore ?? new AuthProfileStore(dataDir)
+  ) as AuthProfileStore;
   const requestDeviceCodeImpl = (
     _deps?.requestDeviceCode ?? requestDeviceCode
   ) as typeof requestDeviceCode;
   const pollForAccessTokenImpl = (
     _deps?.pollForAccessToken ?? pollForAccessToken
   ) as typeof pollForAccessToken;
-  const fetchGitHubUsernameImpl = (
-    _deps?.fetchGitHubUsername ?? fetchGitHubUsername
-  ) as typeof fetchGitHubUsername;
+  const resolveGitHubIdentityImpl = (
+    _deps?.resolveGitHubIdentity ?? resolveVerifiedGitHubIdentity
+  ) as (
+    token: string,
+    fetchImpl?: typeof fetch,
+    signal?: AbortSignal,
+  ) => Promise<VerifiedGitHubIdentity>;
+  const authStateService = (
+    _deps?.copilotAuthStateService ?? new CopilotAuthStateService()
+  ) as CopilotAuthStateService;
+  const modelStateService = (
+    _deps?.copilotModelStateService ?? new CopilotModelStateService()
+  ) as CopilotModelStateService;
+  const modelChecksEnabled = Boolean(_deps?.copilotModelStateService);
+  const modelIsReady = (): boolean =>
+    !modelChecksEnabled || modelStateService.current().status === 'ready';
+  const resolveCopilotToken = (
+    _deps?.resolveCopilotToken ?? resolveCopilotApiToken
+  ) as typeof resolveCopilotApiToken;
+  const discoverModelCatalog = (
+    _deps?.discoverModelCatalog ?? discoverCopilotModelCatalog
+  ) as typeof discoverCopilotModelCatalog;
+  const onAuthModelUpdate = _deps?.onAuthModelUpdate as
+    ((model: string) => void) | undefined;
+  const retireLegacyCopies = (
+    _deps?.retireLegacyCopies
+    ?? ((token: string) => retireMatchingLegacyCredentialCopies({
+      token,
+      legacyPath: path.join(dataDir, 'credentials', 'github-token.json'),
+      envPath: path.join(dataDir, '.env'),
+    }))
+  ) as (token: string) => unknown;
+  const pendingFlows = new Map<string, PendingLoginFlow>();
+  let pendingFlowCreation: Promise<LoginFlowDescriptor> | undefined;
+  let credentialGeneration = 0;
+  let credentialController = new AbortController();
+  const captureCredentialContext = (): CredentialContext => ({
+    generation: credentialGeneration,
+    authGeneration: authStateService.captureGeneration(),
+    signal: credentialController.signal,
+  });
+  const advanceCredentialGeneration = (): CredentialContext => {
+    credentialGeneration += 1;
+    credentialController.abort();
+    for (const flow of pendingFlows.values()) flow.controller.abort();
+    credentialController = new AbortController();
+    authStateService.advanceGeneration();
+    modelStateService.invalidateCredential();
+    return captureCredentialContext();
+  };
+  const credentialContextIsCurrent = (
+    context: CredentialContext,
+  ): boolean =>
+    context.generation === credentialGeneration
+    && context.authGeneration === authStateService.captureGeneration()
+    && !context.signal.aborted;
 
   // If a profile already exists, notify the caller so the provider can use it
   const onTokenUpdate = _deps?.onAuthTokenUpdate as (
     (token: string | null) => void
   ) | undefined;
-  const existingProfile = store.get('copilot');
-  if (existingProfile?.token && onTokenUpdate) {
-    onTokenUpdate(existingProfile.token);
-  } else if (store.hasPersistedState() && onTokenUpdate) {
-    onTokenUpdate(null);
+  const verifyStoredProfile = async (
+    profile: AuthProfile | undefined,
+    context: CredentialContext,
+  ): Promise<CopilotAuthState> => {
+    if (!profile?.token) {
+      return authStateService.needsSignIn(
+        'COPILOT_SIGN_IN_REQUIRED',
+        false,
+      );
+    }
+    authStateService.checking(context.authGeneration);
+    try {
+      const identity = await resolveGitHubIdentityImpl(
+        profile.token,
+        undefined,
+        context.signal,
+      );
+      if (!credentialContextIsCurrent(context)) {
+        return authStateService.current();
+      }
+      if (identity.login !== profile.id) {
+        throw new CopilotTokenError('exchange-error');
+      }
+      const state = await authStateService.check(profile.token, identity.login, {
+        generation: context.authGeneration,
+        signal: context.signal,
+      });
+      if (state.status === 'ready' && credentialContextIsCurrent(context)) {
+        retireLegacyCopies(profile.token);
+        if (modelChecksEnabled) await verifyModel(profile, context);
+      }
+      return state;
+    } catch (error) {
+      return credentialContextIsCurrent(context)
+        ? authStateService.reportFailure(error, context.authGeneration)
+        : authStateService.current();
+    }
+  };
+  async function verifyModel(
+    profile: AuthProfile,
+    context: CredentialContext,
+    force = false,
+  ): Promise<CopilotModelState> {
+    const resolved = await resolveCopilotToken({
+      githubToken: profile.token ?? '',
+      signal: context.signal,
+    });
+    if (!credentialContextIsCurrent(context)) {
+      return modelStateService.current();
+    }
+    const configuredModel =
+      profile.model
+      ?? process.env.OPENRAPPTER_SURGEON_MODEL
+      ?? process.env.OPENRAPPTER_MODEL;
+    const state = await modelStateService.check({
+      accountId: profile.id,
+      endpoint: resolved.baseUrl,
+      configuredModel,
+      explicitConfigured: Boolean(configuredModel),
+      force,
+      discover: async (signal) => (
+        await discoverModelCatalog({
+          githubToken: profile.token,
+          signal,
+        })
+      ).catalog,
+    });
+    if (
+      state.status === 'ready'
+      && state.selectedModel
+      && credentialContextIsCurrent(context)
+    ) onAuthModelUpdate?.(state.selectedModel);
+    return state;
   }
+  const existingProfile = store.get('copilot');
+  if (existingProfile?.token) {
+    const context = captureCredentialContext();
+    void verifyStoredProfile(existingProfile, context)
+      .then((state) => {
+        if (
+          state.status === 'ready'
+          && credentialContextIsCurrent(context)
+          && modelIsReady()
+          && store.get('copilot')?.id === existingProfile.id
+        ) {
+          onTokenUpdate?.(existingProfile.token!);
+        } else if (credentialContextIsCurrent(context)) {
+          onTokenUpdate?.(null);
+        }
+      });
+  } else if (store.hasPersistedState()) {
+    advanceCredentialGeneration();
+    authStateService.needsSignIn('COPILOT_SIGN_IN_REQUIRED', false);
+    onTokenUpdate?.(null);
+  }
+
+  server.registerMethod<void, CopilotAuthState>('auth.status', async () =>
+    ({ ...authStateService.current(), model: modelStateService.current() })
+  );
+
+  server.registerMethod<void, CopilotAuthState>('auth.check', async () => {
+    const context = captureCredentialContext();
+    const profile = store.get('copilot');
+    const state = await verifyStoredProfile(profile, context);
+    if (
+      state.status === 'ready'
+      && profile?.token
+      && credentialContextIsCurrent(context)
+      && store.get('copilot')?.id === profile.id
+    ) {
+      onTokenUpdate?.(profile.token);
+    }
+    return { ...state, model: modelStateService.current() };
+  });
+
+  server.registerMethod<void, CopilotModelState>(
+    'auth.model.retry',
+    async () => {
+      const profile = store.get('copilot');
+      if (!profile?.token) return modelStateService.current();
+      return verifyModel(profile, captureCredentialContext(), true);
+    },
+  );
+
+  const selectModel = async (model: string): Promise<CopilotModelState> => {
+    if (!model || typeof model !== 'string') {
+      throw new Error('A verified Copilot model is required.');
+    }
+    const profile = store.get('copilot');
+    if (!profile?.token) {
+      throw new Error('Sign in to GitHub Copilot before selecting a model.');
+    }
+    const selected = await modelStateService.select(
+      model,
+      async (next, previous) => {
+        if (!store.updateModel('copilot', profile.id, next, previous)) {
+          throw new Error('Active Copilot profile was not found.');
+        }
+      },
+    );
+    onAuthModelUpdate?.(model);
+    onTokenUpdate?.(profile.token);
+    return selected;
+  };
+
+  server.registerMethod<{ model: string }, CopilotModelState>(
+    'auth.model.select',
+    async ({ model }) => selectModel(model),
+  );
+  server.registerMethod<{ model: string }, {
+    model: string;
+    previous?: string;
+    persisted: true;
+  }>('models.set', async ({ model }) => {
+    const previous = modelStateService.current().configuredModel;
+    const selected = await selectModel(model);
+    return {
+      model: selected.selectedModel!,
+      previous,
+      persisted: true,
+    };
+  });
+  server.registerMethod('models.get', async () => {
+    const model = modelStateService.current();
+    return {
+      model: model.selectedModel ?? model.configuredModel,
+      default: model.recommendedModel,
+      status: model.status,
+    };
+  });
+  server.registerMethod('models.available', async () => {
+    const model = modelStateService.current();
+    return {
+      models: model.availableModels.map((id) => ({
+        id,
+        active: id === model.selectedModel,
+      })),
+      current: model.selectedModel ?? model.configuredModel,
+      recommended: model.recommendedModel,
+      status: model.status,
+    };
+  });
 
   // ── auth.profiles — list all saved profiles ────────────────────────────────
   server.registerMethod<void, ProfileInfo[]>('auth.profiles', async () => {
@@ -121,62 +366,138 @@ export function registerAuthMethods(
     };
   });
 
-  // ── auth.login — start device code flow ────────────────────────────────────
-  server.registerMethod<void, { userCode: string; verificationUri: string; deviceCode: string }>(
-    'auth.login',
-    async () => {
-      const device = await requestDeviceCodeImpl();
+  const createDeviceFlow = (): Promise<LoginFlowDescriptor> => {
+    if (pendingFlowCreation) return pendingFlowCreation;
+    const creation = (async (): Promise<LoginFlowDescriptor> => {
+      const context = advanceCredentialGeneration();
+      authStateService.checking(context.authGeneration);
+      let device;
+      try {
+        device = await requestDeviceCodeImpl();
+      } catch (error) {
+        throw new CopilotAuthUnavailableError(
+          authStateService.reportFailure(error, context.authGeneration),
+        );
+      }
       const expiresAt = Date.now() + device.expires_in * 1000;
       const intervalMs = Math.max(1000, device.interval * 1000);
       const controller = new AbortController();
-
-      // Store the pending flow
-      pendingFlows.set(device.device_code, {
+      const flow: PendingLoginFlow = {
         deviceCode: device.device_code,
         expiresAt,
         intervalMs,
         resolved: false,
         controller,
-      });
+        userCode: device.user_code,
+        verificationUri: device.verification_uri,
+      };
+      pendingFlows.set(device.device_code, flow);
 
-      // Start polling in the background
-      pollForAccessTokenImpl({
+      void pollForAccessTokenImpl({
         deviceCode: device.device_code,
         intervalMs,
         expiresAt,
         signal: controller.signal,
       })
         .then(async (token) => {
-          const flow = pendingFlows.get(device.device_code);
-          if (!flow) return;
-
-          // Fetch username and save profile before publishing success. A
-          // cancellation can remove the flow while this request is in flight.
-          const username = (
-            await fetchGitHubUsernameImpl(token)
-          ) ?? `account-${Date.now()}`;
           if (pendingFlows.get(device.device_code) !== flow) return;
-          store.remove('copilot', username);
-          store.add({
-            id: username,
-            provider: 'copilot',
-            type: 'device-code',
+          const identity = await resolveGitHubIdentityImpl(
             token,
-            default: true,
-          });
-          flow.token = token;
-          flow.username = username;
+            undefined,
+            context.signal,
+          );
+          if (
+            pendingFlows.get(device.device_code) !== flow
+            || !credentialContextIsCurrent(context)
+          ) return;
+          const state = await authStateService.check(
+            token,
+            identity.login,
+            {
+              generation: context.authGeneration,
+              signal: context.signal,
+            },
+          );
+          if (
+            pendingFlows.get(device.device_code) !== flow
+            || !credentialContextIsCurrent(context)
+          ) return;
+          flow.username = identity.login;
+          flow.authState = state;
           flow.resolved = true;
 
-          // Notify the running provider so it picks up the new token
-          if (onTokenUpdate) onTokenUpdate(token);
-        })
-        .catch((err) => {
-          const flow = pendingFlows.get(device.device_code);
-          if (flow) {
-            flow.error = (err as Error).message;
-            flow.resolved = true;
+          if (state.status === 'ready') {
+            try {
+              const replacingActive =
+                store.get('copilot')?.id === identity.login;
+              if (replacingActive) {
+                advanceCredentialGeneration();
+                authStateService.needsSignIn(
+                  'COPILOT_SIGN_IN_REQUIRED',
+                  false,
+                );
+                onTokenUpdate?.(null);
+                store.remove('copilot', identity.login, {
+                  promoteReplacement: false,
+                });
+              }
+              const persistedContext = advanceCredentialGeneration();
+              authStateService.checking(persistedContext.authGeneration);
+              store.add({
+                id: identity.login,
+                provider: 'copilot',
+                type: 'device-code',
+                token,
+                default: true,
+              });
+              authStateService.markReady(
+                identity.login,
+                persistedContext.authGeneration,
+              );
+              const persistedProfile = store.get('copilot', identity.login)!;
+              const model = modelChecksEnabled
+                ? await verifyModel(persistedProfile, persistedContext)
+                : undefined;
+              flow.persisted = true;
+              flow.authState = {
+                ...authStateService.current(),
+                ...(model ? { model } : {}),
+              };
+              if (!model || model.status === 'ready') onTokenUpdate?.(token);
+            } catch (error) {
+              flow.authState = authStateService.reportFailure(error);
+            }
+          } else if (state.status === 'no-entitlement') {
+            try {
+              if (store.get('copilot', identity.login)) {
+                advanceCredentialGeneration();
+                store.remove('copilot', identity.login, {
+                  promoteReplacement: false,
+                });
+              }
+              advanceCredentialGeneration();
+              store.add({
+                id: identity.login,
+                provider: 'copilot',
+                type: 'device-code',
+                token,
+                default: false,
+              }, { autoDefault: false });
+              flow.persisted = true;
+            } catch (error) {
+              flow.authState = authStateService.reportFailure(error);
+            }
           }
+        })
+        .catch((error) => {
+          if (pendingFlows.get(device.device_code) !== flow) return;
+          flow.authState = credentialContextIsCurrent(context)
+            ? authStateService.reportFailure(
+              error,
+              context.authGeneration,
+            )
+            : authStateService.current();
+          flow.resolved = true;
         });
 
       return {
@@ -184,35 +505,81 @@ export function registerAuthMethods(
         verificationUri: device.verification_uri,
         deviceCode: device.device_code,
       };
+    })();
+    pendingFlowCreation = creation;
+    void creation.finally(() => {
+      if (pendingFlowCreation === creation) pendingFlowCreation = undefined;
+    }).catch(() => undefined);
+    return creation;
+  };
+
+  // ── auth.login — start device code flow ────────────────────────────────────
+  server.registerMethod<void, LoginFlowDescriptor>(
+    'auth.login',
+    async () => {
+      const activeFlow = Array.from(pendingFlows.values()).find(
+        (flow) => !flow.resolved && Date.now() <= flow.expiresAt,
+      );
+      if (activeFlow) {
+        return {
+          userCode: activeFlow.userCode,
+          verificationUri: activeFlow.verificationUri,
+          deviceCode: activeFlow.deviceCode,
+        };
+      }
+      return createDeviceFlow();
     }
   );
 
   // ── auth.pollLogin — check if a pending login completed ────────────────────
-  server.registerMethod<{ deviceCode: string }, { status: string; username?: string; error?: string }>(
+  server.registerMethod<
+    { deviceCode: string },
+    {
+      status: 'pending' | 'success' | 'error';
+      username?: string;
+      error?: string;
+      auth: CopilotAuthState;
+    }
+  >(
     'auth.poll',
     async (params) => {
       const flow = pendingFlows.get(params.deviceCode);
       if (!flow) {
-        return { status: 'error', error: 'No pending login flow found' };
+        const auth = authStateService.current();
+        return { status: 'error', error: auth.message, auth };
       }
 
       if (!flow.resolved) {
         if (Date.now() > flow.expiresAt) {
           pendingFlows.delete(params.deviceCode);
-          return { status: 'error', error: 'Device code expired' };
+          flow.controller.abort();
+          const context = captureCredentialContext();
+          const auth = authStateService.reportFailure(
+            new Error('Device code expired'),
+            context.authGeneration,
+          );
+          return { status: 'error', error: auth.message, auth };
         }
-        return { status: 'pending' };
+        return { status: 'pending', auth: authStateService.current() };
       }
 
       // Flow completed
       pendingFlows.delete(params.deviceCode);
 
-      if (flow.error) {
-        return { status: 'error', error: flow.error };
+      if (
+        flow.authState?.status !== 'ready'
+        || (modelChecksEnabled && flow.authState.model?.status !== 'ready')
+      ) {
+        const auth = flow.authState ?? authStateService.current();
+        return { status: 'error', error: auth.message, auth };
       }
 
       // Determine the username that was saved
-      return { status: 'success', username: flow.username ?? 'unknown' };
+      return {
+        status: 'success',
+        username: flow.username ?? 'unknown',
+        auth: flow.authState,
+      };
     }
   );
 
@@ -226,10 +593,12 @@ export function registerAuthMethods(
       const flow = pendingFlows.get(params.deviceCode);
       if (!flow) return { ok: false, status: 'missing' };
       pendingFlows.delete(params.deviceCode);
-      if (flow.resolved && flow.token) {
+      if (flow.resolved && flow.persisted) {
         return { ok: false, status: 'completed' };
       }
       flow.controller.abort();
+      advanceCredentialGeneration();
+      authStateService.needsSignIn('COPILOT_AUTH_CANCELLED', false);
       return { ok: true, status: 'cancelled' };
     }
   );
@@ -238,10 +607,34 @@ export function registerAuthMethods(
   server.registerMethod<{ id: string }, { ok: boolean }>(
     'auth.switch',
     async (params) => {
-      const ok = store.setDefault('copilot', params.id);
-      if (ok && onTokenUpdate) {
-        const profile = store.get('copilot', params.id);
-        if (profile?.token) onTokenUpdate(profile.token);
+      const profile = store.get('copilot', params.id);
+      if (!profile?.token) return { ok: false };
+      const context = advanceCredentialGeneration();
+      const state = await verifyStoredProfile(profile, context);
+      if (
+        state.status !== 'ready'
+        || !modelIsReady()
+        || !credentialContextIsCurrent(context)
+        || !store.get('copilot', profile.id)
+      ) return { ok: false };
+      const persistedContext = advanceCredentialGeneration();
+      authStateService.checking(persistedContext.authGeneration);
+      let ok: boolean;
+      try {
+        ok = store.setDefault('copilot', params.id);
+      } catch (error) {
+        authStateService.reportFailure(
+          error,
+          persistedContext.authGeneration,
+        );
+        throw error;
+      }
+      if (ok) {
+        authStateService.markReady(
+          profile.id,
+          persistedContext.authGeneration,
+        );
+        onTokenUpdate?.(profile.token);
       }
       return { ok };
     }
@@ -251,12 +644,57 @@ export function registerAuthMethods(
   server.registerMethod<{ id: string }, { ok: boolean }>(
     'auth.remove',
     async (params) => {
-      const activeProfileId = store.get('copilot')?.id;
-      const ok = store.remove('copilot', params.id);
-      if (ok && activeProfileId === params.id && onTokenUpdate) {
-        onTokenUpdate(store.get('copilot')?.token ?? null);
+      const activeProfile = store.get('copilot');
+      const removingActive = activeProfile?.id === params.id;
+      advanceCredentialGeneration();
+      if (removingActive) {
+        authStateService.needsSignIn(
+          'COPILOT_SIGN_IN_REQUIRED',
+          false,
+        );
+        onTokenUpdate?.(null);
       }
-      return { ok };
+      const ok = store.remove('copilot', params.id, {
+        promoteReplacement: false,
+      });
+      if (!ok) return { ok: false };
+
+      if (removingActive) {
+        authStateService.needsSignIn('COPILOT_SIGN_IN_REQUIRED', false);
+        const replacement = store.list('copilot').find(
+          (profile) => typeof profile.token === 'string' && profile.token.length > 0,
+        );
+        if (!replacement?.token) {
+          return { ok: true };
+        }
+
+        const context = captureCredentialContext();
+        const state = await verifyStoredProfile(replacement, context);
+        if (
+          state.status === 'ready'
+          && modelIsReady()
+          && credentialContextIsCurrent(context)
+          && store.get('copilot', replacement.id)
+        ) {
+          const persistedContext = advanceCredentialGeneration();
+          authStateService.checking(persistedContext.authGeneration);
+          try {
+            store.setDefault('copilot', replacement.id);
+          } catch (error) {
+            authStateService.reportFailure(
+              error,
+              persistedContext.authGeneration,
+            );
+            throw error;
+          }
+          authStateService.markReady(
+            replacement.id,
+            persistedContext.authGeneration,
+          );
+          onTokenUpdate?.(replacement.token);
+        }
+      }
+      return { ok: true };
     }
   );
 }

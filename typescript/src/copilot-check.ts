@@ -29,7 +29,11 @@ function loadCachedGitHubToken(): string | null {
 }
 
 /** An existing profile store is authoritative, including an explicit empty store. */
-function loadAuthProfileState(): { authoritative: boolean; token: string | null } {
+function loadAuthProfileState(): {
+  authoritative: boolean;
+  token: string | null;
+  id?: string;
+} {
   if (!fs.existsSync(AUTH_PROFILES_FILE)) {
     return { authoritative: false, token: null };
   }
@@ -37,6 +41,7 @@ function loadAuthProfileState(): { authoritative: boolean; token: string | null 
   try {
     const data = fs.readFileSync(AUTH_PROFILES_FILE, 'utf-8');
     const profiles = JSON.parse(data) as Array<{
+      id?: string;
       provider?: string;
       token?: string;
       default?: boolean;
@@ -46,14 +51,19 @@ function loadAuthProfileState(): { authoritative: boolean; token: string | null 
       (p) => p.provider === 'copilot' && p.default && typeof p.token === 'string' && p.token.length > 10
     );
     if (defaultCopilot?.token) {
-      return { authoritative: true, token: defaultCopilot.token };
+      const id = typeof defaultCopilot.id === 'string'
+        ? defaultCopilot.id
+        : undefined;
+      return { authoritative: true, token: defaultCopilot.token, id };
     }
     // Fall back to any copilot profile with a real token
-    const anyCopilot = profiles.find(
-      (p) => p.provider === 'copilot' && typeof p.token === 'string' && p.token.length > 10
-    );
-    if (anyCopilot?.token) {
-      return { authoritative: true, token: anyCopilot.token };
+    if (!desktopOwnsCredentials()) {
+      const anyCopilot = profiles.find(
+        (p) => p.provider === 'copilot' && typeof p.token === 'string' && p.token.length > 10
+      );
+      if (anyCopilot?.token) {
+        return { authoritative: true, token: anyCopilot.token };
+      }
     }
   } catch { /* a corrupt explicit store must not restore ambient credentials */ }
   return { authoritative: true, token: null };
@@ -64,8 +74,13 @@ export function hasAuthProfileAuthority(): boolean {
     && loadAuthProfileState().authoritative;
 }
 
+function desktopOwnsCredentials(): boolean {
+  return Boolean(process.env.OPENRAPPTER_DESKTOP_OWNER_PID);
+}
+
 /** Save a GitHub token to the credentials file */
 export function saveGitHubToken(token: string, source: CachedGitHubToken['source']): void {
+  if (desktopOwnsCredentials()) return;
   try {
     fs.mkdirSync(CREDENTIALS_DIR, { recursive: true, mode: 0o700 });
     const payload: CachedGitHubToken = { token, savedAt: Date.now(), source };
@@ -89,12 +104,34 @@ export async function resolveGithubToken(): Promise<string | null> {
   const candidates: { token: string; source: string }[] = [];
   const profileState = loadAuthProfileState();
   const profileIsAuthoritative =
-    Boolean(process.env.OPENRAPPTER_DESKTOP_OWNER_PID)
+    desktopOwnsCredentials()
     && profileState.authoritative;
 
   if (profileIsAuthoritative) {
     if (profileState.token) {
       candidates.push({ token: profileState.token, source: 'auth-profile' });
+    }
+  } else if (desktopOwnsCredentials()) {
+    const legacyToken = loadCachedGitHubToken();
+    if (!legacyToken) return null;
+    try {
+      const [{ migrateLegacyDesktopCredential }, { resolveCopilotApiToken }] =
+        await Promise.all([
+          import('./auth/legacy-credential-migration.js'),
+          import('./providers/copilot-token.js'),
+        ]);
+      await migrateLegacyDesktopCredential({
+        token: legacyToken,
+        dataDir: openrappterHome(),
+        legacyPath: GITHUB_TOKEN_FILE,
+        envPath: openrappterPath('.env'),
+        validateToken: (token) => resolveCopilotApiToken({
+          githubToken: token,
+        }),
+      });
+      return legacyToken;
+    } catch {
+      return null;
     }
   } else {
     // Legacy discovery remains available until the first profile-store action.
@@ -150,8 +187,28 @@ export async function resolveGithubToken(): Promise<string | null> {
     try {
       const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
       await resolveCopilotApiToken({ githubToken: candidate.token });
+      if (
+        desktopOwnsCredentials()
+        && candidate.source === 'auth-profile'
+      ) {
+        const { resolveVerifiedGitHubIdentity } = await import(
+          './auth/github-identity.js'
+        );
+        const identity = await resolveVerifiedGitHubIdentity(candidate.token);
+        if (!profileState.id || identity.login !== profileState.id) {
+          throw new Error('Stored GitHub identity could not be verified.');
+        }
+        const { retireMatchingLegacyCredentialCopies } = await import(
+          './auth/legacy-credential-migration.js'
+        );
+        retireMatchingLegacyCredentialCopies({
+          token: candidate.token,
+          legacyPath: GITHUB_TOKEN_FILE,
+          envPath: openrappterPath('.env'),
+        });
+      }
       // This token works — sync it to all sources so they stay consistent
-      if (candidate.source !== 'credentials') {
+      if (candidate.source !== 'credentials' && !desktopOwnsCredentials()) {
         saveGitHubToken(candidate.token, 'device_code');
       }
       return candidate.token;
@@ -213,7 +270,7 @@ export async function resolveCopilotAuth(options?: {
         await resolveCopilotApiToken({ githubToken: existing });
       }
       // Token is valid and cached — save to credentials file if not already there
-      if (!loadCachedGitHubToken()) {
+      if (!desktopOwnsCredentials() && !loadCachedGitHubToken()) {
         saveGitHubToken(existing, 'env');
       }
       return { status: 'authenticated', token: existing, source: 'cache' };
@@ -252,29 +309,47 @@ export async function resolveCopilotAuth(options?: {
       console.log('  Waiting for authorization…');
     });
 
-    // Save to credentials file
-    saveGitHubToken(token, 'device_code');
+    const [
+      { resolveVerifiedGitHubIdentity },
+      { resolveCopilotApiToken },
+      { AuthProfileStore },
+    ] = await Promise.all([
+      import('./auth/github-identity.js'),
+      import('./providers/copilot-token.js'),
+      import('./auth/profiles.js'),
+    ]);
+    const identity = await resolveVerifiedGitHubIdentity(token);
+    await resolveCopilotApiToken({ githubToken: token });
 
-    // Also save to auth-profiles.json for the web UI auth system
-    try {
-      const { AuthProfileStore } = await import('./auth/profiles.js');
+    if (desktopOwnsCredentials()) {
       const store = new AuthProfileStore();
+      store.remove('copilot', identity.login, {
+        promoteReplacement: false,
+      });
       store.add({
-        id: `copilot-${Date.now()}`,
+        id: identity.login,
         provider: 'copilot',
         type: 'device-code',
         token,
         default: true,
       });
-    } catch { /* non-fatal */ }
-
-    // Also save to .env for backward compatibility
-    try {
-      const { loadEnv, saveEnv } = await import('./env.js');
-      const env = await loadEnv();
-      env.GITHUB_TOKEN = token;
-      await saveEnv(env);
-    } catch { /* non-fatal */ }
+    } else {
+      saveGitHubToken(token, 'device_code');
+      const store = new AuthProfileStore();
+      store.add({
+        id: identity.login,
+        provider: 'copilot',
+        type: 'device-code',
+        token,
+        default: true,
+      });
+      try {
+        const { loadEnv, saveEnv } = await import('./env.js');
+        const env = await loadEnv();
+        env.GITHUB_TOKEN = token;
+        await saveEnv(env);
+      } catch { /* non-fatal */ }
+    }
 
     if (!options?.silent) {
       console.log(chalk.green('\n  ✓ Authenticated! Token cached locally.\n'));

@@ -147,6 +147,24 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(main, /customElements\.whenDefined\('openrappter-show-and-tell'\)/);
 });
 
+test('GitHub device authentication opens in the OS browser without relaxing renderer isolation', () => {
+  assert.match(main, /setWindowOpenHandler\(\(\) => \(\{ action: 'deny' \}\)\)/);
+  assert.doesNotMatch(main, /shell\.openExternal\(url\)/);
+  assert.match(main, /shell\.openExternal\(GITHUB_DEVICE_LOGIN_URL\)/);
+  assert.match(preload, /openGithubDeviceLogin:\s*\(\) =>/);
+  assert.doesNotMatch(preload, /github-device-login',\s*\w+/);
+  assert.match(runtimeEntry, /getCopilotAuthStateService/);
+});
+
+test('patient chat bridge accepts no renderer URL or private agent route', () => {
+  assert.match(preload, /patientChat:\s*\(request/);
+  assert.match(preload, /openrappter:patient-chat/);
+  assert.match(main, /executePatientChatRequest\(\{/);
+  assert.match(main, /gatewayOrigin,[\s\S]*gatewayToken/);
+  assert.doesNotMatch(preload, /patientChat:\s*\(url/);
+  assert.doesNotMatch(main, /openrappter:patient-chat[\s\S]{0,300}agentHandler/);
+});
+
 // OPENRAPPTER_DESKTOP_SMOKE is a process-wide launch flag, and the release
 // workflow sets it on the packaged, signed binary -- so whatever it switches
 // off is switched off in the shipped app, not just in a dev build.

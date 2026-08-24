@@ -32,6 +32,8 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
+import { CopilotAuthStateService } from '../auth/copilot-auth-state.js';
+import { CopilotModelStateService } from '../auth/copilot-model-state.js';
 import { registerReleaseRingMethods } from './release-ring-rpc.js';
 import { registerEstateBuddyMethods } from './methods/estate-buddy-methods.js';
 import type {
@@ -425,6 +427,9 @@ export class GatewayServer {
   private agentList?: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[];
   private cronStore: Record<string, unknown>[] = [];
   private surgeonService?: SurgeonService;
+  private readonly copilotAuthState = new CopilotAuthStateService();
+  private readonly copilotModelState = new CopilotModelStateService();
+  private onAuthModelUpdate?: (model: string) => void;
   private estateBuddyAnalyzer?: (
     input: EstateBuddyEvidenceInput,
   ) => Promise<EstateBuddyEvidenceDraft>;
@@ -769,6 +774,18 @@ export class GatewayServer {
 
   setSurgeonService(service: SurgeonService): void {
     this.surgeonService = service;
+  }
+
+  getCopilotAuthStateService(): CopilotAuthStateService {
+    return this.copilotAuthState;
+  }
+
+  getCopilotModelStateService(): CopilotModelStateService {
+    return this.copilotModelState;
+  }
+
+  setAuthModelCallback(cb: (model: string) => void): void {
+    this.onAuthModelUpdate = cb;
   }
 
   setEstateBuddyAnalyzer(
@@ -3393,6 +3410,9 @@ export class GatewayServer {
     registerAuthMethods(this, {
       onAuthTokenUpdate: (token: string | null) => this.onAuthTokenUpdate?.(token),
       dataDir: this.dataDir,
+      copilotAuthStateService: this.copilotAuthState,
+      copilotModelStateService: this.copilotModelState,
+      onAuthModelUpdate: (model: string) => this.onAuthModelUpdate?.(model),
     });
 
     // Backup & restore methods

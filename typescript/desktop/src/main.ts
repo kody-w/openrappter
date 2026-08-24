@@ -43,6 +43,14 @@ import {
 import { SECURE_RENDERER_PREFERENCES } from './window-security.js';
 import { waitForGatewayReady } from './gateway-ready.js';
 import {
+  GITHUB_DEVICE_LOGIN_URL,
+  isAllowedGithubDeviceLoginUrl,
+} from './external-url-policy.js';
+import {
+  executePatientChatRequest,
+  type DesktopPatientChatRequest,
+} from './patient-chat.js';
+import {
   extractBuddyEvidence,
   hasActiveBuddyEvidenceJobs,
   pruneStaleBuddyEvidence,
@@ -99,6 +107,7 @@ let processingCommand = false;
 let rendererReady = false;
 let narrationService: NarrationService | undefined;
 let vibeVoiceService: VibeVoiceService | undefined;
+let patientChatController: AbortController | undefined;
 let tray: Tray | undefined;
 let endpointFile: string | undefined;
 let smokeWatchdog: NodeJS.Timeout | undefined;
@@ -1141,14 +1150,10 @@ function createWindow(): BrowserWindow {
     rendererReady = true;
     startDesktopCommandPump();
   });
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
-    return { action: 'deny' };
-  });
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, url) => {
     if (url !== pathToFileURL(uiIndex).href && !url.startsWith(uiRootUrl)) {
       event.preventDefault();
-      if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     }
   });
   window.webContents.on('render-process-gone', (_event, details) => {
@@ -1559,6 +1564,45 @@ if (!ownsInstanceLock) {
       ipcMain.handle('openrappter:narration', handleNarration);
       ipcMain.handle('openrappter:buddy-evidence', handleBuddyEvidence);
       ipcMain.handle('openrappter:voice', handleVoice);
+      ipcMain.handle(
+        'openrappter:github-device-login',
+        async (event) => {
+          if (!trustedRenderer(event)) {
+            throw new Error('Untrusted desktop renderer.');
+          }
+          if (!isAllowedGithubDeviceLoginUrl(GITHUB_DEVICE_LOGIN_URL)) {
+            throw new Error('GitHub device login URL is not allowed.');
+          }
+          await shell.openExternal(GITHUB_DEVICE_LOGIN_URL);
+          return { opened: true };
+        },
+      );
+      ipcMain.handle(
+        'openrappter:patient-chat',
+        async (event, request: DesktopPatientChatRequest) => {
+          if (!trustedRenderer(event)) {
+            throw new Error('Untrusted desktop renderer.');
+          }
+          if (request?.action === 'cancel') {
+            patientChatController?.abort();
+            patientChatController = undefined;
+            return { status: 204, body: '' };
+          }
+          patientChatController?.abort();
+          const controller = new AbortController();
+          patientChatController = controller;
+          const result = await executePatientChatRequest({
+            request,
+            gatewayOrigin,
+            gatewayToken,
+            signal: controller.signal,
+          });
+          if (patientChatController === controller) {
+            patientChatController = undefined;
+          }
+          return result;
+        },
+      );
       ipcMain.handle(
         'openrappter:desktop-control',
         async (event, request: unknown) => {

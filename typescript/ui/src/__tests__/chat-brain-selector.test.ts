@@ -1,6 +1,18 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+const brainstem = vi.hoisted(() => ({
+  probe: vi.fn(async () => ({ status: 'ready', message: 'ready', retryable: false })),
+  ask: vi.fn(async () => ({
+    response: 'Brainstem answer',
+    session_id: 'session-1',
+    agent_logs: '',
+  })),
+}));
+vi.mock('../services/patient.js', () => ({
+  probeBrainstemTransport: brainstem.probe,
+  askBrainstem: brainstem.ask,
+}));
 import '../components/chat.js';
 import { gateway } from '../services/gateway.js';
 
@@ -19,7 +31,7 @@ import { gateway } from '../services/gateway.js';
  */
 
 interface TestChatElement extends HTMLElement {
-  chatTarget: 'openrappter' | 'brainstem' | 'estate';
+  chatTarget: 'brainstem' | 'estate';
   sessionKey: string | null;
   inputValue: string;
   sending: boolean;
@@ -48,7 +60,7 @@ function makeChat(): TestChatElement {
 /** A change event from a <select>, as the component receives it. */
 function selectEvent(value: string): Event {
   const select = document.createElement('select');
-  for (const option of ['openrappter', 'brainstem', 'estate']) {
+  for (const option of ['brainstem', 'estate']) {
     const element = document.createElement('option');
     element.value = option;
     select.append(element);
@@ -88,6 +100,8 @@ describe('chat brain selector', () => {
       value: testStorage,
     });
     localStorage.clear();
+    brainstem.probe.mockClear();
+    brainstem.ask.mockClear();
   });
 
   afterEach(() => {
@@ -96,8 +110,8 @@ describe('chat brain selector', () => {
     delete window.openrappterDesktop;
   });
 
-  it('talks to the local runtime unless told otherwise', () => {
-    expect(makeChat().chatTarget).toBe('openrappter');
+  it('talks to Brainstem by default', () => {
+    expect(makeChat().chatTarget).toBe('brainstem');
   });
 
   it('sends the selected target on the wire', async () => {
@@ -106,33 +120,19 @@ describe('chat brain selector', () => {
     chat.sessionKey = 'session-1';
     chat.inputValue = 'who are you?';
 
-    const request = vi
-      .spyOn(gateway, 'request')
-      .mockResolvedValue({ runId: 'run-1', sessionKey: 'session-1', status: 'accepted' } as never);
+    const request = vi.spyOn(gateway, 'request');
 
     await chat.handleSend();
 
-    const [method, params] = request.mock.calls[0] as [string, Record<string, unknown>];
-    expect(method).toBe('chat.send');
-    // The whole feature is this parameter arriving; without it the brainstem
-    // selection is decorative and the local runtime answers instead.
-    expect(params.target).toBe('brainstem');
-    expect(params.message).toBe('who are you?');
+    expect(brainstem.ask).toHaveBeenCalledWith('who are you?', 'session-1');
+    expect(request.mock.calls.some(([method]) => method === 'chat.send')).toBe(false);
   });
 
-  it('sends the local runtime as the target when that is selected', async () => {
+  it('maps the removed OpenRappter target to Brainstem', () => {
     const chat = makeChat();
-    chat.sessionKey = 'session-1';
-    chat.inputValue = 'hello';
-
-    const request = vi
-      .spyOn(gateway, 'request')
-      .mockResolvedValue({ runId: 'run-1', sessionKey: 'session-1', status: 'accepted' } as never);
-
-    await chat.handleSend();
-
-    const [, params] = request.mock.calls[0] as [string, Record<string, unknown>];
-    expect(params.target).toBe('openrappter');
+    localStorage.setItem('openrappter.chat.target', 'openrappter');
+    chat.restoreChatTarget();
+    expect(chat.chatTarget).toBe('brainstem');
   });
 
   it('chats with the selected estate Twin instead of the local runtime', async () => {
@@ -413,7 +413,7 @@ describe('chat brain selector', () => {
     localStorage.setItem('openrappter.chat.target', 'something-else');
     const chat = makeChat();
     chat.restoreChatTarget();
-    expect(chat.chatTarget).toBe('openrappter');
+    expect(chat.chatTarget).toBe('brainstem');
   });
 
   it('ignores a change to an unknown target', () => {

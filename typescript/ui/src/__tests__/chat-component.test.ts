@@ -1,6 +1,24 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const brainstem = vi.hoisted(() => ({
+  probe: vi.fn(async () => ({
+    status: 'ready',
+    message: 'Brainstem ready.',
+    retryable: false,
+  })),
+  ask: vi.fn(async () => ({
+    response: 'Brainstem answer',
+    session_id: 'brainstem-session',
+    agent_logs: '',
+  })),
+}));
+vi.mock('../services/patient.js', () => ({
+  probeBrainstemTransport: brainstem.probe,
+  askBrainstem: brainstem.ask,
+}));
+
 import '../components/chat.js';
 import { gateway } from '../services/gateway.js';
 
@@ -38,6 +56,8 @@ describe('chat component terminal events', () => {
     document.body.replaceChildren();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    brainstem.probe.mockClear();
+    brainstem.ask.mockClear();
   });
 
   it('clears only the matching stream when aborted remotely or by supersession', () => {
@@ -276,24 +296,20 @@ describe('chat component terminal events', () => {
 
   it('fences a pending send response when the user switches sessions', async () => {
     let finishSend!: (value: {
-      runId: string;
-      sessionKey: string;
-      status: string;
+      response: string;
+      session_id: string;
+      agent_logs: string;
     }) => void;
     const send = new Promise<{
-      runId: string;
-      sessionKey: string;
-      status: string;
+      response: string;
+      session_id: string;
+      agent_logs: string;
     }>((resolve) => {
       finishSend = resolve;
     });
 
-    const request = vi.spyOn(gateway, 'request').mockImplementation(
-      async (method) => {
-        if (method === 'chat.send') return send;
-        return { aborted: true };
-      },
-    );
+    brainstem.ask.mockImplementationOnce(async () => send);
+    const request = vi.spyOn(gateway, 'request');
     vi.spyOn(gateway, 'call').mockResolvedValue([]);
     const chat = document.createElement('openrappter-chat') as TestChatElement;
     chat.sessionKey = 'session-1';
@@ -306,18 +322,18 @@ describe('chat component terminal events', () => {
     const sending = chat.handleSend();
     await Promise.resolve();
     const switching = chat.switchSession('session-2');
-    finishSend({ runId: 'run-1', sessionKey: 'session-1', status: 'started' });
+    finishSend({
+      response: 'late response',
+      session_id: 'session-1',
+      agent_logs: '',
+    });
     await sending;
     await switching;
 
     expect(chat.sessionKey).toBe('session-2');
     expect(chat.activeRunId).toBeNull();
     expect(chat.messages).toEqual([]);
-    expect(request).toHaveBeenCalledWith(
-      'chat.abort',
-      { runId: 'run-1' },
-      { timeoutMs: 5_000 },
-    );
+    expect(request.mock.calls.some(([method]) => method === 'chat.send')).toBe(false);
   });
 
   it('blocks a new send while a session transition is aborting', async () => {
@@ -359,5 +375,26 @@ describe('chat component terminal events', () => {
     finishAbort();
     await switching;
     expect(chat.sessionKey).toBe('session-2');
+  });
+
+  it('regression: default Grail chat always uses Brainstem POST /chat', async () => {
+    vi.spyOn(gateway, 'call').mockResolvedValue([]);
+    const rpc = vi.spyOn(gateway, 'request');
+    const chat = document.createElement('openrappter-chat') as TestChatElement;
+    chat.inputValue = 'hello brainstem';
+    chat.messages = [];
+    document.body.append(chat);
+    await settle(chat);
+
+    await chat.handleSend();
+
+    expect(brainstem.probe).toHaveBeenCalledOnce();
+    expect(brainstem.ask).toHaveBeenCalledWith('hello brainstem', undefined);
+    expect(rpc.mock.calls.some(([method]) => method === 'chat.send')).toBe(false);
+    expect(chat.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'Brainstem answer',
+      commitState: 'committed',
+    });
   });
 });

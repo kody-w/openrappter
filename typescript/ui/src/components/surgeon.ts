@@ -8,7 +8,26 @@ import {
   rejectProcedure,
   sendTurn as requestSurgeonTurn,
 } from '../services/surgeon.js';
-import { askPatient } from '../services/patient.js';
+import {
+  askPatient,
+  cancelPatientRequest,
+  getPatientTransportState,
+  probePatientTransport,
+  type PatientTransportState,
+} from '../services/patient.js';
+import {
+  beginCopilotSignIn,
+  cancelCopilotSignIn,
+  copilotActionsReady,
+  loadCopilotAuthState,
+  openCopilotVerification,
+  pollCopilotSignIn,
+  retryCopilotAuth,
+  retryCopilotModel,
+  selectCopilotModel,
+  type CopilotAuthState,
+  type CopilotLoginFlow,
+} from '../services/copilot-auth.js';
 import type {
   SurgeonCase,
   SurgeonOption,
@@ -403,6 +422,91 @@ export class OpenRappterSurgeon extends LitElement {
       flex: 0 0 auto;
     }
 
+    .mode-switcher {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--border, var(--line));
+      border-radius: 12px;
+      background: var(--bg-secondary, var(--theater-soft));
+    }
+
+    .tbtn {
+      appearance: none;
+      min-height: 40px;
+      padding: 8px 12px;
+      border: 2px solid var(--border, var(--line));
+      border-radius: 8px;
+      background: var(--bg-tertiary, #121a2d);
+      color: var(--text-primary, #f7f9ff);
+      font-weight: 750;
+      line-height: 1.2;
+      cursor: pointer;
+      text-shadow: none;
+    }
+
+    .tbtn[data-state='selected'] {
+      border-color: var(--accent, var(--cyan));
+      background: var(--accent, var(--cyan));
+      color: var(--accent-foreground, var(--theater));
+      box-shadow: inset 0 0 0 1px var(--accent-foreground, var(--theater));
+    }
+
+    .tbtn[data-state='unselected']:hover {
+      border-color: var(--accent-hover, var(--blue));
+      background: var(--bg-secondary, var(--theater-soft));
+      color: var(--text-primary, #f7f9ff);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .tbtn:focus-visible {
+      outline: 3px solid var(--accent-hover, var(--blue));
+      outline-offset: 3px;
+    }
+
+    .tbtn:disabled {
+      opacity: 1;
+      border-style: dashed;
+      border-color: var(--text-secondary, #94a0ba);
+      background:
+        repeating-linear-gradient(
+          -45deg,
+          var(--bg-secondary, var(--theater-soft)) 0 7px,
+          var(--bg-tertiary, #121a2d) 7px 14px
+        );
+      color: var(--text-primary, #f7f9ff);
+      cursor: not-allowed;
+    }
+
+    .tbtn[data-state='auth-unavailable'] {
+      border-style: double;
+      border-color: var(--error, var(--red));
+    }
+
+    .tbtn[data-state='model-unavailable'] {
+      border-style: dotted;
+      border-color: var(--warning, var(--amber));
+    }
+
+    .tbtn[data-state='transport-unavailable'] {
+      border-style: dashed;
+      border-color: var(--error, var(--red));
+      text-decoration: line-through;
+      text-decoration-thickness: 1px;
+    }
+
+    .tbtn[data-state='disabled'] {
+      border-style: dashed;
+    }
+
+    .mode-icon {
+      display: inline-block;
+      min-width: 1.25em;
+      margin-right: 4px;
+      font-weight: 900;
+    }
+
     .copilot {
       width: 38px;
       height: 38px;
@@ -436,6 +540,85 @@ export class OpenRappterSurgeon extends LitElement {
       font-weight: 700;
       letter-spacing: .08em;
       text-transform: uppercase;
+    }
+
+    .mode-status {
+      max-width: min(100%, 420px);
+      color: var(--text-primary, #f7f9ff);
+      background: var(--bg-tertiary, #121a2d);
+      border-color: var(--text-secondary, #94a0ba);
+      line-height: 1.45;
+      text-transform: none;
+    }
+
+    @media (prefers-color-scheme: light) {
+      .mode-switcher {
+        background: var(--bg-secondary, #f3f4f6);
+      }
+
+      .tbtn {
+        background: var(--bg-tertiary, #e5e7eb);
+        color: var(--text-primary, #111827);
+        border-color: var(--border, #4b5563);
+      }
+
+      .tbtn:disabled,
+      .mode-status {
+        color: var(--text-primary, #111827);
+        background: var(--bg-secondary, #f3f4f6);
+        border-color: var(--text-secondary, #4b5563);
+      }
+    }
+
+    @media (prefers-contrast: more) {
+      .mode-switcher,
+      .tbtn,
+      .mode-status {
+        border-width: 2px;
+      }
+
+      .tbtn[data-state='selected'] {
+        outline: 2px solid var(--text-primary, #f7f9ff);
+        outline-offset: 1px;
+      }
+    }
+
+    @media (forced-colors: active) {
+      .mode-switcher {
+        border: 2px solid ButtonText;
+        background: Canvas;
+        forced-color-adjust: auto;
+      }
+
+      .tbtn {
+        border: 2px solid ButtonText;
+        background: ButtonFace;
+        color: ButtonText;
+        forced-color-adjust: auto;
+      }
+
+      .tbtn[data-state='selected'] {
+        border-color: Highlight;
+        background: Highlight;
+        color: HighlightText;
+        box-shadow: none;
+      }
+
+      .tbtn:disabled {
+        border-color: GrayText;
+        background: Canvas;
+        color: GrayText;
+      }
+
+      .tbtn:focus-visible {
+        outline: 3px solid Highlight;
+      }
+
+      .mode-status {
+        border: 2px solid ButtonText;
+        background: Canvas;
+        color: CanvasText;
+      }
     }
 
     .transcript {
@@ -795,6 +978,54 @@ export class OpenRappterSurgeon extends LitElement {
       font-size: 10px;
     }
 
+    .auth-banner {
+      max-width: 780px;
+      margin: 0 auto 15px;
+      padding: 14px;
+      border: 1px solid rgba(111,168,255,.3);
+      border-radius: 12px;
+      background: rgba(8,16,34,.92);
+      color: #dbe7ff;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .auth-banner b, .auth-banner span { display: block; }
+    .auth-banner span { color: #9eabc5; margin: 3px 0 10px; }
+    .auth-banner button { margin-right: 8px; }
+
+    .auth-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      background: rgba(0,0,0,.7);
+    }
+
+    .auth-dialog {
+      width: min(420px, calc(100vw - 32px));
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #0b1020;
+      text-align: center;
+    }
+
+    .device-code {
+      margin: 16px 0;
+      padding: 12px;
+      border: 1px dashed var(--blue);
+      border-radius: 8px;
+      color: var(--cyan);
+      font: 700 24px ui-monospace, monospace;
+      letter-spacing: .16em;
+      user-select: all;
+    }
+
+    .auth-dialog a { color: var(--cyan); }
+    .auth-dialog .actions { margin-top: 18px; }
+
     .composer-wrap {
       padding: 16px clamp(20px, 3vw, 38px) 22px;
       border-top: 1px solid var(--line);
@@ -988,6 +1219,20 @@ export class OpenRappterSurgeon extends LitElement {
   @state() private mode: 'surgeon' | 'patient' = 'surgeon';
   @state() private patientTurns: Array<{ q: string; a: string; model?: string }> = [];
   @state() private patientSession = '';
+  @state() private patientTransport: PatientTransportState = {
+    status: 'checking',
+    message: 'Checking gateway health on the patient chat transport…',
+    retryable: false,
+  };
+  @state() private copilotAuth: CopilotAuthState = {
+    status: 'checking',
+    code: 'COPILOT_AUTH_CHECKING',
+    message: 'Verifying GitHub Copilot access…',
+    retryable: false,
+  };
+  @state() private loginFlow: CopilotLoginFlow | null = null;
+  @state() private modelChoice = '';
+  private authPollTimer: ReturnType<typeof setTimeout> | null = null;
 
   private readonly starterOptions: SurgeonOption[] = [
     {
@@ -1013,11 +1258,22 @@ export class OpenRappterSurgeon extends LitElement {
     void this.hydrate();
   }
 
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    if (this.authPollTimer) clearTimeout(this.authPollTimer);
+    cancelPatientRequest();
+  }
+
   private async hydrate(): Promise<void> {
     try {
-      const [patient, cases] = await Promise.all([loadPatient(), loadCases()]);
+      const [patient, cases, copilotAuth] = await Promise.all([
+        loadPatient(),
+        loadCases(),
+        loadCopilotAuthState(),
+      ]);
       this.patient = patient;
       this.patientCase = cases[0] ?? null;
+      this.copilotAuth = copilotAuth;
       this.error = null;
     } catch (error) {
       this.error = (error as Error).message;
@@ -1042,7 +1298,7 @@ export class OpenRappterSurgeon extends LitElement {
   /** Ask the patient directly, over the same public /chat wire a neighbor uses. */
   private async askThePatient(value: string): Promise<void> {
     const q = value.trim();
-    if (!q || this.busy) return;
+    if (!q || this.busy || !this.patientModeReady()) return;
     this.busy = true;
     this.error = null;
     this.input = '';
@@ -1056,6 +1312,8 @@ export class OpenRappterSurgeon extends LitElement {
       if (t) t.scrollTo({ top: t.scrollHeight, behavior: 'smooth' });
     } catch (error) {
       this.error = (error as Error).message;
+      this.patientTransport = getPatientTransportState();
+      this.copilotAuth = await loadCopilotAuthState();
     } finally {
       this.busy = false;
     }
@@ -1064,7 +1322,7 @@ export class OpenRappterSurgeon extends LitElement {
   private async sendTurn(value = this.input): Promise<void> {
     if (this.mode === 'patient') return this.askThePatient(value);
     const userInput = value.trim();
-    if (!userInput || this.busy) return;
+    if (!userInput || this.busy || !this.actionsReady()) return;
     this.busy = true;
     this.error = null;
     this.input = '';
@@ -1081,9 +1339,267 @@ export class OpenRappterSurgeon extends LitElement {
       });
     } catch (error) {
       this.error = (error as Error).message;
+      this.copilotAuth = await loadCopilotAuthState();
     } finally {
       this.busy = false;
     }
+  }
+
+  private async startCopilotSignIn(): Promise<void> {
+      if (this.loginFlow) return;
+      try {
+        this.error = null;
+        this.loginFlow = await beginCopilotSignIn();
+        this.scheduleAuthPoll();
+      } catch {
+        this.copilotAuth = await loadCopilotAuthState();
+        this.error = 'Could not launch GitHub sign-in. Check the connection and try again.';
+      }
+  }
+
+  private scheduleAuthPoll(): void {
+      if (!this.loginFlow || this.authPollTimer) return;
+      this.authPollTimer = setTimeout(async () => {
+        this.authPollTimer = null;
+        if (!this.loginFlow) return;
+        try {
+          const result = await pollCopilotSignIn(this.loginFlow);
+          this.copilotAuth = result.auth;
+          if (result.status === 'pending') {
+            this.scheduleAuthPoll();
+          } else {
+            this.loginFlow = null;
+            if (result.status === 'error') this.error = result.error ?? result.auth.message;
+          }
+        } catch {
+          this.copilotAuth = await loadCopilotAuthState();
+          this.scheduleAuthPoll();
+        }
+      }, 1000);
+  }
+
+  private async cancelSignIn(): Promise<void> {
+      if (!this.loginFlow) return;
+      const flow = this.loginFlow;
+      this.loginFlow = null;
+      if (this.authPollTimer) clearTimeout(this.authPollTimer);
+      this.authPollTimer = null;
+      await cancelCopilotSignIn(flow).catch(() => undefined);
+      this.copilotAuth = await loadCopilotAuthState();
+  }
+
+  private renderCopilotAuth(): unknown {
+      if (this.actionsReady()) return nothing;
+      if (this.copilotAuth.status === 'ready' && this.copilotAuth.model) {
+        return this.renderCopilotModel();
+      }
+
+      const signIn = this.copilotAuth.action === 'sign-in'
+        || this.copilotAuth.status === 'needs-sign-in'
+        || this.copilotAuth.status === 'no-entitlement';
+      return html`
+        <div class="auth-banner" role="status" data-auth-status=${this.copilotAuth.status}>
+          <b>Copilot unavailable</b>
+          <span>${this.copilotAuth.message}</span>
+          ${signIn ? html`
+            <button @click=${this.startCopilotSignIn}>Sign in with GitHub Copilot</button>
+          ` : html`
+            <button @click=${async () => {
+              this.copilotAuth = await retryCopilotAuth();
+            }}>Retry Copilot</button>
+          `}
+          <button @click=${() => this.navigate('presence')}>
+            View local health
+          </button>
+        </div>
+      `;
+  }
+
+  private renderPatientTransport(): unknown {
+    if (
+      this.patientTransport.status === 'ready'
+      || this.patientTransport.status === 'checking'
+    ) return nothing;
+    return html`
+      <div class="auth-banner patient-transport-banner" role="status">
+        <b>Patient chat unavailable</b>
+        <span>${this.patientTransport.message}</span>
+        <button @click=${async () => {
+          this.patientTransport = await probePatientTransport(true);
+        }}>Retry public chat</button>
+        <button @click=${() => this.navigate('presence')}>View local health</button>
+      </div>
+    `;
+  }
+
+  private actionsReady(): boolean {
+    return copilotActionsReady(this.copilotAuth);
+  }
+
+  private modeState(mode: 'surgeon' | 'patient'): string {
+    if (this.busy) return 'disabled';
+    if (this.copilotAuth.status !== 'ready') return 'auth-unavailable';
+    if (this.copilotAuth.model?.status !== 'ready') {
+      return 'model-unavailable';
+    }
+    if (mode === 'patient' && this.patientTransport.status !== 'ready') {
+      return 'transport-unavailable';
+    }
+    return this.mode === mode ? 'selected' : 'unselected';
+  }
+
+  private modeUnavailableReason(
+    mode: 'surgeon' | 'patient' = this.mode,
+  ): string {
+    if (this.busy) return 'A request is currently in progress.';
+    if (this.copilotAuth.status !== 'ready') return this.copilotAuth.message;
+    if (this.copilotAuth.model?.status !== 'ready') {
+      return this.copilotAuth.model?.message
+        ?? 'Choose a supported Copilot model to continue.';
+    }
+    if (mode === 'patient' && this.patientTransport.status !== 'ready') {
+      return this.patientTransport.message;
+    }
+    return '';
+  }
+
+  private patientModeReady(): boolean {
+    return this.actionsReady() && this.patientTransport.status === 'ready';
+  }
+
+  private modeReady(mode: 'surgeon' | 'patient'): boolean {
+    return mode === 'surgeon' ? this.actionsReady() : this.patientModeReady();
+  }
+
+  private modeStatusText(): string {
+    const selected = this.mode === 'patient' ? 'Patient mode' : 'Surgeon mode';
+    const reason = this.modeUnavailableReason(this.mode);
+    const activity = this.mode === 'patient'
+      ? (this.patientTransport.status === 'ready'
+        ? (this.patientSession ? 'conversation active' : 'public chat ready')
+        : this.patientTransport.message)
+      : (this.patientCase?.status.replace('_', ' ') ?? 'observing');
+    return `Observing: ${selected} — ${reason || activity}`;
+  }
+
+  private async selectMode(
+    mode: 'surgeon' | 'patient',
+    focus = false,
+  ): Promise<void> {
+    if (!this.modeReady(mode) || this.busy) return;
+    this.mode = mode;
+    this.error = null;
+    await this.updateComplete;
+    if (focus) {
+      this.shadowRoot
+        ?.querySelector<HTMLButtonElement>(`[data-mode="${mode}"]`)
+        ?.focus();
+    }
+  }
+
+  private onModeKeydown(event: KeyboardEvent): void {
+    if (!this.actionsReady() || this.busy) return;
+    if (event.key === ' ' || event.key === 'Enter') {
+      const mode = (event.target as HTMLElement).dataset.mode;
+      if (mode === 'surgeon' || mode === 'patient') {
+        event.preventDefault();
+        void this.selectMode(mode, true);
+      }
+      return;
+    }
+    if (
+      event.key === 'ArrowLeft'
+      || event.key === 'ArrowUp'
+      || event.key === 'ArrowRight'
+      || event.key === 'ArrowDown'
+    ) {
+      event.preventDefault();
+      const next = this.mode === 'surgeon' ? 'patient' : 'surgeon';
+      void this.selectMode(next, true);
+    }
+  }
+
+  private async chooseModel(model: string): Promise<void> {
+    if (!model || this.busy) return;
+    this.busy = true;
+    this.error = null;
+    try {
+      const selected = await selectCopilotModel(model);
+      this.copilotAuth = { ...this.copilotAuth, model: selected };
+      this.modelChoice = selected.selectedModel ?? '';
+    } catch (error) {
+      this.error = (error as Error).message;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private renderCopilotModel(): unknown {
+    const model = this.copilotAuth.model!;
+    const choice = (
+      model.availableModels.includes(this.modelChoice)
+        ? this.modelChoice
+        : ''
+    ) || model.recommendedModel
+      || model.availableModels[0] || '';
+    return html`
+      <div class="auth-banner model-resolution" role="status"
+        data-model-status=${model.status}>
+        <b>Copilot model unavailable</b>
+        <span>${model.message}</span>
+        ${model.configuredModel ? html`
+          <span>Current model: <code>${model.configuredModel}</code></span>
+        ` : nothing}
+        ${model.availableModels.length > 0 ? html`
+          <select aria-label="Verified available Copilot models"
+            .value=${choice}
+            @change=${(event: Event) => {
+              this.modelChoice = (event.target as HTMLSelectElement).value;
+            }}>
+            ${model.availableModels.map((available) => html`
+              <option value=${available}>${available}</option>
+            `)}
+          </select>
+          <button ?disabled=${!choice || this.busy}
+            @click=${() => this.chooseModel(choice)}>Use selected model</button>
+          ${model.recommendedModel ? html`
+            <button ?disabled=${this.busy}
+              @click=${() => this.chooseModel(model.recommendedModel!)}>
+              Use recommended model
+            </button>
+          ` : nothing}
+        ` : html`
+          <button ?disabled=${this.busy} @click=${async () => {
+            const refreshed = await retryCopilotModel();
+            this.copilotAuth = { ...this.copilotAuth, model: refreshed };
+          }}>Retry model catalog</button>
+        `}
+        <button @click=${() => this.navigate('presence')}>View local health</button>
+      </div>
+    `;
+  }
+
+  private renderLoginDialog(): unknown {
+      if (!this.loginFlow) return nothing;
+      return html`
+        <div class="auth-overlay" role="presentation">
+          <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="copilot-login-title">
+            <h3 id="copilot-login-title">Sign in with GitHub Copilot</h3>
+            <p>Use the Copilot-enabled GitHub account you want OpenRappter to verify.</p>
+            <div class="device-code">${this.loginFlow.userCode}</div>
+            <button @click=${() => {
+              if (!this.loginFlow) return;
+              void openCopilotVerification(this.loginFlow).catch((error) => {
+                this.error = (error as Error).message;
+              });
+            }}>Open GitHub sign-in</button>
+            <p>Waiting for GitHub authorization and Copilot entitlement verification…</p>
+            <div class="actions">
+              <button @click=${this.cancelSignIn}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      `;
   }
 
   private onComposerKeydown(event: KeyboardEvent): void {
@@ -1094,7 +1610,11 @@ export class OpenRappterSurgeon extends LitElement {
   }
 
   private async approve(procedure: SurgeonProcedure): Promise<void> {
-    if (!this.patientCase || this.busy) return;
+    if (
+      !this.patientCase
+      || this.busy
+      || !this.actionsReady()
+    ) return;
     this.busy = true;
     this.error = null;
     try {
@@ -1124,7 +1644,11 @@ export class OpenRappterSurgeon extends LitElement {
   }
 
   private async startOperation(procedure: SurgeonProcedure): Promise<void> {
-    if (!this.patientCase || this.busy) return;
+    if (
+      !this.patientCase
+      || this.busy
+      || !this.actionsReady()
+    ) return;
     this.busy = true;
     this.error = null;
     try {
@@ -1189,12 +1713,13 @@ export class OpenRappterSurgeon extends LitElement {
   }
 
   private renderTurn(userInput: string, turn: SurgeonTurn): unknown {
+    const cached = !this.actionsReady();
     return html`
       <section class="exchange">
         <div class="user-line">${userInput}</div>
         <article class="surgeon-line ${turn.kind === 'error' ? 'error' : ''}">
           <div class="turn-meta">
-            <span>Copilot surgeon</span>
+            <span>${cached ? 'Cached Copilot consultation' : 'Copilot surgeon'}</span>
             <span>·</span>
             <span>${turn.kind}</span>
           </div>
@@ -1213,7 +1738,7 @@ export class OpenRappterSurgeon extends LitElement {
               ${turn.options.map(option => html`
                 <button
                   class="portal"
-                  ?disabled=${this.busy}
+                  ?disabled=${this.busy || !this.actionsReady()}
                   @click=${() => this.sendTurn(option.value)}
                 >
                   <span>${option.label}</span>
@@ -1266,12 +1791,16 @@ export class OpenRappterSurgeon extends LitElement {
           <div class="procedure-actions">
             <button
               class="primary"
-              ?disabled=${this.busy || !highRiskReady}
+              ?disabled=${this.busy || !highRiskReady || !this.actionsReady()}
+              title=${this.actionsReady()
+                ? 'Approve this exact procedure'
+                : this.copilotAuth.message}
               @click=${() => this.approve(current)}
             >Approve exact procedure</button>
             <button
               class="danger"
               ?disabled=${this.busy}
+              title="Reject this procedure without contacting Copilot"
               @click=${() => this.reject(current)}
             >Reject</button>
           </div>
@@ -1279,7 +1808,10 @@ export class OpenRappterSurgeon extends LitElement {
           <div class="procedure-actions">
             <button
               class="primary"
-              ?disabled=${this.busy}
+              ?disabled=${this.busy || !this.actionsReady()}
+              title=${this.actionsReady()
+                ? 'Start the approved operation'
+                : this.copilotAuth.message}
               @click=${() => this.startOperation(current)}
             >Start approved operation</button>
           </div>
@@ -1315,6 +1847,21 @@ export class OpenRappterSurgeon extends LitElement {
   }
 
   private renderPatientTranscript(): unknown {
+    if (this.patientTransport.status !== 'ready') {
+      return html`
+        <div class="welcome patient-transport" role="status">
+          <span class="eyebrow">Public chat · ${this.patientTransport.status}</span>
+          <h2>Patient chat is not ready.</h2>
+          <p>${this.patientTransport.message}</p>
+          ${this.patientTransport.retryable ? html`
+            <button @click=${async () => {
+              this.patientTransport = await probePatientTransport(true);
+            }}>Retry public chat</button>
+          ` : nothing}
+          <button @click=${() => this.navigate('presence')}>View local health</button>
+        </div>
+      `;
+    }
     if (this.patientTurns.length === 0) {
       return html`
         <div class="welcome">
@@ -1323,7 +1870,8 @@ export class OpenRappterSurgeon extends LitElement {
           <p>
             This goes over <code>POST /chat</code> — the same public wire a
             brainstem or any neighbor would use, not a private back channel.
-            Copilot is not in this conversation.
+            This uses the configured AI backend. For deterministic local health,
+            open Anatomy instead.
           </p>
           <div class="starter-portals">
             ${[
@@ -1364,7 +1912,10 @@ export class OpenRappterSurgeon extends LitElement {
             ${this.starterOptions.map(option => html`
               <button
                 class="portal"
-                ?disabled=${this.busy}
+                ?disabled=${this.busy || !this.actionsReady()}
+                title=${this.actionsReady()
+                  ? option.label
+                  : this.copilotAuth.message}
                 @click=${() => this.sendTurn(option.value)}
               >
                 <span>${option.label}</span>
@@ -1380,13 +1931,6 @@ export class OpenRappterSurgeon extends LitElement {
       ${turns.map(entry => this.renderTurn(entry.userInput, entry.turn))}
       ${this.renderOutcome()}
     `;
-  }
-
-  private errorNeedsAuthentication(): boolean {
-    const message = this.error?.toLowerCase() ?? '';
-    return message.includes('not authenticated')
-      || message.includes('copilot token')
-      || message.includes('authentication required');
   }
 
   render(): unknown {
@@ -1417,12 +1961,16 @@ export class OpenRappterSurgeon extends LitElement {
               class="quiet-button"
               @click=${() => this.navigate('presence')}
             >⌁ Open anatomy</button>
+            <button
+              class="quiet-button"
+              @click=${() => this.navigate('chat')}
+            >🧠 Open Brainstem Chat</button>
           </div>
         </header>
 
         <main class="operating-room">
           <section class="patient-wing">
-            <span class="eyebrow">Living local system</span>
+            <span class="eyebrow">Legacy patient interface · status only</span>
             <h1>OpenRappter is the patient.</h1>
             <p class="premise">
               <strong>Copilot is the surgeon.</strong>
@@ -1439,39 +1987,24 @@ export class OpenRappterSurgeon extends LitElement {
               <div class="surgeon-title">
                 <b>${this.mode === 'patient' ? 'OpenRappter' : 'GitHub Copilot'}</b>
                 <span>${this.mode === 'patient'
-                  ? 'the patient, answering for itself · over POST /chat'
+                  ? 'agent chat through the configured AI backend · POST /chat'
                   : 'Brain surgeon · adaptive agent mode'}</span>
               </div>
-              <div class="toolbar" role="group" aria-label="Who you are talking to">
-                <button
-                  class="tbtn${this.mode === 'surgeon' ? ' on' : ''}"
-                  aria-pressed=${this.mode === 'surgeon'}
-                  ?disabled=${this.busy}
-                  @click=${() => { this.mode = 'surgeon'; this.error = null; }}
-                >⌘ Surgeon</button>
-                <button
-                  class="tbtn${this.mode === 'patient' ? ' on' : ''}"
-                  aria-pressed=${this.mode === 'patient'}
-                  ?disabled=${this.busy}
-                  @click=${() => { this.mode = 'patient'; this.error = null; }}
-                >🦖 Patient</button>
-              </div>
-              <span class="case-status">
-                ${this.mode === 'patient'
-                  ? (this.patientSession ? 'in conversation' : 'ready')
-                  : (this.patientCase?.status.replace('_', ' ') ?? 'ready')}
+              <span
+                class="case-status mode-status"
+                id="copilot-mode-status"
+                role="status"
+                aria-live="polite"
+              >
+                ${this.modeStatusText()}
               </span>
             </header>
 
             <div class="transcript">
+              ${this.renderCopilotAuth()}
               ${this.error ? html`
                 <div class="error-banner">
                   ${this.error}
-                  ${this.errorNeedsAuthentication() ? html`
-                    <button @click=${() => this.navigate('accounts')}>
-                      Connect GitHub
-                    </button>
-                  ` : nothing}
                 </div>
               ` : nothing}
               ${this.renderTranscript()}
@@ -1491,7 +2024,7 @@ export class OpenRappterSurgeon extends LitElement {
                     ? 'Ask OpenRappter itself…'
                     : 'Describe what OpenRappter needs…'}
                   .value=${this.input}
-                  ?disabled=${this.busy}
+                  ?disabled=${this.busy || !this.actionsReady()}
                   @input=${(event: Event) => {
                     this.input = (event.target as HTMLTextAreaElement).value;
                   }}
@@ -1500,14 +2033,15 @@ export class OpenRappterSurgeon extends LitElement {
                 <button
                   class="send"
                   aria-label=${this.mode === 'patient' ? 'Send to OpenRappter' : 'Send to Copilot surgeon'}
-                  ?disabled=${this.busy || !this.input.trim()}
+                  ?disabled=${this.busy || !this.input.trim()
+                    || !this.actionsReady()}
                   @click=${() => this.sendTurn()}
                 >↑</button>
               </div>
               <div class="composer-note">
                 ${this.mode === 'patient' ? html`
                   <span>Straight to the agent over <code>POST /chat</code> — the same wire a neighbor uses.</span>
-                  <span>Copilot is not in this conversation.</span>
+                  <span>This may use the configured Copilot backend.</span>
                 ` : html`
                   <span>Copilot shapes the next interface from this turn.</span>
                   <span>Mutations require explicit approval.</span>
@@ -1516,6 +2050,7 @@ export class OpenRappterSurgeon extends LitElement {
             </footer>
           </section>
         </main>
+        ${this.renderLoginDialog()}
       </div>
     `;
   }

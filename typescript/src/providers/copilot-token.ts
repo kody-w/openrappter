@@ -37,6 +37,36 @@ export interface ResolvedCopilotToken {
   baseUrl: string;
 }
 
+export type CopilotTokenErrorReason =
+  | 'http-401'
+  | 'http-403'
+  | 'expired-token'
+  | 'no-entitlement'
+  | 'offline'
+  | 'exchange-error';
+
+export class CopilotTokenError extends Error {
+  constructor(
+    readonly reason: CopilotTokenErrorReason,
+    readonly status?: number,
+  ) {
+    super(
+      reason === 'expired-token'
+        ? 'GitHub authentication expired or was revoked.'
+        : reason === 'http-401'
+          ? 'GitHub rejected the Copilot credential.'
+          : reason === 'http-403'
+            ? 'GitHub forbids Copilot access for this credential.'
+        : reason === 'no-entitlement'
+          ? 'The GitHub account does not have Copilot API access.'
+          : reason === 'offline'
+            ? 'GitHub Copilot is unavailable while offline.'
+            : 'GitHub Copilot token exchange failed.',
+    );
+    this.name = 'CopilotTokenError';
+  }
+}
+
 // ── Token cache ──────────────────────────────────────────────────────────────
 
 function getDefaultCachePath(): string {
@@ -200,27 +230,46 @@ export async function resolveCopilotApiToken(params: {
   // 2. Exchange token — editor headers required for Enterprise/Business Copilot.
   // Match the User-Agent/Editor-Plugin-Version that RAPP brainstem uses
   // (known-good against Copilot Enterprise tenants).
-  const res = await fetchImpl(COPILOT_TOKEN_URL, {
-    method: 'GET',
-    headers: {
-      'Accept': 'application/json',
-      'Authorization': authHeaderForGithubToken(params.githubToken),
-      'Editor-Version': 'vscode/1.95.0',
-      'Editor-Plugin-Version': 'copilot/1.0.0',
-      'User-Agent': 'GitHubCopilotChat/0.22.2024',
-    },
-    signal: params.signal,
-  });
+  let res: Response;
+  try {
+    res = await fetchImpl(COPILOT_TOKEN_URL, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': authHeaderForGithubToken(params.githubToken),
+        'Editor-Version': 'vscode/1.95.0',
+        'Editor-Plugin-Version': 'copilot/1.0.0',
+        'User-Agent': 'GitHubCopilotChat/0.22.2024',
+      },
+      signal: params.signal,
+    });
+  } catch (error) {
+    if (params.signal?.aborted) throw error;
+    throw new CopilotTokenError('offline');
+  }
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    if (res.status === 404 || res.status === 401 || res.status === 403) {
-      throw new Error(
-        `GitHub token does not have Copilot API access (HTTP ${res.status}). ` +
-        `Sign in with a GitHub account that has Copilot enabled.`
+    const responseHint = await res.text().catch(() => '');
+    if (res.status === 401) {
+      throw new CopilotTokenError(
+        /expired|revoked|bad credentials/i.test(responseHint)
+          ? 'expired-token'
+          : 'http-401',
+        res.status,
       );
     }
-    throw new Error(`Copilot token exchange failed: HTTP ${res.status}${body ? ` — ${body}` : ''}`);
+    if (res.status === 403) {
+      throw new CopilotTokenError(
+        /copilot|entitlement|subscription|license/i.test(responseHint)
+          ? 'no-entitlement'
+          : 'http-403',
+        res.status,
+      );
+    }
+    if (res.status === 404) {
+      throw new CopilotTokenError('no-entitlement', res.status);
+    }
+    throw new CopilotTokenError('exchange-error', res.status);
   }
 
   const parsed = parseCopilotTokenResponse(await res.json());

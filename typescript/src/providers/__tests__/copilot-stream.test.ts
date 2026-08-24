@@ -231,6 +231,6 @@ describe('CopilotProvider.chatStream', () => {
       for await (const _ of provider.chatStream([{ role: 'user', content: 'hi' }])) {
         // should not reach here
       }
-    }).rejects.toThrow('Copilot API error: HTTP 500');
+    }).rejects.toThrow('Copilot API request failed (HTTP 500).');
   });
 });

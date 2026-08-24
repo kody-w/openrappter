@@ -12,6 +12,12 @@ vi.mock('../../providers/copilot-token.js', () => ({
     return { token: 'copilot-token', expiresAt: Date.now() + 60_000 };
   }),
 }));
+vi.mock('../../auth/github-identity.js', () => ({
+  resolveVerifiedGitHubIdentity: vi.fn(async (token: string) => ({
+    id: 1,
+    login: token === 'mismatched-token' ? 'different-user' : 'verified-user',
+  })),
+}));
 vi.mock('util', async (importOriginal) => {
   const actual = await importOriginal<typeof import('util')>();
   return {
@@ -148,6 +154,58 @@ describe('resolveGithubToken', () => {
       throw new Error(`Unexpected read: ${String(filePath)} ${String(args)}`);
     });
 
+    expect(await resolveGithubToken()).toBeNull();
+  });
+
+  it('does not resurrect an unverified non-default desktop profile', async () => {
+    process.env.OPENRAPPTER_DESKTOP_OWNER_PID = '1234';
+    vi.mocked(fs.existsSync).mockImplementation((filePath) =>
+      String(filePath).includes('auth-profiles.json')
+    );
+    vi.mocked(fs.readFileSync).mockImplementation((filePath, ...args) => {
+      if (String(filePath).includes('auth-profiles.json')) {
+        return JSON.stringify([{
+          id: 'failed-replacement',
+          provider: 'copilot',
+          token: 'must-not-be-reactivated',
+          default: false,
+        }]);
+      }
+      throw new Error(`Unexpected read: ${String(filePath)} ${String(args)}`);
+    });
+
+    expect(await resolveGithubToken()).toBeNull();
+  });
+
+  it('requires the stored desktop profile id to match verified GitHub identity', async () => {
+    process.env.OPENRAPPTER_DESKTOP_OWNER_PID = '1234';
+    vi.mocked(fs.existsSync).mockImplementation((filePath) =>
+      String(filePath).includes('auth-profiles.json')
+    );
+    vi.mocked(fs.readFileSync).mockImplementation((filePath, ...args) => {
+      if (String(filePath).includes('auth-profiles.json')) {
+        return JSON.stringify([{
+          id: 'verified-user',
+          provider: 'copilot',
+          token: 'verified-token',
+          default: true,
+        }]);
+      }
+      throw new Error(`Unexpected read: ${String(filePath)} ${String(args)}`);
+    });
+    expect(await resolveGithubToken()).toBe('verified-token');
+
+    vi.mocked(fs.readFileSync).mockImplementation((filePath, ...args) => {
+      if (String(filePath).includes('auth-profiles.json')) {
+        return JSON.stringify([{
+          id: 'verified-user',
+          provider: 'copilot',
+          token: 'mismatched-token',
+          default: true,
+        }]);
+      }
+      throw new Error(`Unexpected read: ${String(filePath)} ${String(args)}`);
+    });
     expect(await resolveGithubToken()).toBeNull();
   });
 });

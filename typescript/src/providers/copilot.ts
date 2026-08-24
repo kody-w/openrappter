@@ -20,8 +20,10 @@ import type {
 import {
   resolveCopilotApiToken,
   clearCachedCopilotToken,
+  CopilotTokenError,
   type ResolvedCopilotToken,
 } from "./copilot-token.js";
+import { CopilotModelNotSupportedError } from "../auth/copilot-model-state.js";
 
 // ── Default models ───────────────────────────────────────────────────────────
 
@@ -155,13 +157,36 @@ export class CopilotProvider implements LLMProvider {
   private githubToken: string | null = null;
   private resolvedToken: ResolvedCopilotToken | null = null;
   private allowAmbientCredentials: boolean;
+  private readonly resolveToken: typeof resolveCopilotApiToken;
+  private readonly clearTokenCache: () => void;
+  private modelNotSupportedHandler?: (
+    model: string,
+  ) => Promise<string | null>;
+  private readonly pendingRequests = new Set<AbortController>();
 
   constructor(options?: {
     githubToken?: string;
     allowAmbientCredentials?: boolean;
+    /** Test/embedding seam; production uses the shared credential cache. */
+    tokenResolver?: typeof resolveCopilotApiToken;
+    /** Test/embedding seam paired with tokenResolver. */
+    clearTokenCache?: () => void;
   }) {
     this.githubToken = options?.githubToken ?? null;
     this.allowAmbientCredentials = options?.allowAmbientCredentials ?? true;
+    this.resolveToken = options?.tokenResolver ?? resolveCopilotApiToken;
+    this.clearTokenCache = options?.clearTokenCache ?? clearCachedCopilotToken;
+  }
+
+  setModelNotSupportedHandler(
+    handler: (model: string) => Promise<string | null>,
+  ): void {
+    this.modelNotSupportedHandler = handler;
+  }
+
+  cancelPendingRequests(): void {
+    for (const controller of this.pendingRequests) controller.abort();
+    this.pendingRequests.clear();
   }
 
   /**
@@ -194,7 +219,7 @@ export class CopilotProvider implements LLMProvider {
   /** Invalidate the cached Copilot API token so the next call re-exchanges */
   invalidateToken(): void {
     this.resolvedToken = null;
-    clearCachedCopilotToken();
+    this.clearTokenCache();
   }
 
   /** Get a valid Copilot API token, exchanging if needed */
@@ -214,7 +239,7 @@ export class CopilotProvider implements LLMProvider {
       );
     }
 
-    this.resolvedToken = await resolveCopilotApiToken({ githubToken });
+    this.resolvedToken = await this.resolveToken({ githubToken });
     return this.resolvedToken;
   }
 
@@ -288,21 +313,31 @@ export class CopilotProvider implements LLMProvider {
 
     const url = `${baseUrl}/chat/completions`;
 
-    const res = await this.fetchWithRateRetry(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-        "Editor-Version": "vscode/1.95.0",
-        "User-Agent": "GitHubCopilotChat/0.22.2024",
-        "Copilot-Integration-Id": "vscode-chat",
-      },
-      body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    options?.signal?.addEventListener('abort', abort, { once: true });
+    this.pendingRequests.add(controller);
+    let res: Response;
+    try {
+      res = await this.fetchWithRateRetry(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Editor-Version": "vscode/1.95.0",
+          "User-Agent": "GitHubCopilotChat/0.22.2024",
+          "Copilot-Integration-Id": "vscode-chat",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } finally {
+      this.pendingRequests.delete(controller);
+      options?.signal?.removeEventListener('abort', abort);
+    }
 
     if (!res.ok) {
-      const errBody = await res.text().catch(() => "");
       // On auth errors, invalidate the cached Copilot token and retry once.
       // The GitHub token may still be valid — just the short-lived Copilot API
       // token expired or was revoked server-side.
@@ -313,9 +348,26 @@ export class CopilotProvider implements LLMProvider {
           _isRetry: true,
         } as ChatOptions);
       }
-      throw new Error(
-        `Copilot API error: HTTP ${res.status}${errBody ? ` — ${errBody}` : ""}`,
-      );
+      if (res.status === 401) {
+        throw new CopilotTokenError("expired-token", res.status);
+      }
+      if (res.status === 403) {
+        throw new CopilotTokenError("no-entitlement", res.status);
+      }
+      if (res.status === 400 && await responseIsModelNotSupported(res)) {
+        if (!options?._isModelRetry && this.modelNotSupportedHandler) {
+          const replacement = await this.modelNotSupportedHandler(model);
+          if (replacement && replacement !== model) {
+            return this.chat(messages, {
+              ...options,
+              model: replacement,
+              _isModelRetry: true,
+            });
+          }
+        }
+        throw new CopilotModelNotSupportedError(model);
+      }
+      throw new Error(`Copilot API request failed (HTTP ${res.status}).`);
     }
 
     const data = (await res.json()) as OpenAIChatResponse;
@@ -397,7 +449,6 @@ export class CopilotProvider implements LLMProvider {
     });
 
     if (!res.ok) {
-      const errBody = await res.text().catch(() => "");
       if ((res.status === 401 || res.status === 403) && !options?._isRetry) {
         this.invalidateToken();
         yield* this.chatStream(messages, {
@@ -406,9 +457,27 @@ export class CopilotProvider implements LLMProvider {
         } as ChatOptions);
         return;
       }
-      throw new Error(
-        `Copilot API error: HTTP ${res.status}${errBody ? ` — ${errBody}` : ""}`,
-      );
+      if (res.status === 401) {
+        throw new CopilotTokenError("expired-token", res.status);
+      }
+      if (res.status === 403) {
+        throw new CopilotTokenError("no-entitlement", res.status);
+      }
+      if (res.status === 400 && await responseIsModelNotSupported(res)) {
+        if (!options?._isModelRetry && this.modelNotSupportedHandler) {
+          const replacement = await this.modelNotSupportedHandler(model);
+          if (replacement && replacement !== model) {
+            yield* this.chatStream(messages, {
+              ...options,
+              model: replacement,
+              _isModelRetry: true,
+            });
+            return;
+          }
+        }
+        throw new CopilotModelNotSupportedError(model);
+      }
+      throw new Error(`Copilot API request failed (HTTP ${res.status}).`);
     }
 
     if (!res.body) {
@@ -489,4 +558,26 @@ export function createCopilotProvider(options?: {
   githubToken?: string;
 }): LLMProvider {
   return new CopilotProvider(options);
+}
+
+async function responseIsModelNotSupported(
+  response: Response,
+): Promise<boolean> {
+  const text = (await response.text().catch(() => '')).slice(0, 16_384);
+  try {
+    const value = JSON.parse(text) as Record<string, unknown>;
+    const error = value.error;
+    const candidates = [
+      value.code,
+      typeof error === 'object' && error
+        ? (error as Record<string, unknown>).code
+        : undefined,
+      typeof error === 'object' && error
+        ? (error as Record<string, unknown>).type
+        : undefined,
+    ];
+    return candidates.some((candidate) => candidate === 'model_not_supported');
+  } catch {
+    return /\bmodel_not_supported\b/i.test(text);
+  }
 }

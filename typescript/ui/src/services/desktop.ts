@@ -15,6 +15,16 @@ export interface OpenRappterDesktopBridge {
     callback: (status: Record<string, unknown>) => void,
   ): () => void;
   voice(request: DesktopShowAndTellRequest): Promise<Record<string, unknown>>;
+  openGithubDeviceLogin(): Promise<{ opened: boolean }>;
+  patientChat(request:
+    | { action: 'probe' }
+    | { action: 'send'; userInput: string; sessionId?: string }
+    | { action: 'cancel' }
+  ): Promise<{
+    status: number;
+    body: string;
+    error?: 'offline' | 'timeout' | 'server-error';
+  }>;
   onVoiceStatus(
     callback: (status: Record<string, unknown>) => void,
   ): () => void;

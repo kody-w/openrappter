@@ -204,7 +204,7 @@ describe('copilot-token', () => {
           cachePath,
           fetchImpl: mockFetch as unknown as typeof fetch,
         }),
-      ).rejects.toThrow('does not have Copilot API access (HTTP 401)');
+      ).rejects.toMatchObject({ reason: 'http-401', status: 401 });
     });
 
     it('should throw on HTTP 403 error', async () => {
@@ -223,7 +223,7 @@ describe('copilot-token', () => {
           cachePath,
           fetchImpl: mockFetch as unknown as typeof fetch,
         }),
-      ).rejects.toThrow('does not have Copilot API access (HTTP 403)');
+      ).rejects.toMatchObject({ reason: 'http-403', status: 403 });
     });
 
     it('should throw on HTTP 404 error', async () => {
@@ -242,7 +242,7 @@ describe('copilot-token', () => {
           cachePath,
           fetchImpl: mockFetch as unknown as typeof fetch,
         }),
-      ).rejects.toThrow('does not have Copilot API access (HTTP 404)');
+      ).rejects.toMatchObject({ reason: 'no-entitlement', status: 404 });
     });
 
     it('should throw on missing token in response', async () => {

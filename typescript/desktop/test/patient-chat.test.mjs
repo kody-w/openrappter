@@ -16,35 +16,36 @@ test('mediates only the authoritative exact public /chat route', async () => {
     },
   });
 
-  test('uses the same authoritative base and port for side-effect-free health', async () => {
-    let captured;
-    const result = await executePatientChatRequest({
-      request: { action: 'probe' },
-      gatewayOrigin: 'http://127.0.0.1:32123',
-      gatewayToken: token,
-      fetchImpl: async (url, init) => {
-        captured = { url, init };
-        return new Response(JSON.stringify({
-          status: 'ok',
-          version: '1.13.0',
-          uptime: 10,
-          timestamp: '2026-08-23T00:00:00.000Z',
-          checks: { gateway: true },
-        }), { status: 200 });
-      },
-    });
-    assert.equal(result.status, 200);
-    assert.equal(captured.url, 'http://127.0.0.1:32123/health');
-    assert.equal(captured.init.method, 'GET');
-    assert.equal(captured.init.body, undefined);
-    assert.equal(captured.init.headers.Origin, 'http://127.0.0.1:32123');
-  });
   assert.equal(result.status, 200);
   assert.equal(captured.url, 'http://127.0.0.1:32123/chat');
   assert.equal(captured.init.method, 'POST');
   assert.equal(captured.init.headers.Origin, 'http://127.0.0.1:32123');
   assert.match(captured.init.body, /"user_input":"hello"/);
   assert.doesNotMatch(captured.init.body, /url|path|agent/);
+});
+
+test('uses the same authoritative base and port for side-effect-free health', async () => {
+  let captured;
+  const result = await executePatientChatRequest({
+    request: { action: 'probe' },
+    gatewayOrigin: 'http://127.0.0.1:32123',
+    gatewayToken: token,
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return new Response(JSON.stringify({
+        status: 'ok',
+        version: '1.13.0',
+        uptime: 10,
+        timestamp: '2026-08-23T00:00:00.000Z',
+        checks: { gateway: true },
+      }), { status: 200 });
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(captured.url, 'http://127.0.0.1:32123/health');
+  assert.equal(captured.init.method, 'GET');
+  assert.equal(captured.init.body, undefined);
+  assert.equal(captured.init.headers.Origin, 'http://127.0.0.1:32123');
 });
 
 test('rejects arbitrary renderer URL/path fields and invalid gateway origins', async () => {

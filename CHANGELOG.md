@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Brainstem Frontier Grail is now the default hosted and Electron interface,
+  built from the single authoritative `beta/ui` source. The prior Lit dashboard
+  remains available as reversible Legacy OpenRappter for one migration release.
+- Native Grail surfaces integrate patient/model/transport state, all current
+  OpenRappter modules, Living Company Week, bounded semantic controls,
+  immutable approval review, onboarding/recovery, contrast modes, and
+  fail-closed dependency adapters.
+
 ### Fixed
 
 - Release preflight now accepts strict SemVer prerelease tags such as

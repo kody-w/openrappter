@@ -119,6 +119,15 @@ try {
   if (!packedFiles.has("ui/dist/index.html")) {
     throw new Error("Tarball does not contain ui/dist/index.html");
   }
+  for (const requiredUi of [
+    "ui/dist/grail-app.js",
+    "ui/dist/openrappter-hosted-adapter.js",
+    "ui/dist/legacy/index.html",
+  ]) {
+    if (!packedFiles.has(requiredUi)) {
+      throw new Error(`Tarball does not contain ${requiredUi}`);
+    }
+  }
   if (!packedFiles.has("npm-shrinkwrap.json")) {
     throw new Error("Tarball does not contain the reviewed dependency lock");
   }
@@ -169,6 +178,26 @@ try {
     readFileSync(installedIndex, "utf8").length === 0
   ) {
     throw new Error("Installed package is missing ui/dist/index.html");
+  }
+  const installedIndexText = readFileSync(installedIndex, "utf8");
+  if (
+    !installedIndexText.includes('data-openrappter-shell="grail"') ||
+    !installedIndexText.includes("Brainstem Frontier Grail")
+  ) {
+    throw new Error("Installed package does not boot Brainstem Frontier Grail");
+  }
+  const installedLegacy = path.join(
+    installedRoot,
+    "ui",
+    "dist",
+    "legacy",
+    "index.html",
+  );
+  if (
+    !existsSync(installedLegacy) ||
+    !readFileSync(installedLegacy, "utf8").includes("Legacy OpenRappter")
+  ) {
+    throw new Error("Installed package does not preserve Legacy OpenRappter");
   }
 
   const cleverGirlAssets = [
@@ -896,7 +925,7 @@ try {
   }
 
   console.log(
-    `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2/v3`,
+    `Package smoke passed: ${artifact.filename} includes Brainstem Frontier Grail, Legacy OpenRappter, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2/v3`,
   );
 } finally {
   rmSync(scratch, {

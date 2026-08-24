@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OpenRappter · Copilot Surgeon</title>
+    <title>Legacy OpenRappter · Copilot Surgeon</title>
     <style>
       * {
         box-sizing: border-box;
@@ -36,9 +36,25 @@
       #app {
         min-height: 100vh;
       }
+
+      .legacy-return {
+        position: fixed;
+        z-index: 50000;
+        right: 0.75rem;
+        bottom: 0.75rem;
+        border: 1px solid var(--accent);
+        border-radius: 999px;
+        padding: 0.45rem 0.75rem;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        text-decoration: none;
+        font-size: 0.75rem;
+        font-weight: 700;
+      }
     </style>
   </head>
   <body>
+    <a class="legacy-return" href="../index.html">Return to Brainstem Frontier Grail</a>
     <div id="app">
       <openrappter-app></openrappter-app>
     </div>

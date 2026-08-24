@@ -256,6 +256,13 @@ async function focusWindow(view?: string): Promise<void> {
   if (view) {
     await window.webContents.executeJavaScript(`
       (async () => {
+        if (window.openrappterGrailSemantic) {
+          const aliases = { presence: 'health' };
+          await window.openrappterGrailSemantic.open(
+            aliases[${JSON.stringify(view)}] || ${JSON.stringify(view)}
+          );
+          return;
+        }
         const app = document.querySelector('openrappter-app');
         if (!app) throw new Error('OpenRappter app surface is not mounted.');
         app.navigate(${JSON.stringify(view)});
@@ -1109,33 +1116,34 @@ function createWindow(): BrowserWindow {
     window.webContents.once('did-finish-load', () => {
       void window.webContents.executeJavaScript(`
         (async () => {
-          await customElements.whenDefined('openrappter-show-and-tell');
-          const appElement = document.querySelector('openrappter-app');
           const deadline = Date.now() + 15000;
           while (
             Date.now() < deadline &&
-            (!appElement?.shadowRoot ||
-              /Waking the OpenRappter patient|patient is unreachable/.test(
-                appElement.shadowRoot.textContent || ''
-              ))
+            (
+              document.documentElement.dataset.openrappterShell !== 'grail' ||
+              !window.openrappterGrailSemantic ||
+              !window.OpenRappterGrailHost
+            )
           ) {
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
-          if (!appElement?.shadowRoot) throw new Error('OpenRappter app did not render');
-          if (/patient is unreachable/.test(appElement.shadowRoot.textContent || '')) {
-            throw new Error('OpenRappter UI could not connect to the gateway');
+          if (
+            document.documentElement.dataset.openrappterShell !== 'grail' ||
+            !window.openrappterGrailSemantic
+          ) {
+            throw new Error('Brainstem Frontier Grail did not render');
           }
           const smokeScope = ${JSON.stringify(
             process.env.OPENRAPPTER_DESKTOP_SMOKE_SCOPE ?? 'full',
           )};
           let recorder = null;
+          let recorderSurfaceReady = false;
           if (smokeScope !== 'boot') {
-            appElement.navigate('show-and-tell');
-            await appElement.updateComplete;
-            recorder = appElement.shadowRoot.querySelector(
-              'openrappter-show-and-tell'
+            await window.openrappterGrailSemantic.open('show-and-tell');
+            recorder = document.getElementById('grail-surface-panel');
+            recorderSurfaceReady = /Show & Tell/.test(
+              recorder?.textContent || ''
             );
-            await recorder?.updateComplete;
           }
           const info = await window.openrappterDesktop.getInfo();
           const narrationStatus = await window.openrappterDesktop.narration({
@@ -1148,7 +1156,8 @@ function createWindow(): BrowserWindow {
             return {
               smokeScope: 'boot',
               bridge: Boolean(window.openrappterDesktop),
-              component: Boolean(customElements.get('openrappter-show-and-tell')),
+              component:
+                document.documentElement.dataset.openrappterShell === 'grail',
               narrationBridge: Boolean(narrationStatus.model),
               voiceBridge: Boolean(voiceStatus.state),
               gatewayUrl: window.openrappterDesktop.gatewayUrl,
@@ -1224,10 +1233,14 @@ function createWindow(): BrowserWindow {
           return {
             smokeScope: 'full',
             bridge: Boolean(window.openrappterDesktop),
-            component: Boolean(customElements.get('openrappter-show-and-tell')),
-            recorderSurface: /Show it once/.test(
-              recorder?.shadowRoot?.textContent || ''
-            ),
+            component:
+              document.documentElement.dataset.openrappterShell === 'grail',
+            grailDefault:
+              document.title.includes('Brainstem Frontier Grail') &&
+              Boolean(document.querySelector('[data-grail-surface="operating-room"]')) &&
+              Boolean(document.querySelector('[data-grail-surface="living-company"]')) &&
+              Boolean(document.querySelector('[data-grail-legacy]')),
+            recorderSurface: recorderSurfaceReady,
             recorderStatus: status.status,
             desktopControl:
               controlSnapshot.status === 'success' &&
@@ -1265,6 +1278,7 @@ function createWindow(): BrowserWindow {
         ] as const;
         const fullRequired = [
           'recorderSurface',
+          'grailDefault',
           'desktopControl',
           'hotLoadedAgents',
           'recorderLifecycle',

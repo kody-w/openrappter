@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node ../scripts/build-ui.mjs",
+    "build:legacy": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run"
   },

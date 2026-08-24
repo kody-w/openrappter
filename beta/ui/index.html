@@ -1,14 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-openrappter-shell="grail" data-contrast="dark">
 <head>
   <meta charset="utf-8">
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; frame-src http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: http://127.0.0.1:* http://localhost:*; media-src http://127.0.0.1:* http://localhost:*;"
+    content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: http://127.0.0.1:* http://localhost:*; media-src http://127.0.0.1:* http://localhost:*;"
   >
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OpenRappter</title>
   <link rel="icon" href="../build/icon.svg">
+  <link rel="stylesheet" href="grail-app.css">
   <meta name="theme-color" content="#07111f">
   <style>
     :root {
@@ -772,6 +773,100 @@
   </style>
 </head>
 <body>
+  <button id="grail-nav-toggle" data-drive="grail.navToggle" type="button" aria-controls="grail-sidebar" aria-expanded="false">☰ Grail</button>
+  <aside id="grail-sidebar" aria-label="OpenRappter anatomy">
+    <div class="grail-brand">
+      <strong>Brainstem Frontier Grail</strong>
+      <span>OpenRappter Personal · operating room</span>
+    </div>
+    <nav id="grail-nav" aria-label="Grail modules">
+      <button data-drive="grail.nav.operatingRoom" data-surface="operating-room" data-grail-surface="operating-room">✦ Operating Room</button>
+      <button data-drive="grail.nav.quantumRappids" data-surface="quantum-rappids" data-grail-surface="quantum-rappids">◉ Quantum RAPPIDs</button>
+      <button data-drive="grail.nav.chat" data-surface="chat" data-grail-surface="chat">💬 Chat</button>
+      <button data-drive="grail.nav.showAndTell" data-surface="show-and-tell" data-grail-surface="show-and-tell">⏺ Show &amp; Tell</button>
+      <button data-drive="grail.nav.channels" data-surface="channels" data-grail-surface="channels">↗ Channels</button>
+      <button data-drive="grail.nav.sessions" data-surface="sessions" data-grail-surface="sessions">▤ Sessions</button>
+      <button data-drive="grail.nav.agents" data-surface="agents" data-grail-surface="agents">A Agents</button>
+      <button data-drive="grail.nav.skills" data-surface="skills" data-grail-surface="skills">◇ Skills</button>
+      <button data-drive="grail.nav.cron" data-surface="cron" data-grail-surface="cron">◷ Cron</button>
+      <button data-drive="grail.nav.showcase" data-surface="showcase" data-grail-surface="showcase">▶ Showcase</button>
+      <button data-drive="grail.nav.zen" data-surface="zen" data-grail-surface="zen">○ Zen</button>
+      <button data-drive="grail.nav.accounts" data-surface="accounts" data-grail-surface="accounts">@ Accounts</button>
+      <button data-drive="grail.nav.config" data-surface="config" data-grail-surface="config">{ } Config</button>
+      <button data-drive="grail.nav.devices" data-surface="devices" data-grail-surface="devices">▣ Devices</button>
+      <button data-drive="grail.nav.health" data-surface="health" data-grail-surface="health">+ Health</button>
+      <button data-drive="grail.nav.logs" data-surface="logs" data-grail-surface="logs">≡ Logs</button>
+      <button data-drive="grail.nav.livingCompany" data-surface="living-company" data-grail-surface="living-company">LC Living Company</button>
+    </nav>
+    <div id="grail-status-rail" aria-label="Organism status">
+      <span id="patient-transport-status" class="grail-state" data-state="unknown">Patient <strong>unknown</strong></span>
+      <span id="copilot-auth-status" class="grail-state" data-state="unknown">Copilot auth <strong>unknown</strong></span>
+      <span id="copilot-model-status" class="grail-state" data-state="unknown">Model <strong>unknown</strong></span>
+      <span id="release-ring-status" class="grail-state" data-state="unknown">Ring <strong>unknown</strong></span>
+      <span id="detector-v3-status" class="grail-state" data-state="unknown">Clever Girl <strong>unknown</strong></span>
+      <span id="adaptive-twin-status" class="grail-state" data-state="unknown">Adaptive twin <strong>unknown</strong></span>
+    </div>
+    <div class="grail-sidebar-foot">
+      <button id="grail-onboarding-open" data-drive="grail.onboarding.open" type="button">Recovery &amp; setup</button>
+      <button data-drive="grail.legacy.open" data-grail-legacy type="button">Legacy OpenRappter</button>
+      <div class="grail-actions" aria-label="Contrast">
+        <button data-drive="grail.contrast.dark" data-grail-contrast="dark" type="button">Dark</button>
+        <button data-drive="grail.contrast.light" data-grail-contrast="light" type="button">Light</button>
+        <button data-drive="grail.contrast.high" data-grail-contrast="high-contrast" type="button">High contrast</button>
+      </div>
+      <label>
+        Media ≤100MB
+        <input id="grail-media-input" data-drive="grail.media.input" type="file" accept="image/*,audio/*,video/*">
+      </label>
+      <span id="grail-media-status" role="status">idle: No media selected.</span>
+    </div>
+  </aside>
+  <section id="grail-surface-panel" aria-label="Grail surface">
+    <button id="grail-surface-close" data-drive="grail.surface.close" type="button">← Back to habitat</button>
+    <div id="grail-surface-content"></div>
+  </section>
+  <section
+    id="grail-onboarding"
+    data-drive="grail.onboarding"
+    role="dialog"
+    aria-label="OpenRappter first run"
+    aria-modal="true"
+    aria-labelledby="grail-onboarding-title"
+    aria-describedby="grail-onboarding-status"
+    tabindex="-1"
+  >
+    <div class="grail-onboarding-layout">
+      <p class="eyebrow">OpenRappter first run</p>
+      <h1 id="grail-onboarding-title">Prepare the local organism.</h1>
+      <p>Nothing reports ready until its real adapter proves it. Local-first state stays on this device.</p>
+      <div class="grail-onboarding-steps">
+        <article class="grail-onboarding-step" data-grail-step="onboarding-privacy"><strong>Local-first &amp; privacy</strong><span>No private control plane or secret fallback.</span></article>
+        <article class="grail-onboarding-step" data-grail-step="onboarding-health"><strong>Patient /health</strong><span>Real gateway transport must answer.</span></article>
+        <article class="grail-onboarding-step" data-grail-step="onboarding-copilot"><strong>Copilot &amp; model</strong><span>Verified auth, entitlement, and model required.</span></article>
+        <article class="grail-onboarding-step" data-grail-step="onboarding-ring">
+          <strong>Stable release ring</strong>
+          <span>Stable is default; Apply requires approval and a receipt.</span>
+          <select id="grail-ring-select" data-drive="grail.onboarding.ring" aria-label="Release ring">
+            <option value="stable">stable</option>
+            <option value="beta">beta</option>
+            <option value="canary">canary</option>
+            <option value="alpha">alpha</option>
+            <option value="nightly">nightly</option>
+          </select>
+          <button id="grail-ring-apply" data-drive="grail.onboarding.ringApply" type="button">Request approved Apply</button>
+          <span id="grail-ring-message" role="status"></span>
+        </article>
+        <article class="grail-onboarding-step" data-grail-step="onboarding-skills"><strong>Skills</strong><span>Discover existing local skills.</span></article>
+        <article class="grail-onboarding-step" data-grail-step="onboarding-channels"><strong>Optional channels</strong><span>Credentials remain in approved stores.</span></article>
+        <article class="grail-onboarding-step" data-grail-step="onboarding-recovery"><strong>Recovery</strong><span>Legacy remains available offline.</span></article>
+      </div>
+      <p id="grail-onboarding-status" role="status" aria-live="polite">Checking real readiness…</p>
+      <div class="grail-actions">
+        <button data-drive="grail.onboarding.legacy" data-grail-legacy type="button">Use Legacy OpenRappter</button>
+        <button id="grail-onboarding-continue" data-drive="grail.onboarding.continue" class="primary" type="button" disabled>Continue with Grail</button>
+      </div>
+    </div>
+  </section>
   <div id="neighborhood-identity" data-drive="shell.neighborhood" aria-live="polite">
     <span class="creature" aria-hidden="true"></span>
     <strong>OpenRappter</strong>
@@ -921,7 +1016,7 @@
           <article class="intro-tile">
             <h2>Who should use it?</h2>
             <p>Technical sellers, architects, specialists, engineers, partners, and customer builders who can steer a prototype and judge whether it solves the business problem.</p>
-            <p>It is not the default interface for account executives or end users. They consume the validated outcome in the right production experience.</p>
+            <p>It is the default OpenRappter interface for builders and personal organisms. Governed enterprise delivery still belongs in the approved production experience.</p>
           </article>
           <article class="intro-tile">
             <h2>When should I reach for it?</h2>
@@ -1021,6 +1116,9 @@
   <script src="stream-pacing.js"></script>
   <script src="chat-look.js"></script>
   <script src="typing-delivery.js"></script>
+  <script src="openrappter-hosted-adapter.js"></script>
+  <script src="grail-core.js"></script>
+  <script src="grail-app.js"></script>
   <script src="renderer.js"></script>
   <script src="show-mode-tour.js"></script>
 </body>

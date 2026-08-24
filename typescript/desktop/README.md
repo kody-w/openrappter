@@ -4,6 +4,10 @@ Electron is the desktop host, not a fork of the runtime. It launches or reuses
 the packaged OpenRappter gateway, loads the same web UI, and exposes one
 context-isolated IPC bridge for Show-and-Tell.
 
+The default renderer is the canonical Brainstem Frontier Grail from
+`beta/ui`. The previous Lit dashboard remains at `ui/dist/legacy` for one
+migration release.
+
 ```bash
 cd typescript/desktop
 npm install

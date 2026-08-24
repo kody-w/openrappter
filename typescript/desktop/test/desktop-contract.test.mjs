@@ -144,7 +144,9 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(runtimeInstaller, /'ci'/);
   assert.match(runtimeInstaller, /Desktop runtime dependency drifted/);
   assert.match(main, /OPENRAPPTER_DESKTOP_SMOKE/);
-  assert.match(main, /customElements\.whenDefined\('openrappter-show-and-tell'\)/);
+  assert.match(main, /openrappterGrailSemantic\.open\('show-and-tell'\)/);
+  assert.match(main, /data-grail-surface="operating-room"/);
+  assert.match(main, /grailDefault/);
 });
 
 // OPENRAPPTER_DESKTOP_SMOKE is a process-wide launch flag, and the release
@@ -205,7 +207,7 @@ test('only the agent install consent dialog answers to the smoke flag', () => {
 
 test('the smoke run never asks narration or voice to do the gated work', () => {
   const smokeScript = mainSource.slice(
-    mainSource.indexOf("customElements.whenDefined('openrappter-show-and-tell')"),
+    mainSource.indexOf("document.documentElement.dataset.openrappterShell"),
   );
   assert.ok(smokeScript.length > 1000, 'could not locate the smoke script');
   assert.match(smokeScript, /\.narration\(\{/);

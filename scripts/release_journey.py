@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Sequential, checkpointed release-ring activation orchestrator."""
 from __future__ import annotations
-import argparse, base64, json, os, stat, subprocess, sys, time
+import argparse, base64, json, os, stat, subprocess, sys, time, urllib.parse
+from datetime import datetime, timezone
 from pathlib import Path
 
 RINGS = ("nightly", "alpha", "canary", "beta", "stable")
 TRAIN = "kody-w/openrappter-release-train"
+RELEASE_RUN_FIELDS = "databaseId,status,conclusion,headSha,headBranch,event,createdAt"
 
 def tag_candidate_id(tag: str) -> str:
     return "tag-" + base64.urlsafe_b64encode(tag.encode()).decode().rstrip("=")
@@ -17,6 +19,30 @@ def atomic_json(path: Path, value: dict) -> None:
     os.chmod(temp, stat.S_IRUSR | stat.S_IWUSR)
     temp.replace(path)
 
+def _created_at(value):
+    if isinstance(value, (int, float)):
+        return value
+    if not isinstance(value, str):
+        raise RuntimeError("release run createdAt is malformed")
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+
+def matching_release_runs(rows: list[dict], baseline: dict, fresh_only: bool) -> list[dict]:
+    matches = []
+    for row in rows:
+        if (
+            row.get("event") != "push"
+            or row.get("headBranch") != baseline["tag"]
+            or row.get("headSha") != baseline["source_commit"]
+        ):
+            continue
+        if fresh_only and (
+            row.get("databaseId") in baseline["run_ids"]
+            or _created_at(row.get("createdAt")) < _created_at(baseline["captured_at"])
+        ):
+            continue
+        matches.append(row)
+    return sorted(matches, key=lambda row: row["databaseId"])
+
 class LiveGitHub:
     def __init__(self, timeout: int): self.timeout = timeout
     def call(self, *args: str) -> str:
@@ -26,17 +52,14 @@ class LiveGitHub:
     def workflow(self, repo: str, workflow: str, fields: dict[str, str]) -> None:
         before_rows=json.loads(self.call("run","list","-R",repo,"--workflow",workflow,"--limit","20","--json","databaseId"))
         before={item["databaseId"] for item in before_rows}
-        if workflow!="release.yml":
-            args=["workflow","run",workflow,"-R",repo]
-            for key,value in fields.items(): args += ["-f",f"{key}={value}"]
-            self.call(*args)
+        args=["workflow","run",workflow,"-R",repo]
+        for key,value in fields.items(): args += ["-f",f"{key}={value}"]
+        self.call(*args)
         deadline=time.time()+self.timeout
         run_id=None
         while time.time()<deadline:
             rows=json.loads(self.call("run","list","-R",repo,"--workflow",workflow,"--limit","20","--json","databaseId,status,conclusion,headSha"))
             fresh=[row for row in rows if row["databaseId"] not in before]
-            if workflow=="release.yml" and fields.get("source_commit"):
-                fresh=[row for row in fresh if row.get("headSha")==fields["source_commit"]]
             if fresh: run_id=fresh[0]["databaseId"]; break
             time.sleep(3)
         if run_id is None: raise RuntimeError(f"{workflow} run did not appear")
@@ -47,6 +70,72 @@ class LiveGitHub:
                 return
             time.sleep(5)
         raise RuntimeError(f"{workflow} timed out")
+    def release_baseline(self, tag: str, source_commit: str) -> dict:
+        captured_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00","Z")
+        rows=json.loads(self.call(
+            "run","list","-R","kody-w/openrappter","--workflow","release.yml",
+            "--branch",tag,"--limit","100","--json",RELEASE_RUN_FIELDS,
+        ))
+        refs=self.api_json(
+            "repos/kody-w/openrappter/git/matching-refs/tags/"
+            f"{urllib.parse.quote(tag,safe='')}"
+        )
+        exact_refs=[row for row in refs if row.get("ref")==f"refs/tags/{tag}"]
+        if len(exact_refs)>1: raise RuntimeError("release tag ref is ambiguous")
+        tag_commit=None
+        if exact_refs:
+            tag_commit=self.api_json(
+                f"repos/kody-w/openrappter/commits/{urllib.parse.quote(tag,safe='')}"
+            )["sha"]
+            if tag_commit!=source_commit: raise RuntimeError("existing release tag targets another commit")
+        baseline={
+            "run_ids":{row["databaseId"] for row in rows},
+            "captured_at":captured_at,
+            "tag":tag,
+            "source_commit":source_commit,
+            "tag_existed":tag_commit is not None,
+        }
+        existing=matching_release_runs(rows,baseline,fresh_only=False)
+        if baseline["tag_existed"] and len(existing)>1:
+            raise RuntimeError("release.yml exact tag/source run is ambiguous")
+        baseline["existing_matches"]=existing if baseline["tag_existed"] else []
+        return baseline
+    def wait_release(self, baseline: dict) -> int:
+        deadline=time.time()+self.timeout
+        selected=None
+        while time.time()<deadline:
+            rows=json.loads(self.call(
+                "run","list","-R","kody-w/openrappter","--workflow","release.yml",
+                "--branch",baseline["tag"],"--limit","100","--json",RELEASE_RUN_FIELDS,
+            ))
+            fresh=matching_release_runs(rows,baseline,fresh_only=True)
+            candidates=[*baseline["existing_matches"],*fresh]
+            if len(candidates)>1: raise RuntimeError("multiple release.yml runs match exact tag/source identity")
+            if candidates:
+                selected=candidates[0]
+                break
+            time.sleep(3)
+        if selected is None: raise RuntimeError("release.yml exact tag/source run did not appear")
+        run_id=selected["databaseId"]
+        while time.time()<deadline:
+            row=json.loads(self.call(
+                "run","view",str(run_id),"-R","kody-w/openrappter",
+                "--json","status,conclusion,event,headBranch,headSha,createdAt,databaseId",
+            ))
+            if not matching_release_runs([row],baseline,fresh_only=not bool(baseline["existing_matches"])):
+                raise RuntimeError("release.yml run identity changed")
+            if row["status"]=="completed":
+                if row["conclusion"]!="success": raise RuntimeError(f"release.yml failed: {row['conclusion']}")
+                final_rows=json.loads(self.call(
+                    "run","list","-R","kody-w/openrappter","--workflow","release.yml",
+                    "--branch",baseline["tag"],"--limit","100","--json",RELEASE_RUN_FIELDS,
+                ))
+                final=[*baseline["existing_matches"],*matching_release_runs(final_rows,baseline,fresh_only=True)]
+                if len({item["databaseId"] for item in final})!=1:
+                    raise RuntimeError("multiple release.yml runs match exact tag/source identity")
+                return run_id
+            time.sleep(5)
+        raise RuntimeError("release.yml timed out")
     def api_json(self, endpoint: str) -> object:
         return json.loads(self.call("api", endpoint))
     def content(self, repo: str, path: str, ref: str="main") -> dict:
@@ -78,7 +167,12 @@ class FakeGitHub:
     def workflow(self, repo: str, workflow: str, fields: dict[str,str]) -> None:
         if self.state.get("fail_workflow")==workflow: raise RuntimeError(f"{workflow} failed")
         self.state["calls"].append({"repo":repo,"workflow":workflow,"fields":fields})
-        if workflow=="build-candidate.yml": self.state["candidate"]=True
+        if workflow=="build-candidate.yml":
+            self.state["candidate"]=True
+            self.state["candidate_identity"]={
+                "intended_release_tag":fields["intended_release_tag"],
+                "source_commit":fields["source_commit"],
+            }
         elif workflow=="observe-main.yml":
             if not self.state["candidate"]: raise RuntimeError("candidate missing")
             self._request("nightly")
@@ -99,11 +193,65 @@ class FakeGitHub:
         elif workflow=="pages.yml": self.state["pages"]=True
         elif workflow=="create-release-tag.yml":
             if self.state["heads"]["stable"]["sequence"]<2: raise RuntimeError("tag before stable")
-            self.state["tag"]=True
+            if self.state.get("tag_conclusion","success")!="success":
+                raise RuntimeError(f"create-release-tag.yml failed: {self.state['tag_conclusion']}")
+            if not self.state["tag"]:
+                self.state["tag"]=True
+                self.state["clock"]+=1
+                self.state["release_runs"].extend(self.state.get("concurrent_release_runs",[]))
+                identity=self.state["candidate_identity"]
+                mode=self.state.get("release_mode","fast")
+                run={
+                    "databaseId":self.state["next_run_id"],
+                    "status":"queued" if mode=="delayed" else "completed",
+                    "conclusion":None if mode=="delayed" else ("success" if mode=="fast" else mode),
+                    "event":"push",
+                    "headBranch":identity["intended_release_tag"],
+                    "headSha":identity["source_commit"],
+                    "createdAt":self.state["clock"],
+                }
+                self.state["next_run_id"]+=1
+                if mode=="delayed": self.state["pending_release"]=run
+                else:
+                    self.state["release_runs"].append(run)
+                    self.state["released"]=mode=="fast"
         elif workflow=="release.yml":
-            if not self.state["tag"]: raise RuntimeError("release before tag")
-            self.state["released"]=True
+            raise RuntimeError("release.yml must be started only by the release tag push")
         self.save()
+    def release_baseline(self, tag: str, source_commit: str) -> dict:
+        self.state["calls"].append({
+            "repo":"kody-w/openrappter",
+            "workflow":"release-baseline",
+            "fields":{"tag":tag,"source_commit":source_commit,"captured_at":self.state["clock"]},
+        })
+        baseline={
+            "run_ids":{row["databaseId"] for row in self.state["release_runs"]},
+            "captured_at":self.state["clock"],
+            "tag":tag,
+            "source_commit":source_commit,
+            "tag_existed":self.state["tag"],
+        }
+        existing=matching_release_runs(self.state["release_runs"],baseline,fresh_only=False)
+        if baseline["tag_existed"] and len(existing)>1:
+            raise RuntimeError("release.yml exact tag/source run is ambiguous")
+        baseline["existing_matches"]=existing if baseline["tag_existed"] else []
+        self.save()
+        return baseline
+    def wait_release(self, baseline: dict) -> int:
+        pending=self.state.pop("pending_release",None)
+        if pending:
+            pending["status"]="completed";pending["conclusion"]="success"
+            self.state["release_runs"].append(pending)
+        fresh=matching_release_runs(self.state["release_runs"],baseline,fresh_only=True)
+        candidates=[*baseline["existing_matches"],*fresh]
+        if len(candidates)>1: raise RuntimeError("multiple release.yml runs match exact tag/source identity")
+        if not candidates: raise RuntimeError("release.yml exact tag/source run did not appear")
+        run=candidates[0]
+        if run["status"]!="completed": raise RuntimeError("release.yml timed out")
+        if run["conclusion"]!="success": raise RuntimeError(f"release.yml failed: {run['conclusion']}")
+        self.state["released"]=True
+        self.save()
+        return run["databaseId"]
     def _request(self,ring):
         index=self.state["indexes"][ring]; seq=index["next_sequence"]; rid=f"{seq:064x}"
         entry={"sequence":seq,"request_id":rid,"path":f"requests/{ring}/{seq:020d}-{rid}.json","request_commit":f"{seq+100:040x}"}
@@ -171,9 +319,10 @@ def run(args) -> int:
         if gh.artifact_sha("beta") != gh.artifact_sha("stable"):
             raise RuntimeError("beta/stable candidate digest mismatch")
         gh.workflow("kody-w/openrappter","pages.yml",{})
+        release_baseline=gh.release_baseline(state["intended_release_tag"],state["source_commit"])
         gh.workflow("kody-w/openrappter","create-release-tag.yml",{})
-        gh.workflow("kody-w/openrappter","release.yml",{"source_commit":state["source_commit"]})
-        state["phase"]="complete";state["stable_merge_commit"]=pr["merge_commit_sha"];atomic_json(checkpoint,state)
+        release_run_id=gh.wait_release(release_baseline)
+        state["phase"]="complete";state["stable_merge_commit"]=pr["merge_commit_sha"];state["release_run_id"]=release_run_id;atomic_json(checkpoint,state)
         return 0
     if checkpoint.exists(): raise RuntimeError("journey checkpoint exists; use --resume")
     npm=json.loads((root/"typescript/package.json").read_text())["version"]

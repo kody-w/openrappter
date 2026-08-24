@@ -83,6 +83,7 @@ jobs:
             candidate_id="${INPUT_CANDIDATE_ID:-snapshot-$SOURCE_DATE_EPOCH}"
           fi
           printf '%s' "$candidate_id" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+          echo "CANDIDATE_KIND=$CANDIDATE_KIND" >> "$GITHUB_ENV"
           echo "CANDIDATE_ID=$candidate_id" >> "$GITHUB_ENV"
           mkdir candidate
           (cd typescript && npm ci && npm run build && node scripts/pack-locked.mjs --pack-destination ../candidate)

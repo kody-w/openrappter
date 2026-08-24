@@ -16,6 +16,8 @@ import type {
   SyncTransactionCallback,
 } from './types.js';
 import { getPendingMigrations, migrations, type Migration } from './migrations.js';
+import path from 'node:path';
+import { withOrganismWriteAccessSync } from '../infra/organism-maintenance.js';
 
 const ASYNC_TRANSACTION_ERROR =
   'transaction() requires a synchronous callback. better-sqlite3 cannot hold a SQLite ' +
@@ -100,7 +102,16 @@ export class SQLiteAdapter implements StorageAdapter {
     if (!this.db) {
       throw new Error('Database not initialized. Call initialize() first.');
     }
+
     return this.db;
+  }
+
+  private withWriteFence<T>(operation: () => T): T {
+    if (this.config.inMemory || !this.config.path) return operation();
+    return withOrganismWriteAccessSync(
+      path.dirname(path.resolve(this.config.path)),
+      operation,
+    );
   }
 
   private async runMigrations(): Promise<void> {
@@ -163,7 +174,7 @@ export class SQLiteAdapter implements StorageAdapter {
     // Real UPSERT, not INSERT OR REPLACE: REPLACE is a DELETE + INSERT, which fires
     // ON DELETE SET NULL on approval_requests.session_id and silently destroys the
     // approval's association with this session.
-    db.prepare(
+    this.withWriteFence(() => db.prepare(
       `INSERT INTO sessions
        (id, channel_id, conversation_id, agent_id, user_id, metadata, messages,
         created_at, updated_at, expires_at, total_tokens, prompt_tokens, completion_tokens)
@@ -195,12 +206,12 @@ export class SQLiteAdapter implements StorageAdapter {
       (session as SessionWithTokens).totalTokens ?? 0,
       (session as SessionWithTokens).promptTokens ?? 0,
       (session as SessionWithTokens).completionTokens ?? 0
-    );
+    ));
   }
 
   async deleteSession(id: string): Promise<void> {
     const db = this.ensureDb();
-    db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
+    this.withWriteFence(() => db.prepare('DELETE FROM sessions WHERE id = ?').run(id));
   }
 
   async listSessions(filter?: SessionFilter): Promise<Session[]> {
@@ -266,7 +277,7 @@ export class SQLiteAdapter implements StorageAdapter {
     const db = this.ensureDb();
     const embeddingBlob = chunk.embedding ? Buffer.from(new Float32Array(chunk.embedding).buffer) : null;
 
-    db.prepare(
+    this.withWriteFence(() => db.prepare(
       `INSERT OR REPLACE INTO memory_chunks
        (id, content, source, source_path, embedding, embedding_dims, metadata, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -280,12 +291,12 @@ export class SQLiteAdapter implements StorageAdapter {
       JSON.stringify(chunk.metadata),
       chunk.createdAt,
       chunk.updatedAt
-    );
+    ));
   }
 
   async deleteMemoryChunk(id: string): Promise<void> {
     const db = this.ensureDb();
-    db.prepare('DELETE FROM memory_chunks WHERE id = ?').run(id);
+    this.withWriteFence(() => db.prepare('DELETE FROM memory_chunks WHERE id = ?').run(id));
   }
 
   async searchMemoryChunks(query: MemorySearchQuery): Promise<MemoryChunkRecord[]> {
@@ -387,7 +398,7 @@ export class SQLiteAdapter implements StorageAdapter {
     // Real UPSERT — same class of bug as saveSession/saveDevice. REPLACE here is a
     // DELETE + INSERT, which fires ON DELETE CASCADE on cron_logs.job_id and wipes
     // the job's entire run history.
-    db.prepare(
+    this.withWriteFence(() => db.prepare(
       `INSERT INTO cron_jobs
        (id, name, schedule, agent_id, message, enabled, last_run, next_run, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -412,12 +423,12 @@ export class SQLiteAdapter implements StorageAdapter {
       job.nextRun ?? null,
       job.createdAt,
       job.updatedAt
-    );
+    ));
   }
 
   async deleteCronJob(id: string): Promise<void> {
     const db = this.ensureDb();
-    db.prepare('DELETE FROM cron_jobs WHERE id = ?').run(id);
+    this.withWriteFence(() => db.prepare('DELETE FROM cron_jobs WHERE id = ?').run(id));
   }
 
   async listCronJobs(): Promise<CronJobRecord[]> {
@@ -428,7 +439,7 @@ export class SQLiteAdapter implements StorageAdapter {
 
   async saveCronLog(log: CronLogRecord): Promise<void> {
     const db = this.ensureDb();
-    db.prepare(
+    this.withWriteFence(() => db.prepare(
       `INSERT OR REPLACE INTO cron_logs
        (id, job_id, started_at, completed_at, status, result, error)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -440,7 +451,7 @@ export class SQLiteAdapter implements StorageAdapter {
       log.status,
       log.result ?? null,
       log.error ?? null
-    );
+    ));
   }
 
   async getCronLogs(jobId: string, limit = 100): Promise<CronLogRecord[]> {
@@ -463,7 +474,7 @@ export class SQLiteAdapter implements StorageAdapter {
     const db = this.ensureDb();
     // Real UPSERT — see saveSession. REPLACE here would null out
     // approval_requests.device_id via ON DELETE SET NULL.
-    db.prepare(
+    this.withWriteFence(() => db.prepare(
       `INSERT INTO devices
        (id, name, type, public_key, last_seen, trusted, metadata, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -486,12 +497,12 @@ export class SQLiteAdapter implements StorageAdapter {
       JSON.stringify(device.metadata),
       device.createdAt,
       device.updatedAt
-    );
+    ));
   }
 
   async deleteDevice(id: string): Promise<void> {
     const db = this.ensureDb();
-    db.prepare('DELETE FROM devices WHERE id = ?').run(id);
+    this.withWriteFence(() => db.prepare('DELETE FROM devices WHERE id = ?').run(id));
   }
 
   async listDevices(): Promise<Device[]> {
@@ -512,14 +523,14 @@ export class SQLiteAdapter implements StorageAdapter {
 
   async setConfig(key: string, value: string): Promise<void> {
     const db = this.ensureDb();
-    db.prepare(
+    this.withWriteFence(() => db.prepare(
       'INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, ?)'
-    ).run(key, value, new Date().toISOString());
+    ).run(key, value, new Date().toISOString()));
   }
 
   async deleteConfig(key: string): Promise<void> {
     const db = this.ensureDb();
-    db.prepare('DELETE FROM config WHERE key = ?').run(key);
+    this.withWriteFence(() => db.prepare('DELETE FROM config WHERE key = ?').run(key));
   }
 
   async getAllConfig(): Promise<Record<string, string>> {
@@ -549,7 +560,7 @@ export class SQLiteAdapter implements StorageAdapter {
     }
 
     let result!: T;
-    db.transaction(() => {
+    this.withWriteFence(() => db.transaction(() => {
       const value = callback() as unknown;
       if (isThenable(value)) {
         // The callback already started async work we cannot undo; at least keep its
@@ -559,7 +570,7 @@ export class SQLiteAdapter implements StorageAdapter {
         throw new Error(ASYNC_TRANSACTION_ERROR);
       }
       result = value as T;
-    })();
+    })());
 
     return result;
   }

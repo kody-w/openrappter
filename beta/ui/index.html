@@ -971,21 +971,33 @@
               <li>A clear route to Scout, Copilot Studio, Foundry, custom code, or "do not proceed."</li>
             </ul>
           </article>
-          <article class="intro-tile wide" id="openrappter-self-tile">
-            <h2>This local OpenRappter is its own tile</h2>
+          <article class="intro-tile wide" id="openrappter-self-tile" data-organism-egg="openrappter-organism-egg/1.0">
+            <h2>Quantum RAPPID · Import / Export / Backup</h2>
             <p>
-              Export the user-owned agents, soul, memory, routing, settings, and
-              parked tiles as one hash-verified local RAPPID. Tokens, secrets,
-              logs, recordings, binaries, and source are excluded.
+              Preserve this organism as one verified RAPP/1 <code>.egg</code>.
+              Portable eggs are private sharing artifacts; sealed backups add
+              passphrase encryption and history/media only when selected.
+              Credentials and device-bound secrets always require reauthentication.
             </p>
             <div class="ambient-settings-actions">
-              <button id="openrappter-tile-export" data-drive="shell.tileExport" type="button">Export tile</button>
-              <button id="openrappter-tile-import" data-drive="shell.tileImport" type="button">Import tile</button>
-              <button id="openrappter-tile-backup" data-drive="shell.tileBackup" class="primary" type="button">Back up now</button>
+              <button id="organism-egg-portable" data-drive="egg.x" aria-label="Share" type="button">Export portable .egg</button>
+              <button id="organism-egg-sealed" data-drive="egg.b" aria-label="Backup" class="primary" type="button">Create sealed backup</button>
+              <button id="organism-egg-preview" data-drive="egg.i" aria-label="Import" type="button">Inspect / preview import</button>
             </div>
-            <p id="openrappter-tile-status" role="status" aria-live="polite">
-              Reading this tile's local identity…
+            <label>
+              Backup/import passphrase (never stored or logged)
+              <input id="organism-egg-passphrase" data-drive="egg.p" type="password" minlength="12" autocomplete="new-password" spellcheck="false">
+            </label>
+            <p id="organism-egg-status" role="status" aria-live="polite">
+              Export and preview are read-only. Apply creates a sealed rollback egg and asks for native human approval.
             </p>
+            <pre id="organism-egg-detail" class="smt-mono" aria-live="polite"></pre>
+            <div hidden aria-hidden="true">
+              <span id="openrappter-tile-export">Export legacy tile</span>
+              <span id="openrappter-tile-import">Import legacy tile</span>
+              <span id="openrappter-tile-backup">Back up legacy tile</span>
+              <span id="openrappter-tile-status"></span>
+            </div>
           </article>
           <article class="intro-tile wide" id="rappter-pack-sentinel">
             <h2>Rappter Pack Sentinel</h2>

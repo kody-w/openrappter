@@ -11,6 +11,7 @@ import { parseSenses } from '../channels/senses.js';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import fs from 'fs';
 import path from 'path';
+import { withOrganismWriteAccessSync } from '../infra/organism-maintenance.js';
 import type {
   GatewayConfig,
   GatewayStatus,
@@ -580,7 +581,9 @@ export class GatewayServer {
   private saveSessions() {
     try {
       const data = Array.from(this.sessionStore.values());
-      fs.writeFileSync(this.sessionsPath, JSON.stringify(data, null, 2));
+      withOrganismWriteAccessSync(this.dataDir, () => {
+        fs.writeFileSync(this.sessionsPath, JSON.stringify(data, null, 2));
+      });
     } catch { /* ignore write errors */ }
   }
 
@@ -594,7 +597,9 @@ export class GatewayServer {
   }
 
   private saveConfig(content: string) {
-    fs.writeFileSync(this.configPath, content, 'utf-8');
+    withOrganismWriteAccessSync(this.dataDir, () => {
+      fs.writeFileSync(this.configPath, content, 'utf-8');
+    });
   }
 
   /**

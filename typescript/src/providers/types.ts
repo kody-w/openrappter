@@ -62,6 +62,8 @@ export interface ChatOptions {
   stream?: boolean;
   /** Internal: prevents infinite retry loops on auth errors */
   _isRetry?: boolean;
+  /** Internal: permits one catalog refresh after model_not_supported. */
+  _isModelRetry?: boolean;
   signal?: AbortSignal;
 }
 

@@ -32,6 +32,7 @@ import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
 import { CopilotAuthStateService } from '../auth/copilot-auth-state.js';
+import { CopilotModelStateService } from '../auth/copilot-model-state.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
 import {
@@ -420,6 +421,8 @@ export class GatewayServer {
   private cronStore: Record<string, unknown>[] = [];
   private surgeonService?: SurgeonService;
   private readonly copilotAuthState = new CopilotAuthStateService();
+  private readonly copilotModelState = new CopilotModelStateService();
+  private onAuthModelUpdate?: (model: string) => void;
   /**
    * The approval queue `exec.pending`/`exec.respond` serve.
    *
@@ -765,6 +768,14 @@ export class GatewayServer {
 
   getCopilotAuthStateService(): CopilotAuthStateService {
     return this.copilotAuthState;
+  }
+
+  getCopilotModelStateService(): CopilotModelStateService {
+    return this.copilotModelState;
+  }
+
+  setAuthModelCallback(cb: (model: string) => void): void {
+    this.onAuthModelUpdate = cb;
   }
 
   /** Override the approval engine served by `exec.*` (tests, embedders). */
@@ -3380,6 +3391,8 @@ export class GatewayServer {
       onAuthTokenUpdate: (token: string | null) => this.onAuthTokenUpdate?.(token),
       dataDir: this.dataDir,
       copilotAuthStateService: this.copilotAuthState,
+      copilotModelStateService: this.copilotModelState,
+      onAuthModelUpdate: (model: string) => this.onAuthModelUpdate?.(model),
     });
 
     // Backup & restore methods

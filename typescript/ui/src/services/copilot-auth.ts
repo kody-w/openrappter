@@ -10,6 +10,34 @@ export type CopilotAuthStatus =
   | 'offline'
   | 'error';
 
+export type CopilotModelStatus =
+  | 'unknown'
+  | 'model-checking'
+  | 'ready'
+  | 'model-not-supported'
+  | 'offline'
+  | 'error';
+
+export interface CopilotModelState {
+  status: CopilotModelStatus;
+  code:
+    | 'COPILOT_MODEL_UNKNOWN'
+    | 'COPILOT_MODEL_CHECKING'
+    | 'COPILOT_MODEL_READY'
+    | 'COPILOT_MODEL_NOT_SUPPORTED'
+    | 'COPILOT_MODEL_SELECTION_REQUIRED'
+    | 'COPILOT_MODEL_CATALOG_EMPTY'
+    | 'COPILOT_MODEL_OFFLINE'
+    | 'COPILOT_MODEL_ERROR';
+  message: string;
+  availableModels: string[];
+  configuredModel?: string;
+  selectedModel?: string;
+  recommendedModel?: string;
+  explicitConfigured: boolean;
+  retryable: boolean;
+}
+
 export interface CopilotAuthState {
   status: CopilotAuthStatus;
   code:
@@ -30,6 +58,7 @@ export interface CopilotAuthState {
   action?: 'sign-in' | 'retry';
   username?: string;
   checkedAt?: string;
+  model?: CopilotModelState;
 }
 
 export interface CopilotLoginFlow {
@@ -73,6 +102,20 @@ export async function retryCopilotAuth(): Promise<CopilotAuthState> {
   } catch {
     return offlineState;
   }
+}
+
+export async function retryCopilotModel(): Promise<CopilotModelState> {
+  return gateway.call<CopilotModelState>('auth.model.retry');
+}
+
+export async function selectCopilotModel(
+  model: string,
+): Promise<CopilotModelState> {
+  return gateway.call<CopilotModelState>('auth.model.select', { model });
+}
+
+export function copilotActionsReady(state: CopilotAuthState): boolean {
+  return state.status === 'ready' && state.model?.status === 'ready';
 }
 
 export function beginCopilotSignIn(): Promise<CopilotLoginFlow> {
@@ -130,13 +173,17 @@ export function copilotOnboardingStep(state: CopilotAuthState): {
   status: CopilotAuthStatus;
   code: CopilotAuthState['code'];
   message: string;
+  modelStatus: CopilotModelStatus;
+  modelCode: CopilotModelState['code'];
   legacyAvailable: true;
 } {
   return {
-    complete: state.status === 'ready',
+    complete: copilotActionsReady(state),
     status: state.status,
     code: state.code,
     message: state.message,
+    modelStatus: state.model?.status ?? 'unknown',
+    modelCode: state.model?.code ?? 'COPILOT_MODEL_UNKNOWN',
     legacyAvailable: true,
   };
 }

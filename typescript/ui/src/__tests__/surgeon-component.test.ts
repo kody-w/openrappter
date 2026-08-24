@@ -20,6 +20,11 @@ const mocks = vi.hoisted(() => ({
   pollCopilotSignIn: vi.fn(),
   cancelCopilotSignIn: vi.fn(),
   openCopilotVerification: vi.fn(),
+  retryCopilotModel: vi.fn(),
+  selectCopilotModel: vi.fn(),
+  copilotActionsReady: vi.fn((state) =>
+    state.status === 'ready' && state.model?.status === 'ready'
+  ),
   askPatient: vi.fn(),
 }));
 
@@ -31,6 +36,9 @@ vi.mock('../services/copilot-auth.js', () => ({
   pollCopilotSignIn: mocks.pollCopilotSignIn,
   cancelCopilotSignIn: mocks.cancelCopilotSignIn,
   openCopilotVerification: mocks.openCopilotVerification,
+  retryCopilotModel: mocks.retryCopilotModel,
+  selectCopilotModel: mocks.selectCopilotModel,
+  copilotActionsReady: mocks.copilotActionsReady,
 }));
 vi.mock('../services/patient.js', () => ({
   askPatient: mocks.askPatient,
@@ -122,6 +130,15 @@ describe('openrappter-surgeon', () => {
       code: 'COPILOT_READY',
       message: 'GitHub Copilot is ready.',
       retryable: false,
+      model: {
+        status: 'ready',
+        code: 'COPILOT_MODEL_READY',
+        message: 'Model ready.',
+        availableModels: ['supported-model'],
+        selectedModel: 'supported-model',
+        explicitConfigured: true,
+        retryable: false,
+      },
     });
   });
 
@@ -163,6 +180,15 @@ describe('openrappter-surgeon', () => {
         code: 'COPILOT_READY',
         message: 'GitHub Copilot is ready.',
         retryable: false,
+        model: {
+          status: 'ready',
+          code: 'COPILOT_MODEL_READY',
+          message: 'Model ready.',
+          availableModels: ['supported-model'],
+          selectedModel: 'supported-model',
+          explicitConfigured: true,
+          retryable: false,
+        },
       })
       .mockResolvedValue({
         status: 'needs-sign-in',
@@ -201,6 +227,7 @@ describe('openrappter-surgeon', () => {
       retryable: true,
       action: 'retry',
     });
+
     const element = document.createElement('openrappter-surgeon') as SurgeonElement;
     const navigate = vi.fn();
     element.addEventListener('navigate', navigate);
@@ -231,6 +258,78 @@ describe('openrappter-surgeon', () => {
     expect(mocks.askPatient).not.toHaveBeenCalled();
     expect(mocks.sendTurn).not.toHaveBeenCalled();
     expect(element.shadowRoot?.textContent).not.toContain('Use local patient tools');
+  });
+
+  it('shows only verified model choices and caches stale consultation after HTTP 400', async () => {
+    const previous = result();
+    mocks.loadCases.mockResolvedValue([previous.case]);
+    mocks.sendTurn.mockRejectedValueOnce(new Error(
+      'The configured Copilot model "unsupported-model" is not supported.',
+    ));
+    mocks.loadCopilotAuthState
+      .mockResolvedValueOnce({
+        status: 'ready',
+        code: 'COPILOT_READY',
+        message: 'GitHub Copilot is ready.',
+        retryable: false,
+        model: {
+          status: 'ready',
+          code: 'COPILOT_MODEL_READY',
+          message: 'Model ready.',
+          availableModels: ['unsupported-model'],
+          selectedModel: 'unsupported-model',
+          explicitConfigured: true,
+          retryable: false,
+        },
+      })
+      .mockResolvedValue({
+        status: 'ready',
+        code: 'COPILOT_READY',
+        message: 'GitHub Copilot is ready.',
+        retryable: false,
+        model: {
+          status: 'model-not-supported',
+          code: 'COPILOT_MODEL_NOT_SUPPORTED',
+          message: 'The configured Copilot model "unsupported-model" is not supported by this account.',
+          availableModels: ['supported-model'],
+          configuredModel: 'unsupported-model',
+          recommendedModel: 'supported-model',
+          explicitConfigured: true,
+          retryable: true,
+        },
+      });
+    mocks.selectCopilotModel.mockResolvedValue({
+      status: 'ready',
+      code: 'COPILOT_MODEL_READY',
+      message: 'Model ready.',
+      availableModels: ['supported-model'],
+      configuredModel: 'supported-model',
+      selectedModel: 'supported-model',
+      explicitConfigured: true,
+      retryable: false,
+    });
+    const element = document.createElement('openrappter-surgeon') as SurgeonElement;
+    document.body.append(element);
+    await settle(element);
+
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.portal')!.click();
+    await settle(element);
+
+    expect(element.shadowRoot?.textContent).toContain('Cached Copilot consultation');
+    expect(element.shadowRoot?.textContent).toContain('unsupported-model');
+    expect(element.shadowRoot?.textContent).toContain('Use recommended model');
+    expect(Array.from(
+      element.shadowRoot?.querySelectorAll<HTMLOptionElement>('option') ?? [],
+    ).map((option) => option.value)).toEqual(['supported-model']);
+    expect(element.shadowRoot?.textContent).not.toContain('model_not_supported');
+    expect(element.shadowRoot?.querySelector<HTMLButtonElement>('.send')?.disabled)
+      .toBe(true);
+    const recommended = Array.from(
+      element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.model-resolution button') ?? [],
+    ).find((button) => button.textContent?.includes('Use recommended model'));
+    recommended!.click();
+    await settle(element);
+    expect(mocks.selectCopilotModel).toHaveBeenCalledWith('supported-model');
   });
 });
 

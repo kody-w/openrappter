@@ -34,6 +34,12 @@ import { CopilotTokenError } from '../../providers/copilot-token.js';
 import path from 'path';
 import { openrappterHome } from '../../infra/openrappter-home.js';
 import { retireMatchingLegacyCredentialCopies } from '../../auth/legacy-credential-migration.js';
+import {
+  CopilotModelStateService,
+  type CopilotModelState,
+} from '../../auth/copilot-model-state.js';
+import { resolveCopilotApiToken } from '../../providers/copilot-token.js';
+import { discoverCopilotModelCatalog } from '../../providers/copilot-model-catalog.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -99,6 +105,20 @@ export function registerAuthMethods(
   const authStateService = (
     _deps?.copilotAuthStateService ?? new CopilotAuthStateService()
   ) as CopilotAuthStateService;
+  const modelStateService = (
+    _deps?.copilotModelStateService ?? new CopilotModelStateService()
+  ) as CopilotModelStateService;
+  const modelChecksEnabled = Boolean(_deps?.copilotModelStateService);
+  const modelIsReady = (): boolean =>
+    !modelChecksEnabled || modelStateService.current().status === 'ready';
+  const resolveCopilotToken = (
+    _deps?.resolveCopilotToken ?? resolveCopilotApiToken
+  ) as typeof resolveCopilotApiToken;
+  const discoverModelCatalog = (
+    _deps?.discoverModelCatalog ?? discoverCopilotModelCatalog
+  ) as typeof discoverCopilotModelCatalog;
+  const onAuthModelUpdate = _deps?.onAuthModelUpdate as
+    ((model: string) => void) | undefined;
   const retireLegacyCopies = (
     _deps?.retireLegacyCopies
     ?? ((token: string) => retireMatchingLegacyCredentialCopies({
@@ -122,6 +142,7 @@ export function registerAuthMethods(
     for (const flow of pendingFlows.values()) flow.controller.abort();
     credentialController = new AbortController();
     authStateService.advanceGeneration();
+    modelStateService.invalidateCredential();
     return captureCredentialContext();
   };
   const credentialContextIsCurrent = (
@@ -164,6 +185,7 @@ export function registerAuthMethods(
       });
       if (state.status === 'ready' && credentialContextIsCurrent(context)) {
         retireLegacyCopies(profile.token);
+        if (modelChecksEnabled) await verifyModel(profile, context);
       }
       return state;
     } catch (error) {
@@ -172,6 +194,42 @@ export function registerAuthMethods(
         : authStateService.current();
     }
   };
+  async function verifyModel(
+    profile: AuthProfile,
+    context: CredentialContext,
+    force = false,
+  ): Promise<CopilotModelState> {
+    const resolved = await resolveCopilotToken({
+      githubToken: profile.token ?? '',
+      signal: context.signal,
+    });
+    if (!credentialContextIsCurrent(context)) {
+      return modelStateService.current();
+    }
+    const configuredModel =
+      profile.model
+      ?? process.env.OPENRAPPTER_SURGEON_MODEL
+      ?? process.env.OPENRAPPTER_MODEL;
+    const state = await modelStateService.check({
+      accountId: profile.id,
+      endpoint: resolved.baseUrl,
+      configuredModel,
+      explicitConfigured: Boolean(configuredModel),
+      force,
+      discover: async (signal) => (
+        await discoverModelCatalog({
+          githubToken: profile.token,
+          signal,
+        })
+      ).catalog,
+    });
+    if (
+      state.status === 'ready'
+      && state.selectedModel
+      && credentialContextIsCurrent(context)
+    ) onAuthModelUpdate?.(state.selectedModel);
+    return state;
+  }
   const existingProfile = store.get('copilot');
   if (existingProfile?.token) {
     const context = captureCredentialContext();
@@ -180,6 +238,7 @@ export function registerAuthMethods(
         if (
           state.status === 'ready'
           && credentialContextIsCurrent(context)
+          && modelIsReady()
           && store.get('copilot')?.id === existingProfile.id
         ) {
           onTokenUpdate?.(existingProfile.token!);
@@ -194,7 +253,7 @@ export function registerAuthMethods(
   }
 
   server.registerMethod<void, CopilotAuthState>('auth.status', async () =>
-    authStateService.current()
+    ({ ...authStateService.current(), model: modelStateService.current() })
   );
 
   server.registerMethod<void, CopilotAuthState>('auth.check', async () => {
@@ -209,7 +268,75 @@ export function registerAuthMethods(
     ) {
       onTokenUpdate?.(profile.token);
     }
-    return state;
+    return { ...state, model: modelStateService.current() };
+  });
+
+  server.registerMethod<void, CopilotModelState>(
+    'auth.model.retry',
+    async () => {
+      const profile = store.get('copilot');
+      if (!profile?.token) return modelStateService.current();
+      return verifyModel(profile, captureCredentialContext(), true);
+    },
+  );
+
+  const selectModel = async (model: string): Promise<CopilotModelState> => {
+    if (!model || typeof model !== 'string') {
+      throw new Error('A verified Copilot model is required.');
+    }
+    const profile = store.get('copilot');
+    if (!profile?.token) {
+      throw new Error('Sign in to GitHub Copilot before selecting a model.');
+    }
+    const selected = await modelStateService.select(
+      model,
+      async (next, previous) => {
+        if (!store.updateModel('copilot', profile.id, next, previous)) {
+          throw new Error('Active Copilot profile was not found.');
+        }
+      },
+    );
+    onAuthModelUpdate?.(model);
+    onTokenUpdate?.(profile.token);
+    return selected;
+  };
+
+  server.registerMethod<{ model: string }, CopilotModelState>(
+    'auth.model.select',
+    async ({ model }) => selectModel(model),
+  );
+  server.registerMethod<{ model: string }, {
+    model: string;
+    previous?: string;
+    persisted: true;
+  }>('models.set', async ({ model }) => {
+    const previous = modelStateService.current().configuredModel;
+    const selected = await selectModel(model);
+    return {
+      model: selected.selectedModel!,
+      previous,
+      persisted: true,
+    };
+  });
+  server.registerMethod('models.get', async () => {
+    const model = modelStateService.current();
+    return {
+      model: model.selectedModel ?? model.configuredModel,
+      default: model.recommendedModel,
+      status: model.status,
+    };
+  });
+  server.registerMethod('models.available', async () => {
+    const model = modelStateService.current();
+    return {
+      models: model.availableModels.map((id) => ({
+        id,
+        active: id === model.selectedModel,
+      })),
+      current: model.selectedModel ?? model.configuredModel,
+      recommended: model.recommendedModel,
+      status: model.status,
+    };
   });
 
   // ── auth.profiles — list all saved profiles ────────────────────────────────
@@ -327,9 +454,16 @@ export function registerAuthMethods(
                 identity.login,
                 persistedContext.authGeneration,
               );
+              const persistedProfile = store.get('copilot', identity.login)!;
+              const model = modelChecksEnabled
+                ? await verifyModel(persistedProfile, persistedContext)
+                : undefined;
               flow.persisted = true;
-              flow.authState = authStateService.current();
-              onTokenUpdate?.(token);
+              flow.authState = {
+                ...authStateService.current(),
+                ...(model ? { model } : {}),
+              };
+              if (!model || model.status === 'ready') onTokenUpdate?.(token);
             } catch (error) {
               flow.authState = authStateService.reportFailure(error);
             }
@@ -432,7 +566,10 @@ export function registerAuthMethods(
       // Flow completed
       pendingFlows.delete(params.deviceCode);
 
-      if (flow.authState?.status !== 'ready') {
+      if (
+        flow.authState?.status !== 'ready'
+        || (modelChecksEnabled && flow.authState.model?.status !== 'ready')
+      ) {
         const auth = flow.authState ?? authStateService.current();
         return { status: 'error', error: auth.message, auth };
       }
@@ -476,6 +613,7 @@ export function registerAuthMethods(
       const state = await verifyStoredProfile(profile, context);
       if (
         state.status !== 'ready'
+        || !modelIsReady()
         || !credentialContextIsCurrent(context)
         || !store.get('copilot', profile.id)
       ) return { ok: false };
@@ -534,6 +672,7 @@ export function registerAuthMethods(
         const state = await verifyStoredProfile(replacement, context);
         if (
           state.status === 'ready'
+          && modelIsReady()
           && credentialContextIsCurrent(context)
           && store.get('copilot', replacement.id)
         ) {

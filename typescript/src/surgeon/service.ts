@@ -6,6 +6,8 @@ import { chatWithFlightRecorder } from '../providers/recorded-chat.js';
 import { getFlightRecorder } from '../flight-recorder/index.js';
 import type { LLMProvider, Message } from '../providers/types.js';
 import type { CopilotAuthStateService } from '../auth/copilot-auth-state.js';
+import type { CopilotModelStateService } from '../auth/copilot-model-state.js';
+import { CopilotModelNotSupportedError } from '../auth/copilot-model-state.js';
 import type {
   SurgeonCase,
   SurgeonCaseStatus,
@@ -34,6 +36,8 @@ interface SurgeonServiceOptions {
   now?: () => Date;
   idFactory?: () => string;
   authState?: CopilotAuthStateService;
+  modelState?: CopilotModelStateService;
+  model?: string;
 }
 
 interface ModelProcedure {
@@ -102,6 +106,8 @@ export class SurgeonService {
   private readonly consultingCases = new Set<string>();
   private persistenceError?: Error;
   private readonly authState?: CopilotAuthStateService;
+  private readonly modelState?: CopilotModelStateService;
+  private model: string;
 
   constructor(options: SurgeonServiceOptions) {
     this.provider = options.provider ?? new CopilotCliDirectProvider({
@@ -112,6 +118,10 @@ export class SurgeonService {
     this.now = options.now ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
     this.authState = options.authState;
+    this.modelState = options.modelState;
+    this.model = options.model
+      ?? process.env.OPENRAPPTER_SURGEON_MODEL
+      ?? 'auto';
     this.storePath = path.join(options.dataDir, CASES_FILE);
 
     fs.mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
@@ -124,6 +134,10 @@ export class SurgeonService {
 
   setProvider(provider: LLMProvider): void {
     this.provider = provider;
+  }
+
+  setModel(model: string): void {
+    this.model = model;
   }
 
   async getPatient(): Promise<SurgeonPatientSnapshot> {
@@ -170,6 +184,7 @@ export class SurgeonService {
     current: SurgeonCase,
   ): Promise<SurgeonConsultResult> {
     this.authState?.requireReady();
+    this.modelState?.requireReady();
     const authGeneration = this.authState?.captureGeneration();
     this.assertCaseNotInSurgery(current);
     if (this.consultingCases.has(current.id)) {
@@ -183,7 +198,7 @@ export class SurgeonService {
       candidate = await chatWithFlightRecorder({
         provider: this.provider,
         messages: this.consultMessages(current, patient, userInput),
-        options: { model: process.env.OPENRAPPTER_SURGEON_MODEL ?? 'auto' },
+        options: { model: this.model },
         source: "surgeon-service",
         scope: { sessionId: current.id },
         attributes: { phase: "consult" },
@@ -204,7 +219,7 @@ export class SurgeonService {
             },
           ],
           options: {
-            model: process.env.OPENRAPPTER_SURGEON_MODEL ?? 'auto',
+            model: this.model,
             temperature: 0,
           },
           source: "surgeon-service",
@@ -214,7 +229,9 @@ export class SurgeonService {
         parsed = parseModelTurn(repair.content);
       }
     } catch (error) {
-      this.authState?.reportFailure(error, authGeneration);
+      if (!(error instanceof CopilotModelNotSupportedError)) {
+        this.authState?.reportFailure(error, authGeneration);
+      }
       throw error;
     } finally {
       this.consultingCases.delete(current.id);
@@ -312,6 +329,7 @@ export class SurgeonService {
     current: SurgeonCase,
   ): Promise<SurgeonCase> {
     this.authState?.requireReady();
+    this.modelState?.requireReady();
     const authGeneration = this.authState?.captureGeneration();
     const procedure = this.requireProcedure(current, approval);
     if (current.status === 'recovered' && procedure.status === 'recovered') {
@@ -391,7 +409,7 @@ export class SurgeonService {
           },
         ],
         options: {
-          model: process.env.OPENRAPPTER_SURGEON_MODEL ?? 'auto',
+          model: this.model,
           temperature: 0,
         },
         source: "surgeon-service",
@@ -432,7 +450,9 @@ export class SurgeonService {
         patientAfter,
       );
     } catch (error) {
-      this.authState?.reportFailure(error, authGeneration);
+      if (!(error instanceof CopilotModelNotSupportedError)) {
+        this.authState?.reportFailure(error, authGeneration);
+      }
       const failedAt = this.timestamp();
       procedure.status = 'failed';
       procedure.completedAt = failedAt;

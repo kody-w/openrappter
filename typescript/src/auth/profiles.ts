@@ -11,6 +11,9 @@ export interface AuthProfile {
   refreshToken?: string;
   expiresAt?: number;
   default?: boolean;
+  model?: string;
+  previousModel?: string;
+  modelUpdatedAt?: string;
   createdAt: string;
 }
 
@@ -99,6 +102,24 @@ export class AuthProfileStore {
       if (candidate.provider === provider) candidate.default = false;
     });
     profile.default = true;
+    this.commit(next);
+    return true;
+  }
+
+  updateModel(
+    provider: string,
+    id: string,
+    model: string,
+    previousModel?: string,
+  ): boolean {
+    const next = this.snapshot();
+    const profile = next.find((candidate) =>
+      candidate.provider === provider && candidate.id === id
+    );
+    if (!profile) return false;
+    profile.previousModel = profile.model ?? previousModel;
+    profile.model = model;
+    profile.modelUpdatedAt = new Date().toISOString();
     this.commit(next);
     return true;
   }

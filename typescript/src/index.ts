@@ -544,10 +544,7 @@ async function startGatewayInProcess(opts?: {
   const [
     { SurgeonService },
     { buildPatientSnapshot },
-    {
-      CopilotProvider,
-      COPILOT_DEFAULT_MODEL: PROFILE_COPILOT_DEFAULT_MODEL,
-    },
+    { CopilotProvider },
   ] = await Promise.all([
     import('./surgeon/service.js'),
     import('./surgeon/patient.js'),
@@ -556,6 +553,8 @@ async function startGatewayInProcess(opts?: {
   const surgeonService = new SurgeonService({
     dataDir: HOME_DIR,
     authState: server.getCopilotAuthStateService(),
+    modelState: server.getCopilotModelStateService(),
+    model: assistant.getModel(),
     provider: backend.provider ?? new CopilotProvider({
       allowAmbientCredentials: !desktopProfileAuthority,
     }),
@@ -658,33 +657,58 @@ async function startGatewayInProcess(opts?: {
   // Wire auth profile token updates → live provider refresh (no restart needed)
   let authTokenUpdateGeneration = 0;
   let authTokenUpdateController: AbortController | undefined;
+  let activeCopilotProvider: InstanceType<typeof CopilotProvider> | undefined;
+  const applyAuthModel = (model: string) => {
+    activeCopilotProvider?.cancelPendingRequests();
+    assistant.setModel(model);
+    surgeonService.setModel(model);
+  };
+  server.setAuthModelCallback(applyAuthModel);
   server.setAuthTokenCallback((token) => {
     const generation = ++authTokenUpdateGeneration;
     authTokenUpdateController?.abort();
     const controller = new AbortController();
     authTokenUpdateController = controller;
     const profileModel =
-      process.env.OPENRAPPTER_MODEL
-      ?? (assistant.getModel() === 'auto'
-        ? PROFILE_COPILOT_DEFAULT_MODEL
-        : assistant.getModel());
+      server.getCopilotModelStateService().current().selectedModel
+      ?? assistant.getModel();
     const profileProvider = new CopilotProvider({
       githubToken: token ?? undefined,
       allowAmbientCredentials: false,
     });
+    profileProvider.setModelNotSupportedHandler(async (model) => {
+      const replacement = await server
+        .getCopilotModelStateService()
+        .refreshAfterUnsupported(model);
+      if (replacement) applyAuthModel(replacement);
+      return replacement;
+    });
+    activeCopilotProvider?.cancelPendingRequests();
+    activeCopilotProvider = profileProvider;
     assistant.setGithubToken(token, false);
     assistant.setProvider(profileProvider, profileModel);
     surgeonService.setProvider(profileProvider);
     updateAgentProviders(profileProvider);
     updateIMessageToken?.(token);
     if (!token) {
+      const credentialState = server.getCopilotAuthStateService().current();
+      const modelState = server.getCopilotModelStateService().current();
+      const modelUnavailable =
+        credentialState.status === 'ready'
+        && modelState.status !== 'ready';
       server.setBackendStatus?.({
-        kind: 'unauthenticated',
-        reason: 'No active Copilot profile',
+        kind: modelUnavailable ? 'model-unavailable' : 'unauthenticated',
+        reason: modelUnavailable
+          ? modelState.message
+          : 'No active Copilot profile',
         remedy: {
-          title: 'Sign in to GitHub',
-          detail: 'Open Accounts and authenticate a Copilot-enabled GitHub account.',
-          action: 'auth.login',
+          title: modelUnavailable
+            ? 'Choose a supported Copilot model'
+            : 'Sign in to GitHub',
+          detail: modelUnavailable
+            ? 'Select a model verified for the active Copilot account.'
+            : 'Open Accounts and authenticate a Copilot-enabled GitHub account.',
+          action: modelUnavailable ? 'auth.model.select' : 'auth.login',
         },
         model: profileModel,
         requestedModel: process.env.OPENRAPPTER_MODEL ?? profileModel,
@@ -907,73 +931,6 @@ async function startGatewayInProcess(opts?: {
   // `id`, `installed` and `source`, so the macOS Bar's `[Skill]` decode
   // failed and the pane showed "No skills installed" no matter how many
   // skills were on disk. One method, one place.
-
-  // ── Model switching RPC methods ──
-  const { COPILOT_DEFAULT_MODELS, COPILOT_DEFAULT_MODEL } = await import('./providers/copilot.js');
-
-  server.registerMethod('models.get', async () => {
-    return {
-      model: assistant.getModel(),
-      default: COPILOT_DEFAULT_MODEL,
-    };
-  });
-
-  server.registerMethod('models.set', async (params: { model: string }) => {
-    if (!params.model || typeof params.model !== 'string') {
-      throw new Error('Missing required parameter: model');
-    }
-
-    const oldModel = assistant.getModel();
-    assistant.setModel(params.model);
-    process.env.OPENRAPPTER_MODEL = params.model;
-
-    // Persist to .env so it survives restarts
-    try {
-      const env = await loadEnv();
-      env.OPENRAPPTER_MODEL = params.model;
-      await saveEnv(env);
-    } catch { /* non-fatal — runtime switch still works */ }
-
-    log(`${EMOJI} Model switched: ${oldModel} → ${params.model}`);
-
-    return {
-      model: params.model,
-      previous: oldModel,
-      persisted: true,
-    };
-  });
-
-  server.registerMethod('models.available', async () => {
-    // Start with the known Copilot models
-    const models: string[] = [...COPILOT_DEFAULT_MODELS];
-
-    // Try to discover models from the API if we have a valid token
-    try {
-      const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
-      const resolved = await resolveCopilotApiToken({ githubToken: githubToken ?? '' });
-      const res = await fetch(`${resolved.baseUrl}/v1/models`, {
-        headers: { Authorization: `Bearer ${resolved.token}` },
-      });
-      if (res.ok) {
-        const data = await res.json() as { data?: Array<{ id: string }> };
-        if (data.data && Array.isArray(data.data)) {
-          for (const m of data.data) {
-            if (m.id && !models.includes(m.id)) {
-              models.push(m.id);
-            }
-          }
-        }
-      }
-    } catch { /* fallback to hardcoded list */ }
-
-    return {
-      models: models.map(id => ({
-        id,
-        active: id === assistant.getModel(),
-      })),
-      current: assistant.getModel(),
-    };
-  });
 
   // Name the backend actually in use. This line said "Copilot SDK"
   // unconditionally, which is how a machine running the CLI path looked

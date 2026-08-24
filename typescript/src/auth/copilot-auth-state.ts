@@ -2,6 +2,7 @@ import {
   CopilotTokenError,
   resolveCopilotApiToken,
 } from '../providers/copilot-token.js';
+import type { CopilotModelState } from './copilot-model-state.js';
 
 export type CopilotAuthStatus =
   | 'unknown'
@@ -34,6 +35,7 @@ export interface CopilotAuthState {
   action?: 'sign-in' | 'retry';
   username?: string;
   checkedAt?: string;
+  model?: CopilotModelState;
 }
 
 export const INITIAL_COPILOT_AUTH_STATE: CopilotAuthState = {

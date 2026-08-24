@@ -1296,7 +1296,8 @@ function createWindow(): BrowserWindow {
             component:
               document.documentElement.dataset.openrappterShell === 'grail',
             grailDefault:
-              document.title.includes('Brainstem Frontier Grail') &&
+              document.title === 'OpenRappter' &&
+              document.body.textContent?.includes('Brainstem Frontier Grail') === true &&
               Boolean(document.querySelector('[data-grail-surface="operating-room"]')) &&
               Boolean(document.querySelector('[data-grail-surface="living-company"]')) &&
               Boolean(document.querySelector('[data-grail-legacy]')),

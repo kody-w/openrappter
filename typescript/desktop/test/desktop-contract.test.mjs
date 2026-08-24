@@ -147,6 +147,9 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(main, /openrappterGrailSemantic\.open\('show-and-tell'\)/);
   assert.match(main, /data-grail-surface="operating-room"/);
   assert.match(main, /grailDefault/);
+  assert.match(main, /document\.title === 'OpenRappter'/);
+  assert.match(main, /textContent\?\.includes\('Brainstem Frontier Grail'\)/);
+  assert.doesNotMatch(main, /document\.title\.includes\('Brainstem Frontier Grail'\)/);
 });
 
 // OPENRAPPTER_DESKTOP_SMOKE is a process-wide launch flag, and the release

@@ -1548,6 +1548,31 @@ def _create_trusted_basic_agent_boundary():
     trusted_class = module.BasicAgent
     class_attributes = dict(trusted_class.__dict__)
     class_bases = tuple(trusted_class.__bases__)
+    function_states = {}
+    for name, value in class_attributes.items():
+        function = (
+            value.__func__
+            if isinstance(value, (staticmethod, classmethod))
+            else value
+        )
+        if not isinstance(function, types.FunctionType):
+            continue
+        function_states[name] = {
+            "function": function,
+            "code": function.__code__,
+            "defaults": function.__defaults__,
+            "kwdefaults": (
+                dict(function.__kwdefaults__)
+                if function.__kwdefaults__ is not None
+                else None
+            ),
+            "annotations": dict(function.__annotations__),
+            "dict": dict(function.__dict__),
+            "doc": function.__doc__,
+            "name": function.__name__,
+            "qualname": function.__qualname__,
+            "module": function.__module__,
+        }
 
     agents_package = types.ModuleType("agents")
     agents_package.__path__ = [agents_dir]
@@ -1555,6 +1580,19 @@ def _create_trusted_basic_agent_boundary():
     openrappter_package.__path__ = [_BASE_DIR]
     openrappter_agents_package = types.ModuleType("openrappter.agents")
     openrappter_agents_package.__path__ = [agents_dir]
+    agents_package.basic_agent = module
+    openrappter_agents_package.basic_agent = module
+    openrappter_package.agents = openrappter_agents_package
+    package_paths = {
+        agents_package: tuple(agents_package.__path__),
+        openrappter_package: tuple(openrappter_package.__path__),
+        openrappter_agents_package: tuple(openrappter_agents_package.__path__),
+    }
+    module_attributes = dict(module.__dict__)
+    package_attributes = {
+        package: dict(package.__dict__)
+        for package in package_paths
+    }
 
     aliases = (
         "agents.basic_agent",
@@ -1564,6 +1602,23 @@ def _create_trusted_basic_agent_boundary():
 
     def trusted():
         return trusted_class
+
+    def same_mapping_identity(current, expected):
+        return (
+            set(current) == set(expected)
+            and all(current[name] is value for name, value in expected.items())
+        )
+
+    def same_tuple_identity(current, expected):
+        if current is None or expected is None:
+            return current is expected
+        return (
+            len(current) == len(expected)
+            and all(
+                current[index] is value
+                for index, value in enumerate(expected)
+            )
+        )
 
     def violation():
         for alias in aliases:
@@ -1595,6 +1650,63 @@ def _create_trusted_basic_agent_boundary():
             return "canonical class attribute replaced"
         if tuple(trusted_class.__bases__) != class_bases:
             return "canonical class bases changed"
+        for state in function_states.values():
+            function = state["function"]
+            if function.__code__ is not state["code"]:
+                return "canonical method code changed"
+            if not same_tuple_identity(
+                function.__defaults__,
+                state["defaults"],
+            ):
+                return "canonical method defaults changed"
+            if (
+                function.__kwdefaults__ is None
+                or state["kwdefaults"] is None
+            ):
+                kwdefaults_match = (
+                    function.__kwdefaults__ is state["kwdefaults"]
+                )
+            else:
+                kwdefaults_match = same_mapping_identity(
+                    function.__kwdefaults__,
+                    state["kwdefaults"],
+                )
+            if not kwdefaults_match:
+                return "canonical method keyword defaults changed"
+            if not same_mapping_identity(
+                function.__annotations__,
+                state["annotations"],
+            ):
+                return "canonical method annotations changed"
+            if not same_mapping_identity(function.__dict__, state["dict"]):
+                return "canonical method attributes changed"
+            if (
+                function.__doc__ != state["doc"]
+                or function.__name__ != state["name"]
+                or function.__qualname__ != state["qualname"]
+                or function.__module__ != state["module"]
+            ):
+                return "canonical method metadata changed"
+        if not same_mapping_identity(module.__dict__, module_attributes):
+            return "canonical module attributes changed"
+        for package, expected in package_attributes.items():
+            current_without_path = {
+                name: value
+                for name, value in package.__dict__.items()
+                if name != "__path__"
+            }
+            expected_without_path = {
+                name: value
+                for name, value in expected.items()
+                if name != "__path__"
+            }
+            if not same_mapping_identity(
+                current_without_path,
+                expected_without_path,
+            ):
+                return "canonical package attributes changed"
+            if tuple(package.__path__) != package_paths[package]:
+                return "canonical package path changed"
         return None
 
     def restore():
@@ -1618,10 +1730,34 @@ def _create_trusted_basic_agent_boundary():
                 trusted_class.__bases__ = class_bases
             except (AttributeError, TypeError):
                 pass
-        module.BasicAgent = trusted_class
-        agents_package.basic_agent = module
-        openrappter_agents_package.basic_agent = module
-        openrappter_package.agents = openrappter_agents_package
+        for state in function_states.values():
+            function = state["function"]
+            function.__code__ = state["code"]
+            function.__defaults__ = state["defaults"]
+            function.__kwdefaults__ = (
+                dict(state["kwdefaults"])
+                if state["kwdefaults"] is not None
+                else None
+            )
+            function.__annotations__ = dict(state["annotations"])
+            function.__dict__.clear()
+            function.__dict__.update(state["dict"])
+            function.__doc__ = state["doc"]
+            function.__name__ = state["name"]
+            function.__qualname__ = state["qualname"]
+            function.__module__ = state["module"]
+        for name in set(module.__dict__) - set(module_attributes):
+            module.__dict__.pop(name, None)
+        module.__dict__.update(module_attributes)
+        for package, expected in package_attributes.items():
+            for name in set(package.__dict__) - set(expected):
+                package.__dict__.pop(name, None)
+            package.__dict__.update({
+                name: value
+                for name, value in expected.items()
+                if name != "__path__"
+            })
+            package.__path__ = list(package_paths[package])
         sys.modules["agents"] = agents_package
         sys.modules["openrappter"] = openrappter_package
         sys.modules["openrappter.agents"] = openrappter_agents_package

@@ -1251,6 +1251,8 @@ function createWindow(): BrowserWindow {
           if (!chat || !surgeon) {
             throw new Error('Copilot readiness fixture surfaces did not mount.');
           }
+          chat.chatTarget = 'openrappter';
+          surgeon.mode = 'surgeon';
           chat.messages = [
             { id: 'fixture-user', role: 'user', content: 'fixture question', timestamp: 1 },
             { id: 'fixture-assistant', role: 'assistant', content: 'stale operational answer', timestamp: 2 }
@@ -1267,40 +1269,53 @@ function createWindow(): BrowserWindow {
             async reportFailure() { return unauthorizedState; }
           });
           xpedition.selectOnboardingStep('health');
-          await new Promise((resolve) => setTimeout(resolve, 75));
-          await Promise.all([chat.updateComplete, surgeon.updateComplete]);
-          const onboarding = xpedition.shadowRoot.querySelector(
-            'openrappter-xpedition-onboarding'
-          );
-          await onboarding?.updateComplete;
-          const onboardingButtons = [
-            ...(onboarding?.shadowRoot?.querySelectorAll('button') || [])
-          ];
-          const land = onboardingButtons.find((button) =>
-            button.textContent.includes('Land on desktop')
-          );
-          const legacy = onboardingButtons.find((button) =>
-            button.textContent.includes('Use Legacy OpenRappter')
-          );
-          const chatText = chat.shadowRoot?.textContent || '';
-          const surgeonText = surgeon.shadowRoot?.textContent || '';
-          const chatComposer = chat.shadowRoot?.querySelector('textarea');
-          const surgeonMode = [...(surgeon.shadowRoot?.querySelectorAll('.tbtn') || [])]
-            .find((button) => button.textContent.includes('Surgeon'));
-          const signIn = onboardingButtons.find((button) =>
-            button.textContent.includes('Sign in to Copilot')
-          );
+          let copilotReadinessEvidence = {};
+          for (let attempt = 0; attempt < 30; attempt++) {
+            await Promise.all([
+              xpedition.updateComplete,
+              chat.updateComplete,
+              surgeon.updateComplete
+            ]);
+            const onboarding = xpedition.shadowRoot.querySelector(
+              'openrappter-xpedition-onboarding'
+            );
+            await onboarding?.updateComplete;
+            const onboardingButtons = [
+              ...(onboarding?.shadowRoot?.querySelectorAll('button') || [])
+            ];
+            const land = onboardingButtons.find((button) =>
+              button.textContent.includes('Land on desktop')
+            );
+            const legacy = onboardingButtons.find((button) =>
+              button.textContent.includes('Use Legacy OpenRappter')
+            );
+            const signIn = onboardingButtons.find((button) =>
+              button.textContent.includes('Sign in to Copilot')
+            );
+            const chatText = chat.shadowRoot?.textContent || '';
+            const surgeonText = surgeon.shadowRoot?.textContent || '';
+            const chatComposer = chat.shadowRoot?.querySelector('textarea');
+            const surgeonMode = [
+              ...(surgeon.shadowRoot?.querySelectorAll('.tbtn') || [])
+            ].find((button) => button.textContent.includes('Surgeon'));
+            copilotReadinessEvidence = {
+              state: appElement.getDesktopState().copilotReadiness.state === 'needs-sign-in',
+              staleChatRemoved: !chatText.includes('stale operational answer'),
+              chatLabeled: chatText.includes('Copilot content cleared'),
+              chatDisabled: chatComposer?.disabled === true,
+              staleSurgeonRemoved: surgeon.patientCase === null,
+              surgeonLabeled: surgeonText.includes('cleared as stale'),
+              surgeonDisabled: surgeonMode?.disabled === true,
+              onboardingBlocked: land?.disabled === true,
+              legacyVisible: Boolean(legacy),
+              signInSensitive:
+                signIn?.dataset.desktopSensitive === 'copilot-sign-in'
+            };
+            if (Object.values(copilotReadinessEvidence).every(Boolean)) break;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
           const copilotReadinessGate =
-            appElement.getDesktopState().copilotReadiness.state === 'needs-sign-in' &&
-            !chatText.includes('stale operational answer') &&
-            chatText.includes('Copilot content cleared') &&
-            chatComposer?.disabled === true &&
-            surgeon.patientCase === null &&
-            surgeonText.includes('cleared as stale') &&
-            surgeonMode?.disabled === true &&
-            land?.disabled === true &&
-            Boolean(legacy) &&
-            signIn?.dataset.desktopSensitive === 'copilot-sign-in';
+            Object.values(copilotReadinessEvidence).every(Boolean);
           return {
             smokeScope: 'full',
             bridge: Boolean(window.openrappterDesktop),
@@ -1331,6 +1346,7 @@ function createWindow(): BrowserWindow {
               live.collector_healthy === true &&
               stopped.session.state === 'stopped',
             copilotReadinessGate,
+            copilotReadinessEvidence,
             gatewayUrl: window.openrappterDesktop.gatewayUrl,
             platform: info.platform,
             protocol: location.protocol,

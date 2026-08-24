@@ -83,6 +83,7 @@ jobs:
             candidate_id="${INPUT_CANDIDATE_ID:-snapshot-$SOURCE_DATE_EPOCH}"
           fi
           printf '%s' "$candidate_id" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+          echo "CANDIDATE_KIND=$CANDIDATE_KIND" >> "$GITHUB_ENV"
           echo "CANDIDATE_ID=$candidate_id" >> "$GITHUB_ENV"
           mkdir candidate
           (cd typescript && npm ci && npm run build && node scripts/pack-locked.mjs --pack-destination ../candidate)
@@ -109,7 +110,7 @@ jobs:
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git fetch origin candidates:candidates 2>/dev/null || true
-          if git show-ref --verify --quiet refs/heads/candidates; then git switch candidates; else git switch --orphan candidates; git rm -rf .; fi
+          if git show-ref --verify --quiet refs/heads/candidates; then git switch candidates; else git switch --orphan candidates; git rm -rf . --ignore-unmatch; fi
           path="candidates/$SOURCE_COMMIT/$CANDIDATE_KIND/$CANDIDATE_ID"
           mkdir -p "$path"
           target="$path/$BUNDLE_SHA.tar.gz"

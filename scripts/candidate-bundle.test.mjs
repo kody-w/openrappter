@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { addCandidateIndexEntry, buildProvenance, candidateStoragePath, verifyProvenance } from './candidate-bundle.mjs';
@@ -59,4 +61,49 @@ test('beta.11 provenance preserves dual package and channel identities', () => {
   assert.equal(provenance.candidate_id, 'tag-djEuMTMuMA');
   verifyProvenance(root, provenance);
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('first candidate branch creation tolerates an already-empty orphan index', () => {
+  const workflow = fs.readFileSync(
+    new URL('../.github/workflows/build-candidate.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(
+    workflow,
+    /git switch --orphan candidates; git rm -rf \. --ignore-unmatch/,
+  );
+
+  const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'candidate-orphan-'));
+  try {
+    execFileSync('git', ['init', '--quiet'], { cwd: repository });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repository });
+    execFileSync('git', ['config', 'user.email', 'test@example.invalid'], {
+      cwd: repository,
+    });
+    fs.writeFileSync(path.join(repository, 'tracked.txt'), 'baseline\n');
+    execFileSync('git', ['add', 'tracked.txt'], { cwd: repository });
+    execFileSync('git', ['commit', '--quiet', '-m', 'baseline'], {
+      cwd: repository,
+    });
+    execFileSync('git', ['switch', '--orphan', 'candidates'], {
+      cwd: repository,
+    });
+    execFileSync('git', ['rm', '-rf', '.', '--ignore-unmatch'], {
+      cwd: repository,
+    });
+  } finally {
+    fs.rmSync(repository, { recursive: true, force: true });
+  }
+});
+
+test('candidate identity fields survive the workflow step boundary', () => {
+  const workflow = fs.readFileSync(
+    new URL('../.github/workflows/build-candidate.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(
+    workflow,
+    /echo "CANDIDATE_KIND=\$CANDIDATE_KIND" >> "\$GITHUB_ENV"/,
+    'the commit step reads CANDIDATE_KIND after the build step exits',
+  );
 });

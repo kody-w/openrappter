@@ -200,6 +200,7 @@ export class OpenRappterApp extends LitElement {
   private copilotAuthAdapter: CopilotAuthAdapter =
     new PendingCopilotAuthAdapter();
   private unsubscribeCopilot?: () => void;
+  private copilotOperationGeneration = 0;
 
   connectedCallback() {
     super.connectedCallback();
@@ -241,40 +242,58 @@ export class OpenRappterApp extends LitElement {
   }
 
   private async checkCopilotReadiness(): Promise<void> {
+    const generation = ++this.copilotOperationGeneration;
     copilotReadiness.set({
       state: 'checking',
       message: 'Checking Copilot readiness…',
     });
     try {
-      copilotReadiness.set(await this.copilotAuthAdapter.check());
+      const result = await this.copilotAuthAdapter.check();
+      if (generation === this.copilotOperationGeneration) {
+        copilotReadiness.set(result);
+      }
     } catch (error) {
-      await this.reportCopilotAuthFailure(error);
+      if (generation === this.copilotOperationGeneration) {
+        await this.reportCopilotAuthFailure(error);
+      }
     }
   }
 
   private async beginCopilotSignIn(): Promise<void> {
+    const generation = ++this.copilotOperationGeneration;
     copilotReadiness.set({
       state: 'checking',
       message: 'Starting Copilot sign-in…',
     });
     try {
-      copilotReadiness.set(await this.copilotAuthAdapter.beginSignIn());
+      const result = await this.copilotAuthAdapter.beginSignIn();
+      if (generation === this.copilotOperationGeneration) {
+        copilotReadiness.set(result);
+      }
     } catch (error) {
-      await this.reportCopilotAuthFailure(error);
+      if (generation === this.copilotOperationGeneration) {
+        await this.reportCopilotAuthFailure(error);
+      }
     }
   }
 
   private async reportCopilotAuthFailure(error: unknown): Promise<void> {
+    const generation = ++this.copilotOperationGeneration;
     try {
-      copilotReadiness.set(await this.copilotAuthAdapter.reportFailure(error));
+      const result = await this.copilotAuthAdapter.reportFailure(error);
+      if (generation === this.copilotOperationGeneration) {
+        copilotReadiness.set(result);
+      }
     } catch (adapterError) {
-      copilotReadiness.set({
-        state: 'error',
-        message: adapterError instanceof Error
-          ? adapterError.message
-          : 'Copilot readiness adapter failed.',
-        checkedAt: new Date().toISOString(),
-      });
+      if (generation === this.copilotOperationGeneration) {
+        copilotReadiness.set({
+          state: 'error',
+          message: adapterError instanceof Error
+            ? adapterError.message
+            : 'Copilot readiness adapter failed.',
+          checkedAt: new Date().toISOString(),
+        });
+      }
     }
   }
 

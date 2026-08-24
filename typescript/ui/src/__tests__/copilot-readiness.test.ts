@@ -77,6 +77,69 @@ describe('typed fail-closed Copilot readiness seam', () => {
     });
   });
 
+  it('does not expose mutable readiness state', () => {
+      copilotReadiness.set({
+        state: 'ready',
+        message: 'immutable fixture',
+      });
+      const copy = copilotReadiness.snapshot();
+      copy.state = 'needs-sign-in';
+      copy.message = 'mutated';
+      expect(copilotReadiness.snapshot()).toEqual({
+        state: 'ready',
+        message: 'immutable fixture',
+      });
+    });
+
+  it('rejects malformed adapter states and never treats them as ready', async () => {
+      const element = document.createElement('openrappter-app') as HTMLElement & {
+        setCopilotAuthAdapter(adapter: unknown): void;
+      };
+      element.setCopilotAuthAdapter({
+        check: vi.fn().mockResolvedValue({
+          state: 'operational',
+          message: 'forged ready state',
+        }),
+        beginSignIn: vi.fn(),
+        reportFailure: vi.fn().mockResolvedValue({
+          state: 'error',
+          message: 'Malformed readiness rejected.',
+        }),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(copilotReadiness.snapshot()).toMatchObject({
+        state: 'error',
+      });
+    });
+
+  it('does not let a stale ready check overwrite a later 401', async () => {
+      let resolveCheck!: (value: { state: 'ready'; message: string }) => void;
+      const check = new Promise<{ state: 'ready'; message: string }>((resolve) => {
+        resolveCheck = resolve;
+      });
+      const element = document.createElement('openrappter-app') as HTMLElement & {
+        setCopilotAuthAdapter(adapter: unknown): void;
+        reportCopilotAuthFailure(error: unknown): Promise<void>;
+      };
+      element.setCopilotAuthAdapter({
+        check: vi.fn(() => check),
+        beginSignIn: vi.fn(),
+        reportFailure: vi.fn().mockResolvedValue({
+          state: 'needs-sign-in',
+          message: 'HTTP 401 wins the race.',
+        }),
+      });
+      await element.reportCopilotAuthFailure(
+        Object.assign(new Error('HTTP 401'), { status: 401 }),
+      );
+      resolveCheck({ state: 'ready', message: 'stale ready result' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(copilotReadiness.snapshot()).toEqual({
+        state: 'needs-sign-in',
+        message: 'HTTP 401 wins the race.',
+      });
+  });
+
   it('maps 401, entitlement, offline, and unknown failures without success fallback', async () => {
     const adapter = new PendingCopilotAuthAdapter();
     expect((await adapter.reportFailure(Object.assign(new Error('HTTP 401'), {
@@ -171,7 +234,46 @@ describe('typed fail-closed Copilot readiness seam', () => {
     await element.updateComplete;
     expect(element.shadowRoot!.querySelector<HTMLTextAreaElement>('textarea')!.disabled)
       .toBe(false);
+    target.value = 'openrappter';
+    target.dispatchEvent(new Event('change'));
+    await element.updateComplete;
+    expect(element.shadowRoot!.querySelector<HTMLTextAreaElement>('textarea')!.disabled)
+      .toBe(true);
   });
+
+  it.each([
+    ['no-entitlement', 'No Copilot entitlement.'],
+    ['offline', 'Copilot is offline.'],
+    ['error', 'Copilot check failed.'],
+  ] as const)(
+    'clears stale Copilot output for adjacent %s failures',
+    async (state, message) => {
+      copilotReadiness.set({ state: 'ready', message: 'ready' });
+      const element = document.createElement('openrappter-chat') as HTMLElement & {
+        messages: Array<{
+          id: string;
+          role: 'assistant';
+          content: string;
+          timestamp: number;
+        }>;
+        updateComplete: Promise<unknown>;
+      };
+      element.messages = [{
+        id: 'stale',
+        role: 'assistant',
+        content: 'adjacent stale content',
+        timestamp: 1,
+      }];
+      document.body.append(element);
+      copilotReadiness.set({ state, message });
+      await element.updateComplete;
+      expect(element.messages.some((entry) =>
+        entry.content === 'adjacent stale content')).toBe(false);
+      expect(element.shadowRoot!.querySelector<HTMLTextAreaElement>('textarea')!.disabled)
+        .toBe(true);
+      element.remove();
+    },
+  );
 
   it('clears stale surgeon consultation and preserves direct patient mode', async () => {
     copilotReadiness.set({

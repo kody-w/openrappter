@@ -214,6 +214,24 @@ test('the smoke run never asks narration or voice to do the gated work', () => {
   assert.doesNotMatch(smokeScript, /action: 'enable'/);
 });
 
+test('the full smoke reproduces the Copilot 401 stale-consultation path', () => {
+  const smokeScript = mainSource.slice(
+    mainSource.indexOf("customElements.whenDefined('openrappter-show-and-tell')"),
+  );
+  assert.match(smokeScript, /Fixture Copilot HTTP 401 requires sign-in/);
+  assert.match(smokeScript, /stale operational answer/);
+  assert.match(smokeScript, /!chatText\.includes\('stale operational answer'\)/);
+  assert.match(smokeScript, /chatText\.includes\('Copilot content cleared'\)/);
+  assert.match(smokeScript, /surgeon\.patientCase === null/);
+  assert.match(smokeScript, /land\?\.disabled === true/);
+  assert.match(smokeScript, /Use Legacy OpenRappter/);
+  assert.match(smokeScript, /copilotReadinessGate/);
+  assert.match(
+    smokeScript,
+    /fullRequired[\s\S]*'copilotReadinessGate'/,
+  );
+});
+
 test('the Show-and-Tell consent bypass needs a second per-request factor', () => {
   const body = functionBody(mainSource, 'handleShowAndTell');
   assert.match(

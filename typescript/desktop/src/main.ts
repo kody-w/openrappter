@@ -1225,6 +1225,82 @@ function createWindow(): BrowserWindow {
             action: 'stop',
             session_id: started.session.id
           });
+
+          const readyState = {
+            state: 'ready',
+            message: 'Fixture Copilot readiness is ready.'
+          };
+          const unauthorizedState = {
+            state: 'needs-sign-in',
+            message: 'Fixture Copilot HTTP 401 requires sign-in.'
+          };
+          appElement.setCopilotAuthAdapter({
+            async check() { return readyState; },
+            async beginSignIn() { return unauthorizedState; },
+            async reportFailure() { return unauthorizedState; }
+          });
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          await appElement.openDesktopApp('chat');
+          await appElement.openDesktopApp('observe');
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          const xpedition = appElement.shadowRoot.querySelector(
+            'openrappter-xpedition-shell'
+          );
+          const chat = xpedition?.shadowRoot?.querySelector('openrappter-chat');
+          const surgeon = xpedition?.shadowRoot?.querySelector('openrappter-surgeon');
+          if (!chat || !surgeon) {
+            throw new Error('Copilot readiness fixture surfaces did not mount.');
+          }
+          chat.messages = [
+            { id: 'fixture-user', role: 'user', content: 'fixture question', timestamp: 1 },
+            { id: 'fixture-assistant', role: 'assistant', content: 'stale operational answer', timestamp: 2 }
+          ];
+          chat.toolCalls = [{ id: 'fixture-tool', status: 'success' }];
+          surgeon.patientCase = {
+            id: 'fixture-case',
+            status: 'observing',
+            turns: []
+          };
+          appElement.setCopilotAuthAdapter({
+            async check() { return unauthorizedState; },
+            async beginSignIn() { return unauthorizedState; },
+            async reportFailure() { return unauthorizedState; }
+          });
+          xpedition.selectOnboardingStep('health');
+          await new Promise((resolve) => setTimeout(resolve, 75));
+          await Promise.all([chat.updateComplete, surgeon.updateComplete]);
+          const onboarding = xpedition.shadowRoot.querySelector(
+            'openrappter-xpedition-onboarding'
+          );
+          await onboarding?.updateComplete;
+          const onboardingButtons = [
+            ...(onboarding?.shadowRoot?.querySelectorAll('button') || [])
+          ];
+          const land = onboardingButtons.find((button) =>
+            button.textContent.includes('Land on desktop')
+          );
+          const legacy = onboardingButtons.find((button) =>
+            button.textContent.includes('Use Legacy OpenRappter')
+          );
+          const chatText = chat.shadowRoot?.textContent || '';
+          const surgeonText = surgeon.shadowRoot?.textContent || '';
+          const chatComposer = chat.shadowRoot?.querySelector('textarea');
+          const surgeonMode = [...(surgeon.shadowRoot?.querySelectorAll('.tbtn') || [])]
+            .find((button) => button.textContent.includes('Surgeon'));
+          const signIn = onboardingButtons.find((button) =>
+            button.textContent.includes('Sign in to Copilot')
+          );
+          const copilotReadinessGate =
+            appElement.getDesktopState().copilotReadiness.state === 'needs-sign-in' &&
+            !chatText.includes('stale operational answer') &&
+            chatText.includes('Copilot content cleared') &&
+            chatComposer?.disabled === true &&
+            surgeon.patientCase === null &&
+            surgeonText.includes('cleared as stale') &&
+            surgeonMode?.disabled === true &&
+            land?.disabled === true &&
+            Boolean(legacy) &&
+            signIn?.dataset.desktopSensitive === 'copilot-sign-in';
           return {
             smokeScope: 'full',
             bridge: Boolean(window.openrappterDesktop),
@@ -1254,6 +1330,7 @@ function createWindow(): BrowserWindow {
               started.status === 'success' &&
               live.collector_healthy === true &&
               stopped.session.state === 'stopped',
+            copilotReadinessGate,
             gatewayUrl: window.openrappterDesktop.gatewayUrl,
             platform: info.platform,
             protocol: location.protocol,
@@ -1272,6 +1349,7 @@ function createWindow(): BrowserWindow {
           'desktopControl',
           'hotLoadedAgents',
           'recorderLifecycle',
+          'copilotReadinessGate',
         ] as const;
         if (
           (

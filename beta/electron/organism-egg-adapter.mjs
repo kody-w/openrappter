@@ -103,10 +103,21 @@ export class OrganismEggAdapter {
     ], { passphrase });
   }
 
-  apply(file, { semantics = "restore", approval, passphrase } = {}) {
+  apply(file, {
+    semantics = "restore",
+    approval,
+    previewHandle,
+    nonce,
+    targetRappid,
+    passphrase,
+  } = {}) {
     return this.command([
       "egg", "import", file, "--apply", "--semantics", semantics,
-      "--approval", approval, "--passphrase-stdin", "--json",
+      "--approval", approval,
+      "--preview-handle", previewHandle,
+      "--nonce", nonce,
+      "--target-rappid", targetRappid,
+      "--passphrase-stdin", "--json",
     ], { passphrase });
   }
 }

@@ -250,6 +250,22 @@ try {
     if (!eggHelp.stdout.includes(command)) {
       throw new Error(`Installed package does not expose egg ${command}`);
     }
+    const eggImportHelp = run(
+      process.execPath,
+      [binary, "egg", "import", "--help"],
+      { cwd: installRoot, env: { ...process.env, OPENRAPPTER_HOME: home } },
+    );
+    for (const option of [
+      "--preview-handle",
+      "--nonce",
+      "--target-rappid",
+      "--approval",
+      "--apply",
+    ]) {
+      if (!eggImportHelp.stdout.includes(option)) {
+        throw new Error(`Installed egg import is missing ${option}`);
+      }
+    }
   }
   const cleverHelp = run(
     process.execPath,

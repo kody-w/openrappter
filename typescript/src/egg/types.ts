@@ -24,6 +24,8 @@ export interface OrganismEggFile {
   dimension: string;
   privacy: PrivacyClass;
   provenance: EggProvenance;
+  mode: number;
+  mtimeMs: number;
 }
 
 export interface OrganismDimensions {
@@ -70,6 +72,8 @@ export interface InventoryFile {
   dimension: string;
   privacy: PrivacyClass;
   provenance: EggProvenance;
+  mode: number;
+  mtimeMs: number;
   destination?: string;
 }
 
@@ -79,6 +83,7 @@ export interface InventoryResult {
   dimensions: Omit<OrganismDimensions, 'files' | 'bytes'>;
   exclusions: string[];
   reauthentication: string[];
+  epoch: string;
 }
 
 export interface EggPublicHeader {
@@ -127,17 +132,38 @@ export interface EggDiff {
   compatible: boolean;
   reauthentication: string[];
   entries: EggDiffEntry[];
+  diffDigest: string;
+  eggSize: number;
+  nonce: string;
+  previewHandle: string;
   approvalBinding: string;
+}
+
+export interface EggApplyReceipt {
+  generation: string;
+  priorGeneration?: string;
+  stateDigest: string;
 }
 
 export interface EggStateAdapter {
   inventory(options: {
     mode?: EggMode;
+    exact?: boolean;
     includeHistory: boolean;
     includeMedia: boolean;
     acknowledgeUnknownLicense: boolean;
     mediaPaths?: string[];
   }): Promise<InventoryResult>;
+  withSnapshotFence<T>(operation: () => Promise<T>): Promise<T>;
+  validateStaged(
+    files: InventoryFile[],
+    context: {
+      semantics: ImportSemantics;
+      sourceRappid: string;
+      targetRappid: string;
+      mode: EggMode;
+    },
+  ): Promise<void>;
   apply(
     files: InventoryFile[],
     context: {
@@ -146,8 +172,12 @@ export interface EggStateAdapter {
       mode?: EggMode;
       includesHistory?: boolean;
       includesMedia?: boolean;
+      targetRappid: string;
+      expectedStateDigest: string;
     },
-  ): Promise<void>;
+  ): Promise<EggApplyReceipt>;
+  commit(receipt: EggApplyReceipt): Promise<void>;
+  rollback(receipt: EggApplyReceipt): Promise<void>;
   healthProbe(): Promise<{ ok: boolean; detail: string }>;
 }
 
@@ -170,7 +200,10 @@ export interface ImportEggOptions {
   eggPath: string;
   passphrase?: string;
   semantics: ImportSemantics;
+  targetRappid?: string;
   approval?: string;
+  nonce?: string;
+  previewHandle?: string;
   rollbackPassphrase?: string;
   apply: boolean;
 }

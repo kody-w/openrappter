@@ -1,9 +1,18 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import JSON5 from 'json5';
+import YAML from 'yaml';
 import { openrappterHome } from '../infra/openrappter-home.js';
+import { isGatewayRunning } from '../infra/gateway-lock.js';
+import { withOrganismSnapshotFence } from '../infra/organism-maintenance.js';
+import { hardenPrivatePath, syncParentDirectory } from '../flight-recorder/permissions.js';
+import { isSecretKey } from '../security/secret-keys.js';
+import { redactSecrets } from '../security/redact.js';
 import { generateOrganismTheme, validateMidi } from './midi.js';
+import { assertNoPortableSecrets, sanitizePortableStructured } from './secrets.js';
 import type {
+  EggApplyReceipt,
   EggStateAdapter,
   InventoryFile,
   InventoryResult,
@@ -12,10 +21,12 @@ import type {
 
 const MAX_STATE_FILE = 64 * 1024 * 1024;
 const MAX_MEDIA_FILE = 64 * 1024 * 1024;
+const MAX_INVENTORY_FILES = 5_000;
+const MAX_INVENTORY_BYTES = 1024 * 1024 * 1024;
+const MAX_INVENTORY_DEPTH = 32;
 const SAFE_RESOURCE = /\.(?:json|jsonl|md|txt|yaml|yml|toml|py|js|mjs|ts|sh|card|tile)$/i;
 const SOUND = /\.(?:wav|mp3|flac|ogg|m4a|aac)$/i;
 const MIDI = /\.(?:mid|midi)$/i;
-const SECRET_KEY = /(?:^|_)(?:api_?key|access_?token|refresh_?token|token|password|passwd|secret|credential|private_?key|authorization)(?:$|_)/i;
 const EXCLUDED_NAMES = new Set([
   'node_modules', 'dist', '.build', 'build', 'cache', 'caches', 'logs',
   'downloads', '__pycache__', '.git', 'backups', 'quarantine', 'staging',
@@ -75,52 +86,53 @@ function assertSafeAncestors(root: string, candidate: string): void {
   }
 }
 
-function safeRead(root: string, file: string, maximum = MAX_STATE_FILE): Buffer {
+function safeRead(
+  root: string,
+  file: string,
+  maximum = MAX_STATE_FILE,
+): { bytes: Buffer; mode: number; mtimeMs: number } {
   assertSafeAncestors(root, file);
   const noFollow = fs.constants.O_NOFOLLOW ?? 0;
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
   try {
     const before = fs.fstatSync(descriptor);
-    if (!before.isFile() || before.size > maximum) {
+    if (!before.isFile() || before.nlink !== 1 || before.size > maximum) {
       throw new Error(`State path is not a supported regular file: ${file}`);
+    }
+    if (
+      process.platform !== 'win32'
+      && before.size > 0
+      && before.blocks * 512 < before.size
+    ) {
+      throw new Error(`State path is a sparse file: ${file}`);
     }
     const bytes = fs.readFileSync(descriptor);
     const after = fs.fstatSync(descriptor);
-    if (before.dev !== after.dev || before.ino !== after.ino || after.size !== bytes.length) {
+    if (
+      before.dev !== after.dev
+      || before.ino !== after.ino
+      || before.size !== after.size
+      || before.mtimeMs !== after.mtimeMs
+      || after.size !== bytes.length
+      || after.nlink !== 1
+    ) {
       throw new Error(`State file changed while it was read: ${file}`);
     }
-    return bytes;
+    return {
+      bytes,
+      mode: before.mode & 0o777,
+      mtimeMs: Math.floor(before.mtimeMs / 1000) * 1000,
+    };
   } finally {
     fs.closeSync(descriptor);
   }
 }
 
-function redactConfig(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactConfig);
-  if (!value || typeof value !== 'object') return value;
-  const output: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    output[key] = SECRET_KEY.test(key) ? '[REAUTHENTICATE]' : redactConfig(item);
-  }
-  return output;
-}
-
 function sanitizeConfig(bytes: Buffer, file: string): Buffer {
-  try {
-    const parsed = JSON.parse(bytes.toString('utf8')) as unknown;
-    return Buffer.from(`${JSON.stringify(redactConfig(parsed), null, 2)}\n`, 'utf8');
-  } catch {
-    if (file.endsWith('.json5')) {
-      const lines = bytes.toString('utf8').split(/\r?\n/).map((line) => (
-        SECRET_KEY.test(line.split(':', 1)[0] ?? '') ? '  // [REAUTHENTICATE]' : line
-      ));
-      return Buffer.from(lines.join('\n'), 'utf8');
-    }
-    throw new Error(`Configuration is not valid JSON: ${file}`);
-  }
+  return Buffer.from(sanitizePortableStructured(file, mimeFor(file), bytes));
 }
 
-async function sqliteSnapshot(file: string): Promise<Buffer> {
+async function sqliteSnapshot(file: string, exact = false): Promise<Buffer> {
   const module = await import('better-sqlite3');
   const Database = module.default as unknown as new (
     filename: string | Buffer,
@@ -135,10 +147,10 @@ async function sqliteSnapshot(file: string): Promise<Buffer> {
     };
     close(): void;
   };
-  const database = new Database(file, { fileMustExist: true });
+  const database = new Database(file, { readonly: true, fileMustExist: true });
   let snapshot: Buffer;
   try {
-    database.pragma('wal_checkpoint(PASSIVE)');
+    database.pragma('query_only = ON');
     snapshot = database.serialize();
   } finally {
     database.close();
@@ -154,6 +166,7 @@ async function sqliteSnapshot(file: string): Promise<Buffer> {
     memoryImage[18] = 1;
     memoryImage[19] = 1;
   }
+  if (exact) return memoryImage;
   const sanitized = new Database(memoryImage);
   try {
     const tables = sanitized.prepare(
@@ -161,7 +174,7 @@ async function sqliteSnapshot(file: string): Promise<Buffer> {
     ).all().map((row) => String(row.name));
     for (const table of tables) {
       const quotedTable = `"${table.replaceAll('"', '""')}"`;
-      if (/(?:auth|credential|token|secret|private.?key)/i.test(table)) {
+      if (isSecretKey(table)) {
         sanitized.exec(`DELETE FROM ${quotedTable}`);
         continue;
       }
@@ -169,8 +182,8 @@ async function sqliteSnapshot(file: string): Promise<Buffer> {
       for (const column of columns) {
         const name = String(column.name);
         const quotedColumn = `"${name.replaceAll('"', '""')}"`;
-        if (SECRET_KEY.test(name)) {
-          sanitized.exec(`UPDATE ${quotedTable} SET ${quotedColumn} = '[REAUTHENTICATE]'`);
+        if (isSecretKey(name)) {
+          sanitized.exec(`UPDATE ${quotedTable} SET ${quotedColumn} = '***REDACTED***'`);
           continue;
         }
         const type = String(column.type ?? '').toUpperCase();
@@ -190,7 +203,7 @@ async function sqliteSnapshot(file: string): Promise<Buffer> {
           if (typeof row._egg_value !== 'string') continue;
           let replacement = row._egg_value;
           try {
-            replacement = JSON.stringify(redactConfig(JSON.parse(replacement)));
+            replacement = JSON.stringify(redactSecrets(JSON.parse(replacement)));
           } catch {
             if (
               /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(replacement)
@@ -202,7 +215,26 @@ async function sqliteSnapshot(file: string): Promise<Buffer> {
         }
       }
     }
-    return sanitized.serialize();
+    sanitized.exec('VACUUM');
+    const output = sanitized.serialize();
+    const finalTables = sanitized.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    ).all().map((row) => String(row.name));
+    for (const table of finalTables) {
+      const quoted = `"${table.replaceAll('"', '""')}"`;
+      for (const row of sanitized.prepare(`SELECT * FROM ${quoted}`).all()) {
+        for (const [key, value] of Object.entries(row)) {
+          if (isSecretKey(key) && value !== null && value !== '' && value !== '***REDACTED***') {
+            throw new Error(`Sanitized SQLite still contains secret column ${table}.${key}`);
+          }
+          if (typeof value === 'string' || Buffer.isBuffer(value)) {
+            assertNoPortableSecrets(`${file}:${table}.${key}`, Buffer.from(value));
+          }
+        }
+      }
+    }
+    assertNoPortableSecrets(file, output);
+    return output;
   } finally {
     sanitized.close();
   }
@@ -236,15 +268,24 @@ function walk(
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
     throw new Error(`Managed state root must be a real directory: ${root}`);
   }
-  const visit = (directory: string): void => {
+  const visit = (directory: string, depth = 0): void => {
+    if (depth > MAX_INVENTORY_DEPTH) {
+      throw new Error(`Managed state exceeds depth ${MAX_INVENTORY_DEPTH}: ${directory}`);
+    }
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })
       .sort((left, right) => left.name.localeCompare(right.name))) {
       if (EXCLUDED_NAMES.has(entry.name) || entry.name.startsWith('.')) continue;
       const diskPath = path.join(directory, entry.name);
       const stat = fs.lstatSync(diskPath);
       if (stat.isSymbolicLink()) throw new Error(`Managed state contains a symlink: ${diskPath}`);
-      if (stat.isDirectory()) visit(diskPath);
-      else if (stat.isFile() && accepts(diskPath)) output.push(diskPath);
+      if (stat.isDirectory()) visit(diskPath, depth + 1);
+      else if (stat.isFile() && accepts(diskPath)) {
+        if (stat.nlink !== 1) throw new Error(`Managed state contains a hardlink: ${diskPath}`);
+        if (output.length >= MAX_INVENTORY_FILES) {
+          throw new Error(`Managed state exceeds ${MAX_INVENTORY_FILES} files`);
+        }
+        output.push(diskPath);
+      }
       else if (!stat.isFile()) throw new Error(`Managed state contains a special device: ${diskPath}`);
     }
   };
@@ -260,6 +301,113 @@ interface Candidate {
   sqlite?: boolean;
 }
 
+async function validateSqliteBytes(label: string, bytes: Uint8Array): Promise<void> {
+  const module = await import('better-sqlite3');
+  const Database = module.default as unknown as new (source: Buffer) => {
+    pragma(value: string, options?: { simple?: boolean }): unknown;
+    close(): void;
+  };
+  const image = Buffer.from(bytes);
+  if (image.length >= 20) {
+    image[18] = 1;
+    image[19] = 1;
+  }
+  const database = new Database(image);
+  try {
+    database.pragma('query_only = ON');
+    const integrity = database.pragma('integrity_check', { simple: true });
+    if (integrity !== 'ok') throw new Error(`${label} failed SQLite integrity_check: ${String(integrity)}`);
+    const foreignKeys = database.pragma('foreign_key_check') as unknown[];
+    if (Array.isArray(foreignKeys) && foreignKeys.length) {
+      throw new Error(`${label} failed SQLite foreign_key_check`);
+    }
+  } finally {
+    database.close();
+  }
+}
+
+function clonePrivateTree(source: string, target: string): void {
+  let files = 0;
+  let bytes = 0;
+  const available = fs.statfsSync(path.dirname(target));
+  const freeBytes = available.bavail * available.bsize;
+  const visit = (from: string, to: string, depth: number): void => {
+    if (depth > MAX_INVENTORY_DEPTH) throw new Error('Organism generation exceeds depth limit');
+    for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+      if (EXCLUDED_NAMES.has(entry.name) || entry.name === '.organism-maintenance.lock') continue;
+      const input = path.join(from, entry.name);
+      const output = path.join(to, entry.name);
+      const stat = fs.lstatSync(input);
+      if (stat.isSymbolicLink()) throw new Error(`Generation staging refuses symlink ${input}`);
+      if (stat.isDirectory()) {
+        fs.mkdirSync(output, { mode: stat.mode & 0o777 });
+        visit(input, output, depth + 1);
+      } else if (stat.isFile()) {
+        if (stat.nlink !== 1) throw new Error(`Generation staging refuses hardlink ${input}`);
+        if (
+          process.platform !== 'win32'
+          && stat.size > 0
+          && stat.blocks * 512 < stat.size
+        ) {
+          throw new Error(`Generation staging refuses sparse file ${input}`);
+        }
+        files += 1;
+        bytes += stat.size;
+        if (files > MAX_INVENTORY_FILES || bytes > MAX_INVENTORY_BYTES || bytes > freeBytes) {
+          throw new Error('Insufficient bounded capacity for complete organism generation');
+        }
+        const read = safeRead(source, input, MAX_MEDIA_FILE);
+        fs.writeFileSync(output, read.bytes, { flag: 'wx', mode: read.mode });
+        hardenPrivatePath(output);
+        if (process.platform !== 'win32') fs.chmodSync(output, read.mode);
+        if (read.mtimeMs > 0) fs.utimesSync(output, read.mtimeMs / 1000, read.mtimeMs / 1000);
+      } else {
+        throw new Error(`Generation staging refuses special file ${input}`);
+      }
+    }
+  };
+  visit(source, target, 0);
+}
+
+async function validateGenerationTree(root: string): Promise<void> {
+  const files: string[] = [];
+  walk(root, () => true, files);
+  const agentNames = new Set<string>();
+  for (const file of files) {
+    const stat = fs.lstatSync(file);
+    if (process.platform !== 'win32' && (stat.mode & 0o022) !== 0) {
+      throw new Error(`Staged state is group/world writable: ${file}`);
+    }
+    if (/\.(?:db|sqlite|sqlite3)$/i.test(file)) {
+      await validateSqliteBytes(file, safeRead(root, file).bytes);
+    } else if (/config\.json5$/i.test(file)) {
+      JSON5.parse(safeRead(root, file).bytes.toString('utf8'));
+    } else if (/config\.json$/i.test(file)) {
+      JSON.parse(safeRead(root, file).bytes.toString('utf8'));
+    } else if (/config\.ya?ml$/i.test(file)) {
+      YAML.parse(safeRead(root, file).bytes.toString('utf8'));
+    } else if (MIDI.test(file)) {
+      validateMidi(safeRead(root, file, MAX_MEDIA_FILE).bytes);
+    }
+    const relative = portable(path.relative(root, file));
+    if (relative === 'rappid.body.json') {
+      const body = JSON.parse(safeRead(root, file).bytes.toString('utf8')) as unknown;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        throw new Error('RAPPID body must be a JSON object');
+      }
+    }
+    if (relative.startsWith('agents/') && /\.(?:py|js|mjs|ts)$/i.test(relative)) {
+      if (stat.size === 0) throw new Error(`Agent contract is empty: ${relative}`);
+      const folded = path.basename(relative).toLocaleLowerCase('en-US');
+      if (agentNames.has(folded)) throw new Error(`Agent registry collision: ${relative}`);
+      agentNames.add(folded);
+    }
+    if (relative.endsWith('/SKILL.md') && stat.size === 0) {
+      throw new Error(`Skill contract is empty: ${relative}`);
+    }
+  }
+}
+
 export class LocalOrganismAdapter implements EggStateAdapter {
   readonly home: string;
 
@@ -267,7 +415,11 @@ export class LocalOrganismAdapter implements EggStateAdapter {
     this.home = path.resolve(home);
   }
 
-  private candidates(includeHistory: boolean, includeIdentitySeed = false): Candidate[] {
+  private candidates(
+    includeHistory: boolean,
+    includeIdentitySeed = false,
+    exact = false,
+  ): Candidate[] {
     const values: Candidate[] = [];
     const add = (
       relative: string,
@@ -276,7 +428,7 @@ export class LocalOrganismAdapter implements EggStateAdapter {
     ): void => {
       const diskPath = path.join(this.home, relative);
       if (!fs.existsSync(diskPath)) return;
-      if (REAUTH_FILES.test(portable(relative))) return;
+      if (!exact && REAUTH_FILES.test(portable(relative))) return;
       values.push({
         diskPath,
         eggPath: `state/${portable(relative)}`,
@@ -290,16 +442,27 @@ export class LocalOrganismAdapter implements EggStateAdapter {
     if (includeIdentitySeed) add('rappid.tail', 'rappid', { privacy: 'sensitive-encrypted' });
     add('config.json', 'channels-config', { config: true });
     add('config.json5', 'channels-config', { config: true });
+    add('config.yaml', 'channels-config', { config: true });
+    add('config.yml', 'channels-config', { config: true });
+    if (exact) {
+      for (const name of ['.env', 'auth-profiles.json', 'credentials.json', 'tokens.json']) {
+        add(name, 'reauthentication', { privacy: 'sensitive-encrypted' });
+      }
+    }
     for (const name of [
       'memory.json', 'cron.json', 'jobs.json', 'preferences.json', 'drafts.json',
       'release-ring.json', 'release-receipts.json', 'clever-girl.json',
       'flight-lineage.jsonl',
     ]) add(name, name.includes('memory') ? 'memory' : 'state');
-    for (const name of ['openrappter.db', 'memory.db']) add(name, 'storage', { sqlite: true });
+    for (const name of [
+      'openrappter.db',
+      'memory.db',
+      'show-and-tell.db',
+      path.join('state', 'imessage.sqlite'),
+    ]) add(name, 'storage', { sqlite: true });
     if (includeHistory) {
-      for (const name of ['sessions.db', 'messages.db', 'flight-recorder.db']) {
-        add(name, 'sessions', { sqlite: true });
-      }
+      add('sessions.json', 'sessions');
+      for (const name of ['sessions.db', 'messages.db', 'flight-recorder.db']) add(name, 'sessions', { sqlite: true });
     }
     const managedDirectories: Array<[string, string]> = [
       ['agents', 'agents'],
@@ -313,9 +476,15 @@ export class LocalOrganismAdapter implements EggStateAdapter {
     for (const [relative, dimension] of managedDirectories) {
       const root = path.join(this.home, relative);
       const files: string[] = [];
-      walk(root, (file) => SAFE_RESOURCE.test(file), files);
+      walk(
+        root,
+        (file) => exact
+          ? !/(?:^|[/\\])(?:node_modules|dist|build|logs?|cache|downloads?)(?:[/\\]|$)/i.test(file)
+          : SAFE_RESOURCE.test(file),
+        files,
+      );
       for (const diskPath of files) {
-        if (REAUTH_FILES.test(portable(path.relative(this.home, diskPath)))) continue;
+        if (!exact && REAUTH_FILES.test(portable(path.relative(this.home, diskPath)))) continue;
         values.push({
           diskPath,
           eggPath: `${dimension}/${portable(path.relative(root, diskPath))}`,
@@ -329,19 +498,31 @@ export class LocalOrganismAdapter implements EggStateAdapter {
 
   async inventory(options: {
     mode?: 'portable' | 'sealed-backup';
+    exact?: boolean;
     includeHistory: boolean;
     includeMedia: boolean;
     acknowledgeUnknownLicense: boolean;
     mediaPaths?: string[];
   }): Promise<InventoryResult> {
     const tailPath = path.join(this.home, 'rappid.tail');
-    const tail = safeRead(this.home, tailPath, 1024).toString('utf8').trim();
+    const tail = safeRead(this.home, tailPath, 1024).bytes.toString('utf8').trim();
     if (!/^[0-9a-f]{64}$/.test(tail)) {
       throw new Error('This organism has no valid rappid.tail; export is read-only and will not mint one');
     }
     const digest = createHash('sha256').update('rapp/1:rappid\n').update(tail).digest('hex');
     const rappid = `rappid:@openrappter/organism:${digest}`;
     const files: InventoryFile[] = [];
+    let totalBytes = 0;
+    const pushBounded = (file: InventoryFile): void => {
+      if (files.length >= MAX_INVENTORY_FILES) {
+        throw new Error(`Organism inventory exceeds ${MAX_INVENTORY_FILES} files`);
+      }
+      totalBytes += file.bytes.length;
+      if (totalBytes > MAX_INVENTORY_BYTES) {
+        throw new Error(`Organism inventory exceeds ${MAX_INVENTORY_BYTES} bytes`);
+      }
+      files.push(file);
+    };
     const exclusions = [
       'credentials, tokens, auth profiles, private keys, and OS/Keychain secrets',
       'logs, caches, downloads, sockets, PIDs, lock files, node_modules, and build output',
@@ -355,14 +536,31 @@ export class LocalOrganismAdapter implements EggStateAdapter {
     for (const candidate of this.candidates(
       options.includeHistory,
       options.mode === 'sealed-backup',
+      options.exact === true,
     )) {
       assertSafeAncestors(this.home, candidate.diskPath);
-      const bytes = candidate.sqlite
-        ? await sqliteSnapshot(candidate.diskPath)
+      const candidateStat = fs.lstatSync(candidate.diskPath);
+      if (totalBytes + candidateStat.size > MAX_INVENTORY_BYTES) {
+        throw new Error(`Organism inventory exceeds ${MAX_INVENTORY_BYTES} bytes before read`);
+      }
+      const read = candidate.sqlite
+        ? {
+            bytes: await sqliteSnapshot(candidate.diskPath, options.exact === true),
+            ...(() => {
+              const stat = fs.lstatSync(candidate.diskPath);
+              return {
+                mode: stat.mode & 0o777,
+                mtimeMs: Math.floor(stat.mtimeMs / 1000) * 1000,
+              };
+            })(),
+          }
         : safeRead(this.home, candidate.diskPath);
-      files.push({
+      const bytes = (
+        !options.exact && (candidate.config || /\.(?:json|json5|jsonl|ya?ml|toml)$/i.test(candidate.diskPath))
+      ) ? sanitizeConfig(read.bytes, candidate.diskPath) : read.bytes;
+      pushBounded({
         path: candidate.eggPath,
-        bytes: candidate.config ? sanitizeConfig(bytes, candidate.diskPath) : bytes,
+        bytes,
         mime: candidate.sqlite ? 'application/vnd.sqlite3' : mimeFor(candidate.diskPath),
         dimension: candidate.dimension,
         privacy: candidate.privacy,
@@ -371,6 +569,8 @@ export class LocalOrganismAdapter implements EggStateAdapter {
           license: 'user-owned-state',
           owned: true,
         },
+        mode: read.mode,
+        mtimeMs: read.mtimeMs,
         destination: candidate.diskPath,
       });
     }
@@ -390,6 +590,10 @@ export class LocalOrganismAdapter implements EggStateAdapter {
         else throw new Error(`Media path is not a regular file or directory: ${root}`);
       }
       for (const diskPath of [...new Set(mediaFiles)].sort()) {
+        if (
+          portable(path.relative(this.home, diskPath))
+          === 'media/generated/organism-theme.mid'
+        ) continue;
         const metadata = mediaMetadata(diskPath);
         if (
           !metadata
@@ -401,12 +605,16 @@ export class LocalOrganismAdapter implements EggStateAdapter {
             continue;
           }
         }
-        const bytes = safeRead(this.home, diskPath, MAX_MEDIA_FILE);
-        if (MIDI.test(diskPath)) validateMidi(bytes);
+        const mediaStat = fs.lstatSync(diskPath);
+        if (totalBytes + mediaStat.size > MAX_INVENTORY_BYTES) {
+          throw new Error(`Organism inventory exceeds ${MAX_INVENTORY_BYTES} bytes before media read`);
+        }
+        const read = safeRead(this.home, diskPath, MAX_MEDIA_FILE);
+        if (MIDI.test(diskPath)) validateMidi(read.bytes);
         const relative = portable(path.relative(this.home, diskPath));
-        files.push({
+        pushBounded({
           path: `media/${relative}`,
-          bytes,
+          bytes: read.bytes,
           mime: mimeFor(diskPath),
           dimension: MIDI.test(diskPath) ? 'midi' : 'media',
           privacy: 'private',
@@ -415,13 +623,15 @@ export class LocalOrganismAdapter implements EggStateAdapter {
             license: metadata?.license ?? 'unknown-acknowledged',
             owned: metadata?.owned ?? true,
           },
+          mode: read.mode,
+          mtimeMs: read.mtimeMs,
           destination: diskPath,
         });
       }
     }
     const theme = generateOrganismTheme(rappid);
     validateMidi(theme);
-    files.push({
+    pushBounded({
       path: 'media/media/generated/organism-theme.mid',
       bytes: theme,
       mime: 'audio/midi',
@@ -434,6 +644,8 @@ export class LocalOrganismAdapter implements EggStateAdapter {
         generated: true,
         generator: 'openrappter-organism-theme/1',
       },
+      mode: 0o600,
+      mtimeMs: 0,
       destination: path.join(this.home, 'media', 'generated', 'organism-theme.mid'),
     });
 
@@ -452,6 +664,9 @@ export class LocalOrganismAdapter implements EggStateAdapter {
       },
       exclusions,
       reauthentication,
+      epoch: createHash('sha256').update(files.map((file) => (
+        `${file.path}\0${file.bytes.length}\0${file.mode}\0${file.mtimeMs}\0`
+      )).join('')).digest('hex'),
     };
   }
 
@@ -471,6 +686,69 @@ export class LocalOrganismAdapter implements EggStateAdapter {
     return destination;
   }
 
+  async withSnapshotFence<T>(operation: () => Promise<T>): Promise<T> {
+    if (
+      this.home === path.resolve(openrappterHome())
+      && isGatewayRunning()
+      && process.env.OPENRAPPTER_EGG_GATEWAY_MAINTENANCE !== '1'
+    ) {
+      throw new Error(
+        'The gateway owns live organism state. Stop it or invoke the gateway maintenance snapshot API.',
+      );
+    }
+    return withOrganismSnapshotFence(this.home, operation);
+  }
+
+  async validateStaged(
+    files: InventoryFile[],
+    context: {
+      semantics: 'restore' | 'clone';
+      sourceRappid: string;
+      targetRappid: string;
+      mode: 'portable' | 'sealed-backup';
+    },
+  ): Promise<void> {
+    if (context.mode === 'portable' && context.semantics !== 'clone') {
+      throw new Error('Portable eggs are clone-only and cannot restore identity');
+    }
+    const identityPaths = files.filter((file) => (
+      /(?:^|\/)(?:rappid\.tail|.*private.*key|device.*key|organism.*key)$/i.test(file.path)
+    ));
+    if (context.mode === 'portable' && identityPaths.length) {
+      throw new Error(`Portable egg contains identity seed ${identityPaths[0].path}`);
+    }
+    if (context.mode === 'sealed-backup' && context.semantics === 'restore') {
+      const tailFile = files.find((file) => file.path === 'state/rappid.tail');
+      if (!tailFile) throw new Error('Sealed identity restore requires state/rappid.tail');
+      const tail = Buffer.from(tailFile.bytes).toString('utf8').trim();
+      const digest = createHash('sha256').update('rapp/1:rappid\n').update(tail).digest('hex');
+      if (`rappid:@openrappter/organism:${digest}` !== context.sourceRappid) {
+        throw new Error('Sealed identity seed does not match the source RAPPID');
+      }
+      if (context.targetRappid !== context.sourceRappid) {
+        throw new Error('Sealed restore target confirmation does not match the source RAPPID');
+      }
+    }
+    const agentNames = new Set<string>();
+    for (const file of files) {
+      if (file.mime === 'application/vnd.sqlite3') {
+        await validateSqliteBytes(file.path, file.bytes);
+      } else if (file.mime === 'audio/midi') {
+        validateMidi(file.bytes);
+      } else if (/config\.(?:json|json5|ya?ml)$/i.test(file.path)) {
+        const text = Buffer.from(file.bytes).toString('utf8');
+        if (/\.json$/i.test(file.path)) JSON.parse(text);
+        else if (/\.json5$/i.test(file.path)) JSON5.parse(text);
+        else YAML.parse(text);
+      }
+      if (file.dimension === 'agents') {
+        const folded = path.basename(file.path).toLocaleLowerCase('en-US');
+        if (agentNames.has(folded)) throw new Error(`Agent registry collision: ${file.path}`);
+        agentNames.add(folded);
+      }
+    }
+  }
+
   async apply(
     files: InventoryFile[],
     context: {
@@ -479,73 +757,125 @@ export class LocalOrganismAdapter implements EggStateAdapter {
       mode?: 'portable' | 'sealed-backup';
       includesHistory?: boolean;
       includesMedia?: boolean;
+      targetRappid: string;
+      expectedStateDigest: string;
     },
-  ): Promise<void> {
-    const incoming = new Map(files.map((file) => [this.destination(file.path), file]));
-    if (context.semantics === 'clone') {
-      incoming.delete(path.join(this.home, 'rappid.tail'));
+  ): Promise<EggApplyReceipt> {
+    await this.validateStaged(files, {
+      semantics: context.semantics,
+      sourceRappid: context.sourceRappid,
+      targetRappid: context.targetRappid,
+      mode: context.mode ?? 'portable',
+    });
+    const stagedFiles = files;
+    const generation = `${Date.now()}-${createHash('sha256')
+      .update(stagedFiles.map((file) => `${file.path}\0${file.bytes.length}`).join(''))
+      .digest('hex').slice(0, 12)}`;
+    const parent = path.dirname(this.home);
+    const base = path.basename(this.home);
+    const staged = path.join(parent, `.${base}.egg-stage-${generation}`);
+    const prior = path.join(parent, `.${base}.egg-prior-${generation}`);
+    const journal = path.join(parent, `.${base}.egg-recovery.json`);
+    if (fs.existsSync(staged) || fs.existsSync(prior) || fs.existsSync(journal)) {
+      throw new Error('An organism generation recovery is already pending');
     }
-    const current = this.candidates(
+    fs.mkdirSync(staged, { recursive: false, mode: 0o700 });
+    hardenPrivatePath(staged, true);
+    clonePrivateTree(this.home, staged);
+
+    const managed = this.candidates(
       context.includesHistory === true,
       context.mode === 'sealed-backup' && context.semantics === 'restore',
-    ).map((candidate) => candidate.diskPath);
+    );
+    for (const candidate of managed) {
+      fs.rmSync(path.join(staged, path.relative(this.home, candidate.diskPath)), { force: true });
+    }
     if (context.includesMedia) {
-      for (const mediaRoot of [path.join(this.home, 'media'), path.join(this.home, 'sounds')]) {
-        walk(mediaRoot, (file) => SOUND.test(file) || MIDI.test(file), current);
+      for (const root of ['media', 'sounds']) {
+        fs.rmSync(path.join(staged, root), { recursive: true, force: true });
       }
     }
-    const touched = new Set([...incoming.keys(), ...current]);
-    const snapshots = new Map<string, { bytes: Buffer; mode: number } | null>();
-    for (const destination of touched) {
-      if (!fs.existsSync(destination)) {
-        snapshots.set(destination, null);
-        continue;
-      }
-      const stat = fs.lstatSync(destination);
-      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Unsafe import destination: ${destination}`);
-      snapshots.set(destination, { bytes: fs.readFileSync(destination), mode: stat.mode & 0o777 });
-    }
-    const writeAtomic = (destination: string, bytes: Uint8Array): void => {
-      assertSafeAncestors(this.home, destination);
+    for (const file of stagedFiles) {
+      if (context.semantics === 'clone' && file.path === 'state/rappid.tail') continue;
+      const liveDestination = this.destination(file.path);
+      const destination = path.join(staged, path.relative(this.home, liveDestination));
       fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
-      const temporary = `${destination}.egg-${process.pid}-${Date.now()}`;
-      const descriptor = fs.openSync(temporary, 'wx', 0o600);
+      const descriptor = fs.openSync(destination, 'wx', file.mode || 0o600);
       try {
-        fs.writeFileSync(descriptor, bytes);
+        fs.writeFileSync(descriptor, file.bytes);
         fs.fsyncSync(descriptor);
       } finally {
         fs.closeSync(descriptor);
       }
-      fs.renameSync(temporary, destination);
-      try { fs.chmodSync(destination, 0o600); } catch { /* Windows ACLs are best effort. */ }
-      try {
-        const directory = fs.openSync(path.dirname(destination), 'r');
-        try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
-      } catch { /* Some Windows filesystems cannot fsync directories. */ }
-    };
+      hardenPrivatePath(destination);
+      if (process.platform !== 'win32') fs.chmodSync(destination, file.mode || 0o600);
+      if (file.mtimeMs > 0) fs.utimesSync(destination, file.mtimeMs / 1000, file.mtimeMs / 1000);
+    }
+    await validateGenerationTree(staged);
+    fs.writeFileSync(journal, JSON.stringify({
+      schema: 'openrappter-egg-recovery/1',
+      status: 'prepared',
+      home: this.home,
+      staged,
+      prior,
+      generation,
+    }), { flag: 'wx', mode: 0o600 });
+    hardenPrivatePath(journal);
+    fs.renameSync(this.home, prior);
     try {
-      for (const [destination, file] of incoming) writeAtomic(destination, file.bytes);
-      for (const destination of current) {
-        if (!incoming.has(destination)) fs.rmSync(destination, { force: true });
-      }
+      fs.renameSync(staged, this.home);
+      syncParentDirectory(parent);
+      fs.writeFileSync(journal, JSON.stringify({
+        schema: 'openrappter-egg-recovery/1',
+        status: 'swapped',
+        home: this.home,
+        prior,
+        generation,
+      }), { mode: 0o600 });
     } catch (error) {
-      for (const [destination, snapshot] of snapshots) {
-        if (snapshot === null) fs.rmSync(destination, { force: true });
-        else {
-          writeAtomic(destination, snapshot.bytes);
-          try { fs.chmodSync(destination, snapshot.mode); } catch { /* Windows */ }
-        }
-      }
+      fs.renameSync(prior, this.home);
+      throw error;
+    }
+    return {
+      generation,
+      priorGeneration: prior,
+      stateDigest: context.expectedStateDigest,
+    };
+  }
+
+  async commit(receipt: EggApplyReceipt): Promise<void> {
+    if (receipt.priorGeneration) {
+      fs.rmSync(receipt.priorGeneration, { recursive: true, force: true });
+    }
+    fs.rmSync(path.join(path.dirname(this.home), `.${path.basename(this.home)}.egg-recovery.json`), { force: true });
+  }
+
+  async rollback(receipt: EggApplyReceipt): Promise<void> {
+    if (!receipt.priorGeneration || !fs.existsSync(receipt.priorGeneration)) {
+      throw new Error('Exact prior organism generation is unavailable');
+    }
+    const parent = path.dirname(this.home);
+    const failed = path.join(parent, `.${path.basename(this.home)}.egg-failed-${receipt.generation}`);
+    fs.renameSync(this.home, failed);
+    try {
+      fs.renameSync(receipt.priorGeneration, this.home);
+      syncParentDirectory(parent);
+      await validateGenerationTree(this.home);
+      fs.rmSync(failed, { recursive: true, force: true });
+      fs.rmSync(path.join(parent, `.${path.basename(this.home)}.egg-recovery.json`), { force: true });
+    } catch (error) {
+      if (!fs.existsSync(this.home) && fs.existsSync(failed)) fs.renameSync(failed, this.home);
       throw error;
     }
   }
 
   async healthProbe(): Promise<{ ok: boolean; detail: string }> {
     try {
+      await validateGenerationTree(this.home);
       const tail = safeRead(this.home, path.join(this.home, 'rappid.tail'), 1024)
-        .toString('utf8').trim();
+        .bytes.toString('utf8').trim();
       return /^[0-9a-f]{64}$/.test(tail)
-        ? { ok: true, detail: 'RAPPID and managed state are readable' }
+        ? { ok: true, detail: 'RAPPID, SQLite, config, registry, skills, media, and gateway state are healthy' }
         : { ok: false, detail: 'RAPPID tail is invalid after import' };
     } catch (error) {
       return { ok: false, detail: error instanceof Error ? error.message : String(error) };

@@ -21,7 +21,7 @@ export interface XPeditionEggSurface {
     output: string;
     digest: string;
     manifest: OrganismEggManifest;
-    permissions: '0600' | 'platform-best-effort';
+    permissions: '0600' | 'restricted-acl';
   }>;
   preview(
     file: string,
@@ -55,7 +55,7 @@ export class XPeditionEggAdapter implements XPeditionEggSurface {
     output: string;
     digest: string;
     manifest: OrganismEggManifest;
-    permissions: '0600' | 'platform-best-effort';
+    permissions: '0600' | 'restricted-acl';
   }> {
     return this.service.export(options);
   }

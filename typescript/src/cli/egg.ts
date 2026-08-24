@@ -142,7 +142,9 @@ export function registerEggCommand(program: Command): void {
       print(options.json ? result : (
         `${result.compatible ? 'compatible' : 'identity mismatch'}: `
         + `${result.entries.filter((entry) => entry.change !== 'unchanged').length} changes\n`
-        + `approval ${result.approvalBinding}`
+        + `approval ${result.approvalBinding}\n`
+        + `preview handle ${result.previewHandle}\nnonce ${result.nonce}\n`
+        + `target ${result.targetRappid}`
       ), options.json);
     });
 
@@ -151,6 +153,9 @@ export function registerEggCommand(program: Command): void {
     .option('--preview', 'verify and show the complete diff without mutation')
     .option('--apply', 'apply transactionally after an exact preview approval')
     .option('--approval <digest>', 'action-bound approval digest printed by preview')
+    .option('--preview-handle <handle>', 'private immutable preview handle')
+    .option('--nonce <nonce>', 'one-time preview nonce')
+    .option('--target-rappid <rappid>', 'explicit target organism confirmation')
     .option('--semantics <kind>', 'restore or clone', 'restore')
     .option('--passphrase-stdin', 'read sealed/rollback passphrase from stdin')
     .option('--json', 'print machine-readable result')
@@ -158,6 +163,9 @@ export function registerEggCommand(program: Command): void {
       preview?: boolean;
       apply?: boolean;
       approval?: string;
+      previewHandle?: string;
+      nonce?: string;
+      targetRappid?: string;
       semantics: string;
       passphraseStdin?: boolean;
       json?: boolean;
@@ -171,6 +179,12 @@ export function registerEggCommand(program: Command): void {
       if (options.apply && !options.passphraseStdin) {
         throw new Error('--apply requires --passphrase-stdin to encrypt the rollback egg');
       }
+      if (
+        options.apply
+        && (!options.previewHandle || !options.nonce || !options.targetRappid)
+      ) {
+        throw new Error('--apply requires --preview-handle, --nonce, and --target-rappid');
+      }
       const passphrase = await passphraseFromStdin(options.passphraseStdin);
       const result = await service().import({
         eggPath: path.resolve(file),
@@ -178,12 +192,18 @@ export function registerEggCommand(program: Command): void {
         rollbackPassphrase: passphrase,
         semantics: options.semantics as ImportSemantics,
         approval: options.approval,
+        previewHandle: options.previewHandle,
+        nonce: options.nonce,
+        targetRappid: options.targetRappid,
         apply: options.apply === true,
       });
       print(options.json ? result : (
         result.applied
           ? `Applied ${result.preview.eggDigest}; rollback ${result.rollbackEgg}; ${result.health}`
-          : `Preview only: ${result.preview.entries.length} entries\napproval ${result.preview.approvalBinding}`
+          : `Preview only: ${result.preview.entries.length} entries\n`
+            + `approval ${result.preview.approvalBinding}\n`
+            + `preview handle ${result.preview.previewHandle}\n`
+            + `nonce ${result.preview.nonce}\ntarget ${result.preview.targetRappid}`
       ), options.json);
     });
 }

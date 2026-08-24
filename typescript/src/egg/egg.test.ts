@@ -1,17 +1,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { packRappEgg, readAndVerifyRappEgg, sha256 } from './archive.js';
+import { canonical, packRappEgg, readAndVerifyRappEgg, sha256 } from './archive.js';
 import { LocalOrganismAdapter } from './inventory.js';
 import { generateOrganismTheme, validateMidi } from './midi.js';
 import { OrganismEggService } from './service.js';
 import type {
+  EggApplyReceipt,
+  EggDiff,
   EggStateAdapter,
   ExportEggOptions,
   InventoryFile,
   InventoryResult,
 } from './types.js';
 import { XPeditionEggAdapter } from './xpedition.js';
+import { withOrganismSnapshotFence } from '../infra/organism-maintenance.js';
 
 const ROOT = path.resolve('.test-output', 'organism-egg');
 const CREATED = '2026-08-23T20:00:00.000Z';
@@ -31,6 +34,8 @@ function file(
     dimension,
     privacy: 'private',
     provenance: { origin: 'synthetic-fixture', license: 'Apache-2.0', owned: true },
+    mode: 0o600,
+    mtimeMs: 0,
   };
 }
 
@@ -53,6 +58,7 @@ class SyntheticAdapter implements EggStateAdapter {
   rappid = RAPPID;
   applyCount = 0;
   failNextHealth = false;
+  private generations = new Map<string, InventoryFile[]>();
 
   async inventory(): Promise<InventoryResult> {
     return {
@@ -69,12 +75,36 @@ class SyntheticAdapter implements EggStateAdapter {
       },
       exclusions: ['credentials and external mailbox contents'],
       reauthentication: ['GitHub Copilot'],
+      epoch: 'synthetic-epoch',
     };
   }
 
-  async apply(files: InventoryFile[]): Promise<void> {
+  async withSnapshotFence<T>(operation: () => Promise<T>): Promise<T> {
+    return operation();
+  }
+
+  async validateStaged(): Promise<void> {}
+
+  async apply(
+    files: InventoryFile[],
+    context: { expectedStateDigest: string },
+  ): Promise<EggApplyReceipt> {
     this.applyCount += 1;
+    const generation = `synthetic-${this.applyCount}`;
+    this.generations.set(generation, this.files);
     this.files = files.map((entry) => ({ ...entry, bytes: Buffer.from(entry.bytes) }));
+    return { generation, stateDigest: context.expectedStateDigest };
+  }
+
+  async commit(receipt: EggApplyReceipt): Promise<void> {
+    this.generations.delete(receipt.generation);
+  }
+
+  async rollback(receipt: EggApplyReceipt): Promise<void> {
+    const prior = this.generations.get(receipt.generation);
+    if (!prior) throw new Error('synthetic rollback missing');
+    this.files = prior;
+    this.generations.delete(receipt.generation);
   }
 
   async healthProbe(): Promise<{ ok: boolean; detail: string }> {
@@ -84,6 +114,18 @@ class SyntheticAdapter implements EggStateAdapter {
     }
     return { ok: true, detail: 'synthetic contracts healthy' };
   }
+}
+
+function approved(preview: EggDiff): Pick<
+  import('./types.js').ImportEggOptions,
+  'approval' | 'previewHandle' | 'nonce' | 'targetRappid'
+> {
+  return {
+    approval: preview.approvalBinding,
+    previewHandle: preview.previewHandle,
+    nonce: preview.nonce,
+    targetRappid: preview.targetRappid,
+  };
 }
 
 function options(output: string, mode: 'portable' | 'sealed-backup'): ExportEggOptions {
@@ -152,27 +194,37 @@ describe('OpenRappter organism eggs', () => {
 
     const preview = await service.import({
       eggPath: exported.output,
-      semantics: 'restore',
+      semantics: 'clone',
       apply: false,
     });
     expect(preview.applied).toBe(false);
     expect(adapter.applyCount).toBe(0);
     expect(Buffer.from(adapter.files[0].bytes).equals(beforePreview)).toBe(true);
+    if (process.platform !== 'win32') {
+      expect(
+        fs.statSync(path.join(
+          service.runtimeDir,
+          'previews',
+          `${preview.preview.previewHandle}.egg`,
+        )).mode & 0o077,
+      ).toBe(0);
+    }
 
     await expect(service.import({
       eggPath: exported.output,
-      semantics: 'restore',
+      semantics: 'clone',
       apply: true,
+      ...approved(preview.preview),
       approval: 'b'.repeat(64),
       rollbackPassphrase: PASSPHRASE,
-    })).rejects.toThrow(/action-bound approval/);
+    })).rejects.toThrow(/does not match preview/);
     expect(adapter.applyCount).toBe(0);
 
     const applied = await service.import({
       eggPath: exported.output,
-      semantics: 'restore',
+      semantics: 'clone',
       apply: true,
-      approval: preview.preview.approvalBinding,
+      ...approved(preview.preview),
       rollbackPassphrase: PASSPHRASE,
     });
     expect(applied.applied).toBe(true);
@@ -188,16 +240,16 @@ describe('OpenRappter organism eggs', () => {
     const before = adapter.files.map((entry) => Buffer.from(entry.bytes).toString('hex'));
     const preview = await service.import({
       eggPath: exported.output,
-      semantics: 'restore',
+      semantics: 'clone',
       apply: false,
     });
     adapter.failNextHealth = true;
 
     await expect(service.import({
       eggPath: exported.output,
-      semantics: 'restore',
+      semantics: 'clone',
       apply: true,
-      approval: preview.preview.approvalBinding,
+      ...approved(preview.preview),
       rollbackPassphrase: PASSPHRASE,
     })).rejects.toThrow(/health probe/);
     expect(adapter.files.map((entry) => Buffer.from(entry.bytes).toString('hex'))).toEqual(before);
@@ -211,22 +263,126 @@ describe('OpenRappter organism eggs', () => {
     adapter.files[0] = file('agents/helper_agent.js', 'first change\n', 'agents', 'text/javascript');
     const preview = await service.import({
       eggPath: exported.output,
-      semantics: 'restore',
+      semantics: 'clone',
       apply: false,
     });
     adapter.files[0] = file('agents/helper_agent.js', 'changed after preview\n', 'agents', 'text/javascript');
     await expect(service.import({
       eggPath: exported.output,
-      semantics: 'restore',
+      semantics: 'clone',
       apply: true,
-      approval: preview.preview.approvalBinding,
+      ...approved(preview.preview),
       rollbackPassphrase: PASSPHRASE,
-    })).rejects.toThrow(/action-bound approval/);
+    })).rejects.toThrow(/changed after preview/);
     expect(adapter.applyCount).toBe(0);
+    await expect(service.import({
+      eggPath: exported.output,
+      semantics: 'clone',
+      apply: true,
+      ...approved(preview.preview),
+      rollbackPassphrase: PASSPHRASE,
+    })).rejects.toThrow(/ENOENT|consumed|preview/i);
 
     const link = path.join(ROOT, 'linked.egg');
     fs.symlinkSync(exported.output, link);
     expect(() => service.inspect(link)).toThrow(/symlink/);
+    const hardlink = path.join(ROOT, 'hardlinked.egg');
+    fs.linkSync(exported.output, hardlink);
+    expect(() => service.inspect(hardlink)).toThrow(/bounded regular file/);
+  });
+
+  it('pins immutable preview bytes, target and nonce, then consumes approval once', async () => {
+    const adapter = new SyntheticAdapter();
+    const service = new OrganismEggService(adapter, path.join(ROOT, 'runtime'));
+    const first = await service.export(options(path.join(ROOT, 'pinned.egg'), 'portable'));
+    adapter.files[0] = file('agents/helper_agent.js', 'live changed\n', 'agents', 'text/javascript');
+    const preview = await service.import({
+      eggPath: first.output,
+      semantics: 'clone',
+      apply: false,
+    });
+    const originalDigest = preview.preview.eggDigest;
+    fs.writeFileSync(first.output, Buffer.from('path swapped after preview'));
+
+    await expect(service.import({
+      eggPath: first.output,
+      semantics: 'clone',
+      apply: true,
+      ...approved(preview.preview),
+      targetRappid: `${RAPPID.slice(0, -1)}b`,
+      rollbackPassphrase: PASSPHRASE,
+    })).rejects.toThrow(/does not match preview/);
+
+    const applied = await service.import({
+      eggPath: first.output,
+      semantics: 'clone',
+      apply: true,
+      ...approved(preview.preview),
+      rollbackPassphrase: PASSPHRASE,
+    });
+    expect(applied.preview.eggDigest).toBe(originalDigest);
+    expect(Buffer.from(adapter.files[0].bytes).toString()).toContain('inert = true');
+    await expect(service.import({
+      eggPath: first.output,
+      semantics: 'clone',
+      apply: true,
+      ...approved(preview.preview),
+      rollbackPassphrase: PASSPHRASE,
+    })).rejects.toThrow(/ENOENT|consumed|preview/i);
+  });
+
+  it('makes portable eggs clone-only and keeps identity seeds sealed', async () => {
+    const home = path.join(ROOT, 'identity-home');
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, 'rappid.tail'), `${'8'.repeat(64)}\n`);
+    fs.writeFileSync(path.join(home, 'rappid.body.json'), '{"traits":["safe"]}\n');
+    const service = new OrganismEggService(new LocalOrganismAdapter(home), path.join(ROOT, 'identity-runtime'));
+    const portable = await service.export(options(path.join(ROOT, 'identity-portable.egg'), 'portable'));
+    const portableInspection = service.inspect(portable.output);
+    expect(portableInspection.files?.some((entry) => entry.path === 'state/rappid.tail')).toBe(false);
+    const restorePreview = await service.import({
+      eggPath: portable.output,
+      semantics: 'restore',
+      apply: false,
+    });
+    expect(restorePreview.preview.compatible).toBe(false);
+    await expect(service.import({
+      eggPath: portable.output,
+      semantics: 'restore',
+      apply: true,
+      ...approved(restorePreview.preview),
+      rollbackPassphrase: PASSPHRASE,
+    })).rejects.toThrow(/clone-only/);
+
+    const sealed = await service.export(options(path.join(ROOT, 'identity-sealed.egg'), 'sealed-backup'));
+    expect(service.inspect(sealed.output, PASSPHRASE).files).toContainEqual(
+      expect.objectContaining({ path: 'state/rappid.tail', privacy: 'sensitive-encrypted' }),
+    );
+    fs.writeFileSync(path.join(home, 'rappid.body.json'), '{"traits":["changed"]}\n');
+    const sealedPreview = await service.import({
+      eggPath: sealed.output,
+      passphrase: PASSPHRASE,
+      semantics: 'restore',
+      apply: false,
+    });
+    expect(sealedPreview.preview.compatible).toBe(true);
+    await service.import({
+      eggPath: sealed.output,
+      passphrase: PASSPHRASE,
+      semantics: 'restore',
+      apply: true,
+      ...approved(sealedPreview.preview),
+      rollbackPassphrase: PASSPHRASE,
+    });
+    expect(JSON.parse(fs.readFileSync(path.join(home, 'rappid.body.json'), 'utf8'))).toEqual({
+      traits: ['safe'],
+    });
+
+    const unsafe = new SyntheticAdapter();
+    unsafe.files.push(file('resources/device-key.json', '{"public":"still identity-bound"}\n'));
+    await expect(new OrganismEggService(unsafe, path.join(ROOT, 'unsafe-identity-runtime')).export(
+      options(path.join(ROOT, 'unsafe-identity.egg'), 'portable'),
+    )).rejects.toThrow(/identity seed/);
   });
 
   it('keeps imported code inert and blocks semantic-control apply', async () => {
@@ -245,7 +401,7 @@ describe('OpenRappter organism eggs', () => {
     const seam = new XPeditionEggAdapter(service);
     await expect(seam.apply({
       eggPath: exported.output,
-      semantics: 'restore',
+      semantics: 'clone',
       apply: true,
       approval: 'irrelevant',
       rollbackPassphrase: PASSPHRASE,
@@ -378,6 +534,78 @@ describe('OpenRappter organism eggs', () => {
     })).rejects.toThrow(/not a supported regular file/);
   });
 
+  it('structurally redacts camelCase secrets across JSON5, YAML and TOML and fails closed on SQLite blobs', async () => {
+    const home = path.join(ROOT, 'structured-secret-home');
+    fs.mkdirSync(path.join(home, 'resources'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'rappid.tail'), `${'9'.repeat(64)}\n`);
+    const secret = ['fixture', 'credential', 'value', 'long'].join('-');
+    fs.writeFileSync(path.join(home, 'config.json5'), `{ channels: { botToken: "${secret}" } }`);
+    fs.writeFileSync(path.join(home, 'config.yaml'), `provider:\n  appPassword: ${secret}\n`);
+    fs.writeFileSync(path.join(home, 'resources', 'client.toml'), `clientSecret = "${secret}"\n`);
+    const adapter = new LocalOrganismAdapter(home);
+    const inventory = await adapter.inventory({
+      mode: 'portable',
+      includeHistory: false,
+      includeMedia: false,
+      acknowledgeUnknownLicense: false,
+    });
+    for (const file of inventory.files.filter((entry) => /config|client/.test(entry.path))) {
+      expect(Buffer.from(file.bytes).toString('utf8')).not.toContain(secret);
+    }
+
+    const module = await import('better-sqlite3');
+    const Database = module.default as unknown as new (file: string) => {
+      exec(sql: string): void;
+      prepare(sql: string): { run(value: Buffer): unknown };
+      close(): void;
+    };
+    const database = new Database(path.join(home, 'openrappter.db'));
+    database.exec('CREATE TABLE payloads(value BLOB)');
+    database.prepare('INSERT INTO payloads VALUES (?)').run(
+      Buffer.from(`${['access', 'token'].join('_')}=${secret}`),
+    );
+    database.close();
+    await expect(adapter.inventory({
+      mode: 'portable',
+      includeHistory: false,
+      includeMedia: false,
+      acknowledgeUnknownLicense: false,
+    })).rejects.toThrow(/secret-shape scan/);
+  });
+
+  it('rejects hardlinks and sparse files before buffering an inventory', async () => {
+    const hardlinkHome = path.join(ROOT, 'hardlink-home');
+    fs.mkdirSync(path.join(hardlinkHome, 'agents'), { recursive: true });
+    fs.writeFileSync(path.join(hardlinkHome, 'rappid.tail'), `${'3'.repeat(64)}\n`);
+    const source = path.join(hardlinkHome, 'agents', 'source.py');
+    fs.writeFileSync(source, 'print("fixture")\n');
+    fs.linkSync(source, path.join(hardlinkHome, 'agents', 'linked.py'));
+    await expect(new LocalOrganismAdapter(hardlinkHome).inventory({
+      mode: 'portable',
+      includeHistory: false,
+      includeMedia: false,
+      acknowledgeUnknownLicense: false,
+    })).rejects.toThrow(/hardlink/);
+
+    const sparseHome = path.join(ROOT, 'sparse-home');
+    fs.mkdirSync(path.join(sparseHome, 'sounds'), { recursive: true });
+    fs.writeFileSync(path.join(sparseHome, 'rappid.tail'), `${'4'.repeat(64)}\n`);
+    const sparse = path.join(sparseHome, 'sounds', 'sparse.wav');
+    fs.writeFileSync(sparse, '');
+    fs.truncateSync(sparse, 1024 * 1024);
+    fs.writeFileSync(`${sparse}.license.json`, JSON.stringify({
+      origin: 'synthetic sparse fixture',
+      license: 'CC0-1.0',
+      owned: true,
+    }));
+    await expect(new LocalOrganismAdapter(sparseHome).inventory({
+      mode: 'portable',
+      includeHistory: false,
+      includeMedia: true,
+      acknowledgeUnknownLicense: false,
+    })).rejects.toThrow(/sparse file/);
+  });
+
   it('restores a synthetic local organism exactly without replacing its identity seed', async () => {
     const home = path.join(ROOT, 'restore-home');
     fs.mkdirSync(path.join(home, 'agents'), { recursive: true });
@@ -393,18 +621,156 @@ describe('OpenRappter organism eggs', () => {
     fs.writeFileSync(path.join(home, 'agents', 'extra_agent.js'), 'export const extra = true;\n');
     const preview = await service.import({
       eggPath: exported.output,
-      semantics: 'restore',
+      semantics: 'clone',
       apply: false,
     });
     await service.import({
       eggPath: exported.output,
-      semantics: 'restore',
+      semantics: 'clone',
       apply: true,
-      approval: preview.preview.approvalBinding,
+      ...approved(preview.preview),
       rollbackPassphrase: PASSPHRASE,
     });
-    expect(fs.readFileSync(path.join(home, 'memory.json'), 'utf8')).toBe('{"version":1}\n');
+    expect(JSON.parse(fs.readFileSync(path.join(home, 'memory.json'), 'utf8'))).toEqual({ version: 1 });
     expect(fs.existsSync(path.join(home, 'agents', 'extra_agent.js'))).toBe(false);
     expect(fs.readFileSync(path.join(home, 'rappid.tail'), 'utf8')).toBe(`${'7'.repeat(64)}\n`);
+  });
+
+  it('uses an unsanitized sealed rollback generation and verifies exact recovery', async () => {
+    class OneShotFailingAdapter extends LocalOrganismAdapter {
+      private fail = true;
+      override async healthProbe(): Promise<{ ok: boolean; detail: string }> {
+        if (this.fail) {
+          this.fail = false;
+          return { ok: false, detail: 'synthetic staged health failure' };
+        }
+        return super.healthProbe();
+      }
+    }
+    const home = path.join(ROOT, 'exact-rollback-home');
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, 'rappid.tail'), `${'6'.repeat(64)}\n`);
+    fs.writeFileSync(path.join(home, 'memory.json'), '{"before":true}\n');
+    const envValue = `${['client', 'secret'].join('_')}=synthetic-private-rollback-value\n`;
+    fs.writeFileSync(path.join(home, '.env'), envValue, { mode: 0o600 });
+    const service = new OrganismEggService(
+      new OneShotFailingAdapter(home),
+      path.join(ROOT, 'exact-rollback-runtime'),
+    );
+    const exported = await service.export(options(path.join(ROOT, 'rollback-source.egg'), 'portable'));
+    fs.writeFileSync(path.join(home, 'memory.json'), '{"before":"changed"}\n');
+    const preview = await service.import({
+      eggPath: exported.output,
+      semantics: 'clone',
+      apply: false,
+    });
+    await expect(service.import({
+      eggPath: exported.output,
+      semantics: 'clone',
+      apply: true,
+      ...approved(preview.preview),
+      rollbackPassphrase: PASSPHRASE,
+    })).rejects.toThrow(/health probe/);
+    expect(fs.readFileSync(path.join(home, '.env'), 'utf8')).toBe(envValue);
+    expect(JSON.parse(fs.readFileSync(path.join(home, 'memory.json'), 'utf8'))).toEqual({
+      before: 'changed',
+    });
+    const rollbackName = fs.readdirSync(path.join(service.runtimeDir, 'backups'))
+      .find((name) => name.endsWith('.egg'));
+    const rollback = service.inspect(
+      path.join(service.runtimeDir, 'backups', rollbackName ?? ''),
+      PASSPHRASE,
+    );
+    expect(rollback.files).toContainEqual(expect.objectContaining({ path: 'state/.env' }));
+  });
+
+  it('executes migration functions and quarantines unsupported migration failures', async () => {
+    const adapter = new SyntheticAdapter();
+    const service = new OrganismEggService(adapter, path.join(ROOT, 'migration-runtime'));
+    const exported = await service.export(options(path.join(ROOT, 'migration-source.egg'), 'portable'));
+    const parsed = readAndVerifyRappEgg(fs.readFileSync(exported.output));
+    const manifest = JSON.parse(
+      Buffer.from(parsed.files['organism/manifest.json']).toString('utf8'),
+    ) as Record<string, unknown>;
+    manifest.requiredMigrations = ['openrappter-organism-egg/future-9'];
+    parsed.files['organism/manifest.json'] = Buffer.from(canonical(manifest));
+    const futureEgg = packRappEgg({
+      rappid: parsed.manifest.rappid,
+      createdUtc: parsed.manifest.created_utc,
+      files: parsed.files,
+      payload: parsed.manifest.payload,
+    });
+    const futurePath = path.join(ROOT, 'future-migration.egg');
+    fs.writeFileSync(futurePath, futureEgg, { mode: 0o600 });
+    const preview = await service.import({
+      eggPath: futurePath,
+      semantics: 'clone',
+      apply: false,
+    });
+    await expect(service.import({
+      eggPath: futurePath,
+      semantics: 'clone',
+      apply: true,
+      ...approved(preview.preview),
+      rollbackPassphrase: PASSPHRASE,
+    })).rejects.toThrow(/Unsupported organism migration/);
+    expect(fs.readdirSync(path.join(service.runtimeDir, 'quarantine'))).toHaveLength(1);
+  });
+
+  it('persists recovery-needed evidence and quarantine even when rollback fails', async () => {
+    class BrokenRollbackAdapter extends SyntheticAdapter {
+      override async rollback(): Promise<void> {
+        throw new Error('synthetic rollback failure');
+      }
+    }
+    const adapter = new BrokenRollbackAdapter();
+    const service = new OrganismEggService(adapter, path.join(ROOT, 'broken-rollback-runtime'));
+    const exported = await service.export(options(path.join(ROOT, 'broken-rollback.egg'), 'portable'));
+    adapter.files[0] = file('agents/helper_agent.js', 'changed\n', 'agents', 'text/javascript');
+    const preview = await service.import({
+      eggPath: exported.output,
+      semantics: 'clone',
+      apply: false,
+    });
+    adapter.failNextHealth = true;
+    await expect(service.import({
+      eggPath: exported.output,
+      semantics: 'clone',
+      apply: true,
+      ...approved(preview.preview),
+      rollbackPassphrase: PASSPHRASE,
+    })).rejects.toThrow(/FATAL.*recovery evidence/);
+    expect(fs.readdirSync(service.runtimeDir).some((name) => name.startsWith('RECOVERY-NEEDED-'))).toBe(true);
+    expect(fs.readdirSync(path.join(service.runtimeDir, 'quarantine'))).toHaveLength(1);
+  });
+
+  it('wires query-only snapshots, gateway maintenance fencing, generation swaps and restrictive ACLs', () => {
+    const inventorySource = fs.readFileSync(new URL('./inventory.ts', import.meta.url), 'utf8');
+    const serviceSource = fs.readFileSync(new URL('./service.ts', import.meta.url), 'utf8');
+    const gatewaySource = fs.readFileSync(new URL('../gateway/server.ts', import.meta.url), 'utf8');
+    expect(inventorySource).toContain("database.pragma('query_only = ON')");
+    expect(inventorySource).not.toContain('wal_checkpoint');
+    expect(inventorySource).toContain('fs.renameSync(this.home, prior)');
+    expect(inventorySource).toContain('validateGenerationTree(staged)');
+    expect(gatewaySource).toContain('withOrganismWriteAccessSync');
+    expect(serviceSource).toContain('hardenPrivatePath(target)');
+    expect(serviceSource).not.toContain('platform-best-effort');
+  });
+
+  it('waits for authoritative writers before entering the organism snapshot epoch', async () => {
+    const home = path.join(ROOT, 'maintenance-home');
+    const maintenance = path.join(
+      path.dirname(home),
+      `.${path.basename(home)}.maintenance`,
+    );
+    fs.mkdirSync(maintenance, { recursive: true });
+    const writer = path.join(maintenance, 'writer-synthetic');
+    fs.writeFileSync(writer, '');
+    setTimeout(() => fs.rmSync(writer, { force: true }), 40);
+    const started = Date.now();
+    await withOrganismSnapshotFence(home, async () => {
+      expect(fs.existsSync(writer)).toBe(false);
+    });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(20);
   });
 });

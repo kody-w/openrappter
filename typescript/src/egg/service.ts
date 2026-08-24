@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { openrappterHome } from '../infra/openrappter-home.js';
+import { hardenPrivatePath, syncParentDirectory } from '../flight-recorder/permissions.js';
 import {
   canonical,
   MAX_EGG_BYTES,
@@ -12,10 +14,12 @@ import {
   unsealBytes,
 } from './archive.js';
 import { LocalOrganismAdapter } from './inventory.js';
+import { assertNoPortableSecrets } from './secrets.js';
 import {
   ORGANISM_EGG_PROFILE,
   type EggDiff,
   type EggDiffEntry,
+  type EggApplyReceipt,
   type EggInspection,
   type EggPublicHeader,
   type EggStateAdapter,
@@ -28,12 +32,9 @@ import {
 } from './types.js';
 
 const PROFILE_MIGRATION = 'openrappter-organism-egg/1.0';
-const SECRET_SHAPE = [
-  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
-  /\bgh[opsu]_[A-Za-z0-9]{30,}\b/,
-  /\bsk-[A-Za-z0-9_-]{24,}\b/,
-  /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password)\s*[:=]\s*["']?[^\s"',}]{12,}/i,
-];
+const PREVIEW_TTL_MS = 30 * 60 * 1000;
+const IDENTITY_SEED_PATH =
+  /(?:^|\/)(?:rappid\.tail|[^/]*(?:device|organism|private)[_-]?key(?:\.[^/]*)?)$/i;
 
 function fixedUtc(value: Date): string {
   return value.toISOString();
@@ -48,6 +49,8 @@ function manifestFiles(files: InventoryFile[]): OrganismEggFile[] {
     dimension: file.dimension,
     privacy: file.privacy,
     provenance: file.provenance,
+    mode: file.mode,
+    mtimeMs: file.mtimeMs,
   })).sort((left, right) => Buffer.from(left.path).compare(Buffer.from(right.path)));
 }
 
@@ -80,7 +83,28 @@ function atomicPrivateWrite(file: string, bytes: Uint8Array): void {
   } finally {
     fs.closeSync(descriptor);
   }
-  try { fs.chmodSync(target, 0o600); } catch { /* Windows permissions are best effort. */ }
+  try {
+    hardenPrivatePath(target);
+  } catch (error) {
+    fs.rmSync(target, { force: true });
+    throw new Error('Could not enforce restrictive private permissions for egg output', {
+      cause: error,
+    });
+  }
+  syncParentDirectory(path.dirname(target));
+}
+
+function assertOutputCapacity(file: string, bytes: number): void {
+  let directory = path.dirname(path.resolve(file));
+  while (!fs.existsSync(directory)) {
+    const parent = path.dirname(directory);
+    if (parent === directory) throw new Error('Egg output has no existing filesystem ancestor');
+    directory = parent;
+  }
+  const capacity = fs.statfsSync(directory);
+  if (capacity.bavail * capacity.bsize < bytes * 2) {
+    throw new Error('Insufficient free space for durable egg output');
+  }
 }
 
 function safeReadEgg(file: string): Buffer {
@@ -98,7 +122,16 @@ function safeReadEgg(file: string): Buffer {
   );
   try {
     const before = fs.fstatSync(descriptor);
-    if (!before.isFile() || before.size > MAX_EGG_BYTES + 16 * 1024 * 1024) {
+    if (
+      !before.isFile()
+      || before.nlink !== 1
+      || before.size > MAX_EGG_BYTES + 16 * 1024 * 1024
+      || (
+        process.platform !== 'win32'
+        && before.size > 0
+        && before.blocks * 512 < before.size
+      )
+    ) {
       throw new Error('Egg input is not a bounded regular file');
     }
     const bytes = fs.readFileSync(descriptor);
@@ -114,17 +147,7 @@ function safeReadEgg(file: string): Buffer {
 
 function assertPortableHasNoSecrets(files: InventoryFile[]): void {
   for (const file of files) {
-    if (
-      file.mime.startsWith('audio/')
-      || file.mime === 'application/vnd.sqlite3'
-      || file.bytes.includes(0)
-    ) continue;
-    const text = Buffer.from(file.bytes).toString('utf8');
-    for (const pattern of SECRET_SHAPE) {
-      if (pattern.test(text)) {
-        throw new Error(`Portable egg secret-shape scan rejected ${file.path}`);
-      }
-    }
+    assertNoPortableSecrets(file.path, file.bytes);
   }
 }
 
@@ -202,7 +225,10 @@ function verifyOrganism(
     || manifest.createdUtc !== expectedHeader.createdUtc
     || !Array.isArray(manifest.files)
     || !Array.isArray(manifest.requiredMigrations)
-    || manifest.requiredMigrations.some((migration) => migration !== PROFILE_MIGRATION)
+    || manifest.requiredMigrations.some((migration) => (
+      typeof migration !== 'string'
+      || !/^[a-z0-9][a-z0-9./-]{0,127}$/.test(migration)
+    ))
   ) {
     throw new Error('Organism manifest is incompatible or does not match its RAPP/1 envelope');
   }
@@ -220,9 +246,14 @@ function verifyOrganism(
       !bytes
       || bytes.length !== descriptor.size
       || sha256(bytes) !== descriptor.sha256
+      || !Number.isInteger(descriptor.mode)
+      || descriptor.mode < 0
+      || descriptor.mode > 0o777
+      || !Number.isFinite(descriptor.mtimeMs)
     ) {
       throw new Error(`Organism file size or SHA-256 mismatch: ${descriptor.path}`);
     }
+
   }
   if (rootDigest(manifest.files) !== manifest.rootDigest) {
     throw new Error('Organism root digest mismatch');
@@ -234,8 +265,95 @@ function verifyOrganism(
     dimension: descriptor.dimension,
     privacy: descriptor.privacy,
     provenance: descriptor.provenance,
+    mode: descriptor.mode,
+    mtimeMs: descriptor.mtimeMs,
   }));
   return { manifest, inventoryFiles };
+}
+
+interface PreviewRecord {
+  schema: 'openrappter-egg-preview/1';
+  handle: string;
+  nonce: string;
+  createdUtc: string;
+  expiresUtc: string;
+  eggDigest: string;
+  eggSize: number;
+  targetRappid: string;
+  sourceRappid: string;
+  baseStateDigest: string;
+  diffDigest: string;
+  semantics: 'restore' | 'clone';
+  mode: 'portable' | 'sealed-backup';
+  approvalBinding: string;
+  used: boolean;
+}
+
+const PROFILE_MIGRATIONS: Record<
+  string,
+  (files: InventoryFile[]) => Promise<InventoryFile[]>
+> = {
+  [PROFILE_MIGRATION]: async (files) => {
+    const target = files.find((file) => file.path === 'state/openrappter.db');
+    if (!target) return files;
+    const [{ default: DatabaseModule }, { migrations }] = await Promise.all([
+      import('better-sqlite3'),
+      import('../storage/migrations.js'),
+    ]);
+    const Database = DatabaseModule as unknown as new (source: Buffer) => {
+      exec(sql: string): void;
+      prepare(sql: string): {
+        all(): Array<{ id: number }>;
+        run(...values: unknown[]): unknown;
+      };
+      transaction<T>(operation: () => T): () => T;
+      serialize(): Buffer;
+      close(): void;
+    };
+    const image = Buffer.from(target.bytes);
+    if (image.length >= 20) {
+      image[18] = 1;
+      image[19] = 1;
+    }
+    const database = new Database(image);
+    try {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS migrations (
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          applied_at TEXT NOT NULL
+        )
+      `);
+      const applied = new Set(database.prepare('SELECT id FROM migrations').all().map((row) => row.id));
+      for (const migration of migrations.filter((entry) => !applied.has(entry.id))) {
+        database.transaction(() => {
+          database.exec(migration.up);
+          database.prepare(
+            'INSERT INTO migrations (id, name, applied_at) VALUES (?, ?, ?)',
+          ).run(migration.id, migration.name, fixedUtc(new Date()));
+        })();
+      }
+      const bytes = database.serialize();
+      return files.map((file) => (
+        file === target ? { ...file, bytes } : file
+      ));
+    } finally {
+      database.close();
+    }
+  },
+};
+
+async function executeMigrations(
+  manifest: OrganismEggManifest,
+  files: InventoryFile[],
+): Promise<InventoryFile[]> {
+  let migrated = files;
+  for (const name of manifest.requiredMigrations) {
+    const migration = PROFILE_MIGRATIONS[name];
+    if (!migration) throw new Error(`Unsupported organism migration ${name}`);
+    migrated = await migration(migrated);
+  }
+  return migrated;
 }
 
 export class OrganismEggService {
@@ -244,23 +362,30 @@ export class OrganismEggService {
 
   constructor(
     adapter: EggStateAdapter = new LocalOrganismAdapter(),
-    runtimeDir = openrappterHome(),
+    runtimeDir = path.join(
+      path.dirname(openrappterHome()),
+      `.${path.basename(openrappterHome())}-egg-runtime`,
+    ),
   ) {
     this.adapter = adapter;
-    this.runtimeDir = path.resolve(runtimeDir);
+    const requested = path.resolve(runtimeDir);
+    if (adapter instanceof LocalOrganismAdapter) {
+      const relative = path.relative(adapter.home, requested);
+      this.runtimeDir = (
+        !relative || (!relative.startsWith('..') && !path.isAbsolute(relative))
+      ) ? path.join(path.dirname(adapter.home), `.${path.basename(adapter.home)}-egg-runtime`) : requested;
+    } else {
+      this.runtimeDir = requested;
+    }
   }
 
-  private async buildEggBytes(options: ExportEggOptions): Promise<{
+  private encodeInventory(
+    inventory: InventoryResult,
+    options: ExportEggOptions,
+  ): {
     bytes: Uint8Array;
     manifest: OrganismEggManifest;
-  }> {
-    const inventory = await this.adapter.inventory({
-      mode: options.mode,
-      includeHistory: options.includeHistory === true,
-      includeMedia: options.includeMedia === true,
-      acknowledgeUnknownLicense: options.acknowledgeUnknownLicense === true,
-      mediaPaths: options.mediaPaths,
-    });
+  } {
     if (options.mode === 'portable') assertPortableHasNoSecrets(inventory.files);
     const createdUtc = options.createdUtc ?? fixedUtc(new Date());
     const manifest = buildManifest(inventory, options, createdUtc);
@@ -268,6 +393,14 @@ export class OrganismEggService {
       ...filesRecord(inventory.files),
       'organism/manifest.json': Buffer.from(canonical(manifest), 'utf8'),
     };
+    if (options.mode === 'portable') {
+      if (Object.keys(innerFiles).some((file) => IDENTITY_SEED_PATH.test(file))) {
+        throw new Error('Portable eggs may not contain an identity seed');
+      }
+      for (const [file, bytes] of Object.entries(innerFiles)) {
+        assertNoPortableSecrets(file, bytes);
+      }
+    }
     const header = publicHeader(manifest);
     const inner = packRappEgg({
       rappid: inventory.rappid,
@@ -289,17 +422,35 @@ export class OrganismEggService {
     };
   }
 
+  private async buildEggBytes(options: ExportEggOptions & { exact?: boolean }): Promise<{
+    bytes: Uint8Array;
+    manifest: OrganismEggManifest;
+  }> {
+    return this.adapter.withSnapshotFence(async () => {
+      const inventory = await this.adapter.inventory({
+        mode: options.mode,
+        exact: options.exact === true,
+        includeHistory: options.includeHistory === true,
+        includeMedia: options.includeMedia === true,
+        acknowledgeUnknownLicense: options.acknowledgeUnknownLicense === true,
+        mediaPaths: options.mediaPaths,
+      });
+      return this.encodeInventory(inventory, options);
+    });
+  }
+
   async export(options: ExportEggOptions): Promise<{
     output: string;
     digest: string;
     manifest: OrganismEggManifest;
-    permissions: '0600' | 'platform-best-effort';
+    permissions: '0600' | 'restricted-acl';
   }> {
     if (!options.output.toLowerCase().endsWith('.egg')) {
       throw new Error('Organism exports must use the .egg extension');
     }
     if (fs.existsSync(options.output)) throw new Error(`Refusing to overwrite ${options.output}`);
     const built = await this.buildEggBytes(options);
+    assertOutputCapacity(options.output, built.bytes.length);
     atomicPrivateWrite(path.resolve(options.output), built.bytes);
     if (process.platform !== 'win32' && (fs.statSync(options.output).mode & 0o077) !== 0) {
       fs.rmSync(options.output, { force: true });
@@ -309,7 +460,7 @@ export class OrganismEggService {
       output: path.resolve(options.output),
       digest: sha256(built.bytes),
       manifest: built.manifest,
-      permissions: process.platform === 'win32' ? 'platform-best-effort' : '0600',
+      permissions: process.platform === 'win32' ? 'restricted-acl' : '0600',
     };
   }
 
@@ -349,6 +500,9 @@ export class OrganismEggService {
     if (verified.manifest.mode !== 'portable') {
       throw new Error('Portable envelope contains a non-portable organism manifest');
     }
+    if (verified.inventoryFiles.some((file) => IDENTITY_SEED_PATH.test(file.path))) {
+      throw new Error('Portable egg contains a forbidden identity seed');
+    }
     assertPortableHasNoSecrets(verified.inventoryFiles);
     return {
       valid: true,
@@ -365,6 +519,78 @@ export class OrganismEggService {
     return this.inspectBytes(safeReadEgg(file), passphrase);
   }
 
+  private stagePreview(
+    blob: Uint8Array,
+    record: Omit<PreviewRecord, 'schema' | 'handle' | 'nonce' | 'createdUtc' | 'expiresUtc' | 'approvalBinding' | 'used'>,
+  ): PreviewRecord {
+    const nonce = randomUUID();
+    const handle = `${record.eggDigest}.${nonce}`;
+    const previews = path.join(this.runtimeDir, 'previews');
+    fs.mkdirSync(previews, { recursive: true, mode: 0o700 });
+    hardenPrivatePath(previews, true);
+    const available = fs.statfsSync(previews);
+    if (available.bavail * available.bsize < blob.length * 2) {
+      throw new Error('Insufficient private staging space for immutable egg preview');
+    }
+    const eggFile = path.join(previews, `${handle}.egg`);
+    atomicPrivateWrite(eggFile, blob);
+    const bindingInput = {
+      action: 'openrappter.egg.import.apply',
+      handle,
+      nonce,
+      eggDigest: record.eggDigest,
+      eggSize: record.eggSize,
+      targetRappid: record.targetRappid,
+      sourceRappid: record.sourceRappid,
+      baseStateDigest: record.baseStateDigest,
+      diffDigest: record.diffDigest,
+      semantics: record.semantics,
+      mode: record.mode,
+    };
+    const preview: PreviewRecord = {
+      schema: 'openrappter-egg-preview/1',
+      handle,
+      nonce,
+      createdUtc: fixedUtc(new Date()),
+      expiresUtc: fixedUtc(new Date(Date.now() + PREVIEW_TTL_MS)),
+      ...record,
+      approvalBinding: sha256(canonical(bindingInput)),
+      used: false,
+    };
+    atomicPrivateWrite(
+      path.join(previews, `${handle}.json`),
+      Buffer.from(canonical(preview), 'utf8'),
+    );
+    return preview;
+  }
+
+  private readPreview(handle: string): {
+    record: PreviewRecord;
+    blob: Buffer;
+    recordPath: string;
+    eggPath: string;
+  } {
+    if (!/^[0-9a-f]{64}\.[0-9a-f-]{36}$/.test(handle)) {
+      throw new Error('Invalid preview handle');
+    }
+    const previews = path.join(this.runtimeDir, 'previews');
+    const recordPath = path.join(previews, `${handle}.json`);
+    const eggPath = path.join(previews, `${handle}.egg`);
+    const record = JSON.parse(safeReadEgg(recordPath).toString('utf8')) as PreviewRecord;
+    const blob = safeReadEgg(eggPath);
+    if (
+      record.schema !== 'openrappter-egg-preview/1'
+      || record.handle !== handle
+      || record.used
+      || Date.parse(record.expiresUtc) <= Date.now()
+      || sha256(blob) !== record.eggDigest
+      || blob.length !== record.eggSize
+    ) {
+      throw new Error('Preview handle is expired, consumed, or does not match immutable egg bytes');
+    }
+    return { record, blob, recordPath, eggPath };
+  }
+
   async diff(
     eggPath: string,
     options: { passphrase?: string; semantics: 'restore' | 'clone' },
@@ -374,14 +600,15 @@ export class OrganismEggService {
     if (!inspection.decrypted || !inspection.inventoryFiles || !inspection.manifest) {
       throw new Error('A passphrase is required to diff a sealed egg');
     }
-    const current = await this.adapter.inventory({
-      mode: inspection.manifest.mode,
-      includeHistory: inspection.manifest.privacy.includesHistory,
-      includeMedia: inspection.manifest.privacy.includesMedia,
+    const current = await this.adapter.withSnapshotFence(() => this.adapter.inventory({
+      mode: inspection.manifest!.mode,
+      includeHistory: inspection.manifest!.privacy.includesHistory,
+      includeMedia: inspection.manifest!.privacy.includesMedia,
       acknowledgeUnknownLicense: true,
-    });
-    const compatible = options.semantics === 'clone'
-      || current.rappid === inspection.manifest.organismRappid;
+    }));
+    const compatible = inspection.manifest.mode === 'portable'
+      ? options.semantics === 'clone'
+      : options.semantics === 'clone' || current.rappid === inspection.manifest.organismRappid;
     const before = new Map(manifestFiles(current.files).map((file) => [file.path, file]));
     const after = new Map(inspection.manifest.files.map((file) => [file.path, file]));
     const paths = [...new Set([...before.keys(), ...after.keys()])].sort();
@@ -400,15 +627,17 @@ export class OrganismEggService {
     });
     const baseStateDigest = stateDigest(current.files);
     const eggDigest = sha256(blob);
-    const bindingInput = {
-      action: 'openrappter.egg.import.apply',
+    const diffDigest = sha256(canonical(entries));
+    const staged = this.stagePreview(blob, {
       eggDigest,
+      eggSize: blob.length,
       targetRappid: current.rappid,
       sourceRappid: inspection.manifest.organismRappid,
       baseStateDigest,
-      diffDigest: sha256(canonical(entries)),
+      diffDigest,
       semantics: options.semantics,
-    };
+      mode: inspection.manifest.mode,
+    });
     return {
       eggDigest,
       targetRappid: current.rappid,
@@ -417,7 +646,11 @@ export class OrganismEggService {
       compatible,
       reauthentication: inspection.manifest.privacy.reauthentication,
       entries,
-      approvalBinding: sha256(canonical(bindingInput)),
+      diffDigest,
+      eggSize: blob.length,
+      nonce: staged.nonce,
+      previewHandle: staged.handle,
+      approvalBinding: staged.approvalBinding,
     };
   }
 
@@ -427,119 +660,217 @@ export class OrganismEggService {
     rollbackEgg?: string;
     health?: string;
   }> {
-    const preview = await this.diff(options.eggPath, {
-      passphrase: options.passphrase,
-      semantics: options.semantics,
-    });
-    if (!options.apply) return { preview, applied: false };
-    if (!preview.compatible) {
-      throw new Error('Restore RAPPID mismatch; choose explicit clone semantics instead of merging organisms');
+    if (!options.apply) {
+      const preview = await this.diff(options.eggPath, {
+        passphrase: options.passphrase,
+        semantics: options.semantics,
+      });
+      return { preview, applied: false };
     }
-    if (options.approval !== preview.approvalBinding) {
-      throw new Error('Apply requires the action-bound approval from this exact preview');
+    if (!options.previewHandle || !options.nonce || !options.targetRappid) {
+      throw new Error('Apply requires preview handle, one-time nonce, and target RAPPID confirmation');
     }
     const rollbackPassphrase = options.rollbackPassphrase ?? options.passphrase;
     if (!rollbackPassphrase) throw new Error('Apply requires a passphrase for the rollback egg');
 
     fs.mkdirSync(this.runtimeDir, { recursive: true, mode: 0o700 });
+    hardenPrivatePath(this.runtimeDir, true);
     const lockPath = path.join(this.runtimeDir, 'organism-egg.lock');
     const lock = fs.openSync(lockPath, 'wx', 0o600);
-    const operation = `${Date.now()}-${preview.eggDigest.slice(0, 12)}`;
+    hardenPrivatePath(lockPath);
+    const operation = `${Date.now()}-${options.previewHandle.slice(0, 12)}`;
     const staging = path.join(this.runtimeDir, 'staging', operation);
     const quarantine = path.join(this.runtimeDir, 'quarantine');
     fs.mkdirSync(staging, { recursive: true, mode: 0o700 });
+    hardenPrivatePath(staging, true);
     let rollbackEgg = '';
-    let rollbackFiles: InventoryFile[] = [];
-    let currentRappid = preview.targetRappid;
+    let receipt: EggApplyReceipt | undefined;
+    let stagedBlob: Buffer | undefined;
+    let stagedRecord: PreviewRecord | undefined;
+    let usedRecordPath = '';
+    let rollbackFailure: unknown;
+    let rollbackStateDigest = '';
+    let expectedStateFiles: InventoryFile[] = [];
     try {
+      const staged = this.readPreview(options.previewHandle);
+      stagedBlob = staged.blob;
+      stagedRecord = staged.record;
+      if (
+        staged.record.nonce !== options.nonce
+        || staged.record.approvalBinding !== options.approval
+        || staged.record.targetRappid !== options.targetRappid
+        || staged.record.semantics !== options.semantics
+      ) {
+        throw new Error('Apply approval does not match preview nonce, target, semantics, or digest');
+      }
+      if (staged.record.mode === 'portable' && options.semantics !== 'clone') {
+        throw new Error('Portable eggs are clone-only');
+      }
       fs.writeFileSync(lock, canonical({
         pid: process.pid,
-        eggDigest: preview.eggDigest,
-        targetRappid: preview.targetRappid,
-        baseStateDigest: preview.baseStateDigest,
+        previewHandle: staged.record.handle,
+        nonce: staged.record.nonce,
+        eggDigest: staged.record.eggDigest,
+        targetRappid: staged.record.targetRappid,
+        baseStateDigest: staged.record.baseStateDigest,
       }));
       fs.fsyncSync(lock);
-      const incomingBlob = safeReadEgg(options.eggPath);
-      const incoming = this.inspectBytes(incomingBlob, options.passphrase);
-      if (!incoming.inventoryFiles || !incoming.manifest) throw new Error('Import payload is still sealed');
-      const current = await this.adapter.inventory({
-        mode: incoming.manifest.mode,
-        includeHistory: incoming.manifest.privacy.includesHistory,
-        includeMedia: incoming.manifest.privacy.includesMedia,
-        acknowledgeUnknownLicense: true,
-      });
-      currentRappid = current.rappid;
-      if (stateDigest(current.files) !== preview.baseStateDigest) {
-        throw new Error('Organism changed after preview; produce a new diff and human approval');
-      }
-      const rollbackInventory = (
-        incoming.manifest.privacy.includesHistory
-        && incoming.manifest.privacy.includesMedia
-      ) ? current : await this.adapter.inventory({
-        mode: 'sealed-backup',
-        includeHistory: true,
-        includeMedia: true,
-        acknowledgeUnknownLicense: true,
-      });
-      rollbackFiles = rollbackInventory.files;
-      const rollbackPath = path.join(
-        this.runtimeDir,
-        'backups',
-        `rollback-${operation}.egg`,
-      );
-      const rollbackOptions: ExportEggOptions = {
-        mode: 'sealed-backup',
-        output: rollbackPath,
-        passphrase: rollbackPassphrase,
-        includeHistory: true,
-        includeMedia: true,
-        acknowledgeUnknownLicense: true,
-        createdUtc: fixedUtc(new Date()),
-        sourceVersion: 'rollback',
-        sourceCommit: preview.baseStateDigest,
-        sourceRing: 'local-rollback',
-      };
-      const rollbackBuilt = await this.buildEggBytes(rollbackOptions);
-      atomicPrivateWrite(rollbackPath, rollbackBuilt.bytes);
-      rollbackEgg = rollbackPath;
+      usedRecordPath = `${staged.recordPath}.used`;
+      fs.renameSync(staged.recordPath, usedRecordPath);
+      fs.writeFileSync(usedRecordPath, canonical({ ...staged.record, used: true }), { mode: 0o600 });
+      hardenPrivatePath(usedRecordPath);
 
-      await this.adapter.apply(incoming.inventoryFiles, {
-        semantics: options.semantics,
-        sourceRappid: incoming.manifest.organismRappid,
-        mode: incoming.manifest.mode,
-        includesHistory: incoming.manifest.privacy.includesHistory,
-        includesMedia: incoming.manifest.privacy.includesMedia,
+      const incoming = this.inspectBytes(staged.blob, options.passphrase);
+      if (!incoming.inventoryFiles || !incoming.manifest) throw new Error('Import payload is still sealed');
+      if (
+        incoming.manifest.organismRappid !== staged.record.sourceRappid
+        || incoming.manifest.mode !== staged.record.mode
+      ) {
+        throw new Error('Immutable preview identity no longer matches the verified egg');
+      }
+      await this.adapter.withSnapshotFence(async () => {
+        const current = await this.adapter.inventory({
+          mode: incoming.manifest!.mode,
+          includeHistory: incoming.manifest!.privacy.includesHistory,
+          includeMedia: incoming.manifest!.privacy.includesMedia,
+          acknowledgeUnknownLicense: true,
+        });
+        if (
+          current.rappid !== staged.record.targetRappid
+          || stateDigest(current.files) !== staged.record.baseStateDigest
+        ) {
+          throw new Error('Organism changed after preview; produce a new diff and human approval');
+        }
+        const rollbackInventory = await this.adapter.inventory({
+          mode: 'sealed-backup',
+          exact: true,
+          includeHistory: true,
+          includeMedia: true,
+          acknowledgeUnknownLicense: true,
+        });
+        rollbackStateDigest = stateDigest(rollbackInventory.files);
+        const rollbackPath = path.join(this.runtimeDir, 'backups', `rollback-${operation}.egg`);
+        const rollbackBuilt = this.encodeInventory(rollbackInventory, {
+          mode: 'sealed-backup',
+          output: rollbackPath,
+          passphrase: rollbackPassphrase,
+          includeHistory: true,
+          includeMedia: true,
+          acknowledgeUnknownLicense: true,
+          createdUtc: fixedUtc(new Date()),
+          sourceVersion: 'exact-rollback',
+          sourceCommit: staged.record.baseStateDigest,
+          sourceRing: 'local-recovery',
+        });
+        atomicPrivateWrite(rollbackPath, rollbackBuilt.bytes);
+        rollbackEgg = rollbackPath;
+
+        const migrated = await executeMigrations(incoming.manifest!, incoming.inventoryFiles!);
+        expectedStateFiles = migrated;
+        await this.adapter.validateStaged(migrated, {
+          semantics: options.semantics,
+          sourceRappid: incoming.manifest!.organismRappid,
+          targetRappid: staged.record.targetRappid,
+          mode: incoming.manifest!.mode,
+        });
+        receipt = await this.adapter.apply(migrated, {
+          semantics: options.semantics,
+          sourceRappid: incoming.manifest!.organismRappid,
+          targetRappid: staged.record.targetRappid,
+          mode: incoming.manifest!.mode,
+          includesHistory: incoming.manifest!.privacy.includesHistory,
+          includesMedia: incoming.manifest!.privacy.includesMedia,
+          expectedStateDigest: stateDigest(migrated),
+        });
       });
       const health = await this.adapter.healthProbe();
       if (!health.ok) throw new Error(`Post-import health probe failed: ${health.detail}`);
+      if (!receipt) throw new Error('Import did not produce a durable generation receipt');
+      const committedState = await this.adapter.withSnapshotFence(() => this.adapter.inventory({
+        mode: incoming.manifest!.mode,
+        includeHistory: incoming.manifest!.privacy.includesHistory,
+        includeMedia: incoming.manifest!.privacy.includesMedia,
+        acknowledgeUnknownLicense: true,
+      }));
+      const committedDigest = stateDigest(committedState.files);
+      if (committedDigest !== receipt.stateDigest) {
+        const expected = new Map(manifestFiles(expectedStateFiles).map((file) => [file.path, file]));
+        const actual = new Map(manifestFiles(committedState.files).map((file) => [file.path, file]));
+        const mismatch = [...new Set([...expected.keys(), ...actual.keys()])].find((file) => (
+          canonical(expected.get(file) ?? null) !== canonical(actual.get(file) ?? null)
+        ));
+        throw new Error(
+          `Staged generation state digest does not match after swap`
+          + ` (expected ${receipt.stateDigest}, actual ${committedDigest}, first mismatch ${mismatch ?? 'unknown'}`
+          + `${mismatch ? `; expected=${canonical(expected.get(mismatch) ?? null)}; actual=${canonical(actual.get(mismatch) ?? null)}` : ''})`,
+        );
+      }
+      await this.adapter.commit(receipt);
+      fs.rmSync(staged.eggPath, { force: true });
+      fs.rmSync(usedRecordPath, { force: true });
       fs.rmSync(staging, { recursive: true, force: true });
+      const preview: EggDiff = {
+        eggDigest: staged.record.eggDigest,
+        eggSize: staged.record.eggSize,
+        targetRappid: staged.record.targetRappid,
+        baseStateDigest: staged.record.baseStateDigest,
+        semantics: staged.record.semantics,
+        compatible: true,
+        reauthentication: incoming.manifest.privacy.reauthentication,
+        entries: [],
+        diffDigest: staged.record.diffDigest,
+        nonce: staged.record.nonce,
+        previewHandle: staged.record.handle,
+        approvalBinding: staged.record.approvalBinding,
+      };
       return { preview, applied: true, rollbackEgg, health: health.detail };
     } catch (error) {
-      if (rollbackFiles.length) {
+      if (receipt) {
         try {
-          await this.adapter.apply(rollbackFiles, {
-            semantics: 'restore',
-            sourceRappid: currentRappid,
+          await this.adapter.rollback(receipt);
+          const restored = await this.adapter.withSnapshotFence(() => this.adapter.inventory({
             mode: 'sealed-backup',
-            includesHistory: true,
-            includesMedia: true,
-          });
+            exact: true,
+            includeHistory: true,
+            includeMedia: true,
+            acknowledgeUnknownLicense: true,
+          }));
+          if (stateDigest(restored.files) !== rollbackStateDigest) {
+            throw new Error('Restored generation hash does not match the exact rollback snapshot');
+          }
+          const rollbackHealth = await this.adapter.healthProbe();
+          if (!rollbackHealth.ok) {
+            throw new Error(`Restored generation health failed: ${rollbackHealth.detail}`);
+          }
         } catch (rollbackError) {
-          throw new Error(
-            `Import failed and rollback failed: ${String(error)}; rollback: ${String(rollbackError)}`,
-          );
+          rollbackFailure = rollbackError;
         }
       }
       fs.mkdirSync(quarantine, { recursive: true, mode: 0o700 });
+      hardenPrivatePath(quarantine, true);
       const quarantinePath = path.join(quarantine, `${operation}.egg`);
-      if (!fs.existsSync(quarantinePath)) atomicPrivateWrite(quarantinePath, safeReadEgg(options.eggPath));
-      fs.writeFileSync(path.join(staging, 'failure.json'), canonical({
-        eggDigest: preview.eggDigest,
+      if (stagedBlob && !fs.existsSync(quarantinePath)) atomicPrivateWrite(quarantinePath, stagedBlob);
+      const evidencePath = path.join(
+        this.runtimeDir,
+        rollbackFailure ? `RECOVERY-NEEDED-${operation}.json` : `failure-${operation}.json`,
+      );
+      fs.writeFileSync(evidencePath, canonical({
+        eggDigest: stagedRecord?.eggDigest ?? null,
         failedUtc: fixedUtc(new Date()),
         error: error instanceof Error ? error.message : String(error),
         quarantine: quarantinePath,
         rollbackEgg,
+        rollbackFailure: rollbackFailure instanceof Error
+          ? rollbackFailure.message
+          : rollbackFailure ? String(rollbackFailure) : null,
       }), { mode: 0o600 });
+      hardenPrivatePath(evidencePath);
+      if (rollbackFailure) {
+        throw new Error(
+          `FATAL: import failed and exact generation rollback failed; recovery evidence: ${evidencePath}`,
+          { cause: rollbackFailure },
+        );
+      }
       throw error;
     } finally {
       fs.closeSync(lock);

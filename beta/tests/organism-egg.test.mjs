@@ -9,6 +9,10 @@ import {
 import path from "node:path";
 
 import { OrganismEggAdapter } from "../electron/organism-egg-adapter.mjs";
+import {
+  packEgg,
+  verifyEgg,
+} from "../electron/rapp-protocol.mjs";
 
 const root = path.resolve(".test-output", "organism-egg-adapter");
 const cli = path.join(root, "fake-openrappter.mjs");
@@ -38,6 +42,9 @@ test("XPedition adapter exposes beta.11 typed capabilities and never puts passph
   const result = await adapter.apply(path.join(root, "fixture.egg"), {
     semantics: "restore",
     approval: "a".repeat(64),
+    previewHandle: `${"b".repeat(64)}.00000000-0000-4000-8000-000000000000`,
+    nonce: "00000000-0000-4000-8000-000000000000",
+    targetRappid: `rappid:@openrappter/organism:${"c".repeat(64)}`,
     passphrase: "fixture-passphrase",
   });
   assert.equal(adapter.capabilities.requiredDesktop, "0.1.0-beta.11");
@@ -62,4 +69,25 @@ test("Quantum RAPPID UI shows dimensions, privacy, diff, reauth, MIDI, and nativ
   assert.match(main, /showMessageBox/);
   assert.match(main, /Apply verified restore/);
   assert.match(preload, /organismEggApply/);
+});
+
+test("organism artifacts pass the existing beta RAPP/1 verifyEgg implementation directly", () => {
+  const rappid = `rappid:@openrappter/organism:${"a".repeat(64)}`;
+  const artifact = packEgg({
+    variant: "rapplication",
+    rappid,
+    createdUtc: "2026-08-23T20:00:00.000Z",
+    files: {
+      "organism/manifest.json": Buffer.from(JSON.stringify({
+        profile: "openrappter-organism-egg/1.0",
+        organismRappid: rappid,
+        synthetic: true,
+      })),
+    },
+    payload: {
+      profile: "openrappter-organism-egg/1.0",
+      synthetic_fixture: true,
+    },
+  });
+  assert.deepEqual(verifyEgg(artifact), [true, null, "ok"]);
 });

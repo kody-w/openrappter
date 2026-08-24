@@ -69,3 +69,38 @@ export function redactSecretsInText(text: string): string {
     return `${quote}${key}${quote}${separator}${REDACTED}`;
   });
 }
+
+const CREDENTIAL_VALUE_SHAPES = [
+  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
+  /\bgh[opsu]_[A-Za-z0-9]{30,}\b/,
+  /\bsk-[A-Za-z0-9_-]{24,}\b/,
+  /\b(?:Bearer|Basic|Token)\s+[A-Za-z0-9._~+/-]{16,}=*\b/i,
+];
+
+/**
+ * Detect credential-shaped values after structural redaction.
+ *
+ * Key classification remains owned by `isSecretKey`; this adds only the value
+ * shapes needed to prove a serialized artifact contains no raw credential.
+ */
+export function containsSecretShapedText(text: string): boolean {
+  if (!text) return false;
+  if (CREDENTIAL_VALUE_SHAPES.some((pattern) => pattern.test(text))) return true;
+  let found = false;
+  text.replace(
+    TEXT_PAIR,
+    (whole, _quote: string, key: string, _separator: string, value: string) => {
+      const normalizedValue = value.replace(/^(["'])(.*)\1$/, '$2');
+      if (
+        isSecretKey(key.trim())
+        && normalizedValue !== REDACTED
+        && normalizedValue !== ''
+        && normalizedValue !== 'null'
+      ) {
+        found = true;
+      }
+      return whole;
+    },
+  );
+  return found;
+}

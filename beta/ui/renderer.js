@@ -2452,6 +2452,8 @@ setInterval(() => void maintainAmbientContext(), 240000);
         passphrase: passphrase.value,
         semantics: preview.semantics,
         approval: preview.approvalBinding,
+        previewHandle: preview.previewHandle,
+        nonce: preview.nonce,
         eggDigest: preview.eggDigest,
         targetRappid: preview.targetRappid,
         changed,

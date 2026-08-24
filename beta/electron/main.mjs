@@ -3053,9 +3053,12 @@ function registerIpc() {
     const inspection = await organismEggAdapter.inspect(file, {
       ...(passphrase ? { passphrase } : {}),
     });
+    const semantics = inspection.header?.mode === "portable"
+      ? "clone"
+      : request.semantics === "clone" ? "clone" : "restore";
     const preview = inspection.decrypted
       ? await organismEggAdapter.preview(file, {
-          semantics: request.semantics === "clone" ? "clone" : "restore",
+          semantics,
           ...(passphrase ? { passphrase } : {}),
         })
       : null;
@@ -3066,6 +3069,9 @@ function registerIpc() {
     if (
       !request.file
       || !/^[0-9a-f]{64}$/.test(String(request.approval || ""))
+      || !/^[0-9a-f]{64}\.[0-9a-f-]{36}$/.test(String(request.previewHandle || ""))
+      || !/^[0-9a-f-]{36}$/.test(String(request.nonce || ""))
+      || !String(request.targetRappid || "")
       || !String(request.passphrase || "")
     ) {
       throw new Error("Apply requires a preview-bound approval and rollback passphrase.");
@@ -3086,6 +3092,9 @@ function registerIpc() {
       ...await organismEggAdapter.apply(String(request.file), {
         semantics: request.semantics === "clone" ? "clone" : "restore",
         approval: String(request.approval),
+        previewHandle: String(request.previewHandle),
+        nonce: String(request.nonce),
+        targetRappid: String(request.targetRappid),
         passphrase: String(request.passphrase),
       }),
     };

@@ -1179,11 +1179,12 @@ class MolterAgent(BasicAgent):
                     fh.write(source)
                 with open(os.path.join(gdir, "molt.json"), "x", encoding="utf-8") as fh:
                     json.dump(meta, fh, indent=2)
-                try:
-                    os.chmod(os.path.join(gdir, "agent.py"), 0o400)
-                    os.chmod(os.path.join(gdir, "molt.json"), 0o400)
-                except OSError:
-                    pass
+                if os.name != "nt":
+                    try:
+                        os.chmod(os.path.join(gdir, "agent.py"), 0o400)
+                        os.chmod(os.path.join(gdir, "molt.json"), 0o400)
+                    except OSError:
+                        pass
             except Exception:
                 try:
                     for name in os.listdir(gdir):

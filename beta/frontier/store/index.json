@@ -19,8 +19,8 @@
       "manifest_name": "@frontier/molter",
       "singleton_filename": "molter_agent.py",
       "singleton_url": "https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/beta/frontier/rapplications/molter/agents/molter_agent.py",
-      "singleton_sha256": "871bc310ffc96003bc5f1906abdf53844ffbcc6be8c9f1c24f6ed1b369fcdbfe",
-      "singleton_bytes": 79629,
+      "singleton_sha256": "b67eebba7be7f5db301e1531ef72d86787d799b593d144bbab729b66734d0e49",
+      "singleton_bytes": 79685,
       "publisher": "AIBAST Frontier",
       "quality_tier": "frontier",
       "license": "MIT"

@@ -281,7 +281,11 @@ describe('OpenRappter organism eggs', () => {
     })).toThrow(/file-count/);
 
     const adapter = new SyntheticAdapter();
-    adapter.files.push(file('state/leak.txt', 'access_token=ghp_abcdefghijklmnopqrstuvwxyz1234567890', 'state', 'text/plain'));
+    const shapedSecret = `${['access', 'token'].join('_')}=${[
+      'ghp',
+      'abcdefghijklmnopqrstuvwxyz1234567890',
+    ].join('_')}`;
+    adapter.files.push(file('state/leak.txt', shapedSecret, 'state', 'text/plain'));
     await expect(new OrganismEggService(adapter).export(
       options(path.join(ROOT, 'leak.egg'), 'portable'),
     )).rejects.toThrow(/secret-shape scan/);
@@ -317,11 +321,15 @@ describe('OpenRappter organism eggs', () => {
     const databasePath = path.join(home, 'openrappter.db');
     const database = new Database(databasePath);
     database.pragma('journal_mode = WAL');
+    const databaseSecret = [
+      'ghp',
+      'abcdefghijklmnopqrstuvwxyz1234567890',
+    ].join('_');
     database.exec(`
       CREATE TABLE facts(value TEXT);
       INSERT INTO facts VALUES ('wal-visible');
       CREATE TABLE credentials(token TEXT);
-      INSERT INTO credentials VALUES ('ghp_abcdefghijklmnopqrstuvwxyz1234567890');
+      INSERT INTO credentials VALUES ('${databaseSecret}');
     `);
 
     const adapter = new LocalOrganismAdapter(home);

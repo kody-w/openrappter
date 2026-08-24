@@ -52,11 +52,16 @@ param(
 
     [string]$Version = "",
     [ValidateSet("canary", "nightly", "alpha", "beta", "stable")]
-    [string]$Channel = ""
+    [string]$Channel = "",
+    [ValidateSet("canary", "nightly", "alpha", "beta", "stable")]
+    [string]$Ring = "",
+    [switch]$AllowDowngrade
 )
 
 # ── Strict mode ──────────────────────────────────────────────────────────────
 $ErrorActionPreference = "Stop"
+$METHOD_WAS_BOUND = $PSBoundParameters.ContainsKey("Method")
+$VERSION_WAS_BOUND = $PSBoundParameters.ContainsKey("Version")
 
 # Helper: run npm commands safely (npm.ps1 wrapper breaks under StrictMode)
 function Invoke-Npm {
@@ -84,6 +89,7 @@ $NPM_PACKAGE    = "openrappter"
 $REPO_URL       = "https://github.com/kody-w/openrappter.git"
 $MIN_NODE       = 20
 $HOME_DIR       = Join-Path $env:USERPROFILE ".openrappter"
+$RING_FILE      = Join-Path $HOME_DIR "ring"
 $GATEWAY_PID    = Join-Path $HOME_DIR "gateway.pid"
 # The port the readiness probe knocks on. It must be the port the gateway
 # actually binds, so it follows the CLI's own precedence: OPENRAPPTER_PORT, then
@@ -97,12 +103,26 @@ $INSTALL_STAGE  = 0
 $INSTALL_TOTAL  = 4
 
 # ── Environment variable overrides ──────────────────────────────────────────
-if ($env:OPENRAPPTER_INSTALL_METHOD) { $Method  = $env:OPENRAPPTER_INSTALL_METHOD }
-if ($env:OPENRAPPTER_VERSION)        { $Version = $env:OPENRAPPTER_VERSION }
-if (-not $Channel -and $env:OPENRAPPTER_CHANNEL) { $Channel = $env:OPENRAPPTER_CHANNEL }
+if (-not $METHOD_WAS_BOUND -and $env:OPENRAPPTER_INSTALL_METHOD) {
+    $Method = $env:OPENRAPPTER_INSTALL_METHOD
+}
+if (-not $VERSION_WAS_BOUND -and $env:OPENRAPPTER_VERSION) {
+    $Version = $env:OPENRAPPTER_VERSION
+}
+if (-not $Ring -and $Channel) { $Ring = $Channel }
+if (-not $Ring -and $env:OPENRAPPTER_RING) { $Ring = $env:OPENRAPPTER_RING }
+if (-not $Ring -and $env:OPENRAPPTER_CHANNEL) { $Ring = $env:OPENRAPPTER_CHANNEL }
 # OPENRAPPTER_BETA predates rings and resolved a dist-tag nothing published,
 # so it silently failed. Keep it working as an alias for the beta ring.
-if (-not $Channel -and $env:OPENRAPPTER_BETA -eq "1") { $Channel = "beta" }
+if (-not $Ring -and $env:OPENRAPPTER_BETA -eq "1") { $Ring = "beta" }
+if ($env:OPENRAPPTER_ALLOW_DOWNGRADE -eq "true") { $AllowDowngrade = $true }
+if (-not $Ring -and (Test-Path $RING_FILE)) {
+    $savedRing = (Get-Content $RING_FILE -Raw).Trim()
+    if ($savedRing -notin @("stable", "beta", "canary", "alpha", "nightly")) {
+        throw "Persisted release ring is invalid: $savedRing"
+    }
+    $Ring = $savedRing
+}
 if ($env:OPENRAPPTER_HOME)           { $InstallDir = $env:OPENRAPPTER_HOME }
 if ($env:OPENRAPPTER_NO_PROMPT -eq "true") { $NoPrompt = $true }
 if (-not $InstallDir) { $InstallDir = $HOME_DIR }
@@ -292,48 +312,253 @@ function Get-ExistingInstall {
 
 # ── npm install ──────────────────────────────────────────────────────────────
 
-# Ring -> npm dist-tag. Only `stable` owns `latest`, so a prerelease ring can
-# never be served to a plain `npm install openrappter`.
-function Get-RingDistTag {
+# Ring repositories are an allowlist. A manifest fetched through its current
+# pointer is accepted only after its exact source, artifact host, version,
+# timestamp and SHA-256 are validated.
+function Get-RingRepository {
     param([string]$Ring)
     switch ($Ring) {
-        "canary"  { return "canary" }
-        "nightly" { return "nightly" }
-        "alpha"   { return "alpha" }
-        "beta"    { return "beta" }
-        "stable"  { return "latest" }
-        default   { return "latest" }
+        "stable"  { return "kody-w/openrappter" }
+        "beta"    { return "kody-w/openrappter-beta" }
+        "canary"  { return "kody-w/openrappter-canary" }
+        "alpha"   { return "kody-w/openrappter-alpha" }
+        "nightly" { return "kody-w/openrappter-nightly" }
+        default   { throw "Unknown release ring: $Ring" }
     }
 }
 
+function Parse-CandidateBundleUrl {
+    param([Parameter(Mandatory)][string]$Value)
+    if ($Value -match '[^\x20-\x7E%\\]' -or $Value -cnotmatch '^https://raw\.githubusercontent\.com/kody-w/openrappter/([0-9a-f]{40})/candidates/([0-9a-f]{40})/(snapshot|release)/([A-Za-z0-9][A-Za-z0-9._-]{0,127})/([0-9a-f]{64})\.tar\.gz$') {
+        throw "Candidate URL path rejected"
+    }
+    $uri = [Uri]$Value
+    if ($uri.UserInfo -or $uri.Port -ne 443 -or $uri.Query -or $uri.Fragment -or $Matches[4] -in @(".", "..")) {
+        throw "Candidate URL authority/query/id rejected"
+    }
+    return [pscustomobject]@{
+        Ref = $Matches[1]; SourceCommit = $Matches[2]; Kind = $Matches[3]
+        CandidateId = $Matches[4]; Sha256 = $Matches[5]
+    }
+}
+
+function Get-CanonicalJsonHash {
+    param([Parameter(Mandatory)]$Value)
+    New-Item -ItemType Directory -Path $HOME_DIR -Force | Out-Null
+    $file = Join-Path $HOME_DIR ".ring-hash-$PID.json"
+    try {
+        $Value | ConvertTo-Json -Depth 100 | Set-Content -Path $file -Encoding utf8NoBOM
+        $script = @'
+const fs=require("node:fs"),crypto=require("node:crypto");
+const canon=v=>Array.isArray(v)?v.map(canon):v&&typeof v==="object"?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canon(v[k])])):v;
+process.stdout.write(crypto.createHash("sha256").update(JSON.stringify(canon(JSON.parse(fs.readFileSync(process.argv[1],"utf8"))))).digest("hex"));
+'@
+        return (& node -e $script $file).Trim()
+    } finally {
+        Remove-Item $file -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Resolve-RingManifest {
+    param([string]$SelectedRing)
+    if (-not $SelectedRing) { $SelectedRing = "stable" }
+    $repo = Get-RingRepository $SelectedRing
+    $authorityRef = if ($env:OPENRAPPTER_AUTHORITY_REF) { $env:OPENRAPPTER_AUTHORITY_REF } else { "main" }
+    if ($authorityRef -ne "main" -and $authorityRef -notmatch "^[0-9a-f]{40}$") {
+        throw "OPENRAPPTER_AUTHORITY_REF must be main or immutable 40-hex"
+    }
+    try {
+        $head = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$authorityRef/heads/$SelectedRing.json"
+    } catch { throw "Could not reach $SelectedRing authority head" }
+    $headKeys = @($head.PSObject.Properties.Name | Sort-Object) -join ","
+    if ($headKeys -ne "authority_commit,promotion_id,receipt_path,receipt_sha256,ring,schema,sequence,target_manifest_commit,target_manifest_sha256,target_repository" -or
+        $head.schema -ne "openrappter-ring-head/v1" -or $head.ring -ne $SelectedRing -or
+        $head.sequence -lt 1 -or $head.target_repository -ne $repo -or
+        $head.authority_commit -notmatch "^[0-9a-f]{40}$" -or
+        $head.target_manifest_commit -notmatch "^[0-9a-f]{40}$" -or
+        $head.promotion_id -notmatch "^[0-9a-f]{64}$" -or
+        $head.receipt_sha256 -notmatch "^[0-9a-f]{64}$" -or
+        $head.target_manifest_sha256 -notmatch "^[0-9a-f]{64}$" -or
+        $head.receipt_path -ne "receipts/$SelectedRing/$($head.promotion_id).json") {
+        throw "Authority head rejected"
+    }
+    try {
+        $receipt = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$($head.authority_commit)/$($head.receipt_path)"
+        $m = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/$repo/$($head.target_manifest_commit)/.ring/manifest.json"
+    } catch { throw "Immutable authority receipt or target manifest unreachable" }
+
+    $top = @($m.PSObject.Properties.Name | Sort-Object) -join ","
+    $source = @($m.source.PSObject.Properties.Name | Sort-Object) -join ","
+    $artifact = @($m.artifact.PSObject.Properties.Name | Sort-Object) -join ","
+    $currentTop = "artifact,channel_version,intended_release_tag,predecessor,promoted_at,promotion_id,reason,receipt,ring,schema,source,status,version"
+    $legacyTop = "artifact,predecessor,promoted_at,promotion_id,reason,receipt,ring,schema,source,status,version"
+    if ($top -ne $currentTop -and $top -ne $legacyTop) { throw "Ring manifest is not closed" }
+    if ($source -ne "commit,repository,tag" -or $artifact -ne "install_url,provenance,sha256,url") { throw "Ring manifest children are not closed" }
+    if ($m.schema -ne "openrappter-ring/v1" -or $m.ring -ne $SelectedRing) { throw "Wrong manifest schema or ring" }
+    if ($m.source.repository -ne "kody-w/openrappter" -or $m.source.commit -notmatch "^[0-9a-f]{40}$") { throw "Unauthorized source identity" }
+    if ($m.version -notmatch "^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$") { throw "Malformed exact version" }
+    if ($m.artifact.sha256 -notmatch "^[0-9a-f]{64}$") { throw "Malformed artifact SHA-256" }
+    if ($m.promotion_id -notmatch "^[0-9a-f]{64}$") { throw "Missing authority promotion id" }
+    if ($null -ne $m.intended_release_tag -and $m.intended_release_tag -notmatch "^v[0-9][0-9A-Za-z.+-]*$") { throw "Malformed intended release tag" }
+    foreach ($value in @($m.artifact.url, $m.artifact.install_url)) {
+        if (-not $value) { continue }
+        $parsed = [Uri]$value
+        if ($parsed.Scheme -ne "https" -or $parsed.Host -notin @("github.com", "registry.npmjs.org", "raw.githubusercontent.com")) { throw "Unauthorized artifact URL" }
+    }
+    if ([DateTimeOffset]$m.promoted_at -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) { throw "Future ring manifest" }
+    if ($m.status -ne "published") { throw "$SelectedRing is $($m.status): $($m.reason)" }
+    if (-not $m.artifact.install_url) { throw "Published manifest has no install URL" }
+    $npmUrl = "https://registry.npmjs.org/openrappter/-/openrappter-$($m.version).tgz"
+    $releasePrefix = if ($m.source.tag) { "https://github.com/kody-w/openrappter/releases/download/$($m.source.tag)/" } else { "" }
+    $npmBound = $m.artifact.provenance -eq "npm-registry-download-sha256" -and $m.artifact.url -eq $npmUrl -and $m.artifact.install_url -eq $npmUrl
+    $releaseBound = $m.artifact.provenance -eq "github-release-download-sha256" -and $releasePrefix -and $m.artifact.url.StartsWith($releasePrefix) -and $m.artifact.install_url -eq $m.artifact.url
+    $candidateBound = $false
+    if ($m.artifact.provenance -eq "github-candidate-bundle-sha256" -and $m.artifact.install_url -eq $m.artifact.url) {
+        try {
+            $candidate = Parse-CandidateBundleUrl $m.artifact.url
+            $candidateBound = $candidate.SourceCommit -eq $m.source.commit -and $candidate.Sha256 -eq $m.artifact.sha256
+        } catch { $candidateBound = $false }
+    }
+    if (-not $npmBound -and -not $releaseBound -and -not $candidateBound) { throw "Artifact is not bound to canonical package/version" }
+
+    if ((Get-CanonicalJsonHash $receipt) -ne $head.receipt_sha256 -or
+        (Get-CanonicalJsonHash $m) -ne $head.target_manifest_sha256 -or
+        $receipt.schema -ne "openrappter-promotion-receipt/v1" -or
+        $receipt.target_repository -ne $repo -or $receipt.target_ring -ne $SelectedRing -or
+        $receipt.promotion_id -ne $head.promotion_id -or $m.promotion_id -ne $head.promotion_id -or
+        $receipt.target_manifest_commit -ne $head.target_manifest_commit -or
+        $receipt.target_manifest_sha256 -ne $head.target_manifest_sha256 -or
+        ($null -ne $receipt.sequence -and [int]$receipt.sequence -ne [int]$head.sequence) -or
+        $receipt.source_repository -ne $m.source.repository -or
+        $receipt.source_commit -ne $m.source.commit -or
+        $receipt.source_tag -ne $m.source.tag -or $receipt.version -ne $m.version -or
+        $receipt.artifact_url -ne $m.artifact.url -or
+        $receipt.install_url -ne $m.artifact.install_url -or
+        $receipt.artifact_sha256 -ne $m.artifact.sha256 -or
+        $receipt.artifact_provenance -ne $m.artifact.provenance) {
+        throw "Immutable authority receipt does not authorize manifest"
+    }
+    $sequenceFile = Join-Path $HOME_DIR "ring-head-sequences.json"
+    $sequences = @{}
+    if (Test-Path $sequenceFile) {
+        $stored = Get-Content $sequenceFile -Raw | ConvertFrom-Json
+        foreach ($property in $stored.PSObject.Properties) { $sequences[$property.Name] = [int]$property.Value }
+    }
+    $previousSequence = if ($sequences.ContainsKey($SelectedRing)) { $sequences[$SelectedRing] } else { 0 }
+    if ([int]$head.sequence -lt $previousSequence) { throw "Authority head sequence rollback" }
+    if ([int]$head.sequence -gt $previousSequence) {
+        $sequences[$SelectedRing] = [int]$head.sequence
+        $sequenceTemp = "$sequenceFile.$PID.new"
+        $sequences | ConvertTo-Json | Set-Content -Path $sequenceTemp -Encoding utf8NoBOM
+        Move-Item -Force $sequenceTemp $sequenceFile
+    }
+    if ($Version -and $Version -ne $m.version) { throw "Version must equal the ring's exact version $($m.version)" }
+    return $m
+}
+
+function Compare-SemVer {
+    param([Parameter(Mandatory)][string]$Left, [Parameter(Mandatory)][string]$Right)
+    $pattern = '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+    $a = [regex]::Match($Left, $pattern)
+    $b = [regex]::Match($Right, $pattern)
+    if (-not $a.Success -or -not $b.Success) { throw "Invalid SemVer comparison: $Left, $Right" }
+    for ($i = 1; $i -le 3; $i++) {
+        $av = [System.Numerics.BigInteger]::Parse($a.Groups[$i].Value)
+        $bv = [System.Numerics.BigInteger]::Parse($b.Groups[$i].Value)
+        if ($av -lt $bv) { return -1 }
+        if ($av -gt $bv) { return 1 }
+    }
+    $aHasPre = $a.Groups[4].Success
+    $bHasPre = $b.Groups[4].Success
+    [string[]]$ap = if ($aHasPre) { $a.Groups[4].Value.Split('.') } else { @() }
+    [string[]]$bp = if ($bHasPre) { $b.Groups[4].Value.Split('.') } else { @() }
+    if (-not $aHasPre -and -not $bHasPre) { return 0 }
+    if (-not $aHasPre) { return 1 }
+    if (-not $bHasPre) { return -1 }
+    foreach ($id in @($ap + $bp)) {
+        if ($id -match '^\d+$' -and $id -match '^0\d+') { throw "Invalid numeric SemVer identifier: $id" }
+    }
+    $length = [Math]::Max($ap.Count, $bp.Count)
+    for ($i = 0; $i -lt $length; $i++) {
+        if ($i -ge $ap.Count) { return -1 }
+        if ($i -ge $bp.Count) { return 1 }
+        if ($ap[$i] -ceq $bp[$i]) { continue }
+        $an = $ap[$i] -match '^\d+$'
+        $bn = $bp[$i] -match '^\d+$'
+        if ($an -and $bn) {
+            $av = [System.Numerics.BigInteger]::Parse($ap[$i])
+            $bv = [System.Numerics.BigInteger]::Parse($bp[$i])
+            if ($av -lt $bv) { return -1 }
+            return 1
+        }
+        if ($an -ne $bn) { return $(if ($an) { -1 } else { 1 }) }
+        return $(if ([string]::CompareOrdinal($ap[$i], $bp[$i]) -lt 0) { -1 } else { 1 })
+    }
+    return 0
+}
+
 function Install-ViaNpm {
-    # Precedence: explicit version > ring dist-tag > stable.
-    $pkg = $NPM_PACKAGE
-    if ($Version) {
-        $pkg = "${NPM_PACKAGE}@${Version}"
-    } else {
-        $ring = if ($Channel) { $Channel } else { "stable" }
-        $pkg = "${NPM_PACKAGE}@$(Get-RingDistTag $ring)"
-        Write-Info "Release ring: $ring"
+    $selected = if ($Ring) { $Ring } else { "stable" }
+    $manifest = Resolve-RingManifest $selected
+    Write-Info "Release ring: $selected -> $($manifest.version) @ $($manifest.source.commit)"
+
+    $current = ""
+    try {
+        $listed = Invoke-Npm list -g openrappter --depth=0 --json | ConvertFrom-Json
+        $current = $listed.dependencies.openrappter.version
+    } catch {}
+    if ($current -and -not $AllowDowngrade) {
+        if ((Compare-SemVer $manifest.version $current) -lt 0) {
+            throw "Refusing downgrade $current -> $($manifest.version); pass -AllowDowngrade"
+        }
     }
 
-    Write-Info "Running: npm install -g $pkg"
     if ($DryRun) {
-        Write-Info "[dry-run] Would run: npm install -g $pkg"
+        Write-Info "[dry-run] Would verify and install $($manifest.artifact.url)"
         return
     }
 
+    $downloads = Join-Path $HOME_DIR ".downloads"
+    New-Item -ItemType Directory -Path $downloads -Force | Out-Null
+    $artifact = Join-Path $downloads "openrappter-$($manifest.version).tgz"
+    Invoke-WebRequest -Uri $manifest.artifact.url -OutFile $artifact
+    $actual = (Get-FileHash -Algorithm SHA256 -Path $artifact).Hash.ToLowerInvariant()
+    if ($actual -ne $manifest.artifact.sha256) {
+        Remove-Item $artifact -Force -ErrorAction SilentlyContinue
+        throw "Artifact checksum mismatch (expected $($manifest.artifact.sha256), got $actual)"
+    }
+
+    if ($manifest.artifact.provenance -eq "github-candidate-bundle-sha256") {
+        $candidateDir = Join-Path $HOME_DIR ".candidate-$($manifest.artifact.sha256)"
+        Remove-Item $candidateDir -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Path $candidateDir -Force | Out-Null
+        & tar -xzf $artifact -C $candidateDir
+        if ($LASTEXITCODE -ne 0) { throw "Candidate bundle extraction failed" }
+        $checks = Get-Content (Join-Path $candidateDir "SHA256SUMS")
+        foreach ($line in $checks) {
+            if ($line -notmatch '^([0-9a-f]{64})\s+\*?(.+)$') { throw "Malformed candidate checksum line" }
+            $file = Join-Path $candidateDir $Matches[2]
+            if ((Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant() -ne $Matches[1]) {
+                throw "Candidate inner checksum mismatch: $($Matches[2])"
+            }
+        }
+        $packages = @(Get-ChildItem $candidateDir -Filter "openrappter-*.tgz" -File)
+        if ($packages.Count -ne 1) { throw "Candidate bundle must contain exactly one npm tarball" }
+        $artifact = $packages[0].FullName
+    }
+
+    Write-Info "Running: npm install -g verified artifact"
     # Set SHARP_IGNORE_GLOBAL_LIBVIPS to prevent native module download issues
     $env:SHARP_IGNORE_GLOBAL_LIBVIPS = "1"
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        Invoke-Npm install -g $pkg | ForEach-Object { Write-Info "$_" }
+        Invoke-Npm install -g $artifact | ForEach-Object { Write-Info "$_" }
         if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
     } catch {
         Write-Warn "npm install failed. Retrying..."
-        Invoke-Npm install -g $pkg --omit=optional | ForEach-Object { Write-Info "$_" }
+        Invoke-Npm install -g $artifact --omit=optional | ForEach-Object { Write-Info "$_" }
         if ($LASTEXITCODE -ne 0) {
             throw "npm install failed after retry"
         }
@@ -353,16 +578,18 @@ function Install-ViaNpm {
 # ── git install ──────────────────────────────────────────────────────────────
 
 function Install-ViaGit {
+    $selected = if ($Ring) { $Ring } else { "stable" }
+    $manifest = Resolve-RingManifest $selected
     if (-not (Test-GitAvailable)) {
         Install-Git
     }
 
     if (Test-Path (Join-Path $InstallDir ".git")) {
-        Write-Info "Existing git clone found at $InstallDir -- pulling latest..."
+        Write-Info "Existing git clone found at $InstallDir -- fetching exact source..."
         if (-not $DryRun) {
             Push-Location $InstallDir
             try {
-                & git pull --ff-only 2>&1 | ForEach-Object { Write-Info $_ }
+                & git fetch --depth 1 origin $manifest.source.commit 2>&1 | ForEach-Object { Write-Info $_ }
             } finally {
                 Pop-Location
             }
@@ -370,8 +597,14 @@ function Install-ViaGit {
     } else {
         Write-Info "Cloning $REPO_URL to $InstallDir..."
         if (-not $DryRun) {
-            & git clone $REPO_URL $InstallDir 2>&1 | ForEach-Object { Write-Info $_ }
+            & git clone --no-checkout --filter=blob:none $REPO_URL $InstallDir 2>&1 | ForEach-Object { Write-Info $_ }
+            & git -C $InstallDir fetch --depth 1 origin $manifest.source.commit 2>&1 | ForEach-Object { Write-Info $_ }
         }
+    }
+    if (-not $DryRun) {
+        & git -C $InstallDir checkout --detach $manifest.source.commit 2>&1 | ForEach-Object { Write-Info $_ }
+        $head = (& git -C $InstallDir rev-parse HEAD).Trim()
+        if ($head -ne $manifest.source.commit) { throw "Exact source checkout verification failed" }
     }
 
     if ($DryRun) {
@@ -901,7 +1134,7 @@ function Main {
     Write-Stage "Choosing install method"
 
     # If upgrading, match existing method unless overridden
-    if ($isUpgrade -and -not $env:OPENRAPPTER_INSTALL_METHOD) {
+    if ($isUpgrade -and -not $METHOD_WAS_BOUND -and -not $env:OPENRAPPTER_INSTALL_METHOD) {
         $Method = $existingMethod
         Write-Info "Matching existing install method: $Method"
     }
@@ -921,6 +1154,9 @@ function Main {
     } else {
         Install-ViaGit
     }
+    $selectedRing = if ($Ring) { $Ring } else { "stable" }
+    New-Item -ItemType Directory -Path $HOME_DIR -Force | Out-Null
+    Set-Content -Path $RING_FILE -Value $selectedRing -Encoding ascii
 
     # ── Copilot SDK setup ──
     Setup-CopilotSdk
@@ -1012,9 +1248,10 @@ function Main {
 }
 
 # ── Entry point ──────────────────────────────────────────────────────────────
-try {
+if ($env:OPENRAPPTER_INSTALL_PS1_NO_RUN -ne "1") {
+  try {
     Main
-} catch {
+  } catch {
     Write-Host ""
     Write-Err "Installation failed: $_"
     Write-Host ""
@@ -1029,4 +1266,5 @@ try {
     Write-Info "https://github.com/kody-w/openrappter/issues"
     Write-Host ""
     exit 1
+  }
 }

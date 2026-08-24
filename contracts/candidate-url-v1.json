@@ -1,0 +1,18 @@
+{
+  "schema": "openrappter-candidate-url/v1",
+  "scheme": "https",
+  "host": "raw.githubusercontent.com",
+  "owner": "kody-w",
+  "repository": "openrappter",
+  "path": "candidates/<40hex-source-commit>/<snapshot|release>/<candidate-id>/<64hex-sha>.tar.gz",
+  "candidate_id_pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+  "candidate_id_forbidden": [".", "..", "%", "/", "\\", "non-ASCII"],
+  "fixture": {
+    "ref": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "kind": "release",
+    "candidate_id": "tag-djEuMTMuMA",
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "url": "https://raw.githubusercontent.com/kody-w/openrappter/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/candidates/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/release/tag-djEuMTMuMA/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.tar.gz"
+  }
+}

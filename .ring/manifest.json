@@ -1,0 +1,25 @@
+{
+  "schema": "openrappter-ring/v1",
+  "ring": "stable",
+  "source": {
+    "repository": "kody-w/openrappter",
+    "commit": "e8d8fccce652917989218f8a0a1785e9edd8b95e",
+    "tag": "v1.9.8"
+  },
+  "version": "1.9.8",
+  "artifact": {
+    "url": "https://registry.npmjs.org/openrappter/-/openrappter-1.9.8.tgz",
+    "install_url": "https://registry.npmjs.org/openrappter/-/openrappter-1.9.8.tgz",
+    "sha256": "1b879e40174e7bd9614710341bb81a7d708b42149e3aae57a88b0ca2c1d094cc",
+    "provenance": "npm-registry-download-sha256"
+  },
+  "promoted_at": "2026-05-16T01:48:41Z",
+  "predecessor": "beta",
+  "status": "published",
+  "reason": null,
+  "receipt": null,
+  "promotion_id": "de213c055ada6c5a9e064fad90455fd0e7bf5a8ca7ddc9f80160d640e03db584",
+  "intended_release_tag": null,
+  "channel_version": null,
+  "intended_release_tag": null
+}

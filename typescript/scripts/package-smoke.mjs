@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -13,6 +14,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { JSDOM } from "jsdom";
 
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -122,6 +124,14 @@ try {
   if (!packedFiles.has("npm-shrinkwrap.json")) {
     throw new Error("Tarball does not contain the reviewed dependency lock");
   }
+  for (const selectorFile of [
+    "ui/dist/release-ring-selector.js",
+    "ui/dist/release-ring-selector.d.ts",
+  ]) {
+    if (!packedFiles.has(selectorFile)) {
+      throw new Error(`Tarball does not contain ${selectorFile}`);
+    }
+  }
   for (const required of [
     "bin/clever-girl.mjs",
     "dist/agents/ShowAndTellAgent.js",
@@ -140,6 +150,8 @@ try {
     "dist/show-and-tell/store.js",
     "dist/show-and-tell/worker.js",
     "dist/cli/show-and-tell.js",
+    "dist/release-rings.js",
+    "dist/gateway/release-ring-rpc.js",
   ]) {
     if (!packedFiles.has(required)) {
       throw new Error(`Tarball does not contain ${required}`);
@@ -169,6 +181,85 @@ try {
     readFileSync(installedIndex, "utf8").length === 0
   ) {
     throw new Error("Installed package is missing ui/dist/index.html");
+  }
+  const installedAssets = path.join(installedRoot, "ui", "dist", "assets");
+  const uiJavascript = readdirSync(installedAssets)
+    .filter((name) => name.endsWith(".js"))
+    .map((name) => readFileSync(path.join(installedAssets, name), "utf8"))
+    .join("\n");
+  if (!uiJavascript.includes("Apply for next update")) {
+    throw new Error("Installed UI does not contain the release-ring switcher");
+  }
+  const dom = new JSDOM("<!doctype html><body></body>", { url: "http://localhost" });
+  for (const key of [
+    "window", "document", "customElements", "HTMLElement", "Element",
+    "ShadowRoot", "Event", "CustomEvent", "Node", "Document", "CSSStyleSheet",
+  ]) {
+    globalThis[key] = dom.window[key] ?? class {};
+  }
+  const selectorEntry = await import(
+    `${pathToFileURL(path.join(installedRoot, "ui", "dist", "release-ring-selector.js")).href}?smoke=${Date.now()}`
+  );
+  const selector = document.createElement("openrappter-release-ring-switcher");
+  if (!(selector instanceof selectorEntry.OpenRappterReleaseRingSwitcher)) {
+    throw new Error("Packed release-ring selector entry could not be instantiated");
+  }
+  if (selectorEntry.RELEASE_RINGS.join(",") !== "stable,beta,canary,alpha,nightly") {
+    throw new Error("Packed release-ring selector exports an unsafe ring vocabulary");
+  }
+  const sourceCommit = "a".repeat(40);
+  const candidateRef = "b".repeat(40);
+  const candidateSha = createHash("sha256").update(readFileSync(tarball)).digest("hex");
+  const candidateUrl = [
+    "https://raw.githubusercontent.com/kody-w/openrappter",
+    candidateRef,
+    "candidates",
+    sourceCommit,
+    "release",
+    "tag-djEuMTMuMA",
+    `${candidateSha}.tar.gz`,
+  ].join("/");
+  const coreEntry = await import(
+    `${pathToFileURL(path.join(installedRoot, "dist", "release-rings.js")).href}?smoke=${Date.now()}`
+  );
+  const coreIdentity = coreEntry.parseCandidateBundleUrl(candidateUrl);
+  const uiIdentity = selectorEntry.parseCandidateBundleUrl(candidateUrl);
+  if (JSON.stringify(coreIdentity) !== JSON.stringify(uiIdentity)) {
+    throw new Error("Packed core and UI candidate parsers disagree");
+  }
+  if (coreIdentity.sourceCommit !== sourceCommit || coreIdentity.sha256 !== candidateSha) {
+    throw new Error("Packed candidate parser lost the real artifact byte identity");
+  }
+  coreEntry.validateRingManifest({
+    schema: "openrappter-ring/v1",
+    ring: "beta",
+    source: { repository: "kody-w/openrappter", commit: sourceCommit, tag: null },
+    version: "1.13.0",
+    artifact: {
+      url: candidateUrl,
+      install_url: candidateUrl,
+      sha256: candidateSha,
+      provenance: "github-candidate-bundle-sha256",
+    },
+    promoted_at: "2026-08-23T20:00:00Z",
+    predecessor: "canary",
+    status: "published",
+    reason: null,
+    receipt: null,
+    promotion_id: "c".repeat(64),
+    intended_release_tag: "v1.13.0",
+    channel_version: "0.1.0-beta.11",
+  }, "beta", new Date("2026-08-23T20:01:00Z"));
+  if (process.platform !== "win32") {
+    const parsedByBash = run("bash", [
+      "-c",
+      'export OPENRAPPTER_INSTALL_SH_NO_RUN=1; source "$1"; parse_candidate_bundle_url "$CANDIDATE_URL"',
+      "candidate-smoke",
+      path.resolve(packageRoot, "..", "install.sh"),
+    ], { env: { ...process.env, CANDIDATE_URL: candidateUrl } }).stdout.trim();
+    if (!parsedByBash.endsWith(`|release|tag-djEuMTMuMA|${candidateSha}`)) {
+      throw new Error("Bash installer parser disagrees with the packed candidate identity");
+    }
   }
 
   const cleverGirlAssets = [

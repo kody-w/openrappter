@@ -1,0 +1,20 @@
+name: Release Constitution
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  release-constitution:
+    name: Release Constitution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          node --test tools/release-constitution-static.test.mjs
+          node --test scripts/candidate-bundle.test.mjs
+          node --test scripts/verify-pages-installer.test.mjs
+          python3 -m unittest tests/test_release_journey.py -v
+          node tools/release-constitution-static.mjs

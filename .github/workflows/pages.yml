@@ -1,0 +1,57 @@
+name: Deploy Pages with receipted installers
+on:
+  push:
+    branches: [main]
+    paths: [docs/**, install.sh, install.ps1, .github/workflows/pages.yml]
+  workflow_dispatch:
+permissions: { contents: read }
+concurrency: { group: pages, cancel-in-progress: false }
+jobs:
+  release-constitution:
+    name: Verify finalized stable installer bytes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: kody-w/openrappter-release-train
+          ref: ce7fffe31d8cff3c66db1a0749596ec22fe064eb
+          path: authority
+      - env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -euo pipefail
+          curl -fsSL --proto '=https' \
+            https://raw.githubusercontent.com/kody-w/openrappter-release-train/main/heads/stable.json \
+            -o head.json
+          authority="$(python -c 'import json; print(json.load(open("head.json"))["authority_commit"])')"
+          path="$(python -c 'import json; print(json.load(open("head.json"))["receipt_path"])')"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$authority/$path" \
+            -o receipt.json
+          target_commit="$(python -c 'import json; print(json.load(open("head.json"))["target_manifest_commit"])')"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter/$target_commit/.ring/manifest.json" \
+            -o stable-manifest.json
+          url="$(python -c 'import json; print(json.load(open("receipt.json"))["artifact_url"])')"
+          sha="$(python -c 'import json; print(json.load(open("receipt.json"))["artifact_sha256"])')"
+          curl -fsSL --proto '=https' "$url" -o candidate.tar.gz
+          echo "$sha  candidate.tar.gz" | sha256sum -c -
+          python authority/scripts/release_gate.py \
+            --policy authority/contracts/release-constitution-v1.json \
+            --pages-head head.json --pages-receipt receipt.json \
+            --pages-manifest stable-manifest.json --pages-bundle candidate.tar.gz \
+            --pages-docs docs
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: docs }
+  deploy:
+    needs: release-constitution
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

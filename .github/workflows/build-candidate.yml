@@ -1,0 +1,142 @@
+name: Build immutable non-stable candidate
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact canonical main commit (blank = current main)
+        required: false
+        type: string
+      channel_version:
+        description: Exact channel identity, for example 0.1.0-beta.11
+        required: true
+        type: string
+      intended_release_tag:
+        description: Intended final distribution tag, for example v1.13.0
+        required: false
+        type: string
+      candidate_kind:
+        required: true
+        type: choice
+        options: [release, snapshot]
+      candidate_id:
+        description: Optional snapshot ID; release IDs derive from release_tag
+        required: false
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: candidate-${{ inputs.source_commit || github.sha }}
+  cancel-in-progress: false
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          head="${INPUT_COMMIT:-$(gh api repos/kody-w/openrappter/commits/main --jq .sha)}"
+          printf '%s' "$head" | grep -Eq '^[0-9a-f]{40}$'
+          test "$(gh api repos/kody-w/openrappter/commits/main --jq .sha)" = "$head"
+          gh api "repos/kody-w/openrappter/commits/$head/check-runs?per_page=100" \
+            -H "Accept: application/vnd.github+json" > checks.json
+          python - "$head" <<'PY'
+          import json,sys
+          head=sys.argv[1]; rows=json.load(open("checks.json"))["check_runs"]
+          required=["TypeScript (Node 22)","Python (3.10)","Python (3.12)","Dashboard UI","Runtime parity (golden vectors)","conformance","macos-14","ubuntu-latest","windows-latest"]
+          for name in required:
+            candidates=[r for r in rows if r["name"]==name and r["head_sha"]==head]
+            assert candidates, f"missing exact-head check {name}"
+            latest=max(candidates,key=lambda r:r["id"])
+            assert latest["status"]=="completed" and latest["conclusion"]=="success", f"non-green {name}"
+          PY
+          echo "SOURCE_COMMIT=$head" >> "$GITHUB_ENV"
+          epoch="$(gh api repos/kody-w/openrappter/commits/$head --jq '.commit.committer.date' | xargs -I{} date -d {} +%s)"
+          echo "SOURCE_DATE_EPOCH=$epoch" >> "$GITHUB_ENV"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.head }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: typescript/package-lock.json }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Build exact candidate bytes once
+        env:
+          CHANNEL_VERSION: ${{ inputs.channel_version }}
+          INTENDED_RELEASE_TAG: ${{ inputs.intended_release_tag }}
+          CANDIDATE_KIND: ${{ inputs.candidate_kind }}
+          INPUT_CANDIDATE_ID: ${{ inputs.candidate_id }}
+        run: |
+          set -euo pipefail
+          ts_version="$(node -p 'require("./typescript/package.json").version')"
+          py_version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml","rb"))["project"]["version"])')"
+          runtime_version="$(PYTHONPATH=python python -c 'from openrappter import __version__; print(__version__)')"
+          if [ "$CANDIDATE_KIND" = release ]; then
+            test "$INTENDED_RELEASE_TAG" = "v$ts_version"
+            candidate_id="$(python -c 'import base64,os; print(\"tag-\"+base64.urlsafe_b64encode(os.environ[\"INTENDED_RELEASE_TAG\"].encode()).decode().rstrip(\"=\"))')"
+          else
+            test -z "$INTENDED_RELEASE_TAG"
+            candidate_id="${INPUT_CANDIDATE_ID:-snapshot-$SOURCE_DATE_EPOCH}"
+          fi
+          printf '%s' "$candidate_id" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+          echo "CANDIDATE_ID=$candidate_id" >> "$GITHUB_ENV"
+          mkdir candidate
+          (cd typescript && npm ci && npm run build && node scripts/pack-locked.mjs --pack-destination ../candidate)
+          python -m pip install --disable-pip-version-check "build==1.5.1" "hatchling==1.31.0"
+          (cd python && python -m build --no-isolation --outdir ../candidate)
+          cp install.sh install.ps1 candidate/
+          node --input-type=module - "$SOURCE_COMMIT" "$ts_version" "$py_version" "$runtime_version" "$CHANNEL_VERSION" "$INTENDED_RELEASE_TAG" "$CANDIDATE_KIND" "$candidate_id" "$SOURCE_DATE_EPOCH" <<'NODE'
+          import fs from 'node:fs';
+          import { buildProvenance, verifyProvenance } from './scripts/candidate-bundle.mjs';
+          const versions={npm:process.argv[3],pypi:process.argv[4],runtime:process.argv[5],channel:process.argv[6]};
+          const value=buildProvenance('candidate',process.argv[2],null,versions,process.argv[7]||null,process.argv[8],process.argv[9],Number(process.argv[10]));
+          verifyProvenance('candidate',value);
+          fs.writeFileSync('candidate/provenance.json',JSON.stringify(value,null,2)+'\n');
+          NODE
+          (cd candidate && sha256sum $(find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort) > SHA256SUMS)
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -czf candidate.tar.gz -C candidate .
+          bundle_sha="$(sha256sum candidate.tar.gz | cut -d' ' -f1)"
+          echo "BUNDLE_SHA=$bundle_sha" >> "$GITHUB_ENV"
+      - name: Commit immutable public candidate bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin candidates:candidates 2>/dev/null || true
+          if git show-ref --verify --quiet refs/heads/candidates; then git switch candidates; else git switch --orphan candidates; git rm -rf .; fi
+          path="candidates/$SOURCE_COMMIT/$CANDIDATE_KIND/$CANDIDATE_ID"
+          mkdir -p "$path"
+          target="$path/$BUNDLE_SHA.tar.gz"
+          if [ -f "$target" ]; then
+            echo "$BUNDLE_SHA  $target" | sha256sum -c -
+            cmp candidate/provenance.json "$path/provenance.json"
+          else
+            cp candidate.tar.gz "$target"
+            cp candidate/provenance.json "$path/provenance.json"
+          fi
+          index="candidates/$SOURCE_COMMIT/index.json"
+          node --input-type=module - "$index" "$CANDIDATE_KIND" "$CANDIDATE_ID" "$BUNDLE_SHA" "$path" <<'NODE'
+          import fs from 'node:fs';
+          const [index,kind,id,sha,path]=process.argv.slice(2);
+          let value={schema:'openrappter-candidate-index/v1',source_commit:process.env.SOURCE_COMMIT,snapshots:[],releases:[]};
+          if(fs.existsSync(index))value=JSON.parse(fs.readFileSync(index));
+          const key=kind==='release'?'releases':'snapshots';
+          const entry={id,bundle_sha256:sha,path,provenance_path:`${path}/provenance.json`,source_date_epoch:Number(process.env.SOURCE_DATE_EPOCH)};
+          const old=value[key].find(row=>row.id===id);
+          if(old&&JSON.stringify(old)!==JSON.stringify(entry))throw Error('conflicting rebuild for immutable candidate id');
+          if(!old)value[key].push(entry);
+          value[key].sort((a,b)=>a.source_date_epoch-b.source_date_epoch||a.id.localeCompare(b.id));
+          fs.mkdirSync(`candidates/${process.env.SOURCE_COMMIT}`,{recursive:true});
+          fs.writeFileSync(index,JSON.stringify(value,null,2)+'\n');
+          NODE
+          git add "$path" "$index"
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "candidate: $SOURCE_COMMIT $BUNDLE_SHA"
+          git push origin candidates
+          echo "::notice::candidate channel only; never stable/default"

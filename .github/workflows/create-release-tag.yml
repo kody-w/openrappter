@@ -1,0 +1,63 @@
+name: Create constitution-gated release tag
+on:
+  workflow_dispatch:
+permissions: { contents: read }
+concurrency: { group: create-release-tag, cancel-in-progress: false }
+jobs:
+  release-constitution:
+    name: Release Constitution
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.verify.outputs.tag }}
+      commit: ${{ steps.verify.outputs.commit }}
+    steps:
+      - id: verify
+        run: |
+          set -euo pipefail
+          curl -fsSL --proto '=https' \
+            https://raw.githubusercontent.com/kody-w/openrappter-release-train/main/heads/stable.json -o head.json
+          authority="$(python -c 'import json; print(json.load(open("head.json"))["authority_commit"])')"
+          path="$(python -c 'import json; print(json.load(open("head.json"))["receipt_path"])')"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$authority/$path" -o receipt.json
+          commit="$(python -c 'import json; print(json.load(open("receipt.json"))["source_commit"])')"
+          target_commit="$(python -c 'import json; print(json.load(open("head.json"))["target_manifest_commit"])')"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter/$target_commit/.ring/manifest.json" -o manifest.json
+          python - <<'PY'
+          import hashlib,json
+          h=json.load(open("head.json"));r=json.load(open("receipt.json"));m=json.load(open("manifest.json"))
+          digest=lambda v:hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+          assert h["ring"]=="stable" and h["target_repository"]=="kody-w/openrappter"
+          assert r["receipt_kind"]=="promotion" and r["promotion_id"]==h["promotion_id"]
+          assert digest(r)==h["receipt_sha256"] and digest(m)==h["target_manifest_sha256"]
+          assert m["source"]["tag"] is None and r["source_tag"] is None
+          assert m["intended_release_tag"]==r["intended_release_tag"]
+          assert m["channel_version"]==r["channel_version"]
+          assert r["artifact_provenance"]=="github-candidate-bundle-sha256"
+          assert r["intended_release_tag"]==f"v{r['version']}"
+          PY
+          tag="$(python -c 'import json; print(json.load(open("receipt.json"))["intended_release_tag"])')"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"; echo "commit=$commit" >> "$GITHUB_OUTPUT"
+  create:
+    needs: release-constitution
+    permissions: { contents: write }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - env:
+          RELEASE_TAG: ${{ needs.release-constitution.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.release-constitution.outputs.commit }}
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$RELEASE_COMMIT"
+            echo "exact release tag already exists"
+            exit 0
+          fi
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -a "$RELEASE_TAG" "$RELEASE_COMMIT" -m "Constitution-finalized $RELEASE_TAG"
+          git push origin "refs/tags/$RELEASE_TAG"

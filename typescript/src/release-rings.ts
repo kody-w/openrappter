@@ -42,9 +42,11 @@ export interface RingManifest {
   reason: string | null;
   receipt: string | null;
   promotion_id: string | null;
+  intended_release_tag?: string | null;
+  channel_version?: string | null;
 }
 
-const TOP_KEYS = ['artifact', 'predecessor', 'promoted_at', 'promotion_id', 'reason', 'receipt', 'ring', 'schema', 'source', 'status', 'version'];
+const TOP_KEYS = ['artifact', 'channel_version', 'intended_release_tag', 'predecessor', 'promoted_at', 'promotion_id', 'reason', 'receipt', 'ring', 'schema', 'source', 'status', 'version'];
 const SOURCE_KEYS = ['commit', 'repository', 'tag'];
 const ARTIFACT_KEYS = ['install_url', 'provenance', 'sha256', 'url'];
 const ALLOWED_HOSTS = new Set(['github.com', 'registry.npmjs.org', 'raw.githubusercontent.com']);
@@ -115,7 +117,10 @@ export function validateRingManifest(
   expectedRing: RingName,
   now = new Date(),
 ): RingManifest {
-  if (!isClosed(value, TOP_KEYS)) throw new Error('ring manifest is not a closed object');
+  const legacyKeys = TOP_KEYS.filter(key => !['intended_release_tag', 'channel_version'].includes(key));
+  if (!isClosed(value, TOP_KEYS) && !isClosed(value, legacyKeys)) {
+    throw new Error('ring manifest is not a closed object');
+  }
   if (value.schema !== 'openrappter-ring/v1' || value.ring !== expectedRing) {
     throw new Error(`manifest does not identify the ${expectedRing} ring`);
   }
@@ -162,6 +167,14 @@ export function validateRingManifest(
   if (value.promotion_id !== null && (
     typeof value.promotion_id !== 'string' || !/^[0-9a-f]{64}$/.test(value.promotion_id)
   )) throw new Error('manifest promotion_id is malformed');
+  if (value.intended_release_tag != null && (
+    typeof value.intended_release_tag !== 'string'
+    || !/^v[0-9][0-9A-Za-z.+-]*$/.test(value.intended_release_tag)
+  )) throw new Error('manifest intended_release_tag is malformed');
+  if (value.channel_version != null) {
+    if (typeof value.channel_version !== 'string') throw new Error('manifest channel_version is malformed');
+    parseSemVer(value.channel_version);
+  }
   const npmUrl = `https://registry.npmjs.org/openrappter/-/openrappter-${value.version}.tgz`;
   const tag = value.source.tag;
   const releasePrefix = tag
@@ -322,6 +335,8 @@ export async function fetchRingManifest(
     || receipt.install_url !== manifest.artifact.install_url
     || receipt.artifact_sha256 !== manifest.artifact.sha256
     || receipt.artifact_provenance !== manifest.artifact.provenance
+    || (receipt.intended_release_tag !== undefined && receipt.intended_release_tag !== manifest.intended_release_tag)
+    || (receipt.channel_version !== undefined && receipt.channel_version !== manifest.channel_version)
   ) throw new Error(`${ring} authority head does not authorize immutable target manifest`);
   if (options.persistSequence ?? (options.fetchImpl === undefined)) {
     const sequencePath = openrappterPath('ring-head-sequences.json');

@@ -32,7 +32,7 @@ export function addCandidateIndexEntry(index, entry) {
   return value;
 }
 
-export function buildProvenance(root, sourceCommit, versions, releaseTag, candidateKind, candidateId, sourceDateEpoch) {
+export function buildProvenance(root, sourceCommit, sourceTag, versions, intendedReleaseTag, candidateKind, candidateId, sourceDateEpoch) {
   const files = fs.readdirSync(root)
     .filter(name => name !== 'provenance.json')
     .sort()
@@ -43,7 +43,8 @@ export function buildProvenance(root, sourceCommit, versions, releaseTag, candid
     stable: false,
     candidate_kind: candidateKind,
     candidate_id: candidateId,
-    release_tag: releaseTag,
+    source_tag: sourceTag,
+    intended_release_tag: intendedReleaseTag,
     source_repository: 'kody-w/openrappter',
     source_commit: sourceCommit,
     source_date_epoch: sourceDateEpoch,
@@ -53,7 +54,7 @@ export function buildProvenance(root, sourceCommit, versions, releaseTag, candid
 }
 
 export function verifyProvenance(root, provenance) {
-  const expected = buildProvenance(root, provenance.source_commit, provenance.versions, provenance.release_tag, provenance.candidate_kind, provenance.candidate_id, provenance.source_date_epoch);
+  const expected = buildProvenance(root, provenance.source_commit, provenance.source_tag, provenance.versions, provenance.intended_release_tag, provenance.candidate_kind, provenance.candidate_id, provenance.source_date_epoch);
   if (JSON.stringify(expected) !== JSON.stringify(provenance)) {
     throw new Error('candidate provenance or inner bytes changed');
   }
@@ -64,9 +65,10 @@ export function verifyProvenance(root, provenance) {
   ) throw new Error('candidate version identities are incomplete');
   if (
     provenance.candidate_kind === 'release'
-      ? provenance.release_tag !== `v${provenance.versions.channel}`
-      : provenance.release_tag !== null
+      ? provenance.intended_release_tag !== `v${provenance.versions.npm}`
+      : provenance.intended_release_tag !== null
   ) throw new Error('candidate channel tag contract mismatch');
+  if (provenance.source_tag !== null) throw new Error('candidate source_tag must be null before ring finalization');
   const names = provenance.files.map(file => file.path);
   if (names.filter(name => name === `openrappter-${provenance.versions.npm}.tgz`).length !== 1) {
     throw new Error('candidate must contain exactly one npm tarball');

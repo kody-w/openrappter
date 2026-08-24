@@ -18,5 +18,8 @@
   "status": "published",
   "reason": null,
   "receipt": null,
-  "promotion_id": "de213c055ada6c5a9e064fad90455fd0e7bf5a8ca7ddc9f80160d640e03db584"
+  "promotion_id": "de213c055ada6c5a9e064fad90455fd0e7bf5a8ca7ddc9f80160d640e03db584",
+  "intended_release_tag": null,
+  "channel_version": null,
+  "intended_release_tag": null
 }

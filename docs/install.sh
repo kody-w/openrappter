@@ -961,7 +961,10 @@ const closed = (v, keys, label) => {
 };
 try {
   const m = JSON.parse(fs.readFileSync(file, 'utf8'));
-  closed(m, ['artifact','predecessor','promoted_at','promotion_id','reason','receipt','ring','schema','source','status','version'], 'manifest');
+  const top=Object.keys(m).sort().join(',');
+  const current='artifact,channel_version,intended_release_tag,predecessor,promoted_at,promotion_id,reason,receipt,ring,schema,source,status,version';
+  const legacy='artifact,predecessor,promoted_at,promotion_id,reason,receipt,ring,schema,source,status,version';
+  if(top!==current&&top!==legacy)throw new Error('manifest is not closed');
   closed(m.source, ['commit','repository','tag'], 'source');
   closed(m.artifact, ['install_url','provenance','sha256','url'], 'artifact');
   if (m.schema !== 'openrappter-ring/v1' || m.ring !== expected) throw new Error('wrong schema or ring');
@@ -969,6 +972,7 @@ try {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(m.version)) throw new Error('bad version');
   if (!/^[0-9a-f]{64}$/.test(m.artifact.sha256)) throw new Error('bad SHA-256');
   if (!/^[0-9a-f]{64}$/.test(m.promotion_id)) throw new Error('missing authority promotion id');
+  if (m.intended_release_tag!=null&&!/^v[0-9][0-9A-Za-z.+-]*$/.test(m.intended_release_tag))throw new Error('bad intended release tag');
   for (const u of [m.artifact.url, m.artifact.install_url].filter(Boolean)) {
     const parsed = new URL(u);
     if (parsed.protocol !== 'https:' || !['github.com','registry.npmjs.org','raw.githubusercontent.com'].includes(parsed.hostname)) throw new Error('unauthorized URL');

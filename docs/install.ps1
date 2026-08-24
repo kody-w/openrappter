@@ -375,13 +375,16 @@ function Resolve-RingManifest {
     $top = @($m.PSObject.Properties.Name | Sort-Object) -join ","
     $source = @($m.source.PSObject.Properties.Name | Sort-Object) -join ","
     $artifact = @($m.artifact.PSObject.Properties.Name | Sort-Object) -join ","
-    if ($top -ne "artifact,predecessor,promoted_at,promotion_id,reason,receipt,ring,schema,source,status,version") { throw "Ring manifest is not closed" }
+    $currentTop = "artifact,channel_version,intended_release_tag,predecessor,promoted_at,promotion_id,reason,receipt,ring,schema,source,status,version"
+    $legacyTop = "artifact,predecessor,promoted_at,promotion_id,reason,receipt,ring,schema,source,status,version"
+    if ($top -ne $currentTop -and $top -ne $legacyTop) { throw "Ring manifest is not closed" }
     if ($source -ne "commit,repository,tag" -or $artifact -ne "install_url,provenance,sha256,url") { throw "Ring manifest children are not closed" }
     if ($m.schema -ne "openrappter-ring/v1" -or $m.ring -ne $SelectedRing) { throw "Wrong manifest schema or ring" }
     if ($m.source.repository -ne "kody-w/openrappter" -or $m.source.commit -notmatch "^[0-9a-f]{40}$") { throw "Unauthorized source identity" }
     if ($m.version -notmatch "^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$") { throw "Malformed exact version" }
     if ($m.artifact.sha256 -notmatch "^[0-9a-f]{64}$") { throw "Malformed artifact SHA-256" }
     if ($m.promotion_id -notmatch "^[0-9a-f]{64}$") { throw "Missing authority promotion id" }
+    if ($null -ne $m.intended_release_tag -and $m.intended_release_tag -notmatch "^v[0-9][0-9A-Za-z.+-]*$") { throw "Malformed intended release tag" }
     foreach ($value in @($m.artifact.url, $m.artifact.install_url)) {
         if (-not $value) { continue }
         $parsed = [Uri]$value

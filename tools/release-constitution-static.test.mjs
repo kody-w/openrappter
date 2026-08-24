@@ -42,3 +42,14 @@ test('release publication materializes candidate bytes and never rebuilds them',
   assert.match(block, /candidate\.tar\.gz/);
   assert.doesNotMatch(block, /npm run build|python -m build|pack-locked/);
 });
+test('release tag is created only after stable constitution and is idempotent', () => {
+  const workflow = fs.readFileSync(
+    new URL('../.github/workflows/create-release-tag.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(workflow, /create:[\s\S]*needs: release-constitution/);
+  assert.match(workflow, /exact release tag already exists/);
+  assert.match(workflow, /test "\$\(git rev-list -n 1 "\$RELEASE_TAG"\)" = "\$RELEASE_COMMIT"/);
+  assert.match(workflow, /m\["source"\]\["tag"\] is None/);
+  assert.ok(workflow.indexOf('Release Constitution') < workflow.indexOf('git push origin'));
+});

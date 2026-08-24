@@ -33,6 +33,8 @@ const stable = {
   reason: null,
   receipt: null,
   promotion_id: 'e'.repeat(64),
+  intended_release_tag: null,
+  channel_version: null,
 } as const;
 
 const response = (body: unknown, ok = true) => ({

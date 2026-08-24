@@ -11,11 +11,11 @@ function fixture() {
   for (const name of ['openrappter-1.13.0.tgz', 'openrappter-1.13.0-py3-none-any.whl', 'openrappter-1.13.0.tar.gz', 'install.sh', 'install.ps1']) {
     fs.writeFileSync(path.join(root, name), name);
   }
-  return buildProvenance(root, 'a'.repeat(40), { npm: '1.13.0', pypi: '1.13.0', runtime: '1.13.0', channel: '0.1.0-beta.11' }, 'v0.1.0-beta.11', 'release', 'v0.1.0-beta.11', 1234567890);
+  return buildProvenance(root, 'a'.repeat(40), null, { npm: '1.13.0', pypi: '1.13.0', runtime: '1.13.0', channel: '0.1.0-beta.11' }, 'v1.13.0', 'release', 'v1.13.0', 1234567890);
 }
 test('candidate provenance is deterministic and complete', () => {
   const first = fixture();
-  const second = buildProvenance(root, 'a'.repeat(40), { npm: '1.13.0', pypi: '1.13.0', runtime: '1.13.0', channel: '0.1.0-beta.11' }, 'v0.1.0-beta.11', 'release', 'v0.1.0-beta.11', 1234567890);
+  const second = buildProvenance(root, 'a'.repeat(40), null, { npm: '1.13.0', pypi: '1.13.0', runtime: '1.13.0', channel: '0.1.0-beta.11' }, 'v1.13.0', 'release', 'v1.13.0', 1234567890);
   assert.deepEqual(first, second);
   verifyProvenance(root, first);
   fs.rmSync(root, { recursive: true, force: true });
@@ -54,8 +54,9 @@ test('beta.11 provenance preserves dual package and channel identities', () => {
     assert.match(workflow, /candidates\/\$SOURCE_COMMIT\/index\.json/);
     assert.doesNotMatch(workflow, /path="candidates\/\$SOURCE_COMMIT"\s*$/m);
   });
-  assert.equal(provenance.release_tag, 'v0.1.0-beta.11');
-  assert.equal(provenance.candidate_id, 'v0.1.0-beta.11');
+  assert.equal(provenance.source_tag, null);
+  assert.equal(provenance.intended_release_tag, 'v1.13.0');
+  assert.equal(provenance.candidate_id, 'v1.13.0');
   verifyProvenance(root, provenance);
   fs.rmSync(root, { recursive: true, force: true });
 });

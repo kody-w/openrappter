@@ -10,8 +10,8 @@ on:
         description: Exact channel identity, for example 0.1.0-beta.11
         required: true
         type: string
-      release_tag:
-        description: Intended immutable tag, for example v0.1.0-beta.11
+      intended_release_tag:
+        description: Intended final distribution tag, for example v1.13.0
         required: false
         type: string
       candidate_kind:
@@ -67,7 +67,7 @@ jobs:
       - name: Build exact candidate bytes once
         env:
           CHANNEL_VERSION: ${{ inputs.channel_version }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          INTENDED_RELEASE_TAG: ${{ inputs.intended_release_tag }}
           CANDIDATE_KIND: ${{ inputs.candidate_kind }}
           INPUT_CANDIDATE_ID: ${{ inputs.candidate_id }}
         run: |
@@ -76,10 +76,10 @@ jobs:
           py_version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml","rb"))["project"]["version"])')"
           runtime_version="$(PYTHONPATH=python python -c 'from openrappter import __version__; print(__version__)')"
           if [ "$CANDIDATE_KIND" = release ]; then
-            test "$RELEASE_TAG" = "v$CHANNEL_VERSION"
-            candidate_id="$(python -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ[\"RELEASE_TAG\"],safe=\"._-\"))')"
+            test "$INTENDED_RELEASE_TAG" = "v$ts_version"
+            candidate_id="$(python -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ[\"INTENDED_RELEASE_TAG\"],safe=\"._-\"))')"
           else
-            test -z "$RELEASE_TAG"
+            test -z "$INTENDED_RELEASE_TAG"
             candidate_id="${INPUT_CANDIDATE_ID:-snapshot-$SOURCE_DATE_EPOCH}"
           fi
           printf '%s' "$candidate_id" | grep -Eq '^[A-Za-z0-9._%-]+$'
@@ -89,11 +89,11 @@ jobs:
           python -m pip install --disable-pip-version-check "build==1.5.1" "hatchling==1.31.0"
           (cd python && python -m build --no-isolation --outdir ../candidate)
           cp install.sh install.ps1 candidate/
-          node --input-type=module - "$SOURCE_COMMIT" "$ts_version" "$py_version" "$runtime_version" "$CHANNEL_VERSION" "$RELEASE_TAG" "$CANDIDATE_KIND" "$candidate_id" "$SOURCE_DATE_EPOCH" <<'NODE'
+          node --input-type=module - "$SOURCE_COMMIT" "$ts_version" "$py_version" "$runtime_version" "$CHANNEL_VERSION" "$INTENDED_RELEASE_TAG" "$CANDIDATE_KIND" "$candidate_id" "$SOURCE_DATE_EPOCH" <<'NODE'
           import fs from 'node:fs';
           import { buildProvenance, verifyProvenance } from './scripts/candidate-bundle.mjs';
           const versions={npm:process.argv[3],pypi:process.argv[4],runtime:process.argv[5],channel:process.argv[6]};
-          const value=buildProvenance('candidate',process.argv[2],versions,process.argv[7]||null,process.argv[8],process.argv[9],Number(process.argv[10]));
+          const value=buildProvenance('candidate',process.argv[2],null,versions,process.argv[7]||null,process.argv[8],process.argv[9],Number(process.argv[10]));
           verifyProvenance('candidate',value);
           fs.writeFileSync('candidate/provenance.json',JSON.stringify(value,null,2)+'\n');
           NODE

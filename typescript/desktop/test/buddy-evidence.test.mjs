@@ -1,11 +1,20 @@
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdtemp,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
 
 import {
   extractBuddyEvidence,
+  pruneStaleBuddyEvidence,
   resolveBuddyMediaBinary,
 } from "../dist/buddy-evidence.js";
 
@@ -96,4 +105,21 @@ test("rejects a MIME-spoofed PDF before invoking its parser", async () => {
     }),
     /valid PDF signature/,
   );
+});
+
+test("startup cleanup removes stale private evidence scratch", async () => {
+  const scratch = await mkdtemp(
+    path.join(os.tmpdir(), "openrappter-buddy-evidence-"),
+  );
+  try {
+    await writeFile(path.join(scratch, "raw-video"), "private evidence");
+    const stale = new Date(Date.now() - 48 * 60 * 60 * 1_000);
+    await utimes(scratch, stale, stale);
+
+    await pruneStaleBuddyEvidence();
+
+    await assert.rejects(access(scratch));
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
 });

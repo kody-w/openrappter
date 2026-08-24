@@ -45,6 +45,7 @@ import { waitForGatewayReady } from './gateway-ready.js';
 import {
   extractBuddyEvidence,
   hasActiveBuddyEvidenceJobs,
+  pruneStaleBuddyEvidence,
   shutdownBuddyEvidenceJobs,
 } from './buddy-evidence.js';
 
@@ -1469,6 +1470,7 @@ if (!ownsInstanceLock) {
   });
 
   void app.whenReady().then(async () => {
+    await pruneStaleBuddyEvidence();
     if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
       console.log('OPENRAPPTER_DESKTOP_SMOKE ready-handler');
       smokeRoot = path.join(

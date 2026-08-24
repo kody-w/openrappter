@@ -196,18 +196,31 @@ async function evidenceScratch(): Promise<string> {
 }
 
 async function removeEvidenceScratch(scratch: string): Promise<void> {
-  activeScratch.delete(scratch);
-  await rm(scratch, { recursive: true, force: true });
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await rm(scratch, { recursive: true, force: true });
+      activeScratch.delete(scratch);
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+  throw lastError;
 }
 
-async function pruneStaleEvidenceScratch(): Promise<void> {
+export async function pruneStaleBuddyEvidence(): Promise<void> {
   try {
     const entries = await readdir(os.tmpdir(), { withFileTypes: true });
     const cutoff = Date.now() - 24 * 60 * 60 * 1_000;
-    for (const entry of entries.slice(0, 2_000)) {
-      if (!entry.isDirectory() || !entry.name.startsWith(EVIDENCE_PREFIX)) {
-        continue;
-      }
+    const candidates = entries
+      .filter(
+        (entry) =>
+          entry.isDirectory() && entry.name.startsWith(EVIDENCE_PREFIX),
+      )
+      .slice(0, 2_000);
+    for (const entry of candidates) {
       const candidate = path.join(os.tmpdir(), entry.name);
       try {
         if ((await stat(candidate)).mtimeMs < cutoff) {
@@ -223,14 +236,38 @@ async function pruneStaleEvidenceScratch(): Promise<void> {
 }
 
 export async function shutdownBuddyEvidenceJobs(): Promise<void> {
-  for (const child of activeChildren) {
+  const children = [...activeChildren];
+  for (const child of children) {
     if (child.exitCode === null && child.signalCode === null) {
       child.kill("SIGKILL");
     }
   }
   await Promise.all(
+    children.map(
+      (child) =>
+        new Promise<void>((resolve) => {
+          if (child.exitCode !== null || child.signalCode !== null) {
+            resolve();
+            return;
+          }
+          const timer = setTimeout(resolve, 2_000);
+          child.once("close", () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        }),
+    ),
+  );
+  const cleanup = await Promise.allSettled(
     [...activeScratch].map((scratch) => removeEvidenceScratch(scratch)),
   );
+  for (const result of cleanup) {
+    if (result.status === "rejected") {
+      console.error(
+        `Buddy evidence scratch cleanup failed: ${String(result.reason)}`,
+      );
+    }
+  }
 }
 
 export function hasActiveBuddyEvidenceJobs(): boolean {
@@ -487,7 +524,7 @@ export async function extractBuddyEvidence(
   rawInput: BuddyEvidenceInput,
   dependencies: BuddyEvidenceDependencies = {},
 ): Promise<BuddyEvidenceResult> {
-  await pruneStaleEvidenceScratch();
+  await pruneStaleBuddyEvidence();
   const filename = normalizedFilename(rawInput.filename);
   const mimeType = inferredMimeType(filename, rawInput.mimeType);
   const kind = kindFor(mimeType);

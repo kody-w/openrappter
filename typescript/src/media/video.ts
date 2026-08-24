@@ -4,11 +4,11 @@
  * Uses ffmpeg and ffprobe via child_process.
  */
 
-import { spawn } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { promises as fs } from 'fs';
+import { runBoundedMediaProcess } from './process.js';
 
 export interface VideoTranscodeOptions {
   format?: string;
@@ -30,34 +30,22 @@ export interface VideoInfo {
  * Run ffprobe on a file and return parsed JSON output.
  */
 async function ffprobe(inputPath: string): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-v', 'quiet',
-      '-print_format', 'json',
-      '-show_format',
-      '-show_streams',
-      inputPath,
-    ];
-
-    const proc = spawn('ffprobe', args);
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`ffprobe exited ${code}: ${stderr}`));
-        return;
-      }
-      try {
-        resolve(JSON.parse(stdout));
-      } catch {
-        reject(new Error(`ffprobe returned invalid JSON: ${stdout}`));
-      }
-    });
+  const result = await runBoundedMediaProcess('ffprobe', [
+    '-v', 'error',
+    '-print_format', 'json',
+    '-show_format',
+    '-show_streams',
+    inputPath,
+  ], {
+    timeoutMs: 15_000,
+    maxStdoutBytes: 256 * 1024,
+    maxStderrBytes: 256 * 1024,
   });
+  try {
+    return JSON.parse(result.stdout.toString('utf8')) as Record<string, unknown>;
+  } catch {
+    throw new Error('ffprobe returned invalid bounded JSON.');
+  }
 }
 
 /**
@@ -67,26 +55,17 @@ async function ffmpegRun(
   args: string[],
   input?: Buffer,
 ): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('ffmpeg', ['-y', ...args]);
-    const chunks: Buffer[] = [];
-    let stderr = '';
-
-    proc.stdout.on('data', (d: Buffer) => chunks.push(d));
-    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`ffmpeg exited ${code}: ${stderr}`));
-        return;
-      }
-      resolve(Buffer.concat(chunks));
-    });
-
-    if (input) {
-      proc.stdin.end(input);
-    }
-  });
+  const result = await runBoundedMediaProcess(
+    'ffmpeg',
+    ['-y', ...args],
+    {
+      input,
+      timeoutMs: 10 * 60_000,
+      maxStdoutBytes: 512 * 1024 * 1024,
+      maxStderrBytes: 256 * 1024,
+    },
+  );
+  return result.stdout;
 }
 
 export class VideoProcessor {

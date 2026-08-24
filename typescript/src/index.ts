@@ -525,8 +525,24 @@ async function startGatewayInProcess(opts?: {
         req.conversationHistory,
       );
     }
+    const verifiedMedia = req.attachments
+      ?.filter((attachment) => attachment.assetId && attachment.path)
+      .map((attachment) => ({
+        assetId: attachment.assetId,
+        sha256: attachment.digest,
+        displayName: attachment.filename,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+        verifiedPrivatePath: attachment.path,
+        localOnly: true,
+      })) ?? [];
+    const prompt = verifiedMedia.length
+      ? `${req.message}\n\n<verified_local_media>\n${
+          JSON.stringify(verifiedMedia, null, 2)
+        }\nThe bytes are already verified in private local storage. Use the path-capable local media, transcription, or Show-and-Tell tools; do not request an external upload or reread the whole file into memory.\n</verified_local_media>`
+      : req.message;
     const result = await assistant.getResponse(
-      req.message,
+      prompt,
       // Forward streaming deltas
       stream ? (delta) => stream({ id: '', streaming: true, chunk: delta, done: false }) : undefined,
       undefined,

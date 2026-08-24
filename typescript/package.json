@@ -23,6 +23,7 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:package": "node scripts/package-smoke.mjs",
+    "test:media-release": "npm run build:server && node ../tools/media-release-smoke.mjs .media-release-smoke-artifacts",
     "test:watch": "vitest",
     "lint": "eslint src/ --max-warnings 0",
     "demo": "tsx examples/quickstart.ts",

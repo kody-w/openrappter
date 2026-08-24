@@ -5,6 +5,7 @@
 
 import type { TranscriptionService } from '../voice/transcription.js';
 import { assertFetchableUrl, fetchGuarded } from '../net/url-guard.js';
+import type { VerifiedMediaAsset } from './ingest.js';
 
 export interface MediaConfig {
   maxImageSize?: number;
@@ -166,6 +167,53 @@ export class MediaProcessor {
       default:
         throw new Error(`Unsupported media type: ${mimeType}`);
     }
+  }
+
+  /**
+   * Process a content-addressed private asset without materializing it as one
+   * renderer/Node buffer. This is the large-media seam used by Chat,
+   * Show-and-Tell, XPedition adapters, and organism eggs.
+   */
+  async processVerifiedAsset(asset: VerifiedMediaAsset): Promise<ProcessedMedia> {
+    if (!asset.verified || !asset.privatePath || !asset.id.startsWith('sha256:')) {
+      throw new Error('Media processor requires a verified private asset descriptor.');
+    }
+    const result: ProcessedMedia = {
+      type: asset.kind === 'midi' ? 'audio' : asset.kind,
+      mimeType: asset.mimeType,
+      size: asset.size,
+      content: `[Verified local ${asset.kind}: ${asset.displayName}]`,
+      metadata: {
+        assetId: asset.id,
+        digest: asset.digest,
+        privatePath: asset.privatePath,
+        localOnly: true,
+        probe: asset.probe,
+      },
+    };
+    if (
+      this.transcriptionService
+      && (asset.kind === 'audio' || asset.kind === 'video')
+    ) {
+      try {
+        const transcription = await this.transcriptionService.transcribeFile(
+          asset.privatePath,
+          { timestamps: true },
+        );
+        result.content = transcription.text;
+        result.metadata = {
+          ...result.metadata,
+          duration: transcription.duration,
+          language: transcription.language,
+          segments: transcription.segments?.length,
+        };
+      } catch (error) {
+        result.metadata.transcription = 'local-path-provider-unavailable';
+        result.metadata.transcriptionError =
+          error instanceof Error ? error.message : String(error);
+      }
+    }
+    return result;
   }
 
   /**

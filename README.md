@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Verified Media Ingest](./docs/media-ingest.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)

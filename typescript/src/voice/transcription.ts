@@ -8,6 +8,23 @@ import type {
   TranscriptionOptions,
   TranscriptionResult,
 } from './types.js';
+import { randomUUID } from 'node:crypto';
+import { execFileSync, spawn } from 'node:child_process';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import path from 'node:path';
+import { openrappterPath } from '../infra/openrappter-home.js';
+
+const TRANSCRIPTION_TIMEOUT_MS = 10 * 60_000;
+const TRANSCRIPTION_MAX_PROCESS_OUTPUT_BYTES = 256 * 1024;
+const TRANSCRIPTION_MAX_JSON_BYTES = 8 * 1024 * 1024;
 
 /**
  * OpenAI Whisper Transcription Provider
@@ -124,45 +141,65 @@ export class LocalWhisper implements TranscriptionProvider {
   }
 
   async transcribe(audio: Buffer, options?: TranscriptionOptions): Promise<TranscriptionResult> {
-    const { spawn } = await import('child_process');
-    const { writeFileSync, unlinkSync, readFileSync, existsSync } = await import('fs');
-    const { tmpdir } = await import('os');
-    const { join } = await import('path');
-
-    // Write audio to temp file
-    const tempInput = join(tmpdir(), `whisper_input_${Date.now()}.wav`);
-    const tempOutput = join(tmpdir(), `whisper_output_${Date.now()}`);
-
-    writeFileSync(tempInput, audio);
-
+    const work = this.privateWorkDirectory();
+    const tempInput = path.join(work, `${randomUUID()}.wav`);
+    writeFileSync(tempInput, audio, { mode: 0o600, flag: 'wx' });
     try {
-      const args = [tempInput, '-o', tempOutput, '-of', 'json'];
+      return await this.transcribeFile(tempInput, options);
+    } finally {
+      rmSync(tempInput, { force: true });
+    }
+  }
 
-      if (this.modelPath) {
-        args.push('-m', this.modelPath);
-      }
-
-      if (options?.language) {
-        args.push('-l', options.language);
-      }
-
+  async transcribeFile(
+    inputPath: string,
+    options?: TranscriptionOptions,
+  ): Promise<TranscriptionResult> {
+    const work = this.privateWorkDirectory();
+    const outputPrefix = path.join(work, randomUUID());
+    const outputFile = `${outputPrefix}.json`;
+    const args = [inputPath, '-o', outputPrefix, '-of', 'json'];
+    if (this.modelPath) args.push('-m', this.modelPath);
+    if (options?.language) args.push('-l', options.language);
+    try {
       await new Promise<void>((resolve, reject) => {
-        const proc = spawn(this.execPath, args);
-
-        proc.on('close', (code) => {
-          if (code === 0) resolve();
-          else reject(new Error(`Whisper exited with code ${code}`));
+        const proc = spawn(this.execPath, args, {
+          shell: false,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
-
-        proc.on('error', reject);
+        let outputBytes = 0;
+        let settled = false;
+        const finish = (error?: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (error) reject(error);
+          else resolve();
+        };
+        const count = (chunk: Buffer) => {
+          outputBytes += chunk.length;
+          if (outputBytes > TRANSCRIPTION_MAX_PROCESS_OUTPUT_BYTES) {
+            proc.kill('SIGKILL');
+            finish(new Error('Whisper process output exceeded its safety limit.'));
+          }
+        };
+        proc.stdout.on('data', count);
+        proc.stderr.on('data', count);
+        proc.once('error', (error) => finish(error));
+        proc.once('close', (code) => {
+          finish(code === 0 ? undefined : new Error(`Whisper exited with code ${code}`));
+        });
+        const timer = setTimeout(() => {
+          proc.kill('SIGKILL');
+          finish(new Error(`Whisper exceeded ${TRANSCRIPTION_TIMEOUT_MS} ms.`));
+        }, TRANSCRIPTION_TIMEOUT_MS);
       });
-
-      // Read output
-      const outputFile = `${tempOutput}.json`;
-      if (!existsSync(outputFile)) {
-        throw new Error('Whisper output not found');
+      if (!existsSync(outputFile)) throw new Error('Whisper output not found');
+      const outputStats = statSync(outputFile);
+      if (!outputStats.isFile() || outputStats.size > TRANSCRIPTION_MAX_JSON_BYTES) {
+        throw new Error('Whisper output exceeded its JSON safety limit.');
       }
-
       const output = JSON.parse(readFileSync(outputFile, 'utf8')) as {
         text: string;
         segments: Array<{
@@ -172,30 +209,30 @@ export class LocalWhisper implements TranscriptionProvider {
           text: string;
         }>;
       };
-
-      // Cleanup
-      unlinkSync(outputFile);
-
-      return {
-        text: output.text,
-        segments: output.segments,
-      };
+      return { text: output.text, segments: output.segments };
     } finally {
-      // Cleanup input file
-      if (existsSync(tempInput)) {
-        unlinkSync(tempInput);
-      }
+      rmSync(outputFile, { force: true });
     }
   }
 
   async isAvailable(): Promise<boolean> {
     try {
-      const { execSync } = await import('child_process');
-      execSync(`${this.execPath} --help`, { stdio: 'ignore' });
+      execFileSync(this.execPath, ['--help'], {
+        stdio: 'ignore',
+        timeout: 5_000,
+        windowsHide: true,
+      });
       return true;
     } catch {
       return false;
     }
+  }
+
+  private privateWorkDirectory(): string {
+    const work = openrappterPath('media', 'transcription-work');
+    mkdirSync(work, { recursive: true, mode: 0o700 });
+    chmodSync(work, 0o700);
+    return work;
   }
 }
 
@@ -221,6 +258,29 @@ export class TranscriptionService {
     }
 
     throw new Error('No transcription provider available');
+  }
+
+  async transcribeFile(
+    inputPath: string,
+    options?: TranscriptionOptions,
+  ): Promise<TranscriptionResult> {
+    for (const provider of this.providers) {
+      const fileProvider = provider as TranscriptionProvider & {
+        transcribeFile?: (
+          path: string,
+          options?: TranscriptionOptions,
+        ) => Promise<TranscriptionResult>;
+      };
+      if (!fileProvider.transcribeFile) continue;
+      try {
+        if (await provider.isAvailable()) {
+          return await fileProvider.transcribeFile(inputPath, options);
+        }
+      } catch (error) {
+        console.warn(`Transcription provider ${provider.name} failed:`, error);
+      }
+    }
+    throw new Error('No local path-capable transcription provider available');
   }
 
   async isAvailable(): Promise<boolean> {

@@ -82,6 +82,59 @@ export interface Attachment {
   data?: string;
   mimeType: string;
   filename?: string;
+  size?: number;
+  assetId?: string;
+  digest?: string;
+}
+
+export interface MediaAssetDescriptor {
+  schema: 'openrappter-media-asset/1.0';
+  id: string;
+  digest: string;
+  size: number;
+  mimeType: string;
+  kind: 'image' | 'audio' | 'video' | 'midi';
+  displayName: string;
+  storage: 'local-private';
+  verified: true;
+  deduplicated: boolean;
+  createdAt: string;
+  probe?: {
+    format?: string;
+    durationSeconds?: number;
+    width?: number;
+    height?: number;
+    audioStreams?: number;
+    videoStreams?: number;
+    probe: 'magic' | 'magic+ffprobe';
+  };
+}
+
+export interface MediaUploadStatus {
+  schema: 'openrappter-media-upload/1.0';
+  uploadId: string;
+  sessionId: string;
+  displayName: string;
+  mimeType: string;
+  expectedSize: number;
+  expectedDigest?: string;
+  receivedBytes: number;
+  chunkBytes: number;
+  phase:
+    | 'uploading'
+    | 'hashing'
+    | 'validating'
+    | 'complete'
+    | 'cancelled'
+    | 'expired'
+    | 'error';
+  resumable: boolean;
+  localOnly: true;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  asset?: MediaAssetDescriptor;
+  error?: string;
 }
 
 export interface ToolOutput {

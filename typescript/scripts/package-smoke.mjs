@@ -147,6 +147,8 @@ try {
     "dist/clever-girl/SKILL.md",
     "dist/cli/clever-girl.js",
     "dist/desktop-control/queue.js",
+    "dist/media/ingest.js",
+    "dist/media/process.js",
     "dist/show-and-tell/store.js",
     "dist/show-and-tell/worker.js",
     "dist/cli/show-and-tell.js",

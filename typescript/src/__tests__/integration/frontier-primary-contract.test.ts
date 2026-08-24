@@ -45,6 +45,7 @@ describe('Frontier-primary interface contract', () => {
     expect(host).toContain('rpc("agent"');
     expect(frontier).toContain('show-mode-preview');
     expect(frontier).toContain('deploy-copilot-studio');
+    expect(frontier).toContain("frame-src 'self'");
   });
 
   it('adds features through the native Frontier panel without another shell', () => {

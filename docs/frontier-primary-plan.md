@@ -63,6 +63,12 @@ existing chat/Copilot composition was present, but the branch still booted the
 added anatomy shell and lacked the corrected Frontier module/package names.
 After correction, all seven contracts pass.
 
+The first real packaged Electron run then reproduced the exact launch path with
+`ERR_BLOCKED_BY_CSP`, `frontierChat:false`, and `frontierPrimary:false`: the
+restored shell's `frame-src` allowed loopback but not its packaged same-origin
+chat. The contract now pins `frame-src 'self'`; the repeated packaged run
+reported both `frontierChat:true` and `frontierPrimary:true`.
+
 Release gates cover the source DOM, hosted root package, deep links, explicit
 Legacy route, browser behavior, semantic controls, accessibility/responsive
 rules, Electron contracts, and real packaged smoke on Linux, macOS, and Windows.

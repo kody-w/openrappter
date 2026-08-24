@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openrappter.dev/contracts/xpedition-extension-v1.json",
+  "title": "XPedition Extension Selector v1",
+  "description": "Selects only entries already registered by the trusted OpenRappter host.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "appId",
+    "surfaceVersion"
+  ],
+  "properties": {
+    "appId": {
+      "type": "string",
+      "enum": [
+        "observe",
+        "chat",
+        "show-and-tell",
+        "agents",
+        "showcase",
+        "flight",
+        "skills",
+        "channels",
+        "sessions",
+        "cron",
+        "devices",
+        "presence",
+        "debug",
+        "zen",
+        "accounts",
+        "memory",
+        "settings",
+        "terminal",
+        "help"
+      ]
+    },
+    "capabilityIds": {
+      "type": "array",
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "ui:view",
+          "agent:read",
+          "channel:read",
+          "session:read",
+          "skill:read",
+          "system:read",
+          "memory:read"
+        ]
+      }
+    },
+    "order": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "surfaceVersion": {
+      "const": 1
+    }
+  }
+}

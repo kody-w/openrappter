@@ -1,0 +1,158 @@
+{
+  "accepted": [
+    {
+      "appId": "agents",
+      "capabilityIds": [
+        "agent:read"
+      ],
+      "order": 20,
+      "surfaceVersion": 1
+    },
+    {
+      "appId": "help",
+      "surfaceVersion": 1
+    }
+  ],
+  "rejected": [
+    {
+      "reason": "caller title is not part of the selector",
+      "value": {
+        "appId": "agents",
+        "title": "Agent Explorer",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "caller description is not part of the selector",
+      "value": {
+        "appId": "agents",
+        "description": "Browse local agents.",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "caller glyph is not part of the selector",
+      "value": {
+        "appId": "agents",
+        "glyph": "A",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "caller id is not part of the selector",
+      "value": {
+        "appId": "agents",
+        "id": "custom-agent-explorer",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "caller route is supplied by the trusted registry",
+      "value": {
+        "appId": "agents",
+        "routeId": "settings",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "fragment navigation is not caller-controlled",
+      "value": {
+        "appId": "agents",
+        "fragment": "#access-token",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "HTTPS URL property is structurally impossible",
+      "value": {
+        "appId": "agents",
+        "href": "https://example.com/app",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "uppercase URL scheme is structurally impossible",
+      "value": {
+        "appId": "HTTPS://EXAMPLE.COM/APP",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "mailto navigation is structurally impossible",
+      "value": {
+        "appId": "mailto:operator@example.com",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "protocol-relative navigation is structurally impossible",
+      "value": {
+        "appId": "//example.com/app",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "loopback host is not a registered app",
+      "value": {
+        "appId": "http://127.0.0.1/private",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "link-local host is not a registered app",
+      "value": {
+        "appId": "http://169.254.169.254/latest/meta-data",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "localhost is not a registered app",
+      "value": {
+        "appId": "localhost",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "secret-shaped selector is not a registered app",
+      "value": {
+        "appId": "github_pat_not-a-real-value",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "case variation cannot escape the closed registry",
+      "value": {
+        "appId": "Agents",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "private capability is outside the public vocabulary",
+      "value": {
+        "appId": "settings",
+        "capabilityIds": [
+          "tenant:admin"
+        ],
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "free-form capability is outside the public vocabulary",
+      "value": {
+        "appId": "settings",
+        "capabilityIds": [
+          "billing:read"
+        ],
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "order is bounded",
+      "value": {
+        "appId": "agents",
+        "order": 1001,
+        "surfaceVersion": 1
+      }
+    }
+  ]
+}

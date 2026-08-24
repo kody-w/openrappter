@@ -15,6 +15,10 @@ const runtimeEntry = readFileSync(
   'utf8',
 );
 const preload = readFileSync(new URL('../src/preload.cts', import.meta.url), 'utf8');
+const mediaIngest = readFileSync(
+  new URL('../../src/media/ingest.ts', import.meta.url),
+  'utf8',
+);
 const narration = readFileSync(new URL('../src/narration.ts', import.meta.url), 'utf8');
 const vibevoice = readFileSync(new URL('../src/vibevoice.ts', import.meta.url), 'utf8');
 const desktopPackage = JSON.parse(
@@ -61,6 +65,18 @@ test('desktop exposes one narrow context bridge', () => {
   assert.doesNotMatch(preload, /require\s*\(/);
   assert.match(preload, /openrappter:narration/);
   assert.match(preload, /openrappter:voice/);
+});
+
+test('large media uses Electron safe path handoff and descriptor-safe main-process ingest', () => {
+  assert.match(preload, /webUtils\.getPathForFile\(file\)/);
+  assert.match(preload, /mediaStart:\s*\(\s*file:\s*File/);
+  assert.doesNotMatch(preload, /mediaStart:\s*\(\s*(sourcePath|path):\s*string/);
+  assert.match(main, /trustedRenderer\(event\)/);
+  assert.match(main, /openrappter:media-start/);
+  assert.match(mediaIngest, /O_NOFOLLOW/);
+  assert.match(mediaIngest, /partStats\.nlink !== 1/);
+  assert.match(mediaIngest, /Selected media changed while it was being ingested/);
+  assert.doesNotMatch(preload, /readAsDataURL|arrayBuffer\(/);
 });
 
 test('local tell and voice models bootstrap privately', () => {

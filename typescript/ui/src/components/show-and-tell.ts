@@ -5,6 +5,10 @@ import {
   desktopBridge,
   type DesktopShowAndTellRequest,
 } from '../services/desktop.js';
+import {
+  mediaUploads,
+  type MediaUploadProgress,
+} from '../services/media-ingest.js';
 
 interface SessionSummary {
   id: string;
@@ -335,6 +339,9 @@ export class OpenRappterShowAndTell extends LitElement {
   private narrationSessionId?: string;
   private statusGeneration = 0;
   @state() private sessionLoading = false;
+  @state() private mediaProgress: MediaUploadProgress | null = null;
+  @state() private mediaName = '';
+  private mediaController?: AbortController;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -373,7 +380,43 @@ export class OpenRappterShowAndTell extends LitElement {
     if (this.narrationTimer) clearTimeout(this.narrationTimer);
     this.mediaStream?.getTracks().forEach((track) => track.stop());
     this.narrationGeneration += 1;
+    this.mediaController?.abort();
     super.disconnectedCallback();
+  }
+
+  private async attachMedia(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || !this.session || this.session.state !== 'recording') return;
+    this.mediaController?.abort();
+    const controller = new AbortController();
+    this.mediaController = controller;
+    this.mediaName = file.name;
+    this.mediaProgress = null;
+    this.error = '';
+    try {
+      const asset = await mediaUploads.upload(file, {
+        sessionId: this.session.id,
+        signal: controller.signal,
+        onProgress: (progress) => {
+          this.mediaProgress = progress;
+        },
+      });
+      await this.call({
+        action: 'media',
+        session_id: this.session.id,
+        asset_id: asset.id,
+      });
+      this.message =
+        `${file.name} is verified in private local storage and attached to this demonstration.`;
+    } catch (error) {
+      if ((error as { name?: string }).name !== 'AbortError') {
+        this.error = error instanceof Error ? error.message : String(error);
+      }
+    } finally {
+      if (this.mediaController === controller) this.mediaController = undefined;
+    }
   }
 
   private async ensureNarrationModel(): Promise<void> {
@@ -849,6 +892,56 @@ export class OpenRappterShowAndTell extends LitElement {
                         >
                           ${this.narrationRecording ? 'Stop & transcribe' : 'Start narration'}
                         </button>
+                      </div>
+                    </div>
+                    <div class="card" style="margin-top:.75rem;box-shadow:none">
+                      <div class="card-head">
+                        <div>
+                          <div class="eyebrow">Verified local media</div>
+                          <strong>${this.mediaName || 'Add a demonstration recording'}</strong>
+                        </div>
+                        ${this.mediaProgress
+                          ? html`<span class="state">${this.mediaProgress.status.phase}</span>`
+                          : nothing}
+                      </div>
+                      ${this.mediaProgress
+                        ? html`
+                            <p class="lede" role="status" aria-live="polite">
+                              ${this.mediaProgress.message} ·
+                              ${Math.round(this.mediaProgress.percent)}%
+                            </p>
+                            <progress
+                              max="100"
+                              .value=${this.mediaProgress.percent}
+                              aria-label=${`Media ingest progress for ${this.mediaName}`}
+                              style="width:100%;margin-top:.6rem"
+                            ></progress>
+                          `
+                        : html`
+                            <p class="lede">
+                              MP4, QuickTime, WebM, common audio, and MIDI stay on
+                              this OpenRappter installation and are never uploaded externally.
+                            </p>
+                          `}
+                      <div class="actions">
+                        <label>
+                          <span class="eyebrow">Choose media</span>
+                          <input
+                            type="file"
+                            accept="video/mp4,video/quicktime,video/webm,audio/*,.mid,.midi"
+                            ?disabled=${Boolean(this.mediaController)}
+                            @change=${(event: Event) => void this.attachMedia(event)}
+                          />
+                        </label>
+                        ${this.mediaController
+                          ? html`
+                              <button
+                                class="danger"
+                                aria-label=${`Cancel media ingest for ${this.mediaName}`}
+                                @click=${() => this.mediaController?.abort()}
+                              >Cancel</button>
+                            `
+                          : nothing}
                       </div>
                     </div>
                     <div class="actions">

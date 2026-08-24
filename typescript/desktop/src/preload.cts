@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 interface DesktopShowAndTellRequest {
   action: string;
@@ -40,6 +40,36 @@ contextBridge.exposeInMainWorld('openrappterDesktop', {
     ipcRenderer.on('openrappter:voice-status', listener);
     return () => ipcRenderer.removeListener(
       'openrappter:voice-status',
+      listener,
+    );
+  },
+  mediaStart: (
+    file: File,
+    request: Record<string, unknown>,
+  ) => {
+    // Electron deliberately removed File.path. webUtils accepts only a real
+    // renderer File object, so no renderer-supplied string becomes a path.
+    const sourcePath = webUtils.getPathForFile(file);
+    if (!sourcePath) throw new Error('Selected file has no safe local path handoff.');
+    return ipcRenderer.invoke('openrappter:media-start', {
+      ...request,
+      sourcePath,
+    });
+  },
+  mediaStatus: (uploadId: string) =>
+    ipcRenderer.invoke('openrappter:media-status', { uploadId }),
+  mediaCancel: (uploadId: string) =>
+    ipcRenderer.invoke('openrappter:media-cancel', { uploadId }),
+  onMediaStatus: (
+    callback: (status: Record<string, unknown>) => void,
+  ) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      status: Record<string, unknown>,
+    ) => callback(status);
+    ipcRenderer.on('openrappter:media-status', listener);
+    return () => ipcRenderer.removeListener(
+      'openrappter:media-status',
       listener,
     );
   },

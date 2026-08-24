@@ -17,6 +17,15 @@ export interface OpenRappterDesktopBridge {
   onVoiceStatus(
     callback: (status: Record<string, unknown>) => void,
   ): () => void;
+  mediaStart(
+    file: File,
+    request: Omit<DesktopShowAndTellRequest, 'action'>,
+  ): Promise<Record<string, unknown>>;
+  mediaStatus(uploadId: string): Promise<Record<string, unknown>>;
+  mediaCancel(uploadId: string): Promise<Record<string, unknown>>;
+  onMediaStatus(
+    callback: (status: Record<string, unknown>) => void,
+  ): () => void;
   getInfo(): Promise<Record<string, unknown>>;
 }
 

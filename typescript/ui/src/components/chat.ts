@@ -11,7 +11,16 @@ import { gateway } from '../services/gateway.js';
 import { renderMarkdown } from '../services/markdown.js';
 import { createLocalSpeech, spokenLineFrom } from '../../../src/voice/local-speech.js';
 import { desktopBridge } from '../services/desktop.js';
-import type { ChatSessionSummary, Attachment } from '../types.js';
+import {
+  mediaUploads,
+  SMALL_DIRECT_UPLOAD_BYTES,
+  type MediaUploadProgress,
+} from '../services/media-ingest.js';
+import type {
+  ChatSessionSummary,
+  Attachment,
+  MediaAssetDescriptor,
+} from '../types.js';
 
 const AGENT_RUN_OVERALL_TIMEOUT_MS = 30 * 60_000;
 const RUN_ABORT_TIMEOUT_MS = 5_000;
@@ -49,6 +58,11 @@ interface AttachmentPreview {
   dataUrl?: string;
   mimeType: string;
   filename: string;
+  asset?: MediaAssetDescriptor;
+  upload?: MediaUploadProgress;
+  uploadPromise?: Promise<MediaAssetDescriptor | undefined>;
+  uploadController?: AbortController;
+  error?: string;
 }
 
 @customElement('openrappter-chat')
@@ -566,6 +580,45 @@ export class OpenRappterChat extends LitElement {
       flex-shrink: 0;
     }
 
+    .attachment-preview.streaming {
+      width: 240px;
+      min-height: 78px;
+      height: auto;
+      padding: 0.65rem;
+      box-sizing: border-box;
+    }
+
+    .attachment-preview.streaming .file-name {
+      position: static;
+      padding: 0 1.5rem 0.25rem 0;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .media-detail {
+      color: var(--text-secondary);
+      font-size: 0.68rem;
+      line-height: 1.35;
+    }
+
+    .media-progress {
+      width: 100%;
+      height: 5px;
+      margin: 0.4rem 0;
+      accent-color: var(--accent);
+    }
+
+    .media-local {
+      color: var(--accent);
+      font-size: 0.64rem;
+    }
+
+    .media-error {
+      color: var(--error);
+    }
+
     .attachment-preview img {
       width: 100%;
       height: 100%;
@@ -910,6 +963,7 @@ export class OpenRappterChat extends LitElement {
   @state() private toolExpandedIds = new Set<string>();
   @state() private attachments: AttachmentPreview[] = [];
   @state() private draggingOver = false;
+  private pendingUploadSessionKey: string | null = null;
   @state() private messageQueue: Array<{
     id: string;
     text: string;
@@ -1456,11 +1510,29 @@ export class OpenRappterChat extends LitElement {
     this.scrollToBottom();
 
     try {
-      const sessionKey = this.sessionKey ?? `session_${Date.now()}`;
+      const sessionKey = this.sessionKey
+        ?? this.pendingUploadSessionKey
+        ?? `session_${Date.now()}`;
 
       // Build attachments payload
       const attachmentPayload: Attachment[] = [];
       for (const a of this.attachments) {
+        if (a.uploadPromise) await a.uploadPromise;
+        if (a.error) throw new Error(`${a.filename}: ${a.error}`);
+        if (a.asset) {
+          attachmentPayload.push({
+            type: this.getAttachmentType(a.asset.mimeType),
+            assetId: a.asset.id,
+            digest: a.asset.digest,
+            size: a.asset.size,
+            mimeType: a.asset.mimeType,
+            filename: a.filename,
+          });
+          continue;
+        }
+        if (a.file.size > SMALL_DIRECT_UPLOAD_BYTES) {
+          throw new Error(`${a.filename}: verified local staging did not complete.`);
+        }
         const data = await this.readFileAsBase64(a.file);
         attachmentPayload.push({
           type: this.getAttachmentType(a.mimeType),
@@ -1502,6 +1574,7 @@ export class OpenRappterChat extends LitElement {
       }
 
       this.sessionKey = result.sessionKey;
+      this.pendingUploadSessionKey = null;
       this.activeRunId = result.runId;
       this.armRunDeadline(result.runId);
       this.attachments = [];
@@ -1645,7 +1718,10 @@ export class OpenRappterChat extends LitElement {
         filename: file.name,
       };
 
-      if (file.type.startsWith('image/')) {
+      if (
+        file.size <= SMALL_DIRECT_UPLOAD_BYTES
+        && file.type.startsWith('image/')
+      ) {
         const reader = new FileReader();
         reader.onload = () => {
           preview.dataUrl = reader.result as string;
@@ -1655,11 +1731,45 @@ export class OpenRappterChat extends LitElement {
       }
 
       this.attachments = [...this.attachments, preview];
+      if (file.size > SMALL_DIRECT_UPLOAD_BYTES) {
+        this.stageLargeAttachment(preview);
+      }
     }
   }
 
   private removeAttachment(id: string) {
+    this.attachments
+      .find((attachment) => attachment.id === id)
+      ?.uploadController
+      ?.abort();
     this.attachments = this.attachments.filter((a) => a.id !== id);
+  }
+
+  private stageLargeAttachment(preview: AttachmentPreview): void {
+    const controller = new AbortController();
+    preview.uploadController = controller;
+    const sessionId = this.sessionKey
+      ?? this.pendingUploadSessionKey
+      ?? `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    this.pendingUploadSessionKey = sessionId;
+    preview.uploadPromise = mediaUploads.upload(preview.file, {
+      sessionId,
+      signal: controller.signal,
+      onProgress: (progress) => {
+        preview.upload = progress;
+        this.requestUpdate();
+      },
+    }).then((asset) => {
+      preview.asset = asset;
+      return asset;
+    }).catch((error: unknown) => {
+      if ((error as { name?: string }).name !== 'AbortError') {
+        preview.error = error instanceof Error ? error.message : String(error);
+      }
+      return undefined;
+    }).finally(() => {
+      this.requestUpdate();
+    });
   }
 
   private readFileAsBase64(file: File): Promise<string> {
@@ -1687,6 +1797,13 @@ export class OpenRappterChat extends LitElement {
       return 'document';
     }
     return 'file';
+  }
+
+  private formatFileSize(bytes: number): string {
+    if (bytes >= 1024 ** 3) return `${(bytes / (1024 ** 3)).toFixed(2)} GB`;
+    if (bytes >= 1024 ** 2) return `${(bytes / (1024 ** 2)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${bytes} B`;
   }
 
   // ── Tool Sidebar ──
@@ -1916,15 +2033,48 @@ export class OpenRappterChat extends LitElement {
       <div class="attachment-strip">
         ${this.attachments.map(
           (att) => html`
-            <div class="attachment-preview">
+            <div
+              class="attachment-preview ${att.upload || att.error ? 'streaming' : ''}"
+              aria-label=${`${att.filename}, ${this.formatFileSize(att.file.size)}`}
+            >
               ${att.dataUrl
                 ? html`<img src=${att.dataUrl} alt=${att.filename} />`
-                : html`<div class="file-icon">📄</div>`}
+                : att.upload || att.error
+                  ? nothing
+                  : html`<div class="file-icon">📄</div>`}
               <div class="file-name">${att.filename}</div>
+              ${att.upload || att.error
+                ? html`
+                    <div
+                      class="media-detail ${att.error ? 'media-error' : ''}"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      ${this.formatFileSize(att.file.size)} ·
+                      ${att.error ?? att.upload?.message}
+                    </div>
+                    ${att.upload && att.upload.status.phase === 'uploading'
+                      ? html`
+                          <progress
+                            class="media-progress"
+                            max="100"
+                            .value=${att.upload.percent}
+                            aria-label=${`Upload progress for ${att.filename}`}
+                          ></progress>
+                        `
+                      : nothing}
+                    <div class="media-local">
+                      Stays on this OpenRappter installation · not uploaded externally
+                    </div>
+                  `
+                : nothing}
               <button
                 class="attachment-remove"
                 @click=${() => this.removeAttachment(att.id)}
-                title="Remove"
+                title=${att.upload?.status.phase === 'uploading' ? 'Cancel upload' : 'Remove'}
+                aria-label=${att.upload?.status.phase === 'uploading'
+                  ? `Cancel upload of ${att.filename}`
+                  : `Remove ${att.filename}`}
               >✕</button>
             </div>
           `,

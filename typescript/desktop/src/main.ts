@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   spawn,
   spawnSync,
@@ -70,6 +70,7 @@ const allowedActions = new Set([
   'note',
   'capture',
   'observe',
+  'media',
   'stop',
   'analyze',
   'review',
@@ -135,6 +136,29 @@ let showRuntime:
       };
     }
   | undefined;
+interface DesktopMediaRuntime {
+  initialize(): Promise<void>;
+  ingestLocalFile(input: {
+    sourcePath: string;
+    sessionId: string;
+    filename: string;
+    mimeType?: string;
+    expectedSize: number;
+    expectedDigest?: string;
+    uploadId?: string;
+    resumeUploadId?: string;
+    signal?: AbortSignal;
+    onProgress?: (status: Record<string, unknown>) => void;
+  }): Promise<Record<string, unknown>>;
+  status(ownerId: string, uploadId: string): Promise<Record<string, unknown>>;
+  cancelUpload(ownerId: string, uploadId: string): Promise<{ cancelled: true }>;
+}
+let mediaRuntime: DesktopMediaRuntime | undefined;
+const mediaJobs = new Map<string, {
+  ownerWebContentsId: number;
+  controller: AbortController;
+  status?: Record<string, unknown>;
+}>();
 
 async function portIsAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -431,6 +455,175 @@ async function loadShowRuntime() {
     store,
   };
   return showRuntime!;
+}
+
+async function loadMediaRuntime() {
+  if (mediaRuntime) return mediaRuntime;
+  const module = await import(pathToFileURL(
+    path.join(packageRoot, 'dist', 'media', 'ingest.js'),
+  ).href) as {
+    MediaIngestService: new (options: {
+      root: string;
+    }) => DesktopMediaRuntime;
+  };
+  const service = new module.MediaIngestService({
+    root: path.join(os.homedir(), '.openrappter', 'media'),
+  });
+  await service.initialize();
+  mediaRuntime = service;
+  return service;
+}
+
+function mediaUploadId(value: unknown): string {
+  const uploadId = typeof value === 'string' ? value : '';
+  if (!/^[a-f0-9-]{36}$/.test(uploadId)) {
+    throw new Error('Invalid media upload ID.');
+  }
+  return uploadId;
+}
+
+async function handleMediaStart(
+  event: IpcMainInvokeEvent,
+  request: unknown,
+): Promise<Record<string, unknown>> {
+  if (!trustedRenderer(event)) throw new Error('Untrusted desktop renderer.');
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    throw new Error('Invalid local media request.');
+  }
+  const input = request as Record<string, unknown>;
+  const sourcePath = typeof input.sourcePath === 'string' ? input.sourcePath : '';
+  const expectedSize = Number(input.expectedSize);
+  const sessionId = typeof input.sessionId === 'string' ? input.sessionId : '';
+  const filename = typeof input.filename === 'string' ? input.filename : '';
+  if (!path.isAbsolute(sourcePath) || !sessionId || !filename) {
+    throw new Error('Incomplete safe local media handoff.');
+  }
+  if (!Number.isSafeInteger(expectedSize) || expectedSize <= 0) {
+    throw new Error('Invalid selected media size.');
+  }
+  const resumeUploadId = input.resumeUploadId === undefined
+    ? undefined
+    : mediaUploadId(input.resumeUploadId);
+  if (resumeUploadId) {
+    const active = mediaJobs.get(resumeUploadId);
+    if (active) {
+      if (active.ownerWebContentsId !== event.sender.id) {
+        throw new Error('Media upload belongs to another renderer.');
+      }
+      if (active.status) return active.status;
+    }
+  }
+
+  const uploadId = resumeUploadId ?? randomUUID();
+  const controller = new AbortController();
+  const job = {
+    ownerWebContentsId: event.sender.id,
+    controller,
+    status: undefined as Record<string, unknown> | undefined,
+  };
+  mediaJobs.set(uploadId, job);
+  const service = await loadMediaRuntime();
+  let resolveFirst!: (status: Record<string, unknown>) => void;
+  let rejectFirst!: (error: unknown) => void;
+  const firstStatus = new Promise<Record<string, unknown>>((resolve, reject) => {
+    resolveFirst = resolve;
+    rejectFirst = reject;
+  });
+  let firstSettled = false;
+  void service.ingestLocalFile({
+    sourcePath,
+    sessionId,
+    filename,
+    mimeType: typeof input.mimeType === 'string' ? input.mimeType : undefined,
+    expectedSize,
+    expectedDigest:
+      typeof input.expectedDigest === 'string' ? input.expectedDigest : undefined,
+    uploadId,
+    resumeUploadId,
+    signal: controller.signal,
+    onProgress: (status) => {
+      job.status = status;
+      if (!firstSettled) {
+        firstSettled = true;
+        resolveFirst(status);
+      }
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('openrappter:media-status', status);
+      }
+    },
+  }).catch((error: unknown) => {
+    const failed = {
+      schema: 'openrappter-media-upload/1.0',
+      uploadId,
+      sessionId,
+      displayName: filename,
+      mimeType: String(input.mimeType ?? 'application/octet-stream'),
+      expectedSize,
+      receivedBytes: Number(job.status?.receivedBytes ?? 0),
+      chunkBytes: Number(job.status?.chunkBytes ?? 0),
+      phase: 'error',
+      resumable: false,
+      localOnly: true,
+      createdAt: String(job.status?.createdAt ?? new Date().toISOString()),
+      updatedAt: new Date().toISOString(),
+      expiresAt: String(job.status?.expiresAt ?? new Date().toISOString()),
+      error: error instanceof Error ? error.message : String(error),
+    };
+    job.status = failed;
+    if (!firstSettled) {
+      firstSettled = true;
+      rejectFirst(error);
+    }
+    if (!event.sender.isDestroyed()) {
+      event.sender.send('openrappter:media-status', failed);
+    }
+  });
+  return firstStatus;
+}
+
+async function handleMediaStatus(
+  event: IpcMainInvokeEvent,
+  request: unknown,
+): Promise<Record<string, unknown>> {
+  if (!trustedRenderer(event)) throw new Error('Untrusted desktop renderer.');
+  const uploadId = mediaUploadId(
+    request && typeof request === 'object'
+      ? (request as Record<string, unknown>).uploadId
+      : undefined,
+  );
+  const job = mediaJobs.get(uploadId);
+  if (job) {
+    if (job.ownerWebContentsId !== event.sender.id) {
+      throw new Error('Media upload belongs to another renderer.');
+    }
+    if (job.status) return job.status;
+  }
+  return (await loadMediaRuntime()).status('electron-main', uploadId);
+}
+
+async function handleMediaCancel(
+  event: IpcMainInvokeEvent,
+  request: unknown,
+): Promise<{ cancelled: true }> {
+  if (!trustedRenderer(event)) throw new Error('Untrusted desktop renderer.');
+  const uploadId = mediaUploadId(
+    request && typeof request === 'object'
+      ? (request as Record<string, unknown>).uploadId
+      : undefined,
+  );
+  const job = mediaJobs.get(uploadId);
+  if (job && job.ownerWebContentsId !== event.sender.id) {
+    throw new Error('Media upload belongs to another renderer.');
+  }
+  job?.controller.abort();
+  const result = await (await loadMediaRuntime())
+    .cancelUpload('electron-main', uploadId)
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return { cancelled: true as const };
+      throw error;
+    });
+  mediaJobs.delete(uploadId);
+  return result;
 }
 
 function narration(): NarrationService {
@@ -1491,6 +1684,9 @@ if (!ownsInstanceLock) {
       ipcMain.handle('openrappter:show-and-tell', handleShowAndTell);
       ipcMain.handle('openrappter:narration', handleNarration);
       ipcMain.handle('openrappter:voice', handleVoice);
+      ipcMain.handle('openrappter:media-start', handleMediaStart);
+      ipcMain.handle('openrappter:media-status', handleMediaStatus);
+      ipcMain.handle('openrappter:media-cancel', handleMediaCancel);
       ipcMain.handle(
         'openrappter:desktop-control',
         async (event, request: unknown) => {

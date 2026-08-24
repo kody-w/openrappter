@@ -23,6 +23,7 @@ import type {
   ChatSession,
   ChatMessage,
   SendMessageRequest,
+  Attachment,
 } from './types.js';
 import { RPC_ERROR, GatewayEvents } from './types.js';
 import { askBrainstem } from './brainstem-client.js';
@@ -54,6 +55,10 @@ import { buildChatEnvelope } from './chat-envelope.js';
 import { parseChatRequest } from './chat-request.js';
 import { buildTwinResponse, parseTwinEnvelope, sayText } from './twin-chat.js';
 import type { InstalledSkill } from '../skills/registry.js';
+import {
+  MEDIA_DIRECT_UPLOAD_BYTES,
+  MediaIngestService,
+} from '../media/ingest.js';
 
 /**
  * The part of `SkillsRegistry` the gateway needs.
@@ -168,7 +173,13 @@ const RATE_LIMIT_MAX_REQUESTS = 100;
  */
 const FRAME_RATE_LIMIT_WINDOW_MS = 2000;
 const FRAME_RATE_LIMIT_MAX_FRAMES = 120;
-const FRAME_RATE_LIMITED_METHODS = new Set(['zen.publish']);
+const FRAME_RATE_LIMITED_METHODS = new Set([
+  'zen.publish',
+  // Media chunks are bounded to 256 KiB decoded and carry no model/tool work.
+  // Give them the high-throughput frame budget so a legitimate video does not
+  // exhaust the 100/minute control-plane budget after its first 25 MiB.
+  'media.upload.chunk',
+]);
 const PROTOCOL_VERSION = 3;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
@@ -439,6 +450,7 @@ export class GatewayServer {
   private skillsRegistryReady?: Promise<SkillsRegistryLike>;
   /** Override for the bundled `skills/` directory. Tests only. */
   private bundledSkillsDir?: string;
+  private mediaIngest?: MediaIngestService;
 
   constructor(config?: Partial<GatewayConfig>) {
     this.config = {
@@ -785,6 +797,72 @@ export class GatewayServer {
   /** Point the bundled-skill reader at a specific directory. Tests only. */
   setBundledSkillsDir(dir: string | undefined): void {
     this.bundledSkillsDir = dir;
+  }
+
+  private async mediaIngestService(): Promise<MediaIngestService> {
+    if (!this.mediaIngest) {
+      this.mediaIngest = new MediaIngestService({
+        root: path.join(this.dataDir, 'media'),
+      });
+      await this.mediaIngest.initialize();
+    }
+    return this.mediaIngest;
+  }
+
+  private mediaOwner(conn: ConnectionInfo): string {
+    const clientId = conn.metadata?.clientId;
+    return `gateway:${typeof clientId === 'string' ? clientId : conn.id}`;
+  }
+
+  private async resolveChatAttachments(
+    attachments: Attachment[] | undefined,
+  ): Promise<Attachment[] | undefined> {
+    if (!attachments?.length) return undefined;
+    if (attachments.length > 8) throw new Error('A chat turn may include at most 8 attachments.');
+    const service = await this.mediaIngestService();
+    const resolved: Attachment[] = [];
+    for (const attachment of attachments) {
+      if (!attachment || typeof attachment !== 'object') {
+        throw new Error('Invalid chat attachment.');
+      }
+      if (attachment.path) {
+        throw new Error('Renderer-provided media paths are not accepted.');
+      }
+      if (attachment.assetId) {
+        const asset = await service.resolveAsset(attachment.assetId);
+        if (attachment.digest && attachment.digest !== asset.digest) {
+          throw new Error('Media attachment digest does not match the verified asset.');
+        }
+        resolved.push({
+          type: asset.kind === 'video'
+            ? 'file'
+            : asset.kind === 'midi'
+              ? 'audio'
+              : asset.kind,
+          assetId: asset.id,
+          digest: asset.digest,
+          filename: attachment.filename ?? asset.displayName,
+          mimeType: asset.mimeType,
+          size: asset.size,
+          path: asset.privatePath,
+        });
+        continue;
+      }
+      if (typeof attachment.data !== 'string') {
+        throw new Error('Attachment must reference a verified media asset or bounded data.');
+      }
+      const estimatedBytes = Math.floor(attachment.data.length * 3 / 4);
+      if (estimatedBytes > MEDIA_DIRECT_UPLOAD_BYTES) {
+        throw new Error(
+          `Direct attachments are limited to ${MEDIA_DIRECT_UPLOAD_BYTES} bytes; use resumable media ingest.`,
+        );
+      }
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(attachment.data)) {
+        throw new Error('Direct attachment is not canonical base64.');
+      }
+      resolved.push({ ...attachment, size: estimatedBytes });
+    }
+    return resolved;
   }
 
   /**
@@ -2559,6 +2637,103 @@ export class GatewayServer {
     // What the assistant is running on, and what to do when it cannot run.
     this.registerMethod('backend.status', async () => this.backendStatus);
 
+    this.registerMethod('media.upload.policy', async () => {
+      const service = await this.mediaIngestService();
+      return {
+        directThresholdBytes: service.policy.directThresholdBytes,
+        chunkBytes: service.policy.chunkBytes,
+        maxFileBytes: service.policy.maxFileBytes,
+        sessionStagingQuotaBytes: service.policy.sessionStagingQuotaBytes,
+        globalStagingQuotaBytes: service.policy.globalStagingQuotaBytes,
+        maxConcurrentUploads: service.policy.maxConcurrentUploads,
+        maxSessionUploads: service.policy.maxSessionUploads,
+        transport: 'websocket-base64',
+        encodedChunkMaximumBytes: Math.ceil(service.policy.chunkBytes / 3) * 4,
+        localOnly: true,
+      };
+    }, { requiresAuth: true });
+
+    this.registerMethod('media.upload.start', async (params: {
+      sessionId?: string;
+      filename?: string;
+      mimeType?: string;
+      expectedSize?: number;
+      expectedDigest?: string;
+    }, conn) => {
+      const service = await this.mediaIngestService();
+      return service.startUpload({
+        ownerId: this.mediaOwner(conn),
+        sessionId: String(params.sessionId ?? ''),
+        filename: String(params.filename ?? ''),
+        mimeType: typeof params.mimeType === 'string' ? params.mimeType : undefined,
+        expectedSize: Number(params.expectedSize),
+        expectedDigest:
+          typeof params.expectedDigest === 'string' ? params.expectedDigest : undefined,
+      });
+    }, { requiresAuth: true });
+
+    this.registerMethod('media.upload.chunk', async (params: {
+      uploadId?: string;
+      offset?: number;
+      data?: string;
+      chunkDigest?: string;
+    }, conn) => {
+      const service = await this.mediaIngestService();
+      if (typeof params.data !== 'string' || params.data.length === 0) {
+        throw new Error('media.upload.chunk requires base64 data.');
+      }
+      const encodedMaximum = Math.ceil(service.policy.chunkBytes / 3) * 4;
+      if (
+        params.data.length > encodedMaximum
+        || !/^[A-Za-z0-9+/]*={0,2}$/.test(params.data)
+      ) {
+        throw new Error('Encoded media chunk exceeds the bounded transport policy.');
+      }
+      const bytes = Buffer.from(params.data, 'base64');
+      if (bytes.toString('base64') !== params.data) {
+        throw new Error('Encoded media chunk is not canonical base64.');
+      }
+      return service.appendChunk({
+        ownerId: this.mediaOwner(conn),
+        uploadId: String(params.uploadId ?? ''),
+        offset: Number(params.offset),
+        bytes,
+        chunkDigest: String(params.chunkDigest ?? ''),
+      });
+    }, { requiresAuth: true });
+
+    this.registerMethod('media.upload.status', async (params: {
+      uploadId?: string;
+    }, conn) => {
+      const service = await this.mediaIngestService();
+      return service.status(this.mediaOwner(conn), String(params.uploadId ?? ''));
+    }, { requiresAuth: true });
+
+    this.registerMethod('media.upload.complete', async (params: {
+      uploadId?: string;
+      expectedDigest?: string;
+    }, conn) => {
+      const service = await this.mediaIngestService();
+      const asset = await service.completeUpload({
+        ownerId: this.mediaOwner(conn),
+        uploadId: String(params.uploadId ?? ''),
+        expectedDigest:
+          typeof params.expectedDigest === 'string' ? params.expectedDigest : undefined,
+      });
+      const { privatePath: _privatePath, ...descriptor } = asset;
+      return descriptor;
+    }, { requiresAuth: true });
+
+    this.registerMethod('media.upload.cancel', async (params: {
+      uploadId?: string;
+    }, conn) => {
+      const service = await this.mediaIngestService();
+      return service.cancelUpload(
+        this.mediaOwner(conn),
+        String(params.uploadId ?? ''),
+      );
+    }, { requiresAuth: true });
+
     // Subscribe/unsubscribe
     this.registerMethod('subscribe', async (params: { events: string[] }, conn) => {
       for (const event of params.events) conn.subscriptions.add(event);
@@ -2572,7 +2747,7 @@ export class GatewayServer {
     // chat.send — primary chat entry point (openclaw-compatible)
     this.registerMethod(
       'chat.send',
-      async (params: { sessionKey?: string; sessionId?: string; message?: string; idempotencyKey?: string; target?: string }, conn) => {
+      async (params: { sessionKey?: string; sessionId?: string; message?: string; idempotencyKey?: string; target?: string; attachments?: Attachment[] }, conn) => {
         const message = params.message?.trim();
         if (!message) throw new Error('message required');
 
@@ -2585,6 +2760,12 @@ export class GatewayServer {
         }
 
         const sessionKey = resolveSessionId(params) || `session_${randomUUID().slice(0, 8)}`;
+        const attachments = await this.resolveChatAttachments(params.attachments);
+        if (target === 'brainstem' && attachments?.length) {
+          throw new Error(
+            'Verified local media is available only to the local OpenRappter target.',
+          );
+        }
         const runId = `run_${randomUUID().slice(0, 8)}`;
         const run: ActiveRun = {
           runId,
@@ -2627,7 +2808,7 @@ export class GatewayServer {
             void this.askBrainstemWithEvents(run, message);
             return;
           }
-          void this.executeAgentWithEvents(run, message, conn.id);
+          void this.executeAgentWithEvents(run, message, conn.id, attachments);
         }, 0);
 
         return accepted;
@@ -3489,7 +3670,12 @@ export class GatewayServer {
     }
   }
 
-  private async executeAgentWithEvents(run: ActiveRun, message: string, _connId: string): Promise<void> {
+  private async executeAgentWithEvents(
+    run: ActiveRun,
+    message: string,
+    _connId: string,
+    attachments?: Attachment[],
+  ): Promise<void> {
     if (
       !this.agentHandler
       || run.aborted
@@ -3503,7 +3689,7 @@ export class GatewayServer {
     try {
       const result = await this.runAgentOperation(
         run.generation,
-        () => handler({ message, sessionId: run.sessionId }),
+        () => handler({ message, sessionId: run.sessionId, attachments }),
       );
 
       if (run.aborted || !this.isGenerationActive(run.generation)) return;

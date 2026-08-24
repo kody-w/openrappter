@@ -176,6 +176,11 @@ export interface Attachment {
   data?: string;
   mimeType: string;
   filename?: string;
+  size?: number;
+  assetId?: string;
+  digest?: string;
+  /** Server-internal verified path. RPC callers are never allowed to set it. */
+  path?: string;
 }
 
 export interface AgentOptions {

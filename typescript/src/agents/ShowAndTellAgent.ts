@@ -7,6 +7,11 @@ import type { AgentMetadata } from './types.js';
 import type { LLMProvider } from '../providers/types.js';
 import { getFlightRecorder } from '../flight-recorder/index.js';
 import {
+  MediaIngestService,
+  type VerifiedMediaAsset,
+} from '../media/ingest.js';
+import { openrappterPath } from '../infra/openrappter-home.js';
+import {
   analyzeShowAndTellSession,
   assertContextCaptureAvailable,
   buildShowAndTellArtifacts,
@@ -56,6 +61,7 @@ interface ShowAndTellAgentOptions {
   readContext?: typeof readActiveContext;
   checkCapture?: typeof assertContextCaptureAvailable;
   provider?: LLMProvider | null;
+  resolveMediaAsset?: (assetId: string) => Promise<VerifiedMediaAsset>;
 }
 
 function errorMessage(error: unknown): string {
@@ -79,6 +85,7 @@ export class ShowAndTellAgent extends BasicAgent {
   private readonly checkCapture: typeof assertContextCaptureAvailable;
   private provider: LLMProvider | null;
   private readonly localSurface: boolean;
+  private readonly resolveMediaAsset: (assetId: string) => Promise<VerifiedMediaAsset>;
 
   constructor(options: ShowAndTellAgentOptions = {}) {
     const metadata: AgentMetadata = {
@@ -96,6 +103,7 @@ export class ShowAndTellAgent extends BasicAgent {
               'note',
               'capture',
               'observe',
+              'media',
               'stop',
               'analyze',
               'review',
@@ -173,6 +181,11 @@ export class ShowAndTellAgent extends BasicAgent {
             type: 'string',
             description: 'Natural-language fallback used as a note or detail.',
           },
+          asset_id: {
+            type: 'string',
+            description:
+              'Content-addressed media asset id returned by verified local media ingest.',
+          },
         },
         required: [],
       },
@@ -192,6 +205,17 @@ export class ShowAndTellAgent extends BasicAgent {
     this.provider = options.provider ?? null;
     this.localSurface =
       options.localSurface ?? options.root !== undefined;
+    if (options.resolveMediaAsset) {
+      this.resolveMediaAsset = options.resolveMediaAsset;
+    } else {
+      const media = new MediaIngestService({
+        root: openrappterPath('media'),
+      });
+      this.resolveMediaAsset = async (assetId) => {
+        await media.initialize();
+        return media.resolveAsset(assetId);
+      };
+    }
   }
 
   setProvider(provider: LLMProvider | null): void {
@@ -231,6 +255,9 @@ export class ShowAndTellAgent extends BasicAgent {
           break;
         case 'observe':
           result = await this.observe(kwargs);
+          break;
+        case 'media':
+          result = await this.media(kwargs);
           break;
         case 'stop':
           result = await this.stop(kwargs);
@@ -814,6 +841,39 @@ export class ShowAndTellAgent extends BasicAgent {
       return this.store.getSession(sessionId.trim());
     }
     return (await this.store.activeSession()) ?? this.store.latestSession();
+  }
+
+  private async media(kwargs: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const session = await this.requireRecordingSession(kwargs.session_id);
+    const assetId = typeof kwargs.asset_id === 'string' ? kwargs.asset_id.trim() : '';
+    if (!/^sha256:[a-f0-9]{64}$/.test(assetId)) {
+      throw new Error('Show-and-Tell media requires a verified SHA-256 asset id.');
+    }
+    const asset = await this.resolveMediaAsset(assetId);
+    await this.store.appendEvent(session.id, 'media.attached', 'show-and-tell', {
+      asset: {
+        schema: asset.schema,
+        id: asset.id,
+        digest: asset.digest,
+        size: asset.size,
+        mimeType: asset.mimeType,
+        kind: asset.kind,
+        displayName: asset.displayName,
+        storage: asset.storage,
+        verified: asset.verified,
+        probe: asset.probe,
+      },
+      verifiedPrivatePath: asset.privatePath,
+      localOnly: true,
+    });
+    const { privatePath: _privatePath, ...descriptor } = asset;
+    return {
+      status: 'success',
+      action: 'media',
+      session_id: session.id,
+      asset: descriptor,
+      message: `${asset.displayName} is verified in private local media storage.`,
+    };
   }
 
   private async requireRecordingSession(sessionId: unknown): Promise<ShowAndTellSession> {

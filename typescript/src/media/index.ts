@@ -7,6 +7,8 @@ export * from './image.js';
 export * from './audio.js';
 export * from './video.js';
 export * from './files.js';
+export * from './ingest.js';
+export * from './process.js';
 
 /**
  * Unified Media Manager

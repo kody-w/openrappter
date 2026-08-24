@@ -248,3 +248,6 @@ Future XPedition/Grail work consumes the typed `VoiceSurfaceAdapter` and
 `VoiceAudioDescriptor` seam from `typescript/src/voice/integration.ts`; it must
 not reach into the provider or credential store. The local relay, station
 ident, and rolling-buffer design above remains a separate beta specification.
+The default Grail adapter and bounded back-and-forth conversation controller now
+live beside that seam in `typescript/src/voice/grail-adapter.ts` and
+`conversation.ts`. Pending shells remain untouched.

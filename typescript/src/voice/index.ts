@@ -9,3 +9,6 @@ export * from './elevenlabs.js';
 export * from './output-queue.js';
 export * from './speech-ticket.js';
 export * from './integration.js';
+export * from './grail-adapter.js';
+export * from './conversation.js';
+export * from './vad.js';

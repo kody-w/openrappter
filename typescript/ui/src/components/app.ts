@@ -184,7 +184,13 @@ export class OpenRappterApp extends LitElement {
       this.connected = true;
 
       // Subscribe to chat events for streaming
-      await gateway.subscribe(['chat', 'agent', 'presence', 'heartbeat']);
+      await gateway.subscribe([
+        'chat',
+        'agent',
+        'approval',
+        'presence',
+        'heartbeat',
+      ]);
 
       // Get initial status
       try {

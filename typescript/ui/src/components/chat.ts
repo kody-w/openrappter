@@ -21,6 +21,10 @@ import {
   type EstateBuddyEvidenceSource,
 } from '../services/estate-buddies.js';
 import './voice-settings.js';
+import {
+  OpenRappterVoiceConversation,
+} from './voice-conversation.js';
+import type { VoiceAssistantOutput } from '../../../src/voice/conversation.js';
 
 const AGENT_RUN_OVERALL_TIMEOUT_MS = 30 * 60_000;
 const RUN_ABORT_TIMEOUT_MS = 5_000;
@@ -1110,6 +1114,7 @@ export class OpenRappterChat extends LitElement {
   @state() private speechStatus = 'idle';
   @state() private speechDetail = '';
   @state() private voiceProvider: 'system' | 'local' | 'elevenlabs' = 'local';
+  @state() private voiceAutoSpeak = false;
   @state() private voiceSettingsOpen = false;
   @state() private vibeState = 'missing';
   @state() private vibePhase = 'idle';
@@ -1147,6 +1152,7 @@ export class OpenRappterChat extends LitElement {
   @state() private userAtBottom = true;
   private sessionLoadGeneration = 0;
   private sendGeneration = 0;
+  private voiceSubmitting = false;
 
   private toolSidebarWidth = 320;
   private resizing = false;
@@ -1158,6 +1164,8 @@ export class OpenRappterChat extends LitElement {
   @query('textarea') private textarea!: HTMLTextAreaElement;
   @query('.messages') private messagesContainer!: HTMLDivElement;
   @query('.hidden-input') private fileInput!: HTMLInputElement;
+  @query('openrappter-voice-conversation')
+  private voiceConversation?: OpenRappterVoiceConversation;
 
   // ── Lifecycle ──
 
@@ -1222,6 +1230,10 @@ export class OpenRappterChat extends LitElement {
         if (status.enabled) this.speech.noteUserGesture();
       }
     }
+    if (typeof status.autoSpeak === 'boolean') {
+      this.voiceAutoSpeak = status.autoSpeak;
+    }
+    this.voiceConversation?.applyStatus(status);
   }
 
   /**
@@ -1231,7 +1243,10 @@ export class OpenRappterChat extends LitElement {
    * we stay quiet rather than falling back to the shown text — that fallback
    * is what makes assistants read markdown asterisks aloud.
    */
-  private async speakReply(data: { voiceText?: string; voiceTicket?: string }) {
+  private async speakReply(
+    data: { voiceText?: string; voiceTicket?: string },
+    signal?: AbortSignal,
+  ) {
     const line = spokenLineFrom(data);
     if (!line) return;
     const desktop = desktopBridge();
@@ -1273,12 +1288,35 @@ export class OpenRappterChat extends LitElement {
         this.activeAudio?.pause();
         const audio = new Audio(url);
         this.activeAudio = audio;
-        audio.addEventListener('ended', () => {
-          URL.revokeObjectURL(url);
-          if (this.activeAudio === audio) this.activeAudio = undefined;
-          this.speechStatus = 'ready';
-        }, { once: true });
+        const ended = new Promise<void>((resolve, reject) => {
+          const cleanup = () => {
+            URL.revokeObjectURL(url);
+            signal?.removeEventListener('abort', abort);
+            if (this.activeAudio === audio) this.activeAudio = undefined;
+          };
+          const abort = () => {
+            audio.pause();
+            cleanup();
+            reject(Object.assign(new Error('Speech cancelled.'), {
+              code: 'cancelled',
+            }));
+          };
+          audio.addEventListener('ended', () => {
+            cleanup();
+            this.speechStatus = 'ready';
+            resolve();
+          }, { once: true });
+          audio.addEventListener('error', () => {
+            cleanup();
+            reject(new Error('Voice playback failed.'));
+          }, { once: true });
+          signal?.addEventListener('abort', abort, { once: true });
+        });
+        if (signal?.aborted) throw Object.assign(new Error('Speech cancelled.'), {
+          code: 'cancelled',
+        });
         await audio.play();
+        await ended;
         return;
       } catch (error) {
         this.speechStatus = 'error';
@@ -1287,9 +1325,20 @@ export class OpenRappterChat extends LitElement {
       }
     }
     if (!this.speechEnabled) return;
-    const result = await this.speech.speak(line);
-    this.speechStatus = result.state;
-    this.speechDetail = result.detail?.reason ?? '';
+    const abort = () => this.speech.stop();
+    signal?.addEventListener('abort', abort, { once: true });
+    try {
+      const result = await this.speech.speak(line);
+      if (signal?.aborted) {
+        throw Object.assign(new Error('Speech cancelled.'), {
+          code: 'cancelled',
+        });
+      }
+      this.speechStatus = result.state;
+      this.speechDetail = result.detail?.reason ?? '';
+    } finally {
+      signal?.removeEventListener('abort', abort);
+    }
   }
 
   private toggleSpeech = async () => {
@@ -1375,6 +1424,58 @@ export class OpenRappterChat extends LitElement {
 
   private handleVoiceStatusChange = (event: CustomEvent<Record<string, unknown>>) => {
     this.applyVoiceStatus(event.detail);
+  };
+
+  private sendVoiceTranscript = async (
+    transcript: string,
+    signal: AbortSignal,
+  ): Promise<{ runId: string }> => {
+    if (signal.aborted) throw new Error('Voice turn cancelled.');
+    if (this.sending || this.sessionTransitioning) {
+      throw new Error('Another chat turn is already active.');
+    }
+    if (this.attachments.length > 0) {
+      throw new Error('Remove staged attachments before starting a voice turn.');
+    }
+    if (this.chatTarget === 'estate') {
+      throw new Error('Voice conversation is unavailable for estate Twin drafting.');
+    }
+    this.inputValue = transcript;
+    this.voiceSubmitting = true;
+    try {
+      await this.handleSend();
+    } finally {
+      this.voiceSubmitting = false;
+    }
+    if (signal.aborted) throw new Error('Voice turn cancelled.');
+    if (!this.activeRunId) throw new Error('Voice transcript was not accepted.');
+    return { runId: this.activeRunId };
+  };
+
+  private speakVoiceAssistant = async (
+    output: VoiceAssistantOutput,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    await this.speakReply({
+      voiceText: output.text,
+      voiceTicket: output.ticket,
+    }, signal);
+  };
+
+  private finishVoiceOutput = async (data: {
+    runId: string;
+    voiceText?: string;
+    voiceTicket?: string;
+  }): Promise<void> => {
+    const handled = await this.voiceConversation?.assistantFinal({
+      runId: data.runId,
+      text: data.voiceText ?? '',
+      ticket: data.voiceTicket,
+    }) ?? false;
+    if (!handled && this.voiceAutoSpeak) {
+      if (data.voiceText) this.voiceConversation?.noteSpokenText(data.voiceText);
+      await this.speakReply(data);
+    }
   };
 
   disconnectedCallback() {
@@ -1544,16 +1645,16 @@ export class OpenRappterChat extends LitElement {
       const committed = text || this.responseBuffers.get(data.runId) || '';
       this.commitStreamingMessage(data.runId, committed);
       this.finishStreaming(data.runId, true, 'committed');
-      // The gateway has always sent `voiceText`; nothing consumed it, so the
-      // spoken half of every reply was discarded on arrival.
-      void this.speakReply(data);
+      void this.finishVoiceOutput(data);
     }
 
     if (data.state === 'error') {
+      this.voiceConversation?.assistantFailed(data.runId, 'error');
       this.handleStreamError(data.runId, data.errorMessage ?? 'Unknown error');
     }
 
     if (data.state === 'aborted') {
+      this.voiceConversation?.assistantFailed(data.runId, 'cancelled');
       this.responseBuffers.delete(data.runId);
       this.finishStreaming(data.runId, true, 'cancelled');
     }
@@ -1620,6 +1721,7 @@ export class OpenRappterChat extends LitElement {
   }
 
   private async closeActiveRun(): Promise<void> {
+    await this.voiceConversation?.cancelConversation('session-change');
     if (!this.activeRunId) return;
     const runId = this.activeRunId;
     this.rememberClosedRun(runId);
@@ -1700,6 +1802,12 @@ export class OpenRappterChat extends LitElement {
   // ── Sending Messages ──
 
   private async handleSend() {
+    if (
+      !this.voiceSubmitting
+      && this.voiceConversation?.hasActiveConversation
+    ) {
+      await this.voiceConversation.cancelConversation('keyboard-turn');
+    }
     if (this.sessionTransitioning) return;
     if (this.creatingEstateBuddy) {
       this.error = 'Wait for estate buddy creation to finish before sending.';
@@ -2926,6 +3034,13 @@ export class OpenRappterChat extends LitElement {
             ></openrappter-voice-settings>`
           : nothing}
       </div>
+
+      ${desktopBridge()
+        ? html`<openrappter-voice-conversation
+            .sendTranscript=${this.sendVoiceTranscript}
+            .speakAssistant=${this.speakVoiceAssistant}
+          ></openrappter-voice-conversation>`
+        : nothing}
 
       ${this.error
         ? html`<div class="error-toast">

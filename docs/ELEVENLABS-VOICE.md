@@ -26,6 +26,37 @@ IPC, or secure OS credentials. ElevenLabs therefore remains TypeScript desktop
 owned rather than introducing a second Python implementation. The stable safe
 wire shapes are recorded in `tests/elevenlabs-voice-wire.json`.
 
+## Back-and-forth conversation
+
+The default, shell-neutral Grail adapter owns immutable reviewed voice settings:
+output, auto-speak, `system|local|elevenlabs`, verified voice/model, input,
+continuous mode, a closed push-to-talk choice, input device, transcript policy,
+background pause, wake-lock policy, and bounded VAD/timeouts. Credential setup
+is a separate write-only flow and is never part of exported display settings.
+
+The conversation controller follows:
+
+`idle → listening → endpointing → transcribing → sending → thinking → speaking → listening`
+
+It also exposes paused, cancelled, error, offline, auth, and model-unavailable
+states. Local Web Audio capture is echo-cancelled, memory-bounded, and sent only
+to the Electron main process for existing local Whisper transcription. Audio is
+discarded immediately. Only the final endpointed/confirmed transcript enters
+`chat.send`; only signed final assistant voice text enters remote TTS.
+
+Silence VAD, push-to-talk release, and maximum duration can endpoint a turn.
+Barge-in aborts playback before reopening the microphone. Assistant-text echo is
+suppressed for a bounded window. Hidden/minimized windows pause capture, wake
+locks are optional and listening-only, device loss fails closed, and resuming
+requires a visible human action. Any execution approval pauses the loop;
+voice code has no approve method and cannot resume while `exec.pending` is
+non-empty.
+
+The public reference in `localFirstTools` was used only for interaction
+vocabulary (separate input/output groups, continuous mode, PTT, visible
+listening/speaking state, pause). Its branding, assets, unsafe browser speech,
+API-key export, and arbitrary endpoint patterns were not copied.
+
 ## Safe live smoke
 
 After review, the operator performs the one permitted live check:

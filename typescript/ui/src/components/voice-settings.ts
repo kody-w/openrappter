@@ -1,6 +1,12 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { desktopBridge } from '../services/desktop.js';
+import {
+  ALLOWED_PUSH_TO_TALK_KEYS,
+  DEFAULT_GRAIL_VOICE_SETTINGS,
+  DefaultGrailVoiceIntegrationAdapter,
+  type GrailVoiceSettings,
+} from '../../../src/voice/grail-adapter.js';
 
 type ProviderId = 'system' | 'local' | 'elevenlabs';
 
@@ -23,6 +29,8 @@ interface VoiceStatus {
     models: Array<{ id: string; name: string; languages: string[] }>;
   };
   quota?: { usedCharacters: number | null; limitCharacters: number | null };
+  settings?: Partial<GrailVoiceSettings>;
+  inputDevices?: Array<{ id: string; label: string }>;
   disclosure?: string;
 }
 
@@ -77,6 +85,17 @@ export class OpenRappterVoiceSettings extends LitElement {
       outline:2px solid var(--accent); outline-offset:2px;
     }
     .row { display:flex; gap:.5rem; flex-wrap:wrap; }
+    .group {
+      display:grid; gap:.65rem; padding:.75rem;
+      border:1px solid var(--border); border-radius:.5rem;
+    }
+    .toggle { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+    .toggle input { width:auto; }
+    .credential { border-top:2px solid var(--border); padding-top:.75rem; display:grid; gap:.65rem; }
+    .listening-dot {
+      width:.65rem; height:.65rem; display:inline-block; border-radius:50%;
+      background:#ef4444; margin-right:.35rem;
+    }
     .status, .disclosure, .estimate {
       font-size:.75rem; line-height:1.45; color:var(--text-secondary);
     }
@@ -90,6 +109,10 @@ export class OpenRappterVoiceSettings extends LitElement {
   @state() private busy = false;
   @state() private error = '';
   @state() private result = '';
+  @state() private draft: GrailVoiceSettings = DEFAULT_GRAIL_VOICE_SETTINGS;
+  @state() private inputDevices: Array<{ id: string; label: string }> = [];
+  private adapter = new DefaultGrailVoiceIntegrationAdapter();
+  private committed: GrailVoiceSettings = DEFAULT_GRAIL_VOICE_SETTINGS;
   private activeAudio?: HTMLAudioElement;
 
   connectedCallback(): void {
@@ -105,7 +128,10 @@ export class OpenRappterVoiceSettings extends LitElement {
   }
 
   private onKeydown = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') this.close();
+    if (event.key === 'Escape') {
+      this.cancelSettings();
+      this.close();
+    }
   };
 
   private close(): void {
@@ -119,7 +145,33 @@ export class OpenRappterVoiceSettings extends LitElement {
     const desktop = desktopBridge();
     if (!desktop) return;
     this.status = await desktop.voice({ action: 'status' }) as VoiceStatus;
+    this.inputDevices = this.status.inputDevices ?? await this.enumerateInputs();
+    this.adapter = new DefaultGrailVoiceIntegrationAdapter({
+      ...DEFAULT_GRAIL_VOICE_SETTINGS,
+      ...this.status.settings,
+      provider: this.status.settings?.provider ?? this.status.provider ?? 'local',
+      ttsVoice: this.status.settings?.ttsVoice ?? this.status.selectedVoice,
+      ttsModel: this.status.settings?.ttsModel ?? this.status.selectedModel,
+      outputEnabled: this.status.settings?.outputEnabled ?? this.status.enabled ?? false,
+      autoSpeak: this.status.settings?.autoSpeak ?? false,
+    });
+    this.committed = this.adapter.settings;
+    this.draft = { ...this.committed };
     this.emitStatus();
+  }
+
+  private async enumerateInputs(): Promise<Array<{ id: string; label: string }>> {
+    if (!navigator.mediaDevices?.enumerateDevices) return [];
+    try {
+      return (await navigator.mediaDevices.enumerateDevices())
+        .filter((device) => device.kind === 'audioinput')
+        .map((device, index) => ({
+          id: device.deviceId || 'default',
+          label: device.label || `Microphone ${index + 1}`,
+        }));
+    } catch {
+      return [];
+    }
   }
 
   private emitStatus(): void {
@@ -190,14 +242,14 @@ export class OpenRappterVoiceSettings extends LitElement {
     if (result) this.result = 'ElevenLabs credential deleted.';
   };
 
-  private providerChanged = async (event: Event) => {
+  private providerChanged = (event: Event) => {
     const provider = (event.target as HTMLSelectElement).value as ProviderId;
-    await this.run(async () => desktopBridge()!.voice({
-      action: 'provider.set',
+    this.draft = {
+      ...this.draft,
       provider,
-      voice: this.status.selectedVoice,
-      model: this.status.selectedModel,
-    }));
+      ttsVoice: this.draft.ttsVoice ?? this.status.catalog?.voices[0]?.id,
+      ttsModel: this.draft.ttsModel ?? this.status.catalog?.models[0]?.id,
+    };
   };
 
   private catalogSelectionChanged = async (
@@ -205,17 +257,67 @@ export class OpenRappterVoiceSettings extends LitElement {
     event: Event,
   ) => {
     const value = (event.target as HTMLSelectElement).value;
-    await this.run(async () => desktopBridge()!.voice({
-      action: 'provider.set',
-      provider: 'elevenlabs',
-      voice: field === 'voice' ? value : this.status.selectedVoice,
-      model: field === 'model' ? value : this.status.selectedModel,
+    this.draft = {
+      ...this.draft,
+      [field === 'voice' ? 'ttsVoice' : 'ttsModel']: value,
+    };
+  };
+
+  private updateBoolean(
+    field: 'outputEnabled' | 'autoSpeak' | 'inputEnabled' | 'continuousConversation',
+    event: Event,
+  ): void {
+    this.draft = {
+      ...this.draft,
+      [field]: (event.target as HTMLInputElement).checked,
+    };
+  }
+
+  private updateSelect(
+    field: 'pushToTalkKey' | 'inputDeviceId' | 'transcriptPolicy' | 'wakeLock',
+    event: Event,
+  ): void {
+    this.draft = {
+      ...this.draft,
+      [field]: (event.target as HTMLSelectElement).value,
+    };
+  }
+
+  private saveSettings = async () => {
+    let reviewed: GrailVoiceSettings;
+    try {
+      reviewed = this.adapter.reviewAndCommit(this.draft, {
+        reservedKeys: ['Escape', 'Enter'],
+        availableInputDeviceIds: this.inputDevices.length > 0
+          ? this.inputDevices.map((device) => device.id)
+          : undefined,
+      });
+    } catch (error) {
+      this.error = (error as Error).message;
+      return;
+    }
+    const result = await this.run(async () => desktopBridge()!.voice({
+      action: 'settings.save',
+      settings: reviewed,
     }));
+    if (result) {
+      this.committed = this.adapter.settings;
+      this.draft = { ...reviewed };
+      this.result = 'Reviewed voice settings saved.';
+    }
+  };
+
+  private cancelSettings = () => {
+    this.draft = { ...this.adapter.discardDraft() };
+    this.error = '';
+    this.result = 'Unsaved voice settings discarded.';
   };
 
   private preview = async (smoke: boolean) => {
     const result = await this.run(async () => desktopBridge()!.voice({
       action: smoke ? 'smoke' : 'preview',
+      voice: this.draft.ttsVoice,
+      model: this.draft.ttsModel,
     }));
     if (!result) return;
     const bytes = audioBytes(result.audio);
@@ -249,7 +351,7 @@ export class OpenRappterVoiceSettings extends LitElement {
   render() {
     const providers = this.status.providers ?? [];
     const eleven = providers.find((provider) => provider.id === 'elevenlabs');
-    const selected = this.status.provider ?? 'local';
+    const selected = this.draft.provider;
     const voices = this.status.catalog?.voices ?? [];
     const models = this.status.catalog?.models ?? [];
     const estimate = selected === 'elevenlabs'
@@ -262,27 +364,147 @@ export class OpenRappterVoiceSettings extends LitElement {
         role="dialog"
         aria-modal="false"
         aria-labelledby="voice-settings-title"
-        @keydown=${(event: KeyboardEvent) => event.key === 'Escape' && this.close()}
+        @keydown=${(event: KeyboardEvent) => {
+          if (event.key === 'Escape') {
+            this.cancelSettings();
+            this.close();
+          }
+        }}
       >
         <header>
           <h2 id="voice-settings-title">Voice settings</h2>
-          <button @click=${this.close} aria-label="Close voice settings">✕</button>
+          <button @click=${() => {
+            this.cancelSettings();
+            this.close();
+          }} aria-label="Close voice settings">✕</button>
         </header>
 
-        <label>
-          Provider
-          <select
-            .value=${selected}
-            @change=${this.providerChanged}
-            ?disabled=${this.busy}
-          >
-            ${providers.map((provider) => html`
-              <option value=${provider.id}>${provider.name}</option>
-            `)}
-          </select>
-        </label>
+        <div class="group">
+          <strong>Voice output</strong>
+          <label class="toggle">
+            <span>Enable voice output</span>
+            <input type="checkbox"
+              .checked=${this.draft.outputEnabled}
+              @change=${(event: Event) => this.updateBoolean('outputEnabled', event)} />
+          </label>
+          <label class="toggle">
+            <span>Auto-speak responses</span>
+            <input type="checkbox"
+              .checked=${this.draft.autoSpeak}
+              @change=${(event: Event) => this.updateBoolean('autoSpeak', event)} />
+          </label>
+          <label>
+            Provider
+            <select .value=${selected} @change=${this.providerChanged} ?disabled=${this.busy}>
+              ${providers.map((provider) => html`
+                <option value=${provider.id}>${provider.name}</option>
+              `)}
+            </select>
+          </label>
 
-        <strong>ElevenLabs setup</strong>
+          ${selected === 'elevenlabs' && eleven?.verified
+            ? html`
+                <label>
+                  Verified TTS voice
+                  <select
+                    .value=${this.draft.ttsVoice ?? voices[0]?.id ?? ''}
+                    @change=${(event: Event) => this.catalogSelectionChanged('voice', event)}
+                  >
+                    ${voices.map((voice) => html`
+                      <option value=${voice.id}>${voice.name} (${voice.language})</option>
+                    `)}
+                  </select>
+                </label>
+                <label>
+                  Verified TTS model
+                  <select
+                    .value=${this.draft.ttsModel ?? models[0]?.id ?? ''}
+                    @change=${(event: Event) => this.catalogSelectionChanged('model', event)}
+                  >
+                    ${models.map((model) => html`
+                      <option value=${model.id}>${model.name}</option>
+                    `)}
+                  </select>
+                </label>
+                <div class="row">
+                  <button @click=${() => this.preview(false)} ?disabled=${this.busy}>Preview</button>
+                  <button @click=${() => this.preview(true)} ?disabled=${this.busy}>Safe live smoke</button>
+                  <button @click=${this.cancelSpeech}>Cancel speech</button>
+                </div>
+              `
+            : nothing}
+        </div>
+
+        <div class="group">
+          <strong>Voice input</strong>
+          <label class="toggle">
+            <span>Enable voice input</span>
+            <input type="checkbox"
+              .checked=${this.draft.inputEnabled}
+              @change=${(event: Event) => this.updateBoolean('inputEnabled', event)} />
+          </label>
+          <label class="toggle">
+            <span>Continuous conversation mode</span>
+            <input type="checkbox"
+              .checked=${this.draft.continuousConversation}
+              @change=${(event: Event) => this.updateBoolean('continuousConversation', event)} />
+          </label>
+          <label>
+            Push-to-talk key
+            <select .value=${this.draft.pushToTalkKey}
+              @change=${(event: Event) => this.updateSelect('pushToTalkKey', event)}>
+              ${ALLOWED_PUSH_TO_TALK_KEYS.map((key) => html`
+                <option value=${key}>${key.replace(/Right$/, ' (right)')}</option>
+              `)}
+            </select>
+          </label>
+          <label>
+            Input device
+            <select .value=${this.draft.inputDeviceId}
+              @change=${(event: Event) => this.updateSelect('inputDeviceId', event)}>
+              <option value="default">Default microphone</option>
+              ${this.inputDevices
+                .filter((device) => device.id !== 'default')
+                .map((device) => html`<option value=${device.id}>${device.label}</option>`)}
+            </select>
+          </label>
+          <label class="toggle">
+            <span>Review transcript before sending</span>
+            <input type="checkbox"
+              .checked=${this.draft.transcriptPolicy === 'review'}
+              @change=${(event: Event) => {
+                this.draft = {
+                  ...this.draft,
+                  transcriptPolicy: (event.target as HTMLInputElement).checked
+                    ? 'review'
+                    : 'auto',
+                };
+              }} />
+          </label>
+          <label>
+            Wake-lock policy
+            <select .value=${this.draft.wakeLock}
+              @change=${(event: Event) => this.updateSelect('wakeLock', event)}>
+              <option value="never">Never</option>
+              <option value="while-listening">While listening only</option>
+            </select>
+          </label>
+          <div class="status">
+            <span class="listening-dot"></span>
+            The red indicator is visible whenever the microphone is listening.
+            Capture pauses when the app is hidden or minimized.
+          </div>
+        </div>
+
+        <div class="row">
+          <button class="primary" @click=${this.saveSettings} ?disabled=${this.busy}>
+            Save settings
+          </button>
+          <button @click=${this.cancelSettings} ?disabled=${this.busy}>Cancel</button>
+        </div>
+
+        <div class="credential">
+          <strong>Secure ElevenLabs credential setup</strong>
               <div class="status ${eleven?.verified ? 'verified' : ''}">
                 ${eleven?.verified
                   ? `✓ Verified ${eleven.masked ?? ''} · ${eleven.verifiedAt ?? ''}`
@@ -320,45 +542,16 @@ export class OpenRappterVoiceSettings extends LitElement {
                     `
                   : nothing}
               </div>
-
-        ${selected === 'elevenlabs' && eleven?.verified
-          ? html`
-              <label>
-                Verified voice
-                <select
-                  .value=${this.status.selectedVoice ?? voices[0]?.id ?? ''}
-                  @change=${(event: Event) => this.catalogSelectionChanged('voice', event)}
-                >
-                  ${voices.map((voice) => html`
-                    <option value=${voice.id}>${voice.name} (${voice.language})</option>
-                  `)}
-                </select>
-              </label>
-              <label>
-                Verified model
-                <select
-                  .value=${this.status.selectedModel ?? models[0]?.id ?? ''}
-                  @change=${(event: Event) => this.catalogSelectionChanged('model', event)}
-                >
-                  ${models.map((model) => html`
-                    <option value=${model.id}>${model.name}</option>
-                  `)}
-                </select>
-              </label>
-              <div class="row">
-                <button @click=${() => this.preview(false)} ?disabled=${this.busy}>Preview</button>
-                <button @click=${() => this.preview(true)} ?disabled=${this.busy}>Safe live smoke</button>
-                <button @click=${this.cancelSpeech}>Cancel speech</button>
-              </div>
-            `
-          : nothing}
+        </div>
 
         <div class="estimate">${estimate}</div>
         <div class="disclosure">
           ${this.status.disclosure ??
           'ElevenLabs receives only the exact final assistant text selected for speech—never user prompts or conversation history.'}
         </div>
-        ${this.error ? html`<div class="error" role="alert">${this.error}</div>` : nothing}
+        <div aria-live="assertive" aria-atomic="true">
+          ${this.error ? html`<div class="error" role="alert">${this.error}</div>` : nothing}
+        </div>
         ${this.result ? html`<div class="status" role="status">${this.result}</div>` : nothing}
       </section>
     `;

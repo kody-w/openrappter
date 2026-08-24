@@ -175,7 +175,42 @@ let selectedVoiceProvider: 'system' | 'local' | 'elevenlabs' = 'local';
 let selectedElevenLabsVoice: string | undefined;
 let selectedElevenLabsModel: string | undefined;
 let voiceEnabled = false;
+let voiceAutoSpeak = false;
+let voiceInputEnabled = false;
+let continuousConversation = false;
+let pushToTalkKey = 'Space';
+let voiceInputDeviceId = 'default';
+let transcriptPolicy = 'review';
+let backgroundBehavior = 'pause';
+let wakeLockPolicy = 'never';
+let voiceSilenceMs = 800;
+let voiceNoSpeechTimeoutMs = 10_000;
+let voiceMaxListenMs = 30_000;
+let voiceVadThreshold = 0.025;
+let voiceOperationTimeoutMs = 30_000;
+let voiceThinkingTimeoutMs = 120_000;
 let voicePreferencesLoaded = false;
+
+interface ReviewedVoiceSettings {
+  outputEnabled: boolean;
+  autoSpeak: boolean;
+  provider: 'system' | 'local' | 'elevenlabs';
+  ttsVoice?: string;
+  ttsModel?: string;
+  inputEnabled: boolean;
+  continuousConversation: boolean;
+  pushToTalkKey: string;
+  inputDeviceId: string;
+  transcriptPolicy: 'auto' | 'review';
+  backgroundBehavior: 'pause';
+  wakeLock: 'never' | 'while-listening';
+  silenceMs: number;
+  noSpeechTimeoutMs: number;
+  maxListenMs: number;
+  vadThreshold: number;
+  operationTimeoutMs: number;
+  thinkingTimeoutMs: number;
+}
 let tray: Tray | undefined;
 let endpointFile: string | undefined;
 let smokeWatchdog: NodeJS.Timeout | undefined;
@@ -654,6 +689,38 @@ async function handleNarration(
     }
     return narration().download();
   }
+  if (action === 'voice.transcribe') {
+    const durationMs =
+      typeof input.duration_ms === 'number' ? input.duration_ms : 0;
+    if (
+      !Number.isFinite(durationMs)
+      || durationMs <= 0
+      || durationMs > 45_000
+    ) {
+      throw new Error('Voice input exceeds the 45-second local safety limit.');
+    }
+    const sampleBytes = bytes(input.samples);
+    if (
+      sampleBytes.byteLength === 0
+      || sampleBytes.byteLength % 4 !== 0
+      || sampleBytes.byteLength > 45 * 16_000 * 4
+    ) {
+      throw new Error('Voice input samples are invalid or oversized.');
+    }
+    const samples = new Float32Array(
+      sampleBytes.buffer.slice(
+        sampleBytes.byteOffset,
+        sampleBytes.byteOffset + sampleBytes.byteLength,
+      ),
+    );
+    const transcript = await narration().transcribe(samples, 'en');
+    if (!transcript.text) {
+      throw new Error('Whisper did not detect meaningful speech.');
+    }
+    // Deliberately no event/file write: conversational microphone audio is
+    // ephemeral and only the final transcript crosses into chat.
+    return transcript;
+  }
   if (action !== 'transcribe') {
     throw new Error(`Unsupported narration action: ${String(action)}`);
   }
@@ -757,9 +824,56 @@ async function handleVoice(
   request: unknown,
 ): Promise<unknown> {
   const input = validateTrustedRequest(event, request);
-  loadVoicePreferences();
+  await loadVoicePreferences();
   const action = input.action;
-  if (action === 'status') return voiceStatus();
+  if (action === 'status' || action === 'settings.get') return voiceStatus();
+  if (action === 'settings.save') {
+    if (
+      !input.settings
+      || typeof input.settings !== 'object'
+      || Array.isArray(input.settings)
+      || JSON.stringify(input.settings).length > 16_000
+    ) {
+      throw new Error('Voice settings payload is invalid or oversized.');
+    }
+    const runtime = await loadVoiceRuntime();
+    const reviewed = runtime.reviewGrailVoiceSettings(
+      input.settings as Record<string, unknown>,
+      {
+        // Escape and Enter are deliberately never offered as PTT choices.
+        reservedKeys: ['Escape', 'Enter'],
+      },
+    );
+    if (reviewed.provider === 'elevenlabs') {
+      const credential = (await credentialStore()).describe('elevenlabs');
+      if (!credential.present || elevenLabsVerificationFailed) {
+        throw new Error('Verify an ElevenLabs credential before saving this provider.');
+      }
+      const verification = (elevenLabsVerification ?? (
+        await elevenLabs().then((provider) => provider.verify())
+      ))!;
+      if (
+        !reviewed.ttsVoice
+        || !verification.catalog.voices.some(
+          (voice) => voice.id === reviewed.ttsVoice,
+        )
+      ) {
+        throw new Error('The selected ElevenLabs voice is unavailable.');
+      }
+      if (
+        !reviewed.ttsModel
+        || !verification.catalog.models.some(
+          (model) => model.id === reviewed.ttsModel,
+        )
+      ) {
+        throw new Error('The selected ElevenLabs model is unavailable.');
+      }
+      elevenLabsVerification = verification;
+    }
+    applyVoiceSettings(reviewed);
+    saveVoicePreferences();
+    return voiceStatus();
+  }
   if (action === 'stop' || action === 'cancel') {
     voiceOutputQueue?.cancelAll();
     await vibeVoice().stop();
@@ -921,7 +1035,10 @@ async function handleVoice(
     const phrase = action === 'smoke'
       ? 'OpenRappter voice check.'
       : 'This is the selected OpenRappter voice.';
-    return synthesizeElevenLabs(phrase);
+    return synthesizeElevenLabs(phrase, {
+      voice: typeof input.voice === 'string' ? input.voice : undefined,
+      model: typeof input.model === 'string' ? input.model : undefined,
+    });
   }
   if (action !== 'speak') {
     throw new Error(`Unsupported voice action: ${String(action)}`);
@@ -978,7 +1095,7 @@ function voicePreferencesPath(): string {
   return path.join(app.getPath('userData'), 'voice-preferences.json');
 }
 
-function loadVoicePreferences(): void {
+async function loadVoicePreferences(): Promise<void> {
   if (voicePreferencesLoaded) return;
   voicePreferencesLoaded = true;
   const file = voicePreferencesPath();
@@ -987,20 +1104,19 @@ function loadVoicePreferences(): void {
     const stat = lstatSync(file);
     if (!stat.isFile() || stat.isSymbolicLink()) return;
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-    if (
-      parsed.provider === 'system'
-      || parsed.provider === 'local'
-      || parsed.provider === 'elevenlabs'
-    ) {
-      selectedVoiceProvider = parsed.provider;
-    }
-    if (typeof parsed.voice === 'string' && /^[A-Za-z0-9_-]{2,128}$/.test(parsed.voice)) {
-      selectedElevenLabsVoice = parsed.voice;
-    }
-    if (typeof parsed.model === 'string' && /^[A-Za-z0-9_-]{2,128}$/.test(parsed.model)) {
-      selectedElevenLabsModel = parsed.model;
-    }
-    voiceEnabled = parsed.enabled === true;
+    const stored = parsed.settings && typeof parsed.settings === 'object'
+      ? parsed.settings as Record<string, unknown>
+      : {
+          ...currentVoiceSettings(),
+          provider: parsed.provider,
+          ttsVoice: parsed.voice,
+          ttsModel: parsed.model,
+          outputEnabled: parsed.enabled,
+        };
+    const runtime = await loadVoiceRuntime();
+    applyVoiceSettings(runtime.reviewGrailVoiceSettings(stored, {
+      reservedKeys: ['Escape', 'Enter'],
+    }));
   } catch {
     // Invalid non-secret preferences fall back to local voice, off.
   }
@@ -1012,14 +1128,55 @@ function saveVoicePreferences(): void {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const next = `${file}.${process.pid}.${randomBytes(8).toString('hex')}.next`;
   writeFileSync(next, `${JSON.stringify({
-    schema: 'openrappter-voice-preferences/1.0',
-    provider: selectedVoiceProvider,
-    voice: selectedElevenLabsVoice,
-    model: selectedElevenLabsModel,
-    enabled: voiceEnabled,
+    schema: 'openrappter-voice-preferences/2.0',
+    settings: currentVoiceSettings(),
   })}\n`, { mode: 0o600, flag: 'wx' });
   if (process.platform === 'win32' && existsSync(file)) unlinkSync(file);
   renameSync(next, file);
+}
+
+function currentVoiceSettings(): ReviewedVoiceSettings {
+  return {
+    outputEnabled: voiceEnabled,
+    autoSpeak: voiceAutoSpeak,
+    provider: selectedVoiceProvider,
+    ttsVoice: selectedElevenLabsVoice,
+    ttsModel: selectedElevenLabsModel,
+    inputEnabled: voiceInputEnabled,
+    continuousConversation,
+    pushToTalkKey,
+    inputDeviceId: voiceInputDeviceId,
+    transcriptPolicy: transcriptPolicy as 'auto' | 'review',
+    backgroundBehavior: 'pause',
+    wakeLock: wakeLockPolicy as 'never' | 'while-listening',
+    silenceMs: voiceSilenceMs,
+    noSpeechTimeoutMs: voiceNoSpeechTimeoutMs,
+    maxListenMs: voiceMaxListenMs,
+    vadThreshold: voiceVadThreshold,
+    operationTimeoutMs: voiceOperationTimeoutMs,
+    thinkingTimeoutMs: voiceThinkingTimeoutMs,
+  };
+}
+
+function applyVoiceSettings(settings: ReviewedVoiceSettings): void {
+  voiceEnabled = settings.outputEnabled;
+  voiceAutoSpeak = settings.autoSpeak;
+  selectedVoiceProvider = settings.provider;
+  selectedElevenLabsVoice = settings.ttsVoice;
+  selectedElevenLabsModel = settings.ttsModel;
+  voiceInputEnabled = settings.inputEnabled;
+  continuousConversation = settings.continuousConversation;
+  pushToTalkKey = settings.pushToTalkKey;
+  voiceInputDeviceId = settings.inputDeviceId;
+  transcriptPolicy = settings.transcriptPolicy;
+  backgroundBehavior = settings.backgroundBehavior;
+  wakeLockPolicy = settings.wakeLock;
+  voiceSilenceMs = settings.silenceMs;
+  voiceNoSpeechTimeoutMs = settings.noSpeechTimeoutMs;
+  voiceMaxListenMs = settings.maxListenMs;
+  voiceVadThreshold = settings.vadThreshold;
+  voiceOperationTimeoutMs = settings.operationTimeoutMs;
+  voiceThinkingTimeoutMs = settings.thinkingTimeoutMs;
 }
 
 async function loadVoiceRuntime(): Promise<{
@@ -1034,6 +1191,10 @@ async function loadVoiceRuntime(): Promise<{
     ticket: string,
     key: string,
   ): { runId: string; text: string };
+  reviewGrailVoiceSettings(
+    settings: Record<string, unknown>,
+    context?: { reservedKeys?: readonly string[] },
+  ): ReviewedVoiceSettings;
   EncryptedCredentialStore: new (options: {
     filePath: string;
     cipher: {
@@ -1120,13 +1281,20 @@ function safeVoiceError(error: unknown): Error {
   return new Error(messages[code] ?? 'ElevenLabs is temporarily unavailable.');
 }
 
-async function synthesizeElevenLabs(text: string): Promise<Record<string, unknown>> {
+async function synthesizeElevenLabs(
+  text: string,
+  selection: { voice?: string; model?: string } = {},
+): Promise<Record<string, unknown>> {
   const verification = (elevenLabsVerification ?? (
     await elevenLabs().then((provider) => provider.verify())
   ))!;
   elevenLabsVerification = verification;
-  const voice = selectedElevenLabsVoice ?? verification.catalog.voices[0]?.id;
-  const model = selectedElevenLabsModel ?? verification.catalog.models[0]?.id;
+  const voice = selection.voice
+    ?? selectedElevenLabsVoice
+    ?? verification.catalog.voices[0]?.id;
+  const model = selection.model
+    ?? selectedElevenLabsModel
+    ?? verification.catalog.models[0]?.id;
   if (!voice || !model) throw new Error('No verified ElevenLabs voice and model are available.');
   try {
     const result = await (await outputQueue()).enqueue(
@@ -1176,6 +1344,7 @@ async function voiceStatus(): Promise<Record<string, unknown>> {
   return {
     ...local,
     enabled: voiceEnabled,
+    autoSpeak: voiceAutoSpeak,
     provider: selectedVoiceProvider,
     selectedVoice: selectedElevenLabsVoice,
     selectedModel: selectedElevenLabsModel,
@@ -1205,9 +1374,11 @@ async function voiceStatus(): Promise<Record<string, unknown>> {
     ],
     catalog: elevenLabsVerification?.catalog,
     quota: elevenLabsVerification?.quota,
+    settings: currentVoiceSettings(),
     disclosure:
-      'ElevenLabs receives only the exact final assistant text selected for speech. ' +
-      'User prompts and conversation history are never sent.',
+      'Microphone audio is transcribed locally and is not retained. Copilot receives '
+      + 'only the final endpointed transcript. ElevenLabs receives only the exact '
+      + 'final assistant text selected for speech.',
   };
 }
 

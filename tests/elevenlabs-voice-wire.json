@@ -7,6 +7,8 @@
     { "action": "credential.test", "apiKey": "[write-only]" },
     { "action": "credential.testStored" },
     { "action": "credential.delete" },
+    { "action": "settings.get" },
+    { "action": "settings.save", "settings": "[reviewed-display-settings-no-credentials]" },
     { "action": "provider.set", "provider": "elevenlabs", "voice": "voice_id", "model": "model_id" },
     { "action": "speak", "ticket": "[signed-final-assistant-text]" },
     { "action": "preview" },
@@ -28,6 +30,26 @@
       "durationSeconds": 1,
       "sha256": "hex-only",
       "bytes": "[ipc-binary]"
+    },
+    "conversation": {
+      "states": [
+        "idle",
+        "listening",
+        "endpointing",
+        "transcribing",
+        "sending",
+        "thinking",
+        "speaking",
+        "paused",
+        "cancelled",
+        "error",
+        "offline",
+        "auth",
+        "model-unavailable"
+      ],
+      "microphoneTransport": "local-electron-narration-only",
+      "externalTurnInput": "final-transcript-only",
+      "externalTtsInput": "signed-final-assistant-text-only"
     }
   },
   "forbiddenResponseFields": [

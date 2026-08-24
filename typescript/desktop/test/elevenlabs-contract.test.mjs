@@ -51,3 +51,27 @@ test('voice IPC is trusted, bounded, cancellable, and never exposes a key read a
   assert.match(main, /maxQueued: 2/);
   assert.match(main, /maxQueuedCharacters: 5_000/);
 });
+
+test('conversation settings are reviewed separately from secure credentials', () => {
+  assert.match(main, /action === 'settings\.save'/);
+  assert.match(main, /reviewGrailVoiceSettings/);
+  assert.match(main, /openrappter-voice-preferences\/2\.0/);
+  assert.match(main, /settings: currentVoiceSettings\(\)/);
+  assert.doesNotMatch(
+    main.slice(
+      main.indexOf('function saveVoicePreferences'),
+      main.indexOf('async function loadVoiceRuntime'),
+    ),
+    /apiKey|credential/,
+  );
+});
+
+test('conversation microphone audio is ephemeral local-Whisper input', () => {
+  const branch = main.slice(
+    main.indexOf("action === 'voice.transcribe'"),
+    main.indexOf("if (action !== 'transcribe')"),
+  );
+  assert.match(branch, /narration\(\)\.transcribe/);
+  assert.match(branch, /45-second local safety limit/);
+  assert.doesNotMatch(branch, /writeFile|appendEvent|fetch|elevenLabs/);
+});

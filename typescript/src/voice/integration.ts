@@ -1,4 +1,10 @@
 import type { VoiceProviderId } from './types.js';
+import type {
+  GrailVoiceSettings,
+} from './grail-adapter.js';
+import type {
+  VoiceConversationSnapshot,
+} from './conversation.js';
 
 /**
  * Typed audio seam shared by the current desktop and future organism shells.
@@ -28,7 +34,9 @@ export interface VoiceSurfaceState {
 
 /** XPedition/Grail surfaces can implement this without changing their shells. */
 export interface VoiceSurfaceAdapter {
+  readonly settings?: GrailVoiceSettings;
   setVoiceState(state: VoiceSurfaceState): void;
+  setConversationState?(state: VoiceConversationSnapshot): void;
   playVoiceAudio(descriptor: VoiceAudioDescriptor, audio: Uint8Array): Promise<void>;
   stopVoiceAudio(): void;
 }

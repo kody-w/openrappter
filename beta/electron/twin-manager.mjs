@@ -606,6 +606,7 @@ export class TwinManager {
           BRAINSTEM_BETA_TWIN: id,
           MOLTER_HOME: molterHome,
           RAPP_AMBIENT_DIR: path.join(this.betaHome, "ambient"),
+          TWIN_WORKSPACE: path.join(dir, "workspace"),
           // A twin runs sha-pinned-but-still-third-party store code — it must
           // always bind loopback, never inherit the main Brainstem's LAN mode.
           BRAINSTEM_LAN_MODE: "0",

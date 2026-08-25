@@ -163,6 +163,7 @@ const autopilotClassicSource = autopilotSource.replace(
   "function createAutopilot",
 );
 const autopilotCapability = randomUUID();
+const semanticControlEnabled = process.env.OPENRAPPTER_SEMANTIC_CONTROL === "1";
 const activityViewInstallationSource = createActivityViewInstallationSource();
 const openRappterBrandingSource = createOpenRappterBrandingSource();
 const config = resolveBrainstemConfig();
@@ -2186,6 +2187,7 @@ function autopilotInstallationSource() {
   return createAutopilotInstallationSource({
     capability: autopilotCapability,
     classicSource: autopilotClassicSource,
+    semanticControl: semanticControlEnabled,
   });
 }
 

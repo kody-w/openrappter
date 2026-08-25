@@ -46,14 +46,17 @@ const criticalSources = [
   "electron/openrappter-tile.mjs",
   "electron/qqdrill.mjs",
   "electron/rappter-pack.mjs",
+  "electron/semantic-ui-plan.mjs",
   "electron/species-isolation.mjs",
   "electron/video-tools.mjs",
   "resources/media-tool-hashes.json",
   "resources/rappter-pack/rappter_pack_sentinel.py",
   "scripts/openrappter-hatch.mjs",
+  "scripts/frontier-ui.mjs",
   "scripts/openrappter-tile.mjs",
   "scripts/rappter-pack.mjs",
   "ui/index.html",
+  "ui/autopilot.js",
   "ui/renderer.js",
 ];
 const mediaHashes = JSON.parse(readFileSync(

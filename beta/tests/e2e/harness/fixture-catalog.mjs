@@ -34,7 +34,9 @@ function send(res, status, contentType, body) {
 
 export async function startFixtureCatalog({
   agentSource = TINY_AGENT_SOURCE,
+  filename = "tiny_fixture_agent.py",
   id = "tiny-fixture",
+  license = "MIT",
   name = "Tiny Fixture",
 } = {}) {
   const sha256 = createHash("sha256").update(agentSource).digest("hex");
@@ -57,13 +59,13 @@ export async function startFixtureCatalog({
         rapplications: [{
           category: "testing",
           id,
-          license: "MIT",
+          license,
           name,
           quality_tier: "test",
           singleton_bytes: Buffer.byteLength(agentSource),
-          singleton_filename: "tiny_fixture_agent.py",
+          singleton_filename: filename,
           singleton_sha256: sha256,
-          singleton_url: new URL("/tiny_fixture_agent.py", catalogUrl).href,
+          singleton_url: new URL(`/${filename}`, catalogUrl).href,
           summary: "A deterministic loopback-only E2E fixture.",
           version: "1.0.0",
         }],
@@ -71,7 +73,7 @@ export async function startFixtureCatalog({
       }));
       return;
     }
-    if (url.pathname === "/tiny_fixture_agent.py") {
+    if (url.pathname === `/${filename}`) {
       send(res, 200, "text/x-python; charset=utf-8", agentSource);
       return;
     }

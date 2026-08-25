@@ -375,6 +375,7 @@ test("twin hatches and chat completions are wired into the shared ledger", () =>
   assert.match(source, /event: "hatched"/);
   assert.match(source, /surface: `twin:\$\{id\}`/);
   assert.match(source, /MOLTER_HOME: molterHome/);
+  assert.match(source, /TWIN_WORKSPACE: path\.join\(dir, "workspace"\)/);
   assert.match(source, /path\.join\(\s*this\.betaHome,\s*"molts"/);
   assert.match(source, /this\.mirrorMolts\(twin\)/);
   assert.match(source, /recordCompletedTurn\(this\.ledger/);

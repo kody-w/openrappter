@@ -41,6 +41,11 @@ The name is the design: *command-line-less* because there is no command line, *C
 shape is exactly what an AI already drives well and a person can read at a glance. Removing the
 terminal removes the only part that was ever a prerequisite.
 
+For bounded JSON journeys, packaged-app launch, redacted artifacts, and the
+explicit-test-only `openrappter.ui.run(...)` wrapper, see
+[`SEMANTIC-UI-PLANS.md`](SEMANTIC-UI-PLANS.md). It is a closed naming layer
+over this same driver, not a second automation implementation.
+
 ## How it is driven
 
 The Frontier already injects controllers into frames (`executeInFrame` in

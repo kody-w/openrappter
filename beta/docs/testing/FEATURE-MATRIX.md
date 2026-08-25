@@ -216,6 +216,7 @@ Conventions used below:
 | 135 | `walkthrough-certify.mjs`: runs `npm run check`, `npm test`, `package:gate`, `walkthrough-gate --allow-uncertified`; writes `validations/<run>/` logs and stamps `report.validation` | gate | CLI | `walkthroughs/validations/**`, run JSON | no | none | — | no | — |
 | 136 | `frontier-acceptance.mjs`: live force-mode acceptance (shell healthy, Surgeon hatch `json_doctor` + `loop_brainstem_with_twin`, transcript shows BRAINSTEM → JSON DOCTOR → DONE) | acceptance | CLI | twins | **yes** | none | itself | yes | Depends on the Public RAR entry `json_doctor`. |
 | 137 | `npm run check` (node --check over 29 files) and `npm test` (`node --test`, 28 files) | quality | CLI / install.sh | — | no | — | — | no | No linter/formatter. |
+| 138 | `frontier-ui.mjs` + `openrappter-ui-plan/1.0`: launch packaged/source Frontier or connect to an explicit semantic-control run; execute only nine visible semantic actions; emit bounded redacted JSONL and screenshots | driver/e2e | `npm run ui:run`; `openrappter.ui.run` only with `OPENRAPPTER_SEMANTIC_CONTROL=1` | isolated run home, captures, trace | only `send_chat` | semantic-ui-plan.test; autopilot.test | semantic-bookfactory.e2e.test | one plan per home/frame | No arbitrary JS, selectors, shell, direct IPC, install action, coordinate scraping, or forged completion. |
 
 ### 1.13 Documented invariants (must not regress)
 

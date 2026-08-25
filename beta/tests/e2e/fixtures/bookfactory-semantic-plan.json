@@ -1,0 +1,37 @@
+{
+  "schema": "openrappter-ui-plan/1.0",
+  "name": "bookfactory-semantic-journey",
+  "timeoutMs": 300000,
+  "actions": [
+    {
+      "action": "select_store_item",
+      "id": "bookfactory"
+    },
+    {
+      "action": "hatch",
+      "id": "bookfactory",
+      "timeoutMs": 60000
+    },
+    {
+      "action": "wait_status",
+      "status": "ready",
+      "timeoutMs": 60000
+    },
+    {
+      "action": "send_chat",
+      "text": "Turn these fixture notes into a one-paragraph chapter.",
+      "waitText": "BOOKFACTORY_TOOL_INVOKED",
+      "timeoutMs": 120000
+    },
+    {
+      "action": "assert_visible_text",
+      "target": "shell",
+      "text": "BOOKFACTORY_TOOL_INVOKED",
+      "timeoutMs": 30000
+    },
+    {
+      "action": "screenshot",
+      "name": "bookfactory-ready"
+    }
+  ]
+}

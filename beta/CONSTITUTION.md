@@ -248,3 +248,11 @@ Three tests decide compliance: **adding a command must never require a commit to
 `rapp_brainstem/`**; the surface must never do what the interface cannot — no
 arbitrary code, no side door, the same controls a person uses, visible while it
 happens; and no gesture may lock a person out of their own window.
+
+Every new user-visible Frontier feature also requires one real semantic journey:
+launch the application in an isolated home, reach the feature through named
+visible controls, assert its visible or persisted effect, and retain a redacted
+trace. Coordinates, arbitrary selectors, direct IPC, and state mutation behind
+the interface do not satisfy this requirement. The bounded plan contract and
+action catalog are defined in
+[`docs/SEMANTIC-UI-PLANS.md`](docs/SEMANTIC-UI-PLANS.md).

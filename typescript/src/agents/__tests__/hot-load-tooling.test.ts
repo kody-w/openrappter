@@ -18,9 +18,15 @@ import { Assistant } from '../Assistant.js';
 import { AgentRegistry } from '../AgentRegistry.js';
 import { importAgentFile } from '../agent-import.js';
 import type { LLMProvider, Message, ChatOptions, ProviderResponse } from '../../providers/types.js';
+import {
+  FlightRecorder,
+  setFlightRecorder,
+} from '../../flight-recorder/recorder.js';
 
 let dir = '';
 let registry: AgentRegistry;
+let recorder: FlightRecorder;
+let previousRecorder: FlightRecorder;
 
 /** Records the tools it was offered, then calls the one it was told to. */
 class ToolSpyProvider implements LLMProvider {
@@ -78,9 +84,14 @@ class TideAgent(BasicAgent):
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'openrappter-tooling-'));
   registry = new AgentRegistry(path.join(dir, '__no_builtins__'), dir);
+  recorder = new FlightRecorder({ enabled: true, inMemory: true });
+  await recorder.initialize();
+  previousRecorder = setFlightRecorder(recorder);
 });
 
 afterEach(async () => {
+  setFlightRecorder(previousRecorder);
+  await recorder.close();
   await fs.rm(dir, { recursive: true, force: true });
 });
 

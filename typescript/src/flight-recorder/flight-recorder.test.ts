@@ -764,6 +764,129 @@ describe("FlightRecorder", () => {
     await expect(instance.clear()).resolves.toBe(true);
   });
 
+  it("retries a transient ownership release instead of swallowing one failure", async () => {
+    const ledger = new RetryingTerminalFailLedger(1);
+    const instance = new FlightRecorder(
+      {
+        enabled: true,
+        inMemory: true,
+        identityKey: TEST_IDENTITY_KEY,
+        retentionEvents: -1,
+      },
+      ledger,
+    );
+    closeables.push(instance);
+    await instance.initialize();
+
+    await instance.runTrace(
+      { traceId: "release-retry" },
+      async () => "success",
+    );
+
+    expect(ledger.releaseAttempts).toBe(2);
+    expect(
+      (await instance.query({ traceId: "release-retry" }))[0].metadata,
+    ).not.toHaveProperty("ownerPid");
+    expect((await instance.health()).pendingOwnershipReleases).toBe(0);
+  });
+
+  it("queues bounded cleanup and eventually releases a stale pin while the daemon stays alive", async () => {
+    const ledger = new RetryingTerminalFailLedger(5);
+    const instance = new FlightRecorder(
+      {
+        enabled: true,
+        inMemory: true,
+        identityKey: TEST_IDENTITY_KEY,
+        retentionEvents: -1,
+      },
+      ledger,
+    );
+    closeables.push(instance);
+    await instance.initialize();
+
+    await instance.runTrace(
+      { traceId: "release-queued" },
+      async () => "success",
+    );
+
+    expect(process.pid).toBeGreaterThan(0);
+    expect(await ledger.pendingOwnershipReleaseCount()).toBe(1);
+    const queuedRoot =
+      (await instance.query({ traceId: "release-queued" }))[0];
+    expect(queuedRoot.metadata).toHaveProperty("ownerPid", process.pid);
+    expect(
+      await ledger.queueEventOwnershipRelease(queuedRoot.id, 1),
+    ).toBe(1);
+    await expect(
+      ledger.queueEventOwnershipRelease("different-owner-id", 1),
+    ).rejects.toThrow(/bound of 1/i);
+
+    expect((await instance.health()).pendingOwnershipReleases).toBe(1);
+    expect((await instance.health()).pendingOwnershipReleases).toBe(0);
+    expect(
+      (await instance.query({ traceId: "release-queued" }))[0].metadata,
+    ).not.toHaveProperty("ownerPid");
+    expect(ledger.releaseAttempts).toBe(6);
+  });
+
+  it("reconciles durable queued cleanup on startup without releasing a genuinely active trace", async () => {
+    const directory = mkdtempSync(
+      path.join(os.tmpdir(), "flight-owner-reconcile-"),
+    );
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, "flight.db");
+    const failingLedger = new RetryingTerminalFailLedger(10, databasePath);
+    const first = new FlightRecorder(
+      {
+        enabled: true,
+        databasePath,
+        identityKey: TEST_IDENTITY_KEY,
+        retentionEvents: -1,
+      },
+      failingLedger,
+    );
+    await first.initialize();
+
+    await first.runTrace(
+      { traceId: "startup-stale" },
+      async () => "success",
+    );
+    const genuinelyActive = await first.record({
+      traceId: "genuinely-active",
+      parentId: null,
+      kind: "trace.started",
+      source: "runtime",
+      status: "started",
+    });
+    expect(genuinelyActive).not.toBeNull();
+    expect(await failingLedger.pendingOwnershipReleaseCount()).toBe(1);
+    await first.close();
+
+    const healthyLedger = new SQLiteFlightLedger({
+      databasePath,
+      inMemory: false,
+    });
+    const second = new FlightRecorder(
+      {
+        enabled: true,
+        databasePath,
+        identityKey: TEST_IDENTITY_KEY,
+        retentionEvents: -1,
+      },
+      healthyLedger,
+    );
+    closeables.push(second);
+    await second.initialize();
+
+    expect((await second.health()).pendingOwnershipReleases).toBe(0);
+    expect(
+      (await second.query({ traceId: "startup-stale" }))[0].metadata,
+    ).not.toHaveProperty("ownerPid");
+    expect(
+      (await second.query({ traceId: "genuinely-active" }))[0].metadata,
+    ).toHaveProperty("ownerPid", process.pid);
+  });
+
   it("does not terminate an ancestor when a nested start is not durable", async () => {
     const ledger = new FailSecondAppendLedger();
     const instance = new FlightRecorder(
@@ -2149,6 +2272,37 @@ class TerminalFailLedger extends SQLiteFlightLedger {
       throw new Error("terminal append failed");
     }
     await super.append(event);
+  }
+}
+
+class RetryingTerminalFailLedger extends SQLiteFlightLedger {
+  releaseAttempts = 0;
+
+  constructor(
+    private releaseFailures: number,
+    databasePath?: string,
+  ) {
+    super(databasePath
+      ? { databasePath, inMemory: false }
+      : { inMemory: true });
+  }
+
+  override async append(event: FlightEvent) {
+    if (event.kind === "trace.completed") {
+      throw new Error("terminal append failed");
+    }
+    return super.append(event);
+  }
+
+  override async releaseEventOwnership(eventId: string): Promise<void> {
+    this.releaseAttempts += 1;
+    if (this.releaseAttempts <= this.releaseFailures) {
+      const error = new Error("transient ownership release contention") as
+        Error & { code: string };
+      error.code = "SQLITE_BUSY";
+      throw error;
+    }
+    return super.releaseEventOwnership(eventId);
   }
 }
 

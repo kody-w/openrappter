@@ -17,7 +17,11 @@ import { spawn } from 'child_process';
 import { existsSync } from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { BasicAgent } from './BasicAgent.js';
+import {
+  BasicAgent,
+  canonicalAgentSourcePath,
+  withAgentSourceReadLock,
+} from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -190,13 +194,16 @@ export class PythonAgent extends BasicAgent {
     descriptor: PythonAgentDescriptor,
     opts: { python?: string; timeoutMs?: number } = {},
   ) {
+    const sourceFile = canonicalAgentSourcePath(file);
     const metadata: AgentMetadata = {
       name: descriptor.name,
-      description: descriptor.description || `Python agent from ${path.basename(file)}`,
+      description:
+        descriptor.description ||
+        `Python agent from ${path.basename(sourceFile)}`,
       parameters: descriptor.parameters ?? { type: 'object', properties: {}, required: [] },
     };
     super(descriptor.name, metadata);
-    this.file = file;
+    this.file = sourceFile;
     this.agentName = descriptor.name;
     this.python = opts.python ?? process.env.OPENRAPPTER_PYTHON ?? 'python3';
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -206,27 +213,29 @@ export class PythonAgent extends BasicAgent {
   get sourceFile(): string { return this.file; }
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
-    const { stdout, stderr, code } = await runPython(
-      [runnerPath(), 'run', this.file, this.agentName],
-      JSON.stringify(kwargs ?? {}),
-      this.timeoutMs,
-      this.python,
-    );
+    return withAgentSourceReadLock(this.file, async () => {
+      const { stdout, stderr, code } = await runPython(
+        [runnerPath(), 'run', this.file, this.agentName],
+        JSON.stringify(kwargs ?? {}),
+        this.timeoutMs,
+        this.python,
+      );
 
-    let parsed: { status: string; result?: string; error?: string };
-    try {
-      parsed = JSON.parse(stdout.trim());
-    } catch {
-      const detail = stderr.trim().split('\n').slice(-3).join(' ').slice(0, 300);
-      return JSON.stringify({
-        status: 'error',
-        error: `${this.agentName} did not return a result (exit ${code}): ${detail || 'no output'}`,
-      });
-    }
+      let parsed: { status: string; result?: string; error?: string };
+      try {
+        parsed = JSON.parse(stdout.trim());
+      } catch {
+        const detail = stderr.trim().split('\n').slice(-3).join(' ').slice(0, 300);
+        return JSON.stringify({
+          status: 'error',
+          error: `${this.agentName} did not return a result (exit ${code}): ${detail || 'no output'}`,
+        });
+      }
 
-    if (parsed.status === 'error') {
-      return JSON.stringify({ status: 'error', error: parsed.error ?? 'agent failed' });
-    }
-    return parsed.result ?? '';
+      if (parsed.status === 'error') {
+        return JSON.stringify({ status: 'error', error: parsed.error ?? 'agent failed' });
+      }
+      return parsed.result ?? '';
+    });
   }
 }

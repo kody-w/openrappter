@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import type {
+  FlightAppendReceipt,
   FlightEvent,
   FlightEventQuery,
   FlightEventStatus,
@@ -97,6 +98,7 @@ interface RetentionTrace {
   lifecycleDepth: number;
   sawLifecycleStart: boolean;
   malformedLifecycle: boolean;
+  retentionProtected: boolean;
   lifecycleStarts: Map<
     string,
     { pid: number | null; incarnation?: string }
@@ -248,6 +250,10 @@ export class SQLiteFlightLedger implements FlightLedger {
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
           );
+          CREATE TABLE IF NOT EXISTS flight_pending_owner_release (
+            event_id TEXT PRIMARY KEY,
+            queued_at_ms INTEGER NOT NULL
+          );
         `);
 
         migrateTimestampColumn(db);
@@ -307,13 +313,43 @@ export class SQLiteFlightLedger implements FlightLedger {
     this.db = null;
   }
 
-  async append(event: FlightEvent): Promise<void> {
+  async append(event: FlightEvent): Promise<FlightAppendReceipt | void> {
     const db = this.ensureDb();
     const serialized = serializeEvent(event, "event");
     const statement = db.prepare(insertSql(false));
     db.pragma(`busy_timeout = ${RUNTIME_BUSY_TIMEOUT_MS}`);
     try {
-      statement.run(...eventParameters(serialized));
+      return db.transaction(() => {
+        const inserted = statement.run(...eventParameters(serialized));
+        if (inserted.changes === 0) return undefined;
+        const row = db
+          .prepare(`
+            SELECT rowid AS row_id, *
+            FROM flight_events
+            WHERE id = ?
+          `)
+          .get(event.id) as PruneEventRow | undefined;
+        const stored = row ? rowToEvent(row) : undefined;
+        if (
+          !stored ||
+          stored.id !== event.id ||
+          stored.traceId !== event.traceId ||
+          stored.kind !== event.kind ||
+          stored.sequence !== event.sequence ||
+          stored.contentHash !== event.contentHash
+        ) {
+          throw new Error(
+            `Flight event "${event.id}" was not queryable by exact immutable identity inside its append transaction.`,
+          );
+        }
+        return {
+          eventId: stored.id,
+          traceId: stored.traceId,
+          kind: stored.kind,
+          sequence: stored.sequence,
+          contentHash: stored.contentHash,
+        };
+      })();
     } finally {
       db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
     }
@@ -499,6 +535,7 @@ export class SQLiteFlightLedger implements FlightLedger {
           );
         }
         db.prepare("DELETE FROM flight_events").run();
+        db.prepare("DELETE FROM flight_pending_owner_release").run();
       })(),
     );
     await purgeDeletedPages(db, true);
@@ -516,13 +553,21 @@ export class SQLiteFlightLedger implements FlightLedger {
             WHERE id = ?
           `)
           .get(eventId) as PruneEventRow | undefined;
-        if (!row) return;
+        if (!row) {
+          db.prepare(
+            "DELETE FROM flight_pending_owner_release WHERE event_id = ?",
+          ).run(eventId);
+          return;
+        }
         const event = rowToEvent(row);
         if (
           !Object.hasOwn(event.metadata, "ownerPid") &&
           !Object.hasOwn(event.metadata, "ownerId") &&
           !Object.hasOwn(event.metadata, "ownerIncarnation")
         ) {
+          db.prepare(
+            "DELETE FROM flight_pending_owner_release WHERE event_id = ?",
+          ).run(eventId);
           return;
         }
         const metadata = { ...event.metadata };
@@ -541,10 +586,92 @@ export class SQLiteFlightLedger implements FlightLedger {
         };
         db.prepare("UPDATE flight_events SET event_json = ? WHERE id = ?")
           .run(JSON.stringify(released), eventId);
+        db.prepare(
+          "DELETE FROM flight_pending_owner_release WHERE event_id = ?",
+        ).run(eventId);
       })();
     } finally {
       db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
     }
+  }
+
+  async queueEventOwnershipRelease(
+    eventId: string,
+    maxPending: number,
+  ): Promise<number> {
+    const db = this.ensureDb();
+    assertString(eventId, "eventId");
+    assertNonNegativeInteger(maxPending, "maxPending");
+    if (maxPending === 0) {
+      throw new Error("Flight ownership cleanup queue is disabled.");
+    }
+    return retrySqliteBusy(() =>
+      db.transaction(() => {
+        const existing = db
+          .prepare(
+            "SELECT 1 AS present FROM flight_pending_owner_release WHERE event_id = ?",
+          )
+          .get(eventId) as { present: number } | undefined;
+        const count = (
+          db.prepare(
+            "SELECT COUNT(*) AS count FROM flight_pending_owner_release",
+          ).get() as { count: number }
+        ).count;
+        if (!existing && count >= maxPending) {
+          throw new Error(
+            `Flight ownership cleanup queue reached its bound of ${maxPending}.`,
+          );
+        }
+        db.prepare(`
+          INSERT INTO flight_pending_owner_release (event_id, queued_at_ms)
+          VALUES (?, ?)
+          ON CONFLICT(event_id) DO NOTHING
+        `).run(eventId, Date.now());
+        return (
+          db.prepare(
+            "SELECT COUNT(*) AS count FROM flight_pending_owner_release",
+          ).get() as { count: number }
+        ).count;
+      })(),
+    );
+  }
+
+  async reconcileEventOwnershipReleases(
+    limit: number,
+  ): Promise<{ released: number; pending: number }> {
+    assertNonNegativeInteger(limit, "limit");
+    const db = this.ensureDb();
+    const ids = db
+      .prepare(`
+        SELECT event_id
+        FROM flight_pending_owner_release
+        ORDER BY queued_at_ms, rowid
+        LIMIT ?
+      `)
+      .all(limit) as Array<{ event_id: string }>;
+    let released = 0;
+    for (const { event_id: eventId } of ids) {
+      try {
+        await this.releaseEventOwnership(eventId);
+        released += 1;
+      } catch {
+        break;
+      }
+    }
+    return {
+      released,
+      pending: await this.pendingOwnershipReleaseCount(),
+    };
+  }
+
+  async pendingOwnershipReleaseCount(): Promise<number> {
+    return (
+      this.ensureDb()
+        .prepare(
+          "SELECT COUNT(*) AS count FROM flight_pending_owner_release",
+        )
+        .get() as { count: number }
+    ).count;
   }
 
   private ensureDb(): Database {
@@ -588,11 +715,19 @@ function pruneOnce(db: Database, keep: number): number {
       (total, trace) => total + trace.rowCount,
       0,
     );
+    const newestProtectedCompleted = candidates.find(
+      (trace) =>
+        trace.lifecycle === "completed" && trace.retentionProtected,
+    );
+    if (newestProtectedCompleted) {
+      retainedTraceIds.add(newestProtectedCompleted.traceId);
+      retainedRows += newestProtectedCompleted.rowCount;
+    }
     const newestCompleted =
       keep > 0
         ? candidates.find((trace) => trace.lifecycle === "completed")
         : undefined;
-    if (newestCompleted) {
+    if (newestCompleted && !retainedTraceIds.has(newestCompleted.traceId)) {
       retainedTraceIds.add(newestCompleted.traceId);
       retainedRows += newestCompleted.rowCount;
     }
@@ -962,6 +1097,7 @@ function buildRetentionTraces(rows: PruneEventRow[]): RetentionTrace[] {
         lifecycleDepth: 0,
         sawLifecycleStart: false,
         malformedLifecycle: false,
+        retentionProtected: false,
         lifecycleStarts: new Map(),
         latestTimestamp: timestamp,
         latestRowId: row.row_id,
@@ -972,6 +1108,7 @@ function buildRetentionTraces(rows: PruneEventRow[]): RetentionTrace[] {
     trace.rowCount += 1;
     if (event.kind === "trace.started") {
       trace.sawLifecycleStart = true;
+      trace.retentionProtected ||= event.metadata.retentionProtected === true;
       if (event.id) {
         const ownerPid = Number(event.metadata.ownerPid);
         trace.lifecycleStarts.set(event.id, {

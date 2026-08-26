@@ -615,6 +615,7 @@ describe("SQLiteFlightLedger", () => {
       expect(tables.map((row) => row.name)).toEqual([
         "flight_events",
         "flight_metadata",
+        "flight_pending_owner_release",
       ]);
       const columns = raw
         .prepare("PRAGMA table_info(flight_events)")

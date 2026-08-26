@@ -9,7 +9,7 @@ import { openrappterPath } from '../infra/openrappter-home.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { BasicAgent } from './BasicAgent.js';
+import { BasicAgent, canonicalAgentSourcePath } from './BasicAgent.js';
 import { PythonAgent, introspectPythonAgents } from './PythonAgent.js';
 import type { AgentInfo } from './types.js';
 import { logger } from '../logging/logger.js';
@@ -54,6 +54,27 @@ async function walkAgentFiles(dir: string, prefix = ''): Promise<string[]> {
 }
 
 const registryLog = logger.child('agents');
+
+export { canonicalAgentSourcePath } from './BasicAgent.js';
+
+/**
+ * Attribute a generated JavaScript agent to the file that produced it.
+ *
+ * Ownership is intentionally immutable and invisible to normal object
+ * enumeration: import transactions use it to distinguish a same-file update
+ * from a foreign capability with the same public name.
+ */
+export function markAgentSourceFile(
+  agent: BasicAgent,
+  file: string,
+): void {
+  Object.defineProperty(agent, 'sourceFile', {
+    value: canonicalAgentSourcePath(file),
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+}
 
 export class AgentRegistry {
   private agentsDir: string;
@@ -166,6 +187,7 @@ export class AgentRegistry {
             const AgentClass = mod.createAgent(BasicAgent);
             if (AgentClass) {
               const instance = new AgentClass() as BasicAgent;
+              markAgentSourceFile(instance, filePath);
               if (!this.agents.has(instance.name)) {
                 this.agents.set(instance.name, instance);
               }
@@ -207,7 +229,10 @@ export class AgentRegistry {
           // A re-dropped file must replace its own agent rather than being
           // ignored as a duplicate, or editing an agent would never take.
           const existing = this.agents.get(descriptor.name);
-          const isOurs = existing instanceof PythonAgent && existing.sourceFile === filePath;
+          const isOurs =
+            existing instanceof PythonAgent &&
+            canonicalAgentSourcePath(existing.sourceFile) ===
+              canonicalAgentSourcePath(filePath);
           if (existing && !isOurs) continue;
           this.agents.set(descriptor.name, new PythonAgent(filePath, descriptor));
         }

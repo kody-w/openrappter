@@ -384,7 +384,7 @@ async function ensureGateway(): Promise<void> {
           ? {
               HOME: smokeRoot,
               USERPROFILE: smokeRoot,
-              OPENRAPPTER_FLIGHT_RECORDER: '0',
+              OPENRAPPTER_FLIGHT_RECORDER: '1',
             }
           : {}),
       },

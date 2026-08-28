@@ -683,6 +683,15 @@
   <script>
     (() => {
       const TAG_PREFIX = "brainstem-beta-v";
+      // Static Data Covenant (RAR CONSTITUTION.md Article XXIV): a visitor's
+      // browser must never call api.github.com. beta/data/releases.json and
+      // beta/data/commits.json are CI-harvested static snapshots (see
+      // beta/scripts/harvest-release-data.mjs) covering this page's own
+      // repository. The optional `?repo=` override exists only for a
+      // maintainer manually pointing the installer at a different repo to
+      // test it, and is not the default visitor flow — that explicit,
+      // non-default path still resolves live against api.github.com.
+      const SNAPSHOT_REPO = "kody-w/openrappter";
       const params = new URLSearchParams(window.location.search);
       const elements = {
         error: document.getElementById("load-error"),
@@ -734,6 +743,10 @@
         return new URL(filename, window.location.href).href;
       }
 
+      function snapshotUrl(filename) {
+        return new URL(`data/${filename}`, window.location.href).href;
+      }
+
       function unixInstallCommand(repo) {
         return `curl -fsSL "${bootstrapUrl("frontier.sh")}" | RAPP_FRONTIER_REPO="${repo}" bash`;
       }
@@ -782,9 +795,10 @@
         elements.repo.textContent = repo;
         elements.sourceLink.href = `https://github.com/${repo}/tree/main/beta`;
 
-        const releases = await fetchJson(
-          `https://api.github.com/repos/${repo}/releases?per_page=30`,
-        );
+        const usesSnapshot = repo === SNAPSHOT_REPO;
+        const releases = usesSnapshot
+          ? await fetchJson(snapshotUrl("releases.json"))
+          : await fetchJson(`https://api.github.com/repos/${repo}/releases?per_page=30`);
         const release = releases.find((candidate) => {
           if (candidate.draft) return false;
           if (requestedTag) return candidate.tag_name === requestedTag;
@@ -798,10 +812,19 @@
           );
         }
 
-        const commitData = await fetchJson(
-          `https://api.github.com/repos/${repo}/commits/${encodeURIComponent(release.tag_name)}`,
-        );
-        const commit = commitData.sha;
+        let commit;
+        if (usesSnapshot) {
+          const commits = await fetchJson(snapshotUrl("commits.json"));
+          commit = commits[release.tag_name]?.sha;
+          if (!commit) {
+            throw new Error(`No harvested commit snapshot for ${release.tag_name}. Re-run beta/scripts/harvest-release-data.mjs.`);
+          }
+        } else {
+          const commitData = await fetchJson(
+            `https://api.github.com/repos/${repo}/commits/${encodeURIComponent(release.tag_name)}`,
+          );
+          commit = commitData.sha;
+        }
         const version = release.tag_name.startsWith(TAG_PREFIX)
           ? release.tag_name.slice(TAG_PREFIX.length)
           : release.tag_name;

@@ -1,0 +1,92 @@
+{
+  "brainstem-beta-v0.1.0-beta.10": {
+    "sha": "200bda66f3e2ca319aa10a4d55a9bd03548961cf"
+  },
+  "brainstem-beta-v0.1.0-beta.7": {
+    "sha": "3973ef5eb7b6c876d19cc10a310dbe840c978f6f"
+  },
+  "brainstem-beta-v0.1.0-beta.8": {
+    "sha": "bf6004e3243ab5b29c3ce2b69f1344fb9427057d"
+  },
+  "brainstem-beta-v0.1.0-beta.9": {
+    "sha": "398d0b11ed8fda208119173ce6994cfd694137f0"
+  },
+  "v0.1.0-beta.10": {
+    "sha": "200bda66f3e2ca319aa10a4d55a9bd03548961cf"
+  },
+  "v0.1.0-beta.7": {
+    "sha": "3973ef5eb7b6c876d19cc10a310dbe840c978f6f"
+  },
+  "v0.1.0-beta.8": {
+    "sha": "bf6004e3243ab5b29c3ce2b69f1344fb9427057d"
+  },
+  "v0.1.0-beta.9": {
+    "sha": "398d0b11ed8fda208119173ce6994cfd694137f0"
+  },
+  "v1.0.0": {
+    "sha": "fc5dc04680f78e85c91a58e4750521f89fe9ae4a"
+  },
+  "v1.10.0-bar": {
+    "sha": "8b4049e032b209e71a376e36dfeec46b515f1619"
+  },
+  "v1.10.1-bar": {
+    "sha": "dc773780670a745277c6653a3328040351d4aca9"
+  },
+  "v1.10.2-bar": {
+    "sha": "ea16eef490ed0fc628c50c853b0f12a86482e9eb"
+  },
+  "v1.10.3-bar": {
+    "sha": "c6b88d756310593156707a24ef3e4af00e2cc2cf"
+  },
+  "v1.10.4-bar": {
+    "sha": "80428a53e482e406d2988c95a67863dfb38fe40e"
+  },
+  "v1.11.0": {
+    "sha": "8a55eeadc15514a999d9ddc928e989d31118732c"
+  },
+  "v1.11.0-bar": {
+    "sha": "4a5b050ef7bf6480a75271cf4b4f3c58f9e563b1"
+  },
+  "v1.13.0-bar": {
+    "sha": "2d297df07a6bb7aba254f7b6bfe133414c79cd65"
+  },
+  "v1.2.0-bar": {
+    "sha": "47d50e4ca2856c5c505284b5b41b4e5f82d4926e"
+  },
+  "v1.3.0-bar": {
+    "sha": "d05e317988c2f35952879fab309af79a4adaa40d"
+  },
+  "v1.6.0-bar": {
+    "sha": "08ebd6f45ecd773d9d1e3c9ceead891ae95ef06c"
+  },
+  "v1.7.0-bar": {
+    "sha": "929d8e8cc71ff138202fccdac32632ab3e9b6840"
+  },
+  "v1.8.0-bar": {
+    "sha": "45ee40582cd9808c35eff6522509f941d4c04a26"
+  },
+  "v1.8.1-bar": {
+    "sha": "7d5db3b960eb42133d80338e464aa8d389667ef7"
+  },
+  "v1.8.2-bar": {
+    "sha": "c126a88716e3ccee374f308a009fad818eec42c1"
+  },
+  "v1.8.3-bar": {
+    "sha": "4cf3cb8e38574b74671c8996e514f459e2cd417f"
+  },
+  "v1.8.4-bar": {
+    "sha": "1d6aed582835bb5939107fce8d373397eeec1cb3"
+  },
+  "v1.8.5-bar": {
+    "sha": "e8d8fccce652917989218f8a0a1785e9edd8b95e"
+  },
+  "v1.9.3": {
+    "sha": "e2b21107755a7381f3ec04602f8b1d85ab982cf8"
+  },
+  "v1.9.4": {
+    "sha": "e5c03d2dbde7f5155fad522b1ac73629679ae7c8"
+  },
+  "v1.9.8": {
+    "sha": "e8d8fccce652917989218f8a0a1785e9edd8b95e"
+  }
+}

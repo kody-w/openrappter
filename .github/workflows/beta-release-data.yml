@@ -1,0 +1,42 @@
+# Static Data Covenant (RAR CONSTITUTION.md Article XXIV): beta/index.html
+# used to call api.github.com directly from the visitor's browser. It now
+# reads beta/data/releases.json and beta/data/commits.json, committed static
+# snapshots this workflow re-harvests whenever a new release is published.
+name: Harvest beta release data
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beta-release-data
+  cancel-in-progress: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: actions/setup-node@v4
+        with: { node-version: '24.19.0' }
+      - name: Harvest release + commit snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node beta/scripts/harvest-release-data.mjs kody-w/openrappter
+      - name: Commit updated snapshot
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add beta/data/releases.json beta/data/commits.json
+          if git diff --cached --quiet; then
+            echo "no snapshot changes"
+            exit 0
+          fi
+          git commit -m "beta: refresh release data snapshot"
+          git push origin HEAD:main

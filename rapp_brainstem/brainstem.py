@@ -31,6 +31,8 @@ import tempfile
 import ipaddress
 import hashlib
 import platform
+import types
+import builtins
 from datetime import datetime, timezone
 from urllib.parse import urlencode, urlsplit
 
@@ -1523,6 +1525,318 @@ _quarantine_lock = threading.Lock()
 # (file, reason) pairs already flight-logged. load_agents() runs on every /chat, so
 # without this the same warn would be recorded on every request — memoize per process.
 _quarantine_logged = set()
+_agent_load_diagnostics = {}
+_MAX_AGENT_LOAD_DIAGNOSTICS_PER_FILE = 32
+_KERNEL_AGENT_FILENAMES = frozenset({"basic_agent.py"})
+
+
+def _create_trusted_basic_agent_boundary():
+    """Load BasicAgent from the kernel path once, before any cartridge executes.
+
+    The trusted references live in this closure rather than being looked up from
+    sys.modules after candidate code has had a chance to replace an alias.
+    """
+    agents_dir = os.path.join(_BASE_DIR, "agents")
+    source_path = os.path.realpath(os.path.join(agents_dir, "basic_agent.py"))
+    spec = importlib.util.spec_from_file_location(
+        "agents.basic_agent",
+        source_path,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not initialize the canonical BasicAgent boundary.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    trusted_class = module.BasicAgent
+    class_attributes = dict(trusted_class.__dict__)
+    class_bases = tuple(trusted_class.__bases__)
+    builtins_dictionary = builtins.__dict__
+    builtins_attributes = dict(builtins_dictionary)
+    trusted_list = list
+    trusted_set = set
+    trusted_all = all
+    function_states = {}
+    for name, value in class_attributes.items():
+        function = (
+            value.__func__
+            if isinstance(value, (staticmethod, classmethod))
+            else value
+        )
+        if not isinstance(function, types.FunctionType):
+            continue
+        function_states[name] = {
+            "function": function,
+            "code": function.__code__,
+            "defaults": function.__defaults__,
+            "kwdefaults": (
+                dict(function.__kwdefaults__)
+                if function.__kwdefaults__ is not None
+                else None
+            ),
+            "annotations": dict(function.__annotations__),
+            "dict": dict(function.__dict__),
+            "doc": function.__doc__,
+            "name": function.__name__,
+            "qualname": function.__qualname__,
+            "module": function.__module__,
+        }
+
+    agents_package = types.ModuleType("agents")
+    agents_package.__path__ = [agents_dir]
+    openrappter_package = types.ModuleType("openrappter")
+    openrappter_package.__path__ = [_BASE_DIR]
+    openrappter_agents_package = types.ModuleType("openrappter.agents")
+    openrappter_agents_package.__path__ = [agents_dir]
+    agents_package.basic_agent = module
+    openrappter_agents_package.basic_agent = module
+    openrappter_package.agents = openrappter_agents_package
+    package_paths = {
+        agents_package: tuple(agents_package.__path__),
+        openrappter_package: tuple(openrappter_package.__path__),
+        openrappter_agents_package: tuple(openrappter_agents_package.__path__),
+    }
+    module_attributes = dict(module.__dict__)
+    package_attributes = {
+        package: dict(package.__dict__)
+        for package in package_paths
+    }
+
+    aliases = (
+        "agents.basic_agent",
+        "basic_agent",
+        "openrappter.agents.basic_agent",
+    )
+
+    def trusted():
+        return trusted_class
+
+    def same_mapping_identity(current, expected):
+        return (
+            trusted_set(current) == trusted_set(expected)
+            and trusted_all(
+                current[name] is value
+                for name, value in expected.items()
+            )
+        )
+
+    def same_tuple_identity(current, expected):
+        if current is None or expected is None:
+            return current is expected
+        return (
+            len(current) == len(expected)
+            and all(
+                current[index] is value
+                for index, value in enumerate(expected)
+            )
+        )
+
+    def violation():
+        if not same_mapping_identity(
+            builtins_dictionary,
+            builtins_attributes,
+        ):
+            return "interpreter builtins changed"
+        for alias in aliases:
+            candidate = sys.modules.get(alias)
+            if candidate is not module:
+                return "module alias replaced"
+            if getattr(candidate, "BasicAgent", None) is not trusted_class:
+                return "BasicAgent alias replaced"
+        if sys.modules.get("agents") is not agents_package:
+            return "agents package replaced"
+        if getattr(agents_package, "basic_agent", None) is not module:
+            return "agents package alias replaced"
+        if sys.modules.get("openrappter") is not openrappter_package:
+            return "openrappter package replaced"
+        if (
+            sys.modules.get("openrappter.agents")
+            is not openrappter_agents_package
+        ):
+            return "openrappter agents package replaced"
+        if (
+            getattr(openrappter_agents_package, "basic_agent", None)
+            is not module
+        ):
+            return "openrappter agents alias replaced"
+        current = trusted_class.__dict__
+        if set(current) != set(class_attributes):
+            return "canonical class attributes changed"
+        if any(current[name] is not value for name, value in class_attributes.items()):
+            return "canonical class attribute replaced"
+        if tuple(trusted_class.__bases__) != class_bases:
+            return "canonical class bases changed"
+        for state in function_states.values():
+            function = state["function"]
+            if function.__code__ is not state["code"]:
+                return "canonical method code changed"
+            if not same_tuple_identity(
+                function.__defaults__,
+                state["defaults"],
+            ):
+                return "canonical method defaults changed"
+            if (
+                function.__kwdefaults__ is None
+                or state["kwdefaults"] is None
+            ):
+                kwdefaults_match = (
+                    function.__kwdefaults__ is state["kwdefaults"]
+                )
+            else:
+                kwdefaults_match = same_mapping_identity(
+                    function.__kwdefaults__,
+                    state["kwdefaults"],
+                )
+            if not kwdefaults_match:
+                return "canonical method keyword defaults changed"
+            if not same_mapping_identity(
+                function.__annotations__,
+                state["annotations"],
+            ):
+                return "canonical method annotations changed"
+            if not same_mapping_identity(function.__dict__, state["dict"]):
+                return "canonical method attributes changed"
+            if (
+                function.__doc__ != state["doc"]
+                or function.__name__ != state["name"]
+                or function.__qualname__ != state["qualname"]
+                or function.__module__ != state["module"]
+            ):
+                return "canonical method metadata changed"
+        if not same_mapping_identity(module.__dict__, module_attributes):
+            return "canonical module attributes changed"
+        for package, expected in package_attributes.items():
+            current_without_path = {
+                name: value
+                for name, value in package.__dict__.items()
+                if name != "__path__"
+            }
+            expected_without_path = {
+                name: value
+                for name, value in expected.items()
+                if name != "__path__"
+            }
+            if not same_mapping_identity(
+                current_without_path,
+                expected_without_path,
+            ):
+                return "canonical package attributes changed"
+            if tuple(package.__path__) != package_paths[package]:
+                return "canonical package path changed"
+        return None
+
+    def restore():
+        for name in trusted_list(builtins_dictionary):
+            if name not in builtins_attributes:
+                builtins_dictionary.pop(name, None)
+        builtins_dictionary.update(builtins_attributes)
+        current_names = set(trusted_class.__dict__)
+        for name in current_names - set(class_attributes):
+            if name not in {"__dict__", "__weakref__"}:
+                try:
+                    delattr(trusted_class, name)
+                except (AttributeError, TypeError):
+                    pass
+        for name, value in class_attributes.items():
+            if name in {"__dict__", "__weakref__"}:
+                continue
+            if trusted_class.__dict__.get(name) is not value:
+                try:
+                    setattr(trusted_class, name, value)
+                except (AttributeError, TypeError):
+                    pass
+        if tuple(trusted_class.__bases__) != class_bases:
+            try:
+                trusted_class.__bases__ = class_bases
+            except (AttributeError, TypeError):
+                pass
+        for state in function_states.values():
+            function = state["function"]
+            function.__code__ = state["code"]
+            function.__defaults__ = state["defaults"]
+            function.__kwdefaults__ = (
+                dict(state["kwdefaults"])
+                if state["kwdefaults"] is not None
+                else None
+            )
+            function.__annotations__ = dict(state["annotations"])
+            function.__dict__.clear()
+            function.__dict__.update(state["dict"])
+            function.__doc__ = state["doc"]
+            function.__name__ = state["name"]
+            function.__qualname__ = state["qualname"]
+            function.__module__ = state["module"]
+        for name in set(module.__dict__) - set(module_attributes):
+            module.__dict__.pop(name, None)
+        module.__dict__.update(module_attributes)
+        for package, expected in package_attributes.items():
+            for name in set(package.__dict__) - set(expected):
+                package.__dict__.pop(name, None)
+            package.__dict__.update({
+                name: value
+                for name, value in expected.items()
+                if name != "__path__"
+            })
+            package.__path__ = list(package_paths[package])
+        sys.modules["agents"] = agents_package
+        sys.modules["openrappter"] = openrappter_package
+        sys.modules["openrappter.agents"] = openrappter_agents_package
+        for alias in aliases:
+            sys.modules[alias] = module
+        return violation()
+
+    restore()
+    provenance = (
+        source_path,
+        trusted_class.__module__,
+        trusted_class.__qualname__,
+    )
+    return trusted, violation, restore, provenance
+
+
+(
+    _trusted_basic_agent_class,
+    _basic_agent_boundary_violation,
+    _restore_basic_agent_boundary,
+    _TRUSTED_BASIC_AGENT_PROVENANCE,
+) = _create_trusted_basic_agent_boundary()
+
+
+def _is_agent_cartridge_file(filepath):
+    filename = os.path.basename(filepath)
+    return (
+        filename.endswith("_agent.py")
+        and not filename.startswith("__")
+        and not _is_kernel_agent_filename(filename)
+        and os.path.isfile(filepath)
+    )
+
+
+def _is_kernel_agent_filename(filename):
+    normalized = os.path.basename(filename).casefold()
+    return normalized in {
+        name.casefold() for name in _KERNEL_AGENT_FILENAMES
+    }
+
+
+def _aliases_kernel_agent_path(filepath, directory=None):
+    root = directory or os.path.dirname(filepath) or AGENTS_PATH
+    kernel_path = os.path.join(root, "basic_agent.py")
+    try:
+        return os.path.exists(filepath) and os.path.samefile(
+            filepath,
+            kernel_path,
+        )
+    except (OSError, ValueError):
+        return False
+
+
+def _agent_cartridge_files(directory=None):
+    """The single cartridge enumeration contract for runtime, UI, and dry-load."""
+    root = directory or AGENTS_PATH
+    return [
+        filepath
+        for filepath in sorted(glob.glob(os.path.join(root, "*_agent.py")))
+        if _is_agent_cartridge_file(filepath)
+    ]
 
 
 def _validate_agent_instance(instance):
@@ -1641,6 +1955,25 @@ def _quarantine_snapshot():
         ]
 
 
+def _record_agent_load_diagnostic(filepath, kind, message):
+    """Record a bounded, source-free loader decision for tests and diagnostics."""
+    item = {"file": os.path.basename(filepath), "kind": kind, "message": message}
+    with _quarantine_lock:
+        diagnostics = _agent_load_diagnostics.setdefault(filepath, [])
+        if len(diagnostics) < _MAX_AGENT_LOAD_DIAGNOSTICS_PER_FILE:
+            diagnostics.append(item)
+    return item
+
+
+def _agent_load_diagnostics_snapshot():
+    with _quarantine_lock:
+        return [
+            dict(item)
+            for filepath in sorted(_agent_load_diagnostics)
+            for item in _agent_load_diagnostics[filepath]
+        ]
+
+
 def _load_agent_from_file(filepath):
     """Load agent classes from a single .py file. Returns dict of name→instance.
     Auto-installs missing pip packages and shims cloud deps to local storage."""
@@ -1650,28 +1983,73 @@ def _load_agent_from_file(filepath):
     # a fixed cartridge stops showing as quarantined.
     with _quarantine_lock:
         _quarantined_agents.pop(filepath, None)
+        _agent_load_diagnostics.pop(filepath, None)
     brainstem_dir = os.path.dirname(os.path.abspath(__file__))
     if brainstem_dir not in sys.path:
         sys.path.insert(0, brainstem_dir)
     
     _register_shims()
+    trusted_basic_agent = _trusted_basic_agent_class()
+    restore_basic_agent_boundary = _restore_basic_agent_boundary
+    boundary_violation = _basic_agent_boundary_violation
     
     # Try loading, auto-install missing deps, retry once
     for attempt in range(2):
         try:
+            if restore_basic_agent_boundary():
+                raise RuntimeError(
+                    "Could not restore the canonical BasicAgent boundary."
+                )
             mod_name = f"agent_{os.path.basename(filepath).replace('.', '_')}_{id(filepath)}_{attempt}"
             spec = importlib.util.spec_from_file_location(mod_name, filepath)
             mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
+            candidate_boundary_violation = None
+            try:
+                spec.loader.exec_module(mod)
+                candidate_boundary_violation = boundary_violation()
+            finally:
+                restore_error = restore_basic_agent_boundary()
+            if candidate_boundary_violation or restore_error:
+                _quarantine_agent(
+                    filepath,
+                    "(module)",
+                    "canonical BasicAgent boundary mutated by candidate",
+                )
+                break
+            seen_classes = []
+            registered_classes = {}
             for attr in dir(mod):
                 cls = getattr(mod, attr)
                 if (
                     isinstance(cls, type)
                     and cls.__module__ == mod.__name__
-                    and hasattr(cls, "perform")
-                    and attr not in ("BasicAgent", "object")
+                    and cls is not trusted_basic_agent
+                    and issubclass(cls, trusted_basic_agent)
                     and not attr.startswith("_")
                 ):
+                    previous_attr = next(
+                        (
+                            seen_attr
+                            for seen_cls, seen_attr in seen_classes
+                            if cls is seen_cls
+                        ),
+                        None,
+                    )
+                    if previous_attr is not None:
+                        message = (
+                            "same class discovered twice (deduped): "
+                            f"{previous_attr} and {attr}"
+                        )
+                        _record_agent_load_diagnostic(
+                            filepath,
+                            "same-class-deduped",
+                            message,
+                        )
+                        print(
+                            f"[brainstem] {os.path.basename(filepath)}: {message}"
+                        )
+                        continue
+                    seen_classes.append((cls, attr))
                     instance = cls()
                     # Hot-load boundary: a tool-illegal name or malformed metadata
                     # would ship into the tools array and 400 every /chat. On a
@@ -1684,13 +2062,20 @@ def _load_agent_from_file(filepath):
                     if instance.name in agents or instance.name in duplicate_names:
                         duplicate_names.add(instance.name)
                         agents.pop(instance.name, None)
+                        previous_class = registered_classes.get(
+                            instance.name,
+                            "(earlier class)",
+                        )
                         _quarantine_agent(
                             filepath,
                             cls.__name__,
-                            f"duplicate agent name {instance.name!r} within one file",
+                            "distinct duplicate registered name "
+                            f"{instance.name!r} within one file "
+                            f"({previous_class} and {cls.__name__})",
                         )
                         continue
                     agents[instance.name] = instance
+                    registered_classes[instance.name] = cls.__name__
             break  # success
         except ModuleNotFoundError as e:
             missing = _extract_package_name(e)
@@ -1704,6 +2089,13 @@ def _load_agent_from_file(filepath):
         except Exception as e:
             print(f"[brainstem] Failed to load {filepath}: {e}")
             break
+        finally:
+            restore_basic_agent_boundary()
+    if not agents:
+        with _quarantine_lock:
+            already_quarantined = filepath in _quarantined_agents
+        if not already_quarantined:
+            _quarantine_agent(filepath, "(none)", "no valid agents")
     return agents
 
 
@@ -1715,40 +2107,18 @@ def _register_shims():
     """Register local shims for cloud dependencies so agents import them transparently."""
     global _shims_registered
     if _shims_registered:
+        _restore_basic_agent_boundary()
         return
     
-    import types
     brainstem_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Shim: agents.basic_agent → local basic_agent
     try:
-        # Try loading from agents/ subdirectory first, then flat
         agents_dir = os.path.join(brainstem_dir, "agents")
         if agents_dir not in sys.path:
             sys.path.insert(0, agents_dir)
-        from agents.basic_agent import BasicAgent as _BA
-        if "agents" not in sys.modules:
-            agents_mod = types.ModuleType("agents")
-            agents_mod.__path__ = [agents_dir]
-            sys.modules["agents"] = agents_mod
-        if "agents.basic_agent" not in sys.modules:
-            ba_mod = types.ModuleType("agents.basic_agent")
-            ba_mod.BasicAgent = _BA
-            sys.modules["agents.basic_agent"] = ba_mod
-            sys.modules["agents"].basic_agent = ba_mod
-        # Shim: openrappter.agents.basic_agent → same BasicAgent
-        if "openrappter" not in sys.modules:
-            or_mod = types.ModuleType("openrappter")
-            or_mod.__path__ = [brainstem_dir]
-            sys.modules["openrappter"] = or_mod
-        if "openrappter.agents" not in sys.modules:
-            or_agents = types.ModuleType("openrappter.agents")
-            or_agents.__path__ = [agents_dir]
-            or_agents.basic_agent = sys.modules["agents.basic_agent"]
-            sys.modules["openrappter.agents"] = or_agents
-            sys.modules["openrappter"].agents = or_agents
-        if "openrappter.agents.basic_agent" not in sys.modules:
-            sys.modules["openrappter.agents.basic_agent"] = sys.modules["agents.basic_agent"]
+        if _restore_basic_agent_boundary():
+            raise ImportError("canonical BasicAgent boundary could not be restored")
     except ImportError as e:
         print(f"[brainstem] Warning: Could not load BasicAgent: {e}")
         pass
@@ -1835,8 +2205,7 @@ def _auto_install(package):
 
 def load_agents():
     agents = {}
-    pattern = os.path.join(AGENTS_PATH, "*_agent.py")
-    files = sorted(glob.glob(pattern))
+    files = _agent_cartridge_files()
 
     for filepath in files:
         loaded = _load_agent_from_file(filepath)
@@ -1845,7 +2214,8 @@ def load_agents():
                 _quarantine_agent(
                     filepath,
                     instance.__class__.__name__,
-                    f"duplicate agent name {name!r}; already registered by an earlier file",
+                    "distinct duplicate registered name "
+                    f"{name!r}; already registered by an earlier file",
                 )
                 continue
             agents[name] = instance
@@ -1856,6 +2226,8 @@ def load_agents():
     with _quarantine_lock:
         for gone in [f for f in _quarantined_agents if f not in files]:
             _quarantined_agents.pop(gone, None)
+        for gone in [f for f in _agent_load_diagnostics if f not in files]:
+            _agent_load_diagnostics.pop(gone, None)
 
     print(f"[brainstem] {len(agents)} agent(s) ready.")
     return agents
@@ -2983,12 +3355,9 @@ def version():
 @_require_secret
 def list_agents_files():
     """List all agent .py files available with their loaded agent names."""
-    files = glob.glob(os.path.join(AGENTS_PATH, "*.py"))
     results = []
-    for f in files:
+    for f in _agent_cartridge_files():
         filename = os.path.basename(f)
-        if filename.startswith("__") or not filename.endswith(".py"):
-            continue
         try:
             # We don't want to re-download pip packages or run arbitrary init unnecessarily,
             # but if it's already synthetically loaded or safe to parse, _load_agent_from_file is okay.
@@ -3028,7 +3397,13 @@ def agents_delete(filename):
         safe_name += '.py'
     # basic_agent.py is the shared base class every agent imports — deleting it breaks
     # all of them. It isn't a usable agent and the UI never lists it, so refuse.
-    if safe_name == "basic_agent.py":
+    if (
+        _is_kernel_agent_filename(safe_name)
+        or _aliases_kernel_agent_path(
+            os.path.join(AGENTS_PATH, safe_name),
+            AGENTS_PATH,
+        )
+    ):
         return jsonify({"error": "basic_agent.py is the shared base class and cannot be deleted."}), 400
     filepath = os.path.join(AGENTS_PATH, safe_name)
     if os.path.exists(filepath):
@@ -3059,7 +3434,13 @@ def agents_import():
     # Ensure it matches the glob pattern *_agent.py
     if not safe_name.endswith('_agent.py'):
         safe_name = safe_name[:-3] + '_agent.py'
-    if safe_name == "basic_agent.py":
+    if (
+        _is_kernel_agent_filename(safe_name)
+        or _aliases_kernel_agent_path(
+            os.path.join(AGENTS_PATH, safe_name),
+            AGENTS_PATH,
+        )
+    ):
         return jsonify({
             "error": "basic_agent.py is the shared base class and cannot be replaced.",
         }), 400
@@ -3105,7 +3486,7 @@ def agents_import():
         return jsonify({"error": f"Saved {safe_name}, but it did not load as an agent — check the file for errors."}), 200
 
     conflicting_files = []
-    for other_path in sorted(glob.glob(os.path.join(AGENTS_PATH, "*_agent.py"))):
+    for other_path in _agent_cartridge_files():
         if os.path.normcase(os.path.abspath(other_path)) == os.path.normcase(os.path.abspath(filepath)):
             continue
         other_names = _load_agent_from_file(other_path)
@@ -3164,6 +3545,7 @@ def health():
             "soul":   SOUL_PATH if soul_ok else "missing",
             "agents": list(agents.keys()),
             "quarantined": _quarantine_snapshot(),
+            "loader_diagnostics": _agent_load_diagnostics_snapshot(),
             "copilot": "no_access" if no_copilot else ("\u2713" if copilot_ok else "pending"),
             "copilot_username": _no_copilot_access.get("username") if no_copilot else None,
             "brainstem_dir": os.path.dirname(os.path.abspath(__file__)),
@@ -3176,6 +3558,7 @@ def health():
             "soul":   SOUL_PATH if soul_ok else "missing",
             "agents": list(agents.keys()),
             "quarantined": _quarantine_snapshot(),
+            "loader_diagnostics": _agent_load_diagnostics_snapshot(),
             "auth_error": "invalid_credentials" if invalid_credential else None,
         })
 
@@ -3379,6 +3762,7 @@ def diagnostics_report():
         },
         "agents_loaded": list(load_agents().keys()),
         "agents_quarantined": _quarantine_snapshot(),
+        "agent_loader_diagnostics": _agent_load_diagnostics_snapshot(),
         "server_events": events[-10:],
         "client_events": client_events[-10:] if client_events else [],
     }

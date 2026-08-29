@@ -1,0 +1,22 @@
+{
+  "schema": "openrappter-frontier-fixture/1.0",
+  "catalog_url": "https://kody-w.github.io/RAPP_Store/index.json",
+  "source_repository": "kody-w/RAPP_Store",
+  "source_path": "apps/@rapp/bookfactory/singleton/bookfactory_agent.py",
+  "license": "BSD-style (declared by the BookFactory manifest)",
+  "failing": {
+    "version": "0.3.0",
+    "source_commit": "a46cf150e48d44e4ab9c9098031b77b210cdab45",
+    "sha256": "1224fe87e3cfbc569aa6d0aa5edf5f796247a9cdbcd5e26222399e68373e4f02",
+    "bytes": 23458,
+    "fixture": "bookfactory_agent.v0.3.0.py"
+  },
+  "fixed": {
+    "version": "0.3.1",
+    "source_commit": "768534ec6a384bdac319dd65ab3a9d1adbc671bd",
+    "sha256": "b6b39ec2f0ee00bad872b9a779ddb1d1604fa6940b1ee7a09ca6ad144d64c89c",
+    "bytes": 23274,
+    "fixture": "bookfactory_agent.py",
+    "upstream_pull_request": "https://github.com/kody-w/RAPP_Store/pull/54"
+  }
+}

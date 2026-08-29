@@ -343,7 +343,6 @@ function verifyMoltWithMolter({
 }
 
 const DRY_LOAD_SCRIPT = `
-import glob
 import importlib.util
 import os
 import sys
@@ -357,16 +356,17 @@ spec.loader.exec_module(brainstem)
 
 names = {}
 failures = []
-for filepath in sorted(glob.glob(os.path.join(agents_dir, "*_agent.py"))):
-    if os.path.basename(filepath) == "basic_agent.py":
-        continue
+for filepath in brainstem._agent_cartridge_files(agents_dir):
     loaded = brainstem._load_agent_from_file(filepath)
     if not loaded:
-        failures.append(f"{os.path.basename(filepath)} loaded no agents")
+        failures.append(f"{os.path.basename(filepath)}: no valid agents")
         continue
     for name in loaded:
         if name in names:
-            failures.append(f"duplicate tool name {name!r} in {os.path.basename(filepath)} and {names[name]}")
+            failures.append(
+                f"distinct duplicate registered name {name!r} "
+                f"in {os.path.basename(filepath)} and {names[name]}"
+            )
         else:
             names[name] = os.path.basename(filepath)
 
@@ -3163,6 +3163,7 @@ export class BetaRouteManager {
 }
 
 export const routeManagerInternals = {
+  dryLoadAgentDirectory,
   routedContextMemoryMoltSource,
   safeAgentFilename,
   slugFromFilename,

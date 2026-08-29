@@ -90,7 +90,10 @@ test("OpenRappter is the isolated fully built-out twin beside bare Brainstem", (
 
 test("the Electron shell presents the full OpenRappter application", () => {
   assert.match(ui, /<h1>Starting OpenRappter<\/h1>/);
-  assert.match(ui, /title="OpenRappter chat"/);
+  assert.match(
+    ui,
+    /title="Brainstem \/chat — OpenRappter main conversation"/,
+  );
   assert.match(ui, /aria-label="Live OpenRappter agents Explorer"/);
   assert.match(ui, /live OpenRappter workspace/);
   assert.match(ui, /Agent · files, shell, tests, OpenRappter/);

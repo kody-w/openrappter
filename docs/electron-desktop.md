@@ -1,61 +1,54 @@
 # OpenRappter Electron Desktop
 
-OpenRappter Desktop applies Skill Recorder's desktop ergonomics without
-forking OpenRappter's runtime.
+OpenRappter Desktop packages the maintained Frontier application directly.
 
 ## Architecture
 
 ```text
-Electron main process
-  ├─ launches or reuses the local OpenRappter gateway
-  ├─ loads the packaged current Lit UI from disk
-  ├─ owns native confirmation dialogs
-  ├─ owns local Whisper and VibeVoice services
-  ├─ owns the authenticated desktop command queue
-  └─ exposes narrow context-isolated IPC methods
+beta/electron/bootstrap.mjs
+  └─ beta/electron/main.mjs
+      ├─ launches the installed Brainstem /chat runtime
+      ├─ loads beta/ui/index.html directly
+      ├─ owns GitHub Copilot, twins, updater, media, and approvals
+      └─ exposes the context-isolated brainstemBeta preload
 
 Sandboxed renderer
-  └─ existing OpenRappter UI + visual Show-and-Tell workspace
-
-Packed OpenRappter runtime
-  ├─ TypeScript gateway and agents
-  ├─ built UI assets
-  └─ Electron-specific better-sqlite3 binding
+  └─ beta/ui (the authoritative Frontier source)
 ```
 
-The system Node installation and Electron never share a native SQLite binary.
-`desktop/scripts/install-runtime.mjs` packs the current OpenRappter package,
-installs it under `desktop/runtime`, and rebuilds only that copy for Electron.
+Electron Builder runs with `beta/` as its project directory. No Lit renderer,
+TypeScript host, or generated mirror sits between the package and `beta/ui`.
+The extracted `app.asar` is byte-compared against the provenance contract.
 
 ## Development
 
 ```bash
-cd typescript
-npm install
-npm run build
-
-cd desktop
-npm install
+cd beta
+npm ci --ignore-scripts
+node node_modules/electron/install.js
+npm run check
+npm test
 npm start
 ```
 
 ## Build an application
 
 ```bash
-cd typescript/desktop
-CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist -- --dir
+cd beta
+npm run dist:mac
 ```
 
-Electron Builder targets:
+`typescript/ui` and `typescript/desktop` retain the deprecated patient
+interface for migration evidence only; they are not the primary package.
 
-- macOS: DMG and ZIP
-- Windows: NSIS
-- Linux: AppImage
+The maintained Frontier package currently emits signed/notarized macOS DMG and
+ZIP artifacts. Windows and Linux patient-host artifacts are no longer
+presented as Frontier; direct Frontier packages for those platforms remain
+blocked until their native media-tool hashes and package smoke are added.
 
 Production signing/notarization credentials remain external to the repository.
 macOS releases require the documented Apple certificate and notarization
-secrets. Windows releases require `WINDOWS_CERTIFICATE_P12_BASE64` and
-`WINDOWS_CERTIFICATE_PASSWORD`; unsigned `.exe` assets are rejected.
+secrets.
 
 ## Security boundary
 

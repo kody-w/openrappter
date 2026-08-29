@@ -2,7 +2,7 @@ export function createUiDriverHelpers(environment = {}) {
   const documentRef = environment.document || null;
   const caps = Object.freeze({
     budgetDefault: 6000,
-    inspectDefault: 60,
+    inspectDefault: 20,
     inspectMax: 80,
     readMax: 4000,
     screenshotTextDefault: 300,

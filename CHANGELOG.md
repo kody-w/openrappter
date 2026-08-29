@@ -343,6 +343,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Frontier is now packaged directly from the maintained `beta/` application.
+  Release gates hash authoritative renderer/IPC bytes and compare extracted
+  `app.asar` contents, while the TypeScript patient UI remains non-primary.
+
 - `python/tests/test_report_citations.py`, a citation gate that fails CI when a
   report's `Evidence:` bullet cites a code symbol absent from the source tree.
   It checks symbol existence rather than line numbers, because code moves and a

@@ -1,0 +1,50 @@
+{
+  "schema": "openrappter-frontier-provenance/1.0",
+  "application": {
+    "repository": "kody-w/openrappter",
+    "root": "beta",
+    "entrypoint": "beta/electron/bootstrap.mjs",
+    "renderer": "beta/ui",
+    "packageWorkflow": ".github/workflows/frontier-desktop.yml"
+  },
+  "deployment": {
+    "pagesLanding": "docs/beta/index.html",
+    "installer": "beta/install.sh",
+    "releaseWorkflow": ".github/workflows/release.yml"
+  },
+  "brainstem": {
+    "installedRuntime": "~/.openrappter/brainstem/src/rapp_brainstem",
+    "taggedReleaseRepository": "kody-w/openrappter",
+    "taggedReleaseRoot": "rapp_brainstem",
+    "developmentKernelRepository": "microsoft/aibast-agents-library",
+    "bootstrapRepository": "kody-w/aibast-agents-library",
+    "publicPointerRepository": "kody-w/rapp-brainstem"
+  },
+  "legacy": {
+    "root": "typescript/ui",
+    "desktop": "typescript/desktop",
+    "role": "deprecated-patient-interface",
+    "isFrontierMirror": false
+  },
+  "files": {
+    "beta/electron/bootstrap.mjs": "6197c0aa9976b08b17edc331892c532a4a3bebcf15b1383579f749a68720b56e",
+    "beta/electron/injection-sources.mjs": "a5ae0a553237f4044bcb39d7ac12905d8c8b6561fa5a48a958cc083303428986",
+    "beta/electron/main.mjs": "b44c626c201de17df136cc8d67ec9f4f4f5b701bf3edf097488a5a71effba75b",
+    "beta/electron/preload.cjs": "46df4e415697caf1274ab557d96b8bde57839e226d4529e5a866502b9977c415",
+    "beta/package.json": "bea1f3005a566f2d454d5091e87f9e2a93a3253b212a284ac531268715a4f08b",
+    "beta/ui/autopilot.js": "cc49738bc7f6a4a77ecbb30b2d78696f0e61efdda2cdecc9d85a7e4550696a4d",
+    "beta/ui/chat-look.js": "ec28be977568a93a24648df75bffa0fd3c60e7485ff9c1316f45acb6225cdf9e",
+    "beta/ui/dimension-tiles.css": "719f193305fc74ed0983be69dade6a0adb585d5d08fee187666a2dee544d7e55",
+    "beta/ui/dimension-tiles.js": "376a665fdeb29811d303a70ec127a60098c4cf736fbf9bb6d858e55f8038eca8",
+    "beta/ui/frontier-core.js": "1365fefcdd8bb26b31f54231f8247357f8d27564ff6e4143990757cae8b29114",
+    "beta/ui/frontier-features.css": "402ecf707e787443b8a1a8034ce2158e6e46f40c679f37c84392257c7d9ebf07",
+    "beta/ui/frontier-features.js": "0360e6bbb874bd4a38d558081e1c59628e26caa1d50e855548ff5b30c18a1815",
+    "beta/ui/index.html": "4b919f5ea3b261688e8f1a3a14bf258de951482736e75f51d5795f8e5e87aad8",
+    "beta/ui/renderer.js": "c5c4ec039415622051f4a06961086161079450a6bbb499bf909f1beee02b8522",
+    "beta/ui/show-mode-tour.js": "b599afd2f4ee5c1ecdeaac46b8edf48a855488a5c0c6c59ef79eb7354cfe9aad",
+    "beta/ui/stream-follow.js": "47736a1ea64a169e17cfe5efd40205a486edc8dabe378a1455ea2f2b727defc9",
+    "beta/ui/stream-pacing.js": "719482c7b7c49d746c624a194a8a821bbc2d1aeec3821eeb06eae472d42aee0b",
+    "beta/ui/stream-render-pacing.js": "53f737b0015331e250d6467647bfa86dfcdc04fbdb0a16fdec7ac5a2e6f21e5f",
+    "beta/ui/typing-delivery.js": "055115647878546acc3c813f59ce1984fbce588aed784f5e03fe9b1b265fd414"
+  }
+}

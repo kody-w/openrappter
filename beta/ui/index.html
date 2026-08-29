@@ -1,14 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-openrappter-shell="frontier">
 <head>
   <meta charset="utf-8">
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; frame-src http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: http://127.0.0.1:* http://localhost:*; media-src http://127.0.0.1:* http://localhost:*;"
+    content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src 'self' http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: http://127.0.0.1:* http://localhost:*; media-src http://127.0.0.1:* http://localhost:*;"
   >
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OpenRappter</title>
   <link rel="icon" href="../build/icon.svg">
+  <link rel="stylesheet" href="frontier-features.css">
   <meta name="theme-color" content="#07111f">
   <style>
     :root {
@@ -788,10 +789,45 @@
     <iframe
       id="brainstem"
       data-drive="shell.brainstem"
-      title="OpenRappter chat"
+      title="Brainstem /chat — OpenRappter main conversation"
       sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals allow-popups"
     ></iframe>
   </main>
+  <button id="frontier-features-tab" data-drive="frontier.features.open" type="button"
+    aria-haspopup="dialog" aria-controls="frontier-features">
+    OpenRappter features
+  </button>
+  <dialog id="frontier-features" aria-labelledby="frontier-features-title">
+    <div class="frontier-features-head">
+      <div>
+        <strong id="frontier-features-title">OpenRappter features</strong>
+        <span>Native Frontier capabilities and truthful adapter state</span>
+      </div>
+      <button id="frontier-features-close" data-drive="frontier.features.close" type="button"
+        aria-label="Close OpenRappter features">×</button>
+    </div>
+    <div class="frontier-features-layout">
+      <nav id="frontier-feature-nav" aria-label="OpenRappter features">
+        <button data-drive="frontier.feature.status" data-frontier-feature="organism-status" type="button">Organism status</button>
+        <button data-drive="frontier.feature.cleverGirl" data-frontier-feature="clever-girl" type="button">Clever Girl</button>
+        <button data-drive="frontier.feature.releaseRings" data-frontier-feature="release-rings" type="button">Release rings</button>
+        <button data-drive="frontier.feature.quantumRappids" data-frontier-feature="quantum-rappids" type="button">Grail / Quantum RAPPIDs</button>
+        <button data-drive="frontier.feature.livingCompany" data-frontier-feature="living-company" type="button">Living Company</button>
+        <button data-drive="frontier.feature.organismEgg" data-frontier-feature="organism-egg" type="button">Whole-organism egg</button>
+        <button data-drive="frontier.feature.adaptiveTwins" data-frontier-feature="adaptive-twins" type="button">Adaptive twins</button>
+        <button data-drive="frontier.feature.largeMedia" data-frontier-feature="large-media" type="button">Large media</button>
+        <button data-drive="frontier.feature.voice" data-frontier-feature="voice" type="button">Voice &amp; ElevenLabs</button>
+        <button data-drive="frontier.feature.about" data-frontier-feature="about" type="button">About</button>
+      </nav>
+      <section id="frontier-feature-content" aria-live="polite"></section>
+    </div>
+    <div class="frontier-features-foot">
+      <button id="frontier-legacy-patient" data-drive="frontier.legacy.open" type="button">
+        Legacy Patient Interface
+      </button>
+      <span>Beta onboarding, chat, prompt chips, imports, and Copilot remain in place.</span>
+    </div>
+  </dialog>
   <aside id="explorer" data-drive="shell.explorer" aria-label="Live OpenRappter agents Explorer">
     <header>
       <span aria-hidden="true">🗂️</span>
@@ -1021,6 +1057,8 @@
   <script src="stream-pacing.js"></script>
   <script src="chat-look.js"></script>
   <script src="typing-delivery.js"></script>
+  <script src="frontier-core.js"></script>
+  <script src="frontier-features.js"></script>
   <script src="renderer.js"></script>
   <script src="show-mode-tour.js"></script>
 </body>

@@ -2,11 +2,17 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import {
   approveProcedure,
+  createGroup,
   loadCases,
+  loadGroupParticipants,
   loadPatient,
+  loadSurgeonFeatures,
   operate,
   rejectProcedure,
+  sendGroupTurn,
   sendTurn as requestSurgeonTurn,
+  type GroupParticipantSummary,
+  type GroupTranscriptTurn,
 } from '../services/surgeon.js';
 import { askPatient } from '../services/patient.js';
 import type {
@@ -462,6 +468,79 @@ export class OpenRappterSurgeon extends LitElement {
     .welcome p {
       color: #97a3bd;
       line-height: 1.7;
+    }
+
+    .participant-picker {
+      margin: 22px 0 0;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,.025);
+    }
+
+    .participant-picker legend {
+      padding: 0 7px;
+      color: var(--cyan);
+      font-size: 10px;
+      font-weight: 760;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .participant-options {
+      display: grid;
+      gap: 8px;
+    }
+
+    .participant-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      padding: 9px 10px;
+      border-radius: 10px;
+      background: rgba(111,168,255,.045);
+      color: #cbd7ef;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .participant-option input {
+      accent-color: var(--cyan);
+    }
+
+    .participant-option span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .group-transcript {
+      max-width: 780px;
+      margin: 0 auto;
+    }
+
+    .group-roster {
+      margin: 0 0 16px;
+      color: #7f8aa5;
+      font-size: 10px;
+      line-height: 1.6;
+    }
+
+    .group-turn {
+      margin-bottom: 12px;
+      padding: 15px 17px;
+      border: 1px solid var(--line);
+      border-radius: 4px 17px 17px 17px;
+      background: var(--glass);
+    }
+
+    .group-turn p {
+      margin: 8px 0 0;
+      color: #e7ebf6;
+      font-size: 13px;
+      line-height: 1.65;
+      white-space: pre-wrap;
     }
 
     .starter-portals,
@@ -985,9 +1064,16 @@ export class OpenRappterSurgeon extends LitElement {
    * done. 'patient' is OpenRappter answering for itself, which it could not do
    * here at all: every turn went to surgeon.turn and nothing reached the agent.
    */
-  @state() private mode: 'surgeon' | 'patient' = 'surgeon';
+  @state() private mode: 'surgeon' | 'patient' | 'group' = 'surgeon';
   @state() private patientTurns: Array<{ q: string; a: string; model?: string }> = [];
   @state() private patientSession = '';
+  @state() private groupEnabled = false;
+  @state() private groupParticipants: GroupParticipantSummary[] = [];
+  @state() private selectedGroupParticipants = new Set<string>();
+  @state() private groupId = '';
+  @state() private groupTranscript: GroupTranscriptTurn[] = [];
+  @state() private groupStatus = 'ready';
+  private groupAbort?: AbortController;
 
   private readonly starterOptions: SurgeonOption[] = [
     {
@@ -1019,8 +1105,33 @@ export class OpenRappterSurgeon extends LitElement {
       this.patient = patient;
       this.patientCase = cases[0] ?? null;
       this.error = null;
+      void this.hydrateGroupMode();
     } catch (error) {
       this.error = (error as Error).message;
+    }
+  }
+
+  private async hydrateGroupMode(): Promise<void> {
+    try {
+      const features = await loadSurgeonFeatures();
+      this.groupEnabled = features.brainSurgeonGroupChat === true;
+      if (!this.groupEnabled) {
+        this.groupParticipants = [];
+        this.selectedGroupParticipants = new Set();
+        if (this.mode === 'group') this.mode = 'surgeon';
+        return;
+      }
+      const { participants } = await loadGroupParticipants();
+      this.groupParticipants = participants.filter(participant =>
+        participant.state === 'active' && participant.featureEnabled);
+      this.selectedGroupParticipants = new Set(
+        this.groupParticipants.slice(0, 6).map(participant => participant.rappid),
+      );
+    } catch {
+      this.groupEnabled = false;
+      this.groupParticipants = [];
+      this.selectedGroupParticipants = new Set();
+      if (this.mode === 'group') this.mode = 'surgeon';
     }
   }
 
@@ -1033,10 +1144,14 @@ export class OpenRappterSurgeon extends LitElement {
   }
 
   private newExamination(): void {
+    this.groupAbort?.abort();
     this.patientCase = null;
     this.input = '';
     this.confirmation = '';
     this.error = null;
+    this.groupId = '';
+    this.groupTranscript = [];
+    this.groupStatus = 'ready';
   }
 
   /** Ask the patient directly, over the same public /chat wire a neighbor uses. */
@@ -1061,7 +1176,86 @@ export class OpenRappterSurgeon extends LitElement {
     }
   }
 
+  private setMode(mode: 'surgeon' | 'patient' | 'group'): void {
+    if (mode === 'group' && !this.groupEnabled) return;
+    this.mode = mode;
+    this.error = null;
+  }
+
+  private onModeKeydown(event: KeyboardEvent): void {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const buttons = Array.from(
+      this.shadowRoot?.querySelectorAll<HTMLButtonElement>('.toolbar [data-mode]') ?? [],
+    );
+    if (buttons.length === 0) return;
+    const current = Math.max(
+      0,
+      buttons.indexOf((event.target as HTMLElement).closest<HTMLButtonElement>('[data-mode]')!),
+    );
+    const next = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? buttons.length - 1
+        : (current + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length)
+          % buttons.length;
+    event.preventDefault();
+    buttons[next].focus();
+    buttons[next].click();
+  }
+
+  private toggleGroupParticipant(rappid: string, checked: boolean): void {
+    if (this.groupId || this.busy) return;
+    const selected = new Set(this.selectedGroupParticipants);
+    if (checked) selected.add(rappid);
+    else selected.delete(rappid);
+    this.selectedGroupParticipants = selected;
+  }
+
+  private async sendGroup(value: string): Promise<void> {
+    const userInput = value.trim();
+    if (!userInput || this.busy) return;
+    const participants = [...this.selectedGroupParticipants];
+    if (participants.length < 2) {
+      this.error = 'Choose at least two available participants.';
+      return;
+    }
+    this.busy = true;
+    this.error = null;
+    this.input = '';
+    try {
+      if (!this.groupId) {
+        const group = await createGroup(participants);
+        this.groupId = group.id;
+      }
+      const controller = new AbortController();
+      this.groupAbort = controller;
+      const result = await sendGroupTurn(this.groupId, userInput, controller.signal);
+      this.groupTranscript = result.transcript;
+      this.groupStatus = result.status;
+      const last = result.transcript.at(-1);
+      if (last) this.speak(last.envelope.response);
+      await this.updateComplete;
+      this.shadowRoot?.querySelector('.transcript')?.scrollTo({
+        top: this.shadowRoot.querySelector('.transcript')!.scrollHeight,
+        behavior: 'smooth',
+      });
+    } catch (error) {
+      if (!this.groupAbort?.signal.aborted) {
+        this.error = (error as Error).message;
+      }
+    } finally {
+      this.groupAbort = undefined;
+      this.busy = false;
+    }
+  }
+
+  private cancelGroupTurn(): void {
+    this.groupAbort?.abort();
+    this.groupStatus = 'cancelled';
+  }
+
   private async sendTurn(value = this.input): Promise<void> {
+    if (this.mode === 'group') return this.sendGroup(value);
     if (this.mode === 'patient') return this.askThePatient(value);
     const userInput = value.trim();
     if (!userInput || this.busy) return;
@@ -1347,7 +1541,68 @@ export class OpenRappterSurgeon extends LitElement {
       </div>`)}`;
   }
 
+  private renderGroupParticipants(): unknown {
+    return html`
+      <fieldset class="participant-picker" ?disabled=${this.busy || Boolean(this.groupId)}>
+        <legend>Participants</legend>
+        <div class="participant-options">
+          ${this.groupParticipants.map(participant => html`
+            <label class="participant-option">
+              <input
+                type="checkbox"
+                data-rappid=${participant.rappid}
+                .checked=${this.selectedGroupParticipants.has(participant.rappid)}
+                @change=${(event: Event) => this.toggleGroupParticipant(
+                  participant.rappid,
+                  (event.target as HTMLInputElement).checked,
+                )}
+              >
+              <span>${participant.liveLabel}</span>
+            </label>
+          `)}
+        </div>
+      </fieldset>
+    `;
+  }
+
+  private renderGroupTranscript(): unknown {
+    if (this.groupTranscript.length === 0) {
+      return html`
+        <div class="welcome">
+          <span class="eyebrow">Experimental group mode</span>
+          <h2>Ask several local participants.</h2>
+          <p>
+            Replies are attributed conversation data. They cannot approve or
+            run an operation on the patient.
+          </p>
+          ${this.renderGroupParticipants()}
+        </div>
+      `;
+    }
+    return html`
+      <div class="group-transcript">
+        <div class="group-roster">
+          ${this.groupParticipants
+            .filter(participant => this.selectedGroupParticipants.has(participant.rappid))
+            .map(participant => participant.liveLabel)
+            .join(' · ')}
+        </div>
+        ${this.groupTranscript.map(turn => html`
+          <article
+            class="group-turn"
+            data-rappid=${turn.participant.rappid}
+            aria-label=${`Reply from ${turn.participant.liveLabel}`}
+          >
+            <span class="eyebrow">${turn.participant.liveLabel}</span>
+            <p>${turn.envelope.response}</p>
+          </article>
+        `)}
+      </div>
+    `;
+  }
+
   private renderTranscript(): unknown {
+    if (this.mode === 'group') return this.renderGroupTranscript();
     if (this.mode === 'patient') return this.renderPatientTranscript();
     const turns = this.patientCase?.turns ?? [];
     if (turns.length === 0) {
@@ -1387,6 +1642,57 @@ export class OpenRappterSurgeon extends LitElement {
     return message.includes('not authenticated')
       || message.includes('copilot token')
       || message.includes('authentication required');
+  }
+
+  private renderModeToolbar(): unknown {
+    if (!this.groupEnabled) {
+      return html`
+        <div class="toolbar" role="group" aria-label="Who you are talking to">
+          <button
+            class="tbtn${this.mode === 'surgeon' ? ' on' : ''}"
+            aria-pressed=${this.mode === 'surgeon'}
+            ?disabled=${this.busy}
+            @click=${() => { this.mode = 'surgeon'; this.error = null; }}
+          >⌘ Surgeon</button>
+          <button
+            class="tbtn${this.mode === 'patient' ? ' on' : ''}"
+            aria-pressed=${this.mode === 'patient'}
+            ?disabled=${this.busy}
+            @click=${() => { this.mode = 'patient'; this.error = null; }}
+          >🦖 Patient</button>
+        </div>
+      `;
+    }
+    return html`
+      <div
+        class="toolbar"
+        role="group"
+        aria-label="Who you are talking to"
+        @keydown=${this.onModeKeydown}
+      >
+        <button
+          class="tbtn${this.mode === 'surgeon' ? ' on' : ''}"
+          data-mode="surgeon"
+          aria-pressed=${this.mode === 'surgeon'}
+          ?disabled=${this.busy}
+          @click=${() => this.setMode('surgeon')}
+        >⌘ Surgeon</button>
+        <button
+          class="tbtn${this.mode === 'patient' ? ' on' : ''}"
+          data-mode="patient"
+          aria-pressed=${this.mode === 'patient'}
+          ?disabled=${this.busy}
+          @click=${() => this.setMode('patient')}
+        >🦖 Patient</button>
+        <button
+          class="tbtn${this.mode === 'group' ? ' on' : ''}"
+          data-mode="group"
+          aria-pressed=${this.mode === 'group'}
+          ?disabled=${this.busy}
+          @click=${() => this.setMode('group')}
+        >◎ Group</button>
+      </div>
+    `;
   }
 
   render(): unknown {
@@ -1435,31 +1741,30 @@ export class OpenRappterSurgeon extends LitElement {
 
           <section class="surgeon-wing">
             <header class="surgeon-header">
-              <div class="copilot">${this.mode === 'patient' ? '🦖' : '⌘'}</div>
+              <div class="copilot">${this.mode === 'patient'
+                ? '🦖'
+                : this.mode === 'group'
+                  ? '◎'
+                  : '⌘'}</div>
               <div class="surgeon-title">
-                <b>${this.mode === 'patient' ? 'OpenRappter' : 'GitHub Copilot'}</b>
+                <b>${this.mode === 'patient'
+                  ? 'OpenRappter'
+                  : this.mode === 'group'
+                    ? 'Group consultation'
+                    : 'GitHub Copilot'}</b>
                 <span>${this.mode === 'patient'
                   ? 'the patient, answering for itself · over POST /chat'
-                  : 'Brain surgeon · adaptive agent mode'}</span>
+                  : this.mode === 'group'
+                    ? 'bounded round-robin · attributed replies'
+                    : 'Brain surgeon · adaptive agent mode'}</span>
               </div>
-              <div class="toolbar" role="group" aria-label="Who you are talking to">
-                <button
-                  class="tbtn${this.mode === 'surgeon' ? ' on' : ''}"
-                  aria-pressed=${this.mode === 'surgeon'}
-                  ?disabled=${this.busy}
-                  @click=${() => { this.mode = 'surgeon'; this.error = null; }}
-                >⌘ Surgeon</button>
-                <button
-                  class="tbtn${this.mode === 'patient' ? ' on' : ''}"
-                  aria-pressed=${this.mode === 'patient'}
-                  ?disabled=${this.busy}
-                  @click=${() => { this.mode = 'patient'; this.error = null; }}
-                >🦖 Patient</button>
-              </div>
+              ${this.renderModeToolbar()}
               <span class="case-status">
                 ${this.mode === 'patient'
                   ? (this.patientSession ? 'in conversation' : 'ready')
-                  : (this.patientCase?.status.replace('_', ' ') ?? 'ready')}
+                  : this.mode === 'group'
+                    ? this.groupStatus
+                    : (this.patientCase?.status.replace('_', ' ') ?? 'ready')}
               </span>
             </header>
 
@@ -1478,7 +1783,11 @@ export class OpenRappterSurgeon extends LitElement {
               ${this.busy ? html`
                 <div class="thinking">
                   <span class="pulse"><i></i><i></i><i></i></span>
-                  ${this.mode === 'patient' ? 'OpenRappter is answering…' : 'Copilot is examining OpenRappter…'}
+                  ${this.mode === 'patient'
+                    ? 'OpenRappter is answering…'
+                    : this.mode === 'group'
+                      ? 'The group is taking turns…'
+                      : 'Copilot is examining OpenRappter…'}
                 </div>
               ` : nothing}
             </div>
@@ -1486,10 +1795,16 @@ export class OpenRappterSurgeon extends LitElement {
             <footer class="composer-wrap">
               <div class="composer">
                 <textarea
-                  aria-label=${this.mode === 'patient' ? 'Ask OpenRappter directly' : 'Ask the Copilot surgeon'}
+                  aria-label=${this.mode === 'patient'
+                    ? 'Ask OpenRappter directly'
+                    : this.mode === 'group'
+                      ? 'Ask the selected group'
+                      : 'Ask the Copilot surgeon'}
                   placeholder=${this.mode === 'patient'
                     ? 'Ask OpenRappter itself…'
-                    : 'Describe what OpenRappter needs…'}
+                    : this.mode === 'group'
+                      ? 'Ask the group to compare or collaborate…'
+                      : 'Describe what OpenRappter needs…'}
                   .value=${this.input}
                   ?disabled=${this.busy}
                   @input=${(event: Event) => {
@@ -1497,17 +1812,32 @@ export class OpenRappterSurgeon extends LitElement {
                   }}
                   @keydown=${this.onComposerKeydown}
                 ></textarea>
-                <button
-                  class="send"
-                  aria-label=${this.mode === 'patient' ? 'Send to OpenRappter' : 'Send to Copilot surgeon'}
-                  ?disabled=${this.busy || !this.input.trim()}
-                  @click=${() => this.sendTurn()}
-                >↑</button>
+                ${this.mode === 'group' && this.busy ? html`
+                  <button
+                    class="send"
+                    aria-label="Cancel group turn"
+                    @click=${this.cancelGroupTurn}
+                  >×</button>
+                ` : html`
+                  <button
+                    class="send"
+                    aria-label=${this.mode === 'patient'
+                      ? 'Send to OpenRappter'
+                      : this.mode === 'group'
+                        ? 'Send to selected group'
+                        : 'Send to Copilot surgeon'}
+                    ?disabled=${this.busy || !this.input.trim()}
+                    @click=${() => this.sendTurn()}
+                  >↑</button>
+                `}
               </div>
               <div class="composer-note">
                 ${this.mode === 'patient' ? html`
                   <span>Straight to the agent over <code>POST /chat</code> — the same wire a neighbor uses.</span>
                   <span>Copilot is not in this conversation.</span>
+                ` : this.mode === 'group' ? html`
+                  <span>Replies stay attributed to stable participant sessions.</span>
+                  <span>Group text cannot approve or run operations.</span>
                 ` : html`
                   <span>Copilot shapes the next interface from this turn.</span>
                   <span>Mutations require explicit approval.</span>

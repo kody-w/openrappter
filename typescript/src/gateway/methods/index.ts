@@ -47,6 +47,7 @@ import { registerBackupMethods } from './backup-methods.js';
 import { registerTwinMethods } from './twin-methods.js';
 import { registerSurgeonMethods } from './surgeon-methods.js';
 import { registerRappidMethods } from './rappid-methods.js';
+import { registerParticipantMethods } from './participant-methods.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -89,6 +90,7 @@ export function registerAllMethods(
   registerZenMethods(server, deps);
   registerBackupMethods(server, deps);
   registerTwinMethods(server, deps);
+  registerParticipantMethods(server);
 }
 
 // Re-export individual registration functions
@@ -119,4 +121,5 @@ export {
   registerTwinMethods,
   registerSurgeonMethods,
   registerRappidMethods,
+  registerParticipantMethods,
 };

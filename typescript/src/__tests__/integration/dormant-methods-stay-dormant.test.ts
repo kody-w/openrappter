@@ -40,6 +40,8 @@ const SERVER = resolve(__dirname, '../../gateway/server.ts');
 const INTENTIONALLY_INVOKED = new Set([
   'registerAuthMethods',
   'registerBackupMethods',
+  'registerFeaturesMethods',
+  'registerParticipantMethods',
   'registerRappterMethods',
   'registerRappidMethods',
   'registerShowcaseMethods',

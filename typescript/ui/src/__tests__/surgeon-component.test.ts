@@ -14,6 +14,11 @@ const mocks = vi.hoisted(() => ({
   approveProcedure: vi.fn(),
   rejectProcedure: vi.fn(),
   operate: vi.fn(),
+  loadSurgeonFeatures: vi.fn(),
+  loadGroupParticipants: vi.fn(),
+  createGroup: vi.fn(),
+  sendGroupTurn: vi.fn(),
+  cancelGroup: vi.fn(),
 }));
 
 vi.mock('../services/surgeon.js', () => mocks);
@@ -98,6 +103,7 @@ describe('openrappter-surgeon', () => {
   beforeEach(() => {
     mocks.loadPatient.mockResolvedValue(patient);
     mocks.loadCases.mockResolvedValue([]);
+    mocks.loadSurgeonFeatures.mockResolvedValue({ brainSurgeonGroupChat: false });
     mocks.sendTurn.mockResolvedValue(result());
   });
 
@@ -192,6 +198,7 @@ describe('openrappter-surgeon superseded proposals', () => {
 
     mocks.loadPatient.mockResolvedValue(patient);
     mocks.loadCases.mockResolvedValue([first.case]);
+    mocks.loadSurgeonFeatures.mockResolvedValue({ brainSurgeonGroupChat: false });
 
     const element = document.createElement('openrappter-surgeon') as SurgeonElement;
     document.body.append(element);

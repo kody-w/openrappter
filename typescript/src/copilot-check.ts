@@ -3,6 +3,13 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
+import {
+  CopilotAuthority,
+  CopilotAuthorityError,
+  copilotCredentialToken,
+  createCopilotAccount,
+  type CopilotAccount,
+} from './providers/copilot-authority.js';
 
 const execAsync = promisify(exec);
 
@@ -28,35 +35,53 @@ function loadCachedGitHubToken(): string | null {
   return null;
 }
 
+interface StoredCopilotProfile {
+  id?: string;
+  provider?: string;
+  token?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  default?: boolean;
+}
+
 /** An existing profile store is authoritative, including an explicit empty store. */
-function loadAuthProfileState(): { authoritative: boolean; token: string | null } {
+function loadAuthProfileState(): {
+  authoritative: boolean;
+  token: string | null;
+  profiles: StoredCopilotProfile[];
+} {
   if (!fs.existsSync(AUTH_PROFILES_FILE)) {
-    return { authoritative: false, token: null };
+    return { authoritative: false, token: null, profiles: [] };
   }
 
   try {
     const data = fs.readFileSync(AUTH_PROFILES_FILE, 'utf-8');
-    const profiles = JSON.parse(data) as Array<{
-      provider?: string;
-      token?: string;
-      default?: boolean;
-    }>;
-    // Look for the default copilot profile first
-    const defaultCopilot = profiles.find(
-      (p) => p.provider === 'copilot' && p.default && typeof p.token === 'string' && p.token.length > 10
+    const profiles = JSON.parse(data) as StoredCopilotProfile[];
+    const copilotProfiles = profiles.filter(
+      (profile) => profile.provider === 'copilot'
+        && typeof profile.token === 'string'
+        && profile.token.length > 10,
     );
+    // Look for the default copilot profile first
+    const defaultCopilot = copilotProfiles.find((profile) => profile.default);
     if (defaultCopilot?.token) {
-      return { authoritative: true, token: defaultCopilot.token };
+      return {
+        authoritative: true,
+        token: defaultCopilot.token,
+        profiles: copilotProfiles,
+      };
     }
     // Fall back to any copilot profile with a real token
-    const anyCopilot = profiles.find(
-      (p) => p.provider === 'copilot' && typeof p.token === 'string' && p.token.length > 10
-    );
+    const anyCopilot = copilotProfiles[0];
     if (anyCopilot?.token) {
-      return { authoritative: true, token: anyCopilot.token };
+      return {
+        authoritative: true,
+        token: anyCopilot.token,
+        profiles: copilotProfiles,
+      };
     }
   } catch { /* a corrupt explicit store must not restore ambient credentials */ }
-  return { authoritative: true, token: null };
+  return { authoritative: true, token: null, profiles: [] };
 }
 
 export function hasAuthProfileAuthority(): boolean {
@@ -84,17 +109,36 @@ export async function hasCopilotAvailable(): Promise<boolean> {
  * authority, including an empty store created by explicit sign-out. Standalone
  * runtimes retain legacy env, credential-cache, .env, and gh CLI discovery.
  */
-export async function resolveGithubToken(): Promise<string | null> {
+export async function discoverCopilotAccounts(): Promise<CopilotAccount[]> {
   // Collect all candidate tokens in priority order, validate the first one that works
-  const candidates: { token: string; source: string }[] = [];
+  const candidates: Array<{
+    token: string;
+    source: string;
+    id?: string;
+    default?: boolean;
+    refreshToken?: string;
+    expiresAt?: number;
+  }> = [];
   const profileState = loadAuthProfileState();
   const profileIsAuthoritative =
     Boolean(process.env.OPENRAPPTER_DESKTOP_OWNER_PID)
     && profileState.authoritative;
 
   if (profileIsAuthoritative) {
-    if (profileState.token) {
-      candidates.push({ token: profileState.token, source: 'auth-profile' });
+    const orderedProfiles = [...profileState.profiles].sort(
+      (left, right) => Number(Boolean(right.default)) - Number(Boolean(left.default)),
+    );
+    for (const profile of orderedProfiles) {
+      if (profile.token) {
+        candidates.push({
+          token: profile.token,
+          source: `auth-profile:${profile.id ?? 'unknown'}:${profile.default ? 'default' : 'secondary'}`,
+          id: profile.id,
+          default: profile.default,
+          refreshToken: profile.refreshToken,
+          expiresAt: profile.expiresAt,
+        });
+      }
     }
   } else {
     // Legacy discovery remains available until the first profile-store action.
@@ -104,8 +148,20 @@ export async function resolveGithubToken(): Promise<string | null> {
 
     const cached = loadCachedGitHubToken();
     if (cached) candidates.push({ token: cached, source: 'credentials' });
-    if (profileState.token) {
-      candidates.push({ token: profileState.token, source: 'auth-profile' });
+    const orderedProfiles = [...profileState.profiles].sort(
+      (left, right) => Number(Boolean(right.default)) - Number(Boolean(left.default)),
+    );
+    for (const profile of orderedProfiles) {
+      if (profile.token) {
+        candidates.push({
+          token: profile.token,
+          source: `auth-profile:${profile.id ?? 'unknown'}:${profile.default ? 'default' : 'secondary'}`,
+          id: profile.id,
+          default: profile.default,
+          refreshToken: profile.refreshToken,
+          expiresAt: profile.expiresAt,
+        });
+      }
     }
 
     try {
@@ -145,24 +201,47 @@ export async function resolveGithubToken(): Promise<string | null> {
     return true;
   });
 
-  // Try each candidate — validate with Copilot API, return first that works
-  for (const candidate of unique) {
-    try {
-      const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
-      await resolveCopilotApiToken({ githubToken: candidate.token });
-      // This token works — sync it to all sources so they stay consistent
-      if (candidate.source !== 'credentials') {
-        saveGitHubToken(candidate.token, 'device_code');
-      }
-      return candidate.token;
-    } catch {
-      // Token doesn't work with Copilot — try next
-    }
-  }
+  return unique.map((candidate, index) =>
+    createCopilotAccount({
+      token: candidate.token,
+      id: candidate.id ?? `legacy:${index}:${candidate.source}`,
+      source: candidate.source.startsWith('auth-profile:')
+        ? 'auth-profile'
+        : candidate.source === 'credentials'
+          ? 'credential-cache'
+          : candidate.source === 'gh-cli'
+            ? 'github-cli'
+            : candidate.source.startsWith('env-file:')
+              ? 'environment-file'
+              : 'environment',
+      // Precedence is the order above. A profile's `default` flag orders
+      // profiles relative to one another, but must not jump ahead of the
+      // explicit Copilot env/cache sources used by standalone runtimes.
+      default: index === 0,
+      refreshToken: candidate.refreshToken,
+      expiresAt: candidate.expiresAt,
+    })
+  );
+}
 
-  // Every discovered token failed the Copilot exchange. Returning one would
-  // trap callers in a permanent 401 loop instead of triggering re-auth.
-  return null;
+export async function resolveGithubToken(): Promise<string | null> {
+  const accounts = await discoverCopilotAccounts();
+  const authority = new CopilotAuthority({
+    accounts,
+    allowAmbientCredentials: false,
+  });
+  try {
+    const resolved = await authority.resolveCredential();
+    const token = copilotCredentialToken(resolved.account.credential);
+    if (resolved.account.source !== 'credential-cache') {
+      saveGitHubToken(token, 'device_code');
+    }
+    return token;
+  } catch {
+    // Every discovered token failed the Copilot exchange. Returning one would
+    // trap callers in a permanent 401 loop instead of triggering re-auth.
+    return null;
+  }
 }
 
 /**
@@ -200,17 +279,35 @@ export async function resolveCopilotAuth(options?: {
   validateToken?: (token: string) => Promise<void>;
   /** Test seam: whether an interactive prompt is possible. Defaults to `stdin.isTTY`. */
   interactive?: boolean;
+  /** Shared process authority used by long-running runtimes. */
+  authority?: CopilotAuthority;
 }): Promise<CopilotAuthOutcome> {
   let rejected = false;
-  const existing = await (options?.discoverToken ?? resolveGithubToken)();
+  let existing: string | null;
+  if (options?.authority && !options.discoverToken && !options.validateToken) {
+    try {
+      const resolved = await options.authority.resolveCredential();
+      existing = copilotCredentialToken(resolved.account.credential);
+    } catch (error) {
+      existing = null;
+      rejected = error instanceof CopilotAuthorityError
+        && (error.code === 'no_entitlement' || error.code === 'exchange_failure');
+    }
+  } else {
+    existing = await (options?.discoverToken ?? resolveGithubToken)();
+  }
   if (existing) {
     // Validate the existing token actually works with Copilot
     try {
-      if (options?.validateToken) {
+      if (options?.authority && !options.validateToken) {
+        await options.authority.resolveSession();
+      } else if (options?.validateToken) {
         await options.validateToken(existing);
       } else {
-        const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
-        await resolveCopilotApiToken({ githubToken: existing });
+        await new CopilotAuthority({
+          githubToken: existing,
+          allowAmbientCredentials: false,
+        }).resolveSession();
       }
       // Token is valid and cached — save to credentials file if not already there
       if (!loadCachedGitHubToken()) {
@@ -254,6 +351,10 @@ export async function resolveCopilotAuth(options?: {
 
     // Save to credentials file
     saveGitHubToken(token, 'device_code');
+    options?.authority?.setCredential(token, {
+      accountId: `device-code:${Date.now()}`,
+      source: 'explicit',
+    });
 
     // Also save to auth-profiles.json for the web UI auth system
     try {

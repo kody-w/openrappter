@@ -188,6 +188,35 @@ describe('copilot-token', () => {
       expect(saved.token).toBe('fresh-token');
     });
 
+    it('should preserve the account-specific endpoint in the secure cache', async () => {
+      const { resolveCopilotApiToken } = await import('../copilot-token.js');
+      const cachePath = path.join(tmpDir, 'account-endpoint.json');
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          token: 'enterprise-token-without-proxy-field',
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          endpoints: { api: 'https://api.enterprise.example/routed/' },
+        }),
+      });
+
+      const first = await resolveCopilotApiToken({
+        githubToken: 'ghu_enterprise',
+        cachePath,
+        fetchImpl: mockFetch as unknown as typeof fetch,
+      });
+      const second = await resolveCopilotApiToken({
+        githubToken: 'ghu_enterprise',
+        cachePath,
+        fetchImpl: vi.fn() as unknown as typeof fetch,
+      });
+
+      expect(first.baseUrl).toBe('https://api.enterprise.example/routed');
+      expect(second.baseUrl).toBe(first.baseUrl);
+      expect(mockFetch).toHaveBeenCalledOnce();
+      expect(fs.statSync(cachePath).mode & 0o777).toBe(0o600);
+    });
+
     it('should throw on HTTP error', async () => {
       const { resolveCopilotApiToken } = await import('../copilot-token.js');
       const cachePath = path.join(tmpDir, 'err.json');

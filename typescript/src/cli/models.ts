@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 import { loadEnv, saveEnv } from '../env.js';
 import { COPILOT_DEFAULT_MODELS, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js';
+import { CopilotAuthority } from '../providers/copilot-authority.js';
 
 const EMOJI = '🦖';
 
@@ -12,23 +13,14 @@ async function discoverModels(): Promise<string[]> {
   const models: string[] = [...COPILOT_DEFAULT_MODELS];
 
   try {
-    const { resolveGithubToken } = await import('../copilot-check.js');
-    const token = await resolveGithubToken();
-    if (!token) return models;
-
-    const { resolveCopilotApiToken } = await import('../providers/copilot-token.js');
-    const resolved = await resolveCopilotApiToken({ githubToken: token });
-    const res = await fetch(`${resolved.baseUrl}/v1/models`, {
-      headers: { Authorization: `Bearer ${resolved.token}` },
+    const { discoverCopilotAccounts } = await import('../copilot-check.js');
+    const authority = new CopilotAuthority({
+      accountResolver: discoverCopilotAccounts,
+      allowAmbientCredentials: false,
     });
-    if (res.ok) {
-      const data = (await res.json()) as { data?: Array<{ id: string }> };
-      if (data.data && Array.isArray(data.data)) {
-        for (const m of data.data) {
-          if (m.id && !models.includes(m.id)) {
-            models.push(m.id);
-          }
-        }
+    for (const model of await authority.availableModels()) {
+      if (!models.includes(model)) {
+        models.push(model);
       }
     }
   } catch { /* use hardcoded list */ }

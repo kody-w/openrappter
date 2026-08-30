@@ -6,12 +6,21 @@ import { hasCopilotAvailable, resolveGithubToken } from '../../copilot-check.js'
 vi.mock('child_process', () => ({
   exec: vi.fn(),
 }));
-vi.mock('../../providers/copilot-token.js', () => ({
-  resolveCopilotApiToken: vi.fn(async ({ githubToken }: { githubToken: string }) => {
-    if (githubToken.startsWith('bad_')) throw new Error('invalid token');
-    return { token: 'copilot-token', expiresAt: Date.now() + 60_000 };
-  }),
-}));
+vi.mock('../../providers/copilot-token.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../providers/copilot-token.js')>();
+  return {
+    ...actual,
+    resolveCopilotApiToken: vi.fn(async ({ githubToken }: { githubToken: string }) => {
+      if (githubToken.startsWith('bad_')) throw new Error('invalid token');
+      return {
+        token: 'copilot-token',
+        expiresAt: Date.now() + 60 * 60_000,
+        baseUrl: 'https://api.individual.githubcopilot.com',
+        source: 'test',
+      };
+    }),
+  };
+});
 vi.mock('util', async (importOriginal) => {
   const actual = await importOriginal<typeof import('util')>();
   return {

@@ -10,8 +10,9 @@ import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
 import type { AgentInfo } from './agents/types.js';
 import { ensureHomeDir, loadEnv, saveEnv, hydrateManagedEnv, loadConfig, saveConfig, resolvedConfigSources, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
-import { hasAuthProfileAuthority, hasCopilotAvailable, autoAuthIfNeeded, resolveCopilotAuth, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
+import { discoverCopilotAccounts, hasAuthProfileAuthority, hasCopilotAvailable, autoAuthIfNeeded, resolveCopilotAuth, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
 import type { CopilotAuthOutcome } from './copilot-check.js';
+import { CopilotAuthority } from './providers/copilot-authority.js';
 import { chat, displayResult } from './chat.js';
 import { VERSION } from './version.js';
 import { registerTelephonyCommands } from './telephony/cli.js';
@@ -165,9 +166,16 @@ async function startGatewayInProcess(opts?: {
   // Report which failure actually occurred — under launchd there is no TTY, so
   // "run onboard" is advice the daemon itself cannot take, and a *rejected*
   // token is not a *missing* one.
-  const auth = await resolveCopilotAuth({ silent: opts?.silent });
-  const githubToken = auth.status === 'authenticated' ? auth.token : null;
   const desktopProfileAuthority = hasAuthProfileAuthority();
+  const copilotAuthority = new CopilotAuthority({
+    accountResolver: discoverCopilotAccounts,
+    allowAmbientCredentials: false,
+  });
+  const auth = await resolveCopilotAuth({
+    silent: opts?.silent,
+    authority: copilotAuthority,
+  });
+  const githubToken = auth.status === 'authenticated' ? auth.token : null;
   for (const line of describeCopilotAuth(auth)) {
     if (auth.status === 'authenticated') log(line); else console.warn(line);
   }
@@ -185,6 +193,7 @@ async function startGatewayInProcess(opts?: {
     model: process.env.OPENRAPPTER_MODEL,
     allowIndependentCli: !desktopProfileAuthority,
     allowAmbientCredentials: !desktopProfileAuthority,
+    authority: copilotAuthority,
   });
   log(`${EMOJI} AI backend: ${backend.kind} — ${backend.reason}`);
   // Give the agent-writer a model. Without one it silently falls back to a
@@ -554,9 +563,7 @@ async function startGatewayInProcess(opts?: {
   ]);
   const surgeonService = new SurgeonService({
     dataDir: HOME_DIR,
-    provider: backend.provider ?? new CopilotProvider({
-      allowAmbientCredentials: !desktopProfileAuthority,
-    }),
+    provider: backend.provider ?? new CopilotProvider({ authority: copilotAuthority }),
     inspectPatient: async () => {
       const status = server.getStatus();
       const channels = channelRegistry.getStatusList();
@@ -666,11 +673,12 @@ async function startGatewayInProcess(opts?: {
       ?? (assistant.getModel() === 'auto'
         ? PROFILE_COPILOT_DEFAULT_MODEL
         : assistant.getModel());
-    const profileProvider = new CopilotProvider({
-      githubToken: token ?? undefined,
-      allowAmbientCredentials: false,
-    });
     assistant.setGithubToken(token, false);
+    copilotAuthority.setCredential(token, {
+      accountId: 'desktop-active',
+      source: 'auth-profile',
+    });
+    const profileProvider = new CopilotProvider({ authority: copilotAuthority });
     assistant.setProvider(profileProvider, profileModel);
     surgeonService.setProvider(profileProvider);
     updateAgentProviders(profileProvider);
@@ -687,26 +695,13 @@ async function startGatewayInProcess(opts?: {
         model: profileModel,
         requestedModel: process.env.OPENRAPPTER_MODEL ?? profileModel,
       });
-      void import('./providers/copilot-token.js').then(
-        ({ clearCachedCopilotToken }) => clearCachedCopilotToken(),
-      ).catch((error) => {
-        log(
-          `${EMOJI} Copilot profile removed; cached token cleanup failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
       log(`${EMOJI} Copilot profile removed — live credential cleared`);
       return;
     }
-    void import('./providers/copilot-token.js')
-      .then(({ clearCachedCopilotToken, resolveCopilotApiToken }) => {
-        clearCachedCopilotToken();
-        return resolveCopilotApiToken({
-          githubToken: token,
-          signal: controller.signal,
-        });
-      })
+    void copilotAuthority.resolveSession({
+      signal: controller.signal,
+      forceRefresh: true,
+    })
       .then(() => {
         if (generation !== authTokenUpdateGeneration) return;
         server.setBackendStatus?.({
@@ -942,27 +937,9 @@ async function startGatewayInProcess(opts?: {
   });
 
   server.registerMethod('models.available', async () => {
-    // Start with the known Copilot models
-    const models: string[] = [...COPILOT_DEFAULT_MODELS];
-
-    // Try to discover models from the API if we have a valid token
-    try {
-      const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
-      const resolved = await resolveCopilotApiToken({ githubToken: githubToken ?? '' });
-      const res = await fetch(`${resolved.baseUrl}/v1/models`, {
-        headers: { Authorization: `Bearer ${resolved.token}` },
-      });
-      if (res.ok) {
-        const data = await res.json() as { data?: Array<{ id: string }> };
-        if (data.data && Array.isArray(data.data)) {
-          for (const m of data.data) {
-            if (m.id && !models.includes(m.id)) {
-              models.push(m.id);
-            }
-          }
-        }
-      }
-    } catch { /* fallback to hardcoded list */ }
+    const models = await copilotAuthority.availableModels().catch(
+      () => [...COPILOT_DEFAULT_MODELS],
+    );
 
     return {
       models: models.map(id => ({
@@ -1539,8 +1516,10 @@ program
       const s = spinner();
       s.start('Validating existing GitHub token…');
       try {
-        const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
-        await resolveCopilotApiToken({ githubToken: existingToken });
+        await new CopilotAuthority({
+          githubToken: existingToken,
+          allowAmbientCredentials: false,
+        }).resolveSession();
         env.GITHUB_TOKEN = existingToken;
         copilotReady = true;
         s.stop('Existing GitHub token validated — Copilot is ready!');

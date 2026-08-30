@@ -2,6 +2,7 @@ import {
   getEffectiveFeatures,
   getFeatureReleaseMatrix,
   type EffectiveFeatures,
+  type FeatureConfigEvidence,
   type FeatureReleaseMatrix,
 } from '../../config/features.js';
 
@@ -14,26 +15,45 @@ interface MethodRegistrar {
 }
 
 export interface FeaturesMethodsDeps {
-  loadConfig?: () => unknown;
+  loadFeatureConfig?: () => {
+    config: unknown;
+    evidence: FeatureConfigEvidence;
+  };
 }
 
 export function registerFeaturesMethods(
   server: MethodRegistrar,
   deps?: FeaturesMethodsDeps,
 ): void {
-  const loadConfig = (): unknown => {
+  const loadConfig = (): {
+    config: unknown;
+    evidence: FeatureConfigEvidence;
+  } => {
     try {
-      return deps?.loadConfig?.();
+      return deps?.loadFeatureConfig?.() ?? {
+        config: undefined,
+        evidence: {
+          configHash: null,
+          configValid: false,
+        },
+      };
     } catch {
-      return undefined;
+      return {
+        config: undefined,
+        evidence: {
+          configHash: null,
+          configValid: false,
+        },
+      };
     }
   };
 
   server.registerMethod<void, EffectiveFeatures>('features.get', async () => {
-    return getEffectiveFeatures(loadConfig());
+    return getEffectiveFeatures(loadConfig().config);
   });
 
   server.registerMethod<void, FeatureReleaseMatrix>('features.status', async () => {
-    return getFeatureReleaseMatrix(loadConfig());
+    const snapshot = loadConfig();
+    return getFeatureReleaseMatrix(snapshot.config, snapshot.evidence);
   });
 }

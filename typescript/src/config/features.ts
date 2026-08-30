@@ -56,7 +56,13 @@ export interface FeatureReleaseStatus extends FeatureReleaseMetadata {
   enabled: boolean;
 }
 
+export interface FeatureConfigEvidence {
+  configHash: string | null;
+  configValid: boolean;
+}
+
 export interface FeatureReleaseMatrix {
+  evidence: FeatureConfigEvidence;
   promotionOrder: FeatureMaturity[];
   features: FeatureReleaseStatus[];
 }
@@ -87,13 +93,22 @@ export function getEffectiveFeatures(config: unknown): EffectiveFeatures {
   };
 }
 
-export function getFeatureReleaseMatrix(config: unknown): FeatureReleaseMatrix {
+export function getFeatureReleaseMatrix(
+  config: unknown,
+  evidence: FeatureConfigEvidence = {
+    configHash: null,
+    configValid: true,
+  },
+): FeatureReleaseMatrix {
   const effective = getEffectiveFeatures(config);
-  const featureIds = Object.keys(
-    FEATURE_RELEASE_METADATA,
-  ) as PromotableFeature[];
+  const featureIds: PromotableFeature[] = [
+    'hermes',
+    'pi',
+    'brainSurgeonGroupChat',
+  ];
 
   return {
+    evidence: { ...evidence },
     promotionOrder: [...FEATURE_PROMOTION_ORDER],
     features: featureIds.map(id => ({
       id,

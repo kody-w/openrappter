@@ -46,7 +46,7 @@ export async function loadConfig(state: ConfigState): Promise<void> {
 }
 
 export async function saveConfig(state: ConfigState): Promise<boolean> {
-  if (!state.client?.isConnected) return false;
+  if (!state.client?.isConnected || state.saving) return false;
   state.saving = true;
   state.error = null;
   try {
@@ -67,7 +67,7 @@ export async function saveConfig(state: ConfigState): Promise<boolean> {
 }
 
 export async function applyConfig(state: ConfigState): Promise<boolean> {
-  if (!state.client?.isConnected) return false;
+  if (!state.client?.isConnected || state.saving) return false;
   state.saving = true;
   state.error = null;
   try {

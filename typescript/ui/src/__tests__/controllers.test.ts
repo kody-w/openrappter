@@ -259,6 +259,67 @@ describe('Config Controller', () => {
     expect(client.call).toHaveBeenCalledWith('config.set', { raw: 'new', baseHash: 'old' });
   });
 
+  it('coalesces overlapping save attempts', async () => {
+    let releaseSave: (() => void) | undefined;
+    const pendingSave = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const client = createMockClient();
+    (client.call as any) = vi.fn(async (method: string) => {
+      if (method === 'config.set') {
+        await pendingSave;
+        return { ok: true };
+      }
+      if (method === 'config.get') {
+        return { raw: 'new', hash: 'new-hash', format: 'yaml' };
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const state = createConfigState();
+    state.client = client;
+    state.raw = 'new';
+    state.hash = 'old';
+    state.dirty = true;
+
+    const first = saveConfig(state);
+    await Promise.resolve();
+    expect(state.saving).toBe(true);
+    expect(await saveConfig(state)).toBe(false);
+    releaseSave!();
+    expect(await first).toBe(true);
+    expect(client.call).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps unsaved state after failure and recovers on retry', async () => {
+    let saveAttempts = 0;
+    const client = createMockClient();
+    (client.call as any) = vi.fn(async (method: string) => {
+      if (method === 'config.set') {
+        saveAttempts++;
+        if (saveAttempts === 1) throw new Error('disk unavailable');
+        return { ok: true };
+      }
+      if (method === 'config.get') {
+        return { raw: 'new', hash: 'new-hash', format: 'yaml' };
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const state = createConfigState();
+    state.client = client;
+    state.raw = 'new';
+    state.hash = 'old';
+    state.dirty = true;
+
+    expect(await saveConfig(state)).toBe(false);
+    expect(state.dirty).toBe(true);
+    expect(state.error).toContain('disk unavailable');
+
+    expect(await saveConfig(state)).toBe(true);
+    expect(state.dirty).toBe(false);
+    expect(state.error).toBeNull();
+    expect(saveAttempts).toBe(2);
+  });
+
   it('applyConfig sends to config.apply', async () => {
     const client = createMockClient({
       'config.apply': { ok: true },

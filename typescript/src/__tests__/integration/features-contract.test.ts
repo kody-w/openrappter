@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
 import {
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -14,6 +16,7 @@ let dataDir: string | undefined;
 afterEach(async () => {
   await server?.stop();
   server = undefined;
+  vi.restoreAllMocks();
   if (dataDir) rmSync(dataDir, { recursive: true, force: true });
   dataDir = undefined;
 });
@@ -106,6 +109,10 @@ describe('features.get RPC', () => {
     const status = await rpc(port, 'features.status');
     expect(status.error).toBeUndefined();
     expect(status.result).toEqual({
+      evidence: {
+        configHash: saved.result?.hash,
+        configValid: true,
+      },
       promotionOrder: [
         'frontier-experimental',
         'frontier',
@@ -162,5 +169,134 @@ describe('features.get RPC', () => {
       pi: false,
       brainSurgeonGroupChat: false,
     });
+
+    const status = await rpc(port, 'features.status');
+    expect(status.error).toBeUndefined();
+    expect(status.result?.evidence).toEqual({
+      configHash: expect.any(String),
+      configValid: false,
+    });
+    expect(
+      (status.result?.features as Array<{ enabled: boolean }> | undefined)
+        ?.every(feature => feature.enabled === false),
+    ).toBe(true);
+  });
+
+  it('fails closed when valid YAML violates the config schema', async () => {
+    const port = await startServer();
+    writeFileSync(
+      join(dataDir!, 'config.yaml'),
+      [
+        'experimental:',
+        '  enabled: true',
+        '  harnessAdapters:',
+        '    enabled: true',
+        '    hermes: true',
+        '  voiceMode:',
+        '    engine: not-a-real-engine',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const features = await rpc(port, 'features.get');
+    expect(features.result).toEqual({
+      experimental: false,
+      harnessAdapters: false,
+      hermes: false,
+      pi: false,
+      brainSurgeonGroupChat: false,
+    });
+    const status = await rpc(port, 'features.status');
+    expect(status.result?.evidence).toEqual({
+      configHash: expect.any(String),
+      configValid: false,
+    });
+  });
+
+  it('treats a repeated successful save as an idempotent retry', async () => {
+    const port = await startServer();
+    const { result: snapshot } = await rpc(port, 'config.get');
+    const raw = 'experimental:\n  enabled: false\n';
+
+    const first = await rpc(port, 'config.set', {
+      raw,
+      baseHash: snapshot?.hash,
+    });
+    const retry = await rpc(port, 'config.set', {
+      raw,
+      baseHash: snapshot?.hash,
+    });
+
+    expect(first.error).toBeUndefined();
+    expect(retry.error).toBeUndefined();
+    expect(retry.result).toEqual(first.result);
+    expect(readFileSync(join(dataDir!, 'config.yaml'), 'utf8')).toBe(raw);
+  });
+
+  it('preserves the previous config and recovers after an interrupted rename', async () => {
+    const port = await startServer();
+    const configPath = join(dataDir!, 'config.yaml');
+    const original = 'experimental:\n  enabled: false\n';
+    const replacement = 'experimental:\n  enabled: true\n';
+    writeFileSync(configPath, original, 'utf8');
+    const { result: snapshot } = await rpc(port, 'config.get');
+
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementationOnce(() => {
+      throw new Error('simulated atomic rename interruption');
+    });
+    const interrupted = await rpc(port, 'config.set', {
+      raw: replacement,
+      baseHash: snapshot?.hash,
+    });
+
+    expect(interrupted.error?.message).toContain('simulated atomic rename interruption');
+    expect(readFileSync(configPath, 'utf8')).toBe(original);
+    expect(readdirSync(dataDir!).filter(name => name.endsWith('.tmp'))).toEqual([]);
+
+    rename.mockRestore();
+    const recovered = await rpc(port, 'config.set', {
+      raw: replacement,
+      baseHash: snapshot?.hash,
+    });
+    expect(recovered.error).toBeUndefined();
+    expect(readFileSync(configPath, 'utf8')).toBe(replacement);
+  });
+
+  it('recovers idempotently when commit durability acknowledgement is interrupted', async () => {
+    if (process.platform === 'win32') return;
+
+    const port = await startServer();
+    const configPath = join(dataDir!, 'config.yaml');
+    const original = 'experimental:\n  enabled: false\n';
+    const replacement = 'experimental:\n  enabled: true\n';
+    writeFileSync(configPath, original, 'utf8');
+    const { result: snapshot } = await rpc(port, 'config.get');
+
+    const realFsync = fs.fsyncSync.bind(fs);
+    let syncCount = 0;
+    const fsync = vi.spyOn(fs, 'fsyncSync').mockImplementation((descriptor) => {
+      syncCount++;
+      if (syncCount === 2) {
+        throw new Error('simulated directory sync interruption');
+      }
+      realFsync(descriptor);
+    });
+    const uncertain = await rpc(port, 'config.set', {
+      raw: replacement,
+      baseHash: snapshot?.hash,
+    });
+
+    expect(uncertain.error?.message).toContain('simulated directory sync interruption');
+    expect(readFileSync(configPath, 'utf8')).toBe(replacement);
+    expect(readdirSync(dataDir!).filter(name => name.endsWith('.tmp'))).toEqual([]);
+
+    fsync.mockRestore();
+    const recovered = await rpc(port, 'config.set', {
+      raw: replacement,
+      baseHash: snapshot?.hash,
+    });
+    expect(recovered.error).toBeUndefined();
+    expect(readFileSync(configPath, 'utf8')).toBe(replacement);
   });
 });

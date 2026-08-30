@@ -256,6 +256,10 @@ describe('feature release maturity', () => {
         },
       },
     })).toEqual({
+      evidence: {
+        configHash: null,
+        configValid: true,
+      },
       promotionOrder: [...FEATURE_PROMOTION_ORDER],
       features: [
         {

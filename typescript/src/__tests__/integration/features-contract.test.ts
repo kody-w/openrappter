@@ -117,7 +117,39 @@ describe('features.get RPC', () => {
         'frontier-experimental',
         'frontier',
         'brainstem-experimental',
-        'grail-stable',
+        'brainstem-regular',
+      ],
+      tracks: [
+        {
+          id: 'frontier-experimental',
+          ringOrder: ['canary', 'nightly', 'alpha', 'beta', 'grail'],
+        },
+        {
+          id: 'frontier',
+          ringOrder: ['canary', 'nightly', 'alpha', 'beta', 'grail'],
+        },
+        {
+          id: 'brainstem-experimental',
+          ringOrder: ['canary', 'nightly', 'alpha', 'beta', 'grail'],
+        },
+        {
+          id: 'brainstem-regular',
+          ringOrder: ['canary', 'nightly', 'alpha', 'beta', 'grail'],
+        },
+      ],
+      crossTrackEdges: [
+        {
+          from: 'frontier-experimental:grail',
+          to: 'frontier:canary',
+        },
+        {
+          from: 'frontier:grail',
+          to: 'brainstem-experimental:canary',
+        },
+        {
+          from: 'brainstem-experimental:grail',
+          to: 'brainstem-regular:canary',
+        },
       ],
       features: [
         {

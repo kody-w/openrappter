@@ -18,10 +18,20 @@ export const FEATURE_PROMOTION_ORDER = [
   'frontier-experimental',
   'frontier',
   'brainstem-experimental',
-  'grail-stable',
+  'brainstem-regular',
 ] as const;
 
 export type FeatureMaturity = (typeof FEATURE_PROMOTION_ORDER)[number];
+export const FEATURE_RING_ORDER = [
+  'canary',
+  'nightly',
+  'alpha',
+  'beta',
+  'grail',
+] as const;
+export type FeatureReleaseRing = (typeof FEATURE_RING_ORDER)[number];
+export type FeatureReleaseNode =
+  `${FeatureMaturity}:${FeatureReleaseRing}`;
 export type PromotableFeature =
   | 'hermes'
   | 'pi'
@@ -61,9 +71,21 @@ export interface FeatureConfigEvidence {
   configValid: boolean;
 }
 
+export interface FeatureTrackLattice {
+  id: FeatureMaturity;
+  ringOrder: FeatureReleaseRing[];
+}
+
+export interface FeatureCrossTrackEdge {
+  from: FeatureReleaseNode;
+  to: FeatureReleaseNode;
+}
+
 export interface FeatureReleaseMatrix {
   evidence: FeatureConfigEvidence;
   promotionOrder: FeatureMaturity[];
+  tracks: FeatureTrackLattice[];
+  crossTrackEdges: FeatureCrossTrackEdge[];
   features: FeatureReleaseStatus[];
 }
 
@@ -106,10 +128,21 @@ export function getFeatureReleaseMatrix(
     'pi',
     'brainSurgeonGroupChat',
   ];
+  const promotionOrder = [...FEATURE_PROMOTION_ORDER];
+  const tracks = promotionOrder.map(id => ({
+    id,
+    ringOrder: [...FEATURE_RING_ORDER],
+  }));
+  const crossTrackEdges = promotionOrder.slice(0, -1).map((track, index) => ({
+    from: `${track}:grail` as FeatureReleaseNode,
+    to: `${promotionOrder[index + 1]}:canary` as FeatureReleaseNode,
+  }));
 
   return {
     evidence: { ...evidence },
-    promotionOrder: [...FEATURE_PROMOTION_ORDER],
+    promotionOrder,
+    tracks,
+    crossTrackEdges,
     features: featureIds.map(id => ({
       id,
       ...FEATURE_RELEASE_METADATA[id],

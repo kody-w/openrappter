@@ -10,6 +10,7 @@ import {
 import {
   FEATURE_PROMOTION_ORDER,
   FEATURE_RELEASE_METADATA,
+  FEATURE_RING_ORDER,
   getEffectiveFeatures,
   getFeatureReleaseMatrix,
 } from '../../config/features.js';
@@ -241,9 +242,16 @@ describe('feature release maturity', () => {
       'frontier-experimental',
       'frontier',
       'brainstem-experimental',
-      'grail-stable',
+      'brainstem-regular',
     ]);
-    expect(getFeatureReleaseMatrix({
+    expect(FEATURE_RING_ORDER).toEqual([
+      'canary',
+      'nightly',
+      'alpha',
+      'beta',
+      'grail',
+    ]);
+    const matrix = getFeatureReleaseMatrix({
       experimental: {
         enabled: true,
         harnessAdapters: {
@@ -255,12 +263,31 @@ describe('feature release maturity', () => {
           enabled: true,
         },
       },
-    })).toEqual({
+    });
+    expect(matrix).toEqual({
       evidence: {
         configHash: null,
         configValid: true,
       },
       promotionOrder: [...FEATURE_PROMOTION_ORDER],
+      tracks: FEATURE_PROMOTION_ORDER.map(id => ({
+        id,
+        ringOrder: [...FEATURE_RING_ORDER],
+      })),
+      crossTrackEdges: [
+        {
+          from: 'frontier-experimental:grail',
+          to: 'frontier:canary',
+        },
+        {
+          from: 'frontier:grail',
+          to: 'brainstem-experimental:canary',
+        },
+        {
+          from: 'brainstem-experimental:grail',
+          to: 'brainstem-regular:canary',
+        },
+      ],
       features: [
         {
           id: 'hermes',
@@ -285,6 +312,9 @@ describe('feature release maturity', () => {
         },
       ],
     });
+    expect(matrix.tracks.every(
+      track => track.ringOrder.join('>') === 'canary>nightly>alpha>beta>grail',
+    )).toBe(true);
   });
 });
 

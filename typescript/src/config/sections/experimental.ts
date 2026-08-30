@@ -34,9 +34,31 @@ const iMessageTwinDefaults = {
   useSqlite: true,
 };
 
+const harnessAdaptersDefaults = {
+  enabled: false,
+  hermes: false,
+  pi: false,
+};
+
+const brainSurgeonGroupChatDefaults = {
+  enabled: false,
+};
+
 export const experimentalConfigSchema = z.object({
   /** Master toggle — disables all experimental features when false */
   enabled: z.boolean().default(false),
+
+  /** Future external harness adapters. No adapter is active without every parent gate. */
+  harnessAdapters: z.object({
+    enabled: z.boolean().default(false),
+    hermes: z.boolean().default(false),
+    pi: z.boolean().default(false),
+  }).default(harnessAdaptersDefaults),
+
+  /** Future multi-participant Brain Surgeon conversations. */
+  brainSurgeonGroupChat: z.object({
+    enabled: z.boolean().default(false),
+  }).default(brainSurgeonGroupChatDefaults),
 
   /** Local on-device voice-to-text (Whisper / Vosk) */
   voiceMode: z.object({

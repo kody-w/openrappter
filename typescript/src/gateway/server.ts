@@ -32,6 +32,7 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
+import { registerFeaturesMethods } from './methods/features-methods.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
 import {
@@ -55,6 +56,7 @@ import { buildChatEnvelope } from './chat-envelope.js';
 import { parseChatRequest } from './chat-request.js';
 import { buildTwinResponse, parseTwinEnvelope, sayText } from './twin-chat.js';
 import type { InstalledSkill } from '../skills/registry.js';
+import * as YAML from 'yaml';
 
 /**
  * The part of `SkillsRegistry` the gateway needs.
@@ -3227,6 +3229,13 @@ export class GatewayServer {
 
     this.registerMethod('config.set', writeConfig, { requiresAuth: true });
     this.registerMethod('config.apply', writeConfig, { requiresAuth: true });
+
+    registerFeaturesMethods(this, {
+      loadConfig: () => {
+        const raw = this.loadConfig();
+        return raw.trim() ? YAML.parse(raw) : {};
+      },
+    });
 
     // ── Execution approvals ────────────────────────────────────────────────
     //

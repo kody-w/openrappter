@@ -7,12 +7,19 @@ import {
   experimentalConfigSchema,
   experimentalFeatureDescriptions,
 } from '../../config/sections/experimental.js';
+import { getEffectiveFeatures } from '../../config/features.js';
 import { validateConfig } from '../../config/schema.js';
 
 describe('experimentalConfigSchema', () => {
   it('parses empty object with defaults', () => {
     const result = experimentalConfigSchema.parse({});
     expect(result.enabled).toBe(false);
+    expect(result.harnessAdapters).toEqual({
+      enabled: false,
+      hermes: false,
+      pi: false,
+    });
+    expect(result.brainSurgeonGroupChat).toEqual({ enabled: false });
     expect(result.voiceMode.enabled).toBe(false);
     expect(result.voiceMode.engine).toBe('whisper');
     expect(result.voiceMode.modelSize).toBe('base');
@@ -29,6 +36,14 @@ describe('experimentalConfigSchema', () => {
   it('accepts full config', () => {
     const result = experimentalConfigSchema.parse({
       enabled: true,
+      harnessAdapters: {
+        enabled: true,
+        hermes: true,
+        pi: true,
+      },
+      brainSurgeonGroupChat: {
+        enabled: true,
+      },
       voiceMode: {
         enabled: true,
         engine: 'vosk',
@@ -50,6 +65,12 @@ describe('experimentalConfigSchema', () => {
       },
     });
     expect(result.enabled).toBe(true);
+    expect(result.harnessAdapters).toEqual({
+      enabled: true,
+      hermes: true,
+      pi: true,
+    });
+    expect(result.brainSurgeonGroupChat.enabled).toBe(true);
     expect(result.voiceMode.engine).toBe('vosk');
     expect(result.voiceMode.modelSize).toBe('small');
     expect(result.voiceMode.vad).toBe(false);
@@ -94,6 +115,98 @@ describe('experimentalConfigSchema', () => {
       });
       expect(result.voiceMode.modelSize).toBe(size);
     }
+  });
+});
+
+describe('getEffectiveFeatures', () => {
+  it.each([
+    ['missing config', undefined],
+    ['missing experimental section', {}],
+    ['non-object experimental section', { experimental: true }],
+    ['missing master gate', {
+      experimental: {
+        harnessAdapters: { enabled: true, hermes: true, pi: true },
+        brainSurgeonGroupChat: { enabled: true },
+      },
+    }],
+    ['truthy non-boolean master gate', {
+      experimental: {
+        enabled: 1,
+        harnessAdapters: { enabled: true, hermes: true, pi: true },
+        brainSurgeonGroupChat: { enabled: true },
+      },
+    }],
+  ])('keeps every feature off for %s', (_name, config) => {
+    expect(getEffectiveFeatures(config)).toEqual({
+      experimental: false,
+      harnessAdapters: false,
+      hermes: false,
+      pi: false,
+      brainSurgeonGroupChat: false,
+    });
+  });
+
+  it('requires the harness parent before either adapter is effective', () => {
+    expect(getEffectiveFeatures({
+      experimental: {
+        enabled: true,
+        harnessAdapters: {
+          enabled: false,
+          hermes: true,
+          pi: true,
+        },
+      },
+    })).toEqual({
+      experimental: true,
+      harnessAdapters: false,
+      hermes: false,
+      pi: false,
+      brainSurgeonGroupChat: false,
+    });
+  });
+
+  it('requires literal booleans at each child gate', () => {
+    expect(getEffectiveFeatures({
+      experimental: {
+        enabled: true,
+        harnessAdapters: {
+          enabled: true,
+          hermes: 'true',
+          pi: true,
+        },
+        brainSurgeonGroupChat: {
+          enabled: 'true',
+        },
+      },
+    })).toEqual({
+      experimental: true,
+      harnessAdapters: true,
+      hermes: false,
+      pi: true,
+      brainSurgeonGroupChat: false,
+    });
+  });
+
+  it('enables every flag only when all required gates are true', () => {
+    expect(getEffectiveFeatures({
+      experimental: {
+        enabled: true,
+        harnessAdapters: {
+          enabled: true,
+          hermes: true,
+          pi: true,
+        },
+        brainSurgeonGroupChat: {
+          enabled: true,
+        },
+      },
+    })).toEqual({
+      experimental: true,
+      harnessAdapters: true,
+      hermes: true,
+      pi: true,
+      brainSurgeonGroupChat: true,
+    });
   });
 });
 

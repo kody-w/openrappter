@@ -96,6 +96,16 @@ describe("Flight Recorder process ownership", () => {
     expect(processMatchesIncarnation(process.pid, undefined)).toBe(true);
   });
 
+  it("fails closed when a recorded incarnation cannot be read for a live PID", () => {
+    expect(
+      processMatchesIncarnation(
+        process.pid,
+        "different-process-start",
+        () => null,
+      ),
+    ).toBe(false);
+  });
+
   it("does not reclaim a reset barrier owned by this live process", () => {
     const database = databasePath();
     mkdirSync(path.dirname(database), { recursive: true });

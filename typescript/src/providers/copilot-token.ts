@@ -7,8 +7,8 @@ import { openrappterPath } from '../infra/openrappter-home.js';
  */
 
 import fs from 'fs';
-import path from 'path';
 import { createHash } from 'crypto';
+import { writeCopilotSecretJsonAtomically } from './copilot-secure-file.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -28,6 +28,8 @@ export interface CachedCopilotToken {
   updatedAt: number;
   /** Binds this API token to the GitHub credential that produced it. */
   githubTokenFingerprint?: string;
+  /** Canonical account-specific endpoint returned by the exchange. */
+  baseUrl?: string;
 }
 
 export interface ResolvedCopilotToken {
@@ -35,6 +37,24 @@ export interface ResolvedCopilotToken {
   expiresAt: number;
   source: string;
   baseUrl: string;
+}
+
+export class CopilotTokenExchangeError extends Error {
+  readonly code: 'no_entitlement' | 'exchange_failure';
+  readonly statusCode: number;
+  readonly retryable: boolean;
+
+  constructor(
+    code: 'no_entitlement' | 'exchange_failure',
+    message: string,
+    options: { statusCode: number; retryable?: boolean },
+  ) {
+    super(message);
+    this.name = 'CopilotTokenExchangeError';
+    this.code = code;
+    this.statusCode = options.statusCode;
+    this.retryable = options.retryable ?? false;
+  }
 }
 
 // ── Token cache ──────────────────────────────────────────────────────────────
@@ -58,9 +78,7 @@ function loadCachedToken(cachePath: string): CachedCopilotToken | null {
 
 function saveCachedToken(cachePath: string, token: CachedCopilotToken): void {
   try {
-    const dir = path.dirname(cachePath);
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(cachePath, JSON.stringify(token, null, 2), { mode: 0o600 });
+    writeCopilotSecretJsonAtomically(cachePath, token);
   } catch {
     // Non-fatal — token just won't be cached
   }
@@ -96,7 +114,43 @@ export function deriveCopilotApiBaseUrl(token: string): string {
   const host = proxyEp.replace(/^https?:\/\//, '').replace(/^proxy\./i, 'api.');
   if (!host) return DEFAULT_COPILOT_API_BASE_URL;
 
-  return `https://${host}`;
+  return normalizeCopilotApiBaseUrl(`https://${host}`);
+}
+
+/**
+ * Normalize an endpoint discovered for one Copilot account.
+ *
+ * Account endpoints are credentials-adjacent routing data. Only HTTPS origins
+ * are accepted, and URL credentials/query/fragment components are rejected.
+ */
+export function normalizeCopilotApiBaseUrl(endpoint: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    throw new CopilotTokenExchangeError(
+      'exchange_failure',
+      'Copilot token exchange returned an invalid API endpoint',
+      { statusCode: 502 },
+    );
+  }
+  if (
+    parsed.protocol !== 'https:'
+    || parsed.username
+    || parsed.password
+    || parsed.search
+    || parsed.hash
+  ) {
+    throw new CopilotTokenExchangeError(
+      'exchange_failure',
+      'Copilot token exchange returned an unsafe API endpoint',
+      { statusCode: 502 },
+    );
+  }
+  const pathname = parsed.pathname === '/'
+    ? ''
+    : parsed.pathname.replace(/\/+$/, '');
+  return `${parsed.origin}${pathname}`;
 }
 
 // ── Token response parsing ───────────────────────────────────────────────────
@@ -155,7 +209,7 @@ function parseCopilotTokenResponse(value: unknown): {
  * Always sending `token` rejects Enterprise tokens with HTTP 401. Mirror
  * RAPP's brainstem heuristic: `token` only for ghu_-prefixed values.
  */
-function authHeaderForGithubToken(token: string): string {
+export function authHeaderForGithubToken(token: string): string {
   return token.startsWith('ghu_') ? `token ${token}` : `Bearer ${token}`;
 }
 
@@ -193,7 +247,9 @@ export async function resolveCopilotApiToken(params: {
       token: cached.token,
       expiresAt: cached.expiresAt,
       source: `cache:${cachePath}`,
-      baseUrl: deriveCopilotApiBaseUrl(cached.token),
+      baseUrl: cached.baseUrl
+        ? normalizeCopilotApiBaseUrl(cached.baseUrl)
+        : deriveCopilotApiBaseUrl(cached.token),
     };
   }
 
@@ -213,14 +269,19 @@ export async function resolveCopilotApiToken(params: {
   });
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
     if (res.status === 404 || res.status === 401 || res.status === 403) {
-      throw new Error(
+      throw new CopilotTokenExchangeError(
+        'no_entitlement',
         `GitHub token does not have Copilot API access (HTTP ${res.status}). ` +
-        `Sign in with a GitHub account that has Copilot enabled.`
+        `Sign in with a GitHub account that has Copilot enabled.`,
+        { statusCode: res.status },
       );
     }
-    throw new Error(`Copilot token exchange failed: HTTP ${res.status}${body ? ` — ${body}` : ''}`);
+    throw new CopilotTokenExchangeError(
+      'exchange_failure',
+      `Copilot token exchange failed: HTTP ${res.status}`,
+      { statusCode: res.status, retryable: res.status === 408 || res.status === 429 || res.status >= 500 },
+    );
   }
 
   const parsed = parseCopilotTokenResponse(await res.json());
@@ -234,6 +295,9 @@ export async function resolveCopilotApiToken(params: {
     expiresAt: parsed.expiresAt,
     updatedAt: Date.now(),
     githubTokenFingerprint: sourceFingerprint,
+    baseUrl: parsed.apiEndpoint
+      ? normalizeCopilotApiBaseUrl(parsed.apiEndpoint)
+      : deriveCopilotApiBaseUrl(parsed.token),
   };
   saveCachedToken(cachePath, payload);
 
@@ -243,6 +307,6 @@ export async function resolveCopilotApiToken(params: {
     source: `fetched:${COPILOT_TOKEN_URL}`,
     // Prefer the endpoint from the JSON response (handles Enterprise tenants
     // with routed hosts), fall back to parsing the token's `proxy-ep` field.
-    baseUrl: parsed.apiEndpoint ?? deriveCopilotApiBaseUrl(payload.token),
+    baseUrl: payload.baseUrl ?? deriveCopilotApiBaseUrl(payload.token),
   };
 }

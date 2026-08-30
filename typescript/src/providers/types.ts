@@ -63,6 +63,12 @@ export interface ChatOptions {
   /** Internal: prevents infinite retry loops on auth errors */
   _isRetry?: boolean;
   signal?: AbortSignal;
+  /** Copilot request origin. Inferred from the conversation when omitted. */
+  initiator?: "user" | "agent";
+  /** Copilot request intent header. Invalid values fall back safely. */
+  intent?: string;
+  /** Mark a request that contains vision input. */
+  vision?: boolean;
 }
 
 export interface StreamDelta {

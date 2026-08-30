@@ -37,6 +37,7 @@
 
 import { CopilotProvider, COPILOT_DEFAULT_MODEL } from './copilot.js';
 import { CopilotCliDirectProvider } from './copilot-cli-direct.js';
+import { CopilotAuthority } from './copilot-authority.js';
 import type { LLMProvider } from './types.js';
 
 export type BackendKind = 'copilot-sdk' | 'copilot-cli' | 'none';
@@ -83,18 +84,17 @@ export interface SelectBackendOptions {
   allowIndependentCli?: boolean;
   /** Disable SDK fallback to GITHUB_TOKEN/GH_TOKEN. */
   allowAmbientCredentials?: boolean;
+  /** Shared authority for account, token, endpoint, and model decisions. */
+  authority?: CopilotAuthority;
 }
 
 /** Does this GitHub token really exchange for a Copilot API token? */
 async function defaultProbeSdk(githubToken: string): Promise<boolean> {
   if (!githubToken) return false;
-  try {
-    const { resolveCopilotApiToken } = await import('./copilot-token.js');
-    await resolveCopilotApiToken({ githubToken });
-    return true;
-  } catch {
-    return false;
-  }
+  return new CopilotAuthority({
+    githubToken,
+    allowAmbientCredentials: false,
+  }).isAvailable();
 }
 
 /** Is the Copilot CLI present and already signed in? */
@@ -115,6 +115,10 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
   const allowIndependentCli = options.allowIndependentCli ?? true;
   const allowAmbientCredentials = options.allowAmbientCredentials ?? true;
   const model = options.model;
+  const authority = options.authority ?? new CopilotAuthority({
+    githubToken: options.githubToken,
+    allowAmbientCredentials,
+  });
 
   // 1. An explicit choice is honoured without probing. If an operator pins a
   //    backend, silently using a different one would be worse than failing.
@@ -159,8 +163,7 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
     return {
       kind: 'copilot-sdk',
       provider: new CopilotProvider({
-        githubToken: options.githubToken,
-        allowAmbientCredentials,
+        authority,
       }),
       // The SDK rung sends an explicit model on every request, so unlike the
       // CLI it always knows which one was asked to answer.
@@ -181,8 +184,7 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
     return {
       kind: 'copilot-sdk',
       provider: new CopilotProvider({
-        githubToken: token,
-        allowAmbientCredentials,
+        authority,
       }),
       model: model ?? COPILOT_DEFAULT_MODEL,
       reason: 'GitHub token has Copilot API access',

@@ -188,6 +188,66 @@ describe('copilot-token', () => {
       expect(saved.token).toBe('fresh-token');
     });
 
+    it('should preserve the account-specific endpoint in the secure cache', async () => {
+      const { resolveCopilotApiToken } = await import('../copilot-token.js');
+      const cachePath = path.join(tmpDir, 'account-endpoint.json');
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          token: 'enterprise-token-without-proxy-field',
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          endpoints: { api: 'https://api.enterprise.example/routed/' },
+        }),
+      });
+
+      const first = await resolveCopilotApiToken({
+        githubToken: 'ghu_enterprise',
+        cachePath,
+        fetchImpl: mockFetch as unknown as typeof fetch,
+      });
+      const second = await resolveCopilotApiToken({
+        githubToken: 'ghu_enterprise',
+        cachePath,
+        fetchImpl: vi.fn() as unknown as typeof fetch,
+      });
+
+      expect(first.baseUrl).toBe('https://api.enterprise.example/routed');
+      expect(second.baseUrl).toBe(first.baseUrl);
+      expect(mockFetch).toHaveBeenCalledOnce();
+      expect(fs.statSync(cachePath).mode & 0o777).toBe(0o600);
+    });
+
+    it('should preserve the last good cache when an atomic replace fails', async () => {
+      const { resolveCopilotApiToken } = await import('../copilot-token.js');
+      const cachePath = path.join(tmpDir, 'atomic-recovery.json');
+      const previous = JSON.stringify({ sentinel: 'last-good-copy' });
+      fs.writeFileSync(cachePath, previous, { mode: 0o600 });
+      const rename = vi.spyOn(fs, 'renameSync').mockImplementationOnce(() => {
+        throw new Error('simulated rename failure');
+      });
+      try {
+        const result = await resolveCopilotApiToken({
+          githubToken: 'ghu_atomic',
+          cachePath,
+          fetchImpl: vi.fn(async () => ({
+            ok: true,
+            json: async () => ({
+              token: 'fresh-token',
+              expires_at: Math.floor(Date.now() / 1000) + 3600,
+            }),
+          })) as unknown as typeof fetch,
+        });
+
+        expect(result.token).toBe('fresh-token');
+        expect(fs.readFileSync(cachePath, 'utf8')).toBe(previous);
+        expect(
+          fs.readdirSync(tmpDir).filter((name) => name.endsWith('.tmp')),
+        ).toEqual([]);
+      } finally {
+        rename.mockRestore();
+      }
+    });
+
     it('should throw on HTTP error', async () => {
       const { resolveCopilotApiToken } = await import('../copilot-token.js');
       const cachePath = path.join(tmpDir, 'err.json');

@@ -125,16 +125,24 @@ describe('CopilotProvider.chatStream', () => {
 
   async function createProvider() {
     const { CopilotProvider } = await import('../copilot.js');
-    // Create with a token and inject a fake resolved token to skip auth
-    const provider = new CopilotProvider({ githubToken: 'test-token' });
-    // Inject cached token to bypass actual token exchange
-    (provider as any).resolvedToken = {
-      token: 'fake-api-token',
-      expiresAt: Date.now() + 3600 * 1000,
-      baseUrl: 'https://api.test.com',
-      source: 'test',
-    };
-    return provider;
+    const {
+      CopilotAuthority,
+      createCopilotAccount,
+    } = await import('../copilot-authority.js');
+    const authority = new CopilotAuthority({
+      accounts: [createCopilotAccount({
+        token: 'test-token',
+        source: 'explicit',
+      })],
+      fetchImpl: globalThis.fetch,
+      exchange: async () => ({
+        token: 'fake-api-token',
+        expiresAt: Date.now() + 3600 * 1000,
+        baseUrl: 'https://api.test.com',
+        source: 'test',
+      }),
+    });
+    return new CopilotProvider({ authority });
   }
 
   it('yields content deltas with done: false', async () => {

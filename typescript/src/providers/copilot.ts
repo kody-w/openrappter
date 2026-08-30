@@ -18,46 +18,13 @@ import type {
   StreamDelta,
 } from "./types.js";
 import {
-  resolveCopilotApiToken,
-  clearCachedCopilotToken,
-  type ResolvedCopilotToken,
-} from "./copilot-token.js";
+  CopilotAuthority,
+  inferCopilotRequestContext,
+} from "./copilot-authority.js";
+import type { CopilotRequestContext } from "./copilot-authority.js";
+import { COPILOT_DEFAULT_MODEL } from "./copilot-models.js";
 
-// ── Default models ───────────────────────────────────────────────────────────
-
-/**
- * Known Copilot models (hardcoded fallback).
- * The `models.available` RPC method also queries /v1/models at runtime
- * to discover any additional models your subscription has access to.
- *
- * Availability varies by plan tier (Free / Pro / Business / Enterprise).
- * Premium models consume monthly "premium request" allowances.
- */
-export const COPILOT_DEFAULT_MODELS = [
-  // GPT-4.1 family
-  "gpt-4.1",
-  "gpt-4.1-mini",
-  "gpt-4.1-nano",
-  // GPT-4o family
-  "gpt-4o",
-  "gpt-4o-mini",
-  // Reasoning models
-  "o1",
-  "o1-mini",
-  "o3",
-  "o3-mini",
-  "o4-mini",
-  // Claude (Copilot Pro / Business / Enterprise)
-  "claude-3.5-sonnet",
-  "claude-3.7-sonnet",
-  "claude-3.7-sonnet-thought",
-  "claude-sonnet-4",
-  // Gemini (Copilot Pro / Business / Enterprise)
-  "gemini-2.0-flash",
-  "gemini-2.5-pro",
-] as const;
-
-export const COPILOT_DEFAULT_MODEL = "gpt-4.1";
+export { COPILOT_DEFAULT_MODEL, COPILOT_DEFAULT_MODELS } from "./copilot-models.js";
 
 // ── OpenAI-compatible request/response types ─────────────────────────────────
 
@@ -152,16 +119,17 @@ export class CopilotProvider implements LLMProvider {
   readonly id = "copilot";
   readonly name = "GitHub Copilot";
 
-  private githubToken: string | null = null;
-  private resolvedToken: ResolvedCopilotToken | null = null;
-  private allowAmbientCredentials: boolean;
+  private readonly authority: CopilotAuthority;
 
   constructor(options?: {
     githubToken?: string;
     allowAmbientCredentials?: boolean;
+    authority?: CopilotAuthority;
   }) {
-    this.githubToken = options?.githubToken ?? null;
-    this.allowAmbientCredentials = options?.allowAmbientCredentials ?? true;
+    this.authority = options?.authority ?? new CopilotAuthority({
+      githubToken: options?.githubToken,
+      allowAmbientCredentials: options?.allowAmbientCredentials,
+    });
   }
 
   /**
@@ -172,50 +140,18 @@ export class CopilotProvider implements LLMProvider {
     token: string | null,
     allowAmbientCredentials = true,
   ): void {
-    this.githubToken = token;
-    this.allowAmbientCredentials = allowAmbientCredentials;
-    this.resolvedToken = null;
-  }
-
-  /** Resolve the GitHub token from constructor, env, or gh CLI */
-  private getGithubToken(): string | null {
-    if (this.githubToken) return this.githubToken;
-    if (!this.allowAmbientCredentials) return null;
-
-    // Check environment variables (same order as openclaw)
-    return (
-      process.env.COPILOT_GITHUB_TOKEN ??
-      process.env.GH_TOKEN ??
-      process.env.GITHUB_TOKEN ??
-      null
-    );
+    this.authority.setCredential(token, {
+      authoritative: token !== null || !allowAmbientCredentials,
+    });
   }
 
   /** Invalidate the cached Copilot API token so the next call re-exchanges */
   invalidateToken(): void {
-    this.resolvedToken = null;
-    clearCachedCopilotToken();
+    this.authority.invalidate({ clearPersistentCache: true });
   }
 
-  /** Get a valid Copilot API token, exchanging if needed */
-  private async ensureToken(): Promise<ResolvedCopilotToken> {
-    // Return cached token if still valid
-    if (
-      this.resolvedToken &&
-      this.resolvedToken.expiresAt - Date.now() > 5 * 60 * 1000
-    ) {
-      return this.resolvedToken;
-    }
-
-    const githubToken = this.getGithubToken();
-    if (!githubToken) {
-      throw new Error(
-        "No GitHub token found. Set GITHUB_TOKEN, run `gh auth login`, or run `openrappter onboard`.",
-      );
-    }
-
-    this.resolvedToken = await resolveCopilotApiToken({ githubToken });
-    return this.resolvedToken;
+  getAuthority(): CopilotAuthority {
+    return this.authority;
   }
 
   /**
@@ -224,11 +160,12 @@ export class CopilotProvider implements LLMProvider {
    * exponential backoff with jitter.
    */
   private async fetchWithRateRetry(
-    url: string,
+    pathname: string,
     init: RequestInit,
+    context: CopilotRequestContext,
   ): Promise<Response> {
     for (let attempt = 0; attempt <= RATE_LIMIT_MAX_RETRIES; attempt++) {
-      const res = await fetch(url, init);
+      const res = await this.authority.fetch(pathname, init, context);
 
       if (res.status !== 429) return res;
 
@@ -254,8 +191,8 @@ export class CopilotProvider implements LLMProvider {
     messages: Message[],
     options?: ChatOptions,
   ): Promise<ProviderResponse> {
-    const { token, baseUrl } = await this.ensureToken();
     const model = options?.model ?? COPILOT_DEFAULT_MODEL;
+    const requestContext = inferCopilotRequestContext(messages, options);
 
     // Convert to OpenAI format
     const openaiMessages: OpenAIMessage[] = messages.map((m) => ({
@@ -286,20 +223,14 @@ export class CopilotProvider implements LLMProvider {
     if (options?.temperature != null) body.temperature = options.temperature;
     if (options?.max_tokens != null) body.max_tokens = options.max_tokens;
 
-    const url = `${baseUrl}/chat/completions`;
-
-    const res = await this.fetchWithRateRetry(url, {
+    const res = await this.fetchWithRateRetry("/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-        "Editor-Version": "vscode/1.95.0",
-        "User-Agent": "GitHubCopilotChat/0.22.2024",
-        "Copilot-Integration-Id": "vscode-chat",
       },
       body: JSON.stringify(body),
-    });
+      signal: options?.signal,
+    }, { ...requestContext, model, accept: "application/json" });
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
@@ -349,8 +280,8 @@ export class CopilotProvider implements LLMProvider {
     messages: Message[],
     options?: ChatOptions,
   ): AsyncGenerator<StreamDelta> {
-    const { token, baseUrl } = await this.ensureToken();
     const model = options?.model ?? COPILOT_DEFAULT_MODEL;
+    const requestContext = inferCopilotRequestContext(messages, options);
 
     const openaiMessages: OpenAIMessage[] = messages.map((m) => ({
       role: m.role,
@@ -381,20 +312,14 @@ export class CopilotProvider implements LLMProvider {
     if (options?.temperature != null) body.temperature = options.temperature;
     if (options?.max_tokens != null) body.max_tokens = options.max_tokens;
 
-    const url = `${baseUrl}/chat/completions`;
-
-    const res = await this.fetchWithRateRetry(url, {
+    const res = await this.fetchWithRateRetry("/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        Accept: "text/event-stream",
-        "Editor-Version": "vscode/1.95.0",
-        "User-Agent": "GitHubCopilotChat/0.22.2024",
-        "Copilot-Integration-Id": "vscode-chat",
       },
       body: JSON.stringify(body),
-    });
+      signal: options?.signal,
+    }, { ...requestContext, model, accept: "text/event-stream" });
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
@@ -473,15 +398,7 @@ export class CopilotProvider implements LLMProvider {
   }
 
   async isAvailable(): Promise<boolean> {
-    const token = this.getGithubToken();
-    if (!token) return false;
-
-    try {
-      await this.ensureToken();
-      return true;
-    } catch {
-      return false;
-    }
+    return this.authority.isAvailable();
   }
 }
 

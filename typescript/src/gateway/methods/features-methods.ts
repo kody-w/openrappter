@@ -18,19 +18,22 @@ export interface FeaturesMethodsDeps {
   loadFeatureConfig?: () => {
     config: unknown;
     evidence: FeatureConfigEvidence;
-  };
+  } | Promise<{
+    config: unknown;
+    evidence: FeatureConfigEvidence;
+  }>;
 }
 
 export function registerFeaturesMethods(
   server: MethodRegistrar,
   deps?: FeaturesMethodsDeps,
 ): void {
-  const loadConfig = (): {
+  const loadConfig = async (): Promise<{
     config: unknown;
     evidence: FeatureConfigEvidence;
-  } => {
+  }> => {
     try {
-      return deps?.loadFeatureConfig?.() ?? {
+      return await deps?.loadFeatureConfig?.() ?? {
         config: undefined,
         evidence: {
           configHash: null,
@@ -49,11 +52,11 @@ export function registerFeaturesMethods(
   };
 
   server.registerMethod<void, EffectiveFeatures>('features.get', async () => {
-    return getEffectiveFeatures(loadConfig().config);
+    return getEffectiveFeatures((await loadConfig()).config);
   });
 
   server.registerMethod<void, FeatureReleaseMatrix>('features.status', async () => {
-    const snapshot = loadConfig();
+    const snapshot = await loadConfig();
     return getFeatureReleaseMatrix(snapshot.config, snapshot.evidence);
   });
 }

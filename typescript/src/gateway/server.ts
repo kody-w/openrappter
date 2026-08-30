@@ -54,7 +54,7 @@ import type { RappterManager } from './rappter-manager.js';
 import type { SurgeonService } from '../surgeon/service.js';
 import { GroupService } from '../rapp/group-service.js';
 import { ParticipantRegistry } from '../rapp/participant-registry.js';
-import type { EffectiveFeatures, FeatureConfigEvidence } from '../config/features.js';
+import type { EffectiveFeatures } from '../config/features.js';
 import { getEffectiveFeatures } from '../config/features.js';
 import { VERSION } from '../version.js';
 import { buildChatEnvelope } from './chat-envelope.js';
@@ -63,7 +63,6 @@ import { buildTwinResponse, parseTwinEnvelope, sayText } from './twin-chat.js';
 import type { InstalledSkill } from '../skills/registry.js';
 import { liveIdentityMetadata } from '../infra/process-identity.js';
 import * as YAML from 'yaml';
-import { validateConfig } from '../config/schema.js';
 
 /**
  * The part of `SkillsRegistry` the gateway needs.
@@ -645,42 +644,6 @@ export class GatewayServer {
       }
     } catch { /* ignore */ }
     return '';
-  }
-
-  private loadFeatureConfig(): {
-    config: unknown;
-    evidence: FeatureConfigEvidence;
-  } {
-    const raw = this.loadConfig();
-    const evidence = {
-      configHash: this.configHash(raw),
-      configValid: true,
-    };
-    try {
-      const parsed = raw.trim() ? YAML.parse(raw) : {};
-      const validated = validateConfig(parsed);
-      if (!validated.success) {
-        return {
-          config: undefined,
-          evidence: {
-            ...evidence,
-            configValid: false,
-          },
-        };
-      }
-      return {
-        config: validated.data ?? {},
-        evidence,
-      };
-    } catch {
-      return {
-        config: undefined,
-        evidence: {
-          ...evidence,
-          configValid: false,
-        },
-      };
-    }
   }
 
   private saveConfig(content: string) {
@@ -3374,13 +3337,51 @@ export class GatewayServer {
     this.registerMethod('config.apply', writeConfig, { requiresAuth: true });
 
     registerFeaturesMethods(this, {
-      loadFeatureConfig: () => this.loadFeatureConfig(),
+      loadFeatureConfig: async () => {
+        const raw = this.loadConfig();
+        const evidence = {
+          configHash: this.configHash(raw),
+          configValid: true,
+        };
+        try {
+          const parsed = raw.trim() ? YAML.parse(raw) : {};
+          const { validateConfig } = await import('../config/schema.js');
+          const validated = validateConfig(parsed);
+          if (!validated.success) {
+            return {
+              config: undefined,
+              evidence: {
+                ...evidence,
+                configValid: false,
+              },
+            };
+          }
+          return {
+            config: validated.data ?? {},
+            evidence,
+          };
+        } catch {
+          return {
+            config: undefined,
+            evidence: {
+              ...evidence,
+              configValid: false,
+            },
+          };
+        }
+      },
     });
     registerParticipantMethods(this, {
       registry: this.participantRegistry,
       groupService: this.groupService,
-      loadFeatures: (): EffectiveFeatures =>
-        getEffectiveFeatures(this.loadFeatureConfig().config),
+      loadFeatures: (): EffectiveFeatures => {
+        try {
+          const raw = this.loadConfig();
+          return getEffectiveFeatures(raw.trim() ? YAML.parse(raw) : {});
+        } catch {
+          return getEffectiveFeatures(undefined);
+        }
+      },
     });
 
     // ── Execution approvals ────────────────────────────────────────────────

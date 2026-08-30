@@ -478,7 +478,15 @@ export class OpenRappterConfig extends LitElement {
     }
 
     const keys = new Set(Object.keys(parsed));
-    keys.add('experimental');
+    const explicitlyRevealExperimental =
+      this.searchQuery.trim() !== ''
+      && matchesSearch('experimental', this.searchQuery);
+    if (
+      Object.prototype.hasOwnProperty.call(parsed, 'experimental')
+      || explicitlyRevealExperimental
+    ) {
+      keys.add('experimental');
+    }
     const entries = [...keys]
       .filter(key => matchesSearch(key, this.searchQuery))
       .sort();

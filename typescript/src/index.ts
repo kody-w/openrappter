@@ -37,6 +37,7 @@ import { registerHubCommands } from './cli/hubs.js';
 import { tickCountFromFlag } from './infra/cli-args.js';
 import { portFromEnvironment, portFromFlag, portTypedOnCommandLine } from './infra/cli-port.js';
 import { watchOwnerProcess } from './infra/owner-watch.js';
+import { openrappterHome } from './infra/openrappter-home.js';
 import {
   ensureFlightRecorderFromEnv,
   getFlightRecorder,
@@ -111,6 +112,19 @@ async function startGatewayInProcess(opts?: {
   // launchd runs `node` directly with a fixed environment, so hydrate the
   // managed .env before the recorder snapshots and caches its configuration.
   await hydrateManagedEnv();
+  const { canonicalInstanceKey } = await import('./infra/instance-key.js');
+  const { loadOrCreateStableRappid } = await import('./rappids/identity.js');
+  const { declareCurrentLiveIdentity } = await import('./infra/process-identity.js');
+  const logicalName = opts?.instance
+    ? canonicalInstanceKey(opts.instance)
+    : 'alpha';
+  const identityDirectory = opts?.instance
+    ? path.join(openrappterHome(), 'instances', logicalName)
+    : openrappterHome();
+  declareCurrentLiveIdentity(loadOrCreateStableRappid({
+    directory: identityDirectory,
+    name: logicalName,
+  }));
   await ensureFlightRecorderFromEnv();
   const { GatewayServer } = await import('./gateway/server.js');
   const { Assistant } = await import('./agents/Assistant.js');

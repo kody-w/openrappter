@@ -14,7 +14,10 @@
  * Mirrored by `python/openrappter/rappids/identity.py`.
  */
 
-import { rappidHex } from '../identity/name.js';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { mintTail, rappidHex } from '../identity/name.js';
 import { QuantumRappidError } from './types.js';
 import type { RappidParts } from './types.js';
 
@@ -44,6 +47,89 @@ export function formatRappid(parts: RappidParts): string {
   // otherwise become a permanent identity that nothing can parse back.
   parseRappid(value);
   return value;
+}
+
+export interface StableRappidOptions {
+  /** Directory that owns this logical identity. */
+  directory: string;
+  /** RAPPID namespace owner. Defaults to `openrappter`. */
+  owner?: string;
+  /** Logical twin name. Defaults to `alpha`. */
+  name?: string;
+  /** Test seam for proving restart persistence without relying on randomness. */
+  tailFactory?: () => string;
+}
+
+function rappidLabel(value: string | undefined, fallback: string): string {
+  const normalized = (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-+/g, '-');
+  return normalized || fallback;
+}
+
+export function stableRappidTailPath(directory: string): string {
+  return join(directory, 'rappid.tail');
+}
+
+function readPersistedTail(tailPath: string): string | null {
+  try {
+    const tail = readFileSync(tailPath, 'utf8').trim();
+    if (!/^[0-9a-f]{64}$/.test(tail)) {
+      throw new QuantumRappidError(
+        'invalid-rappid-tail',
+        `persisted RAPPID tail is invalid: ${tailPath}`,
+      );
+    }
+    return tail;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+/**
+ * Load the stable logical RAPPID for a twin, minting its tail exactly once.
+ *
+ * The PID is deliberately absent. A process restart gets a new live identity,
+ * while this persisted RAPPID remains the same logical organism.
+ */
+export function loadOrCreateStableRappid(
+  options: StableRappidOptions,
+): string {
+  const tailPath = stableRappidTailPath(options.directory);
+  let tail = readPersistedTail(tailPath);
+  if (tail === null) {
+    const minted = (options.tailFactory ?? mintTail)();
+    if (!/^[0-9a-f]{64}$/.test(minted)) {
+      throw new QuantumRappidError(
+        'invalid-rappid-tail',
+        'RAPPID tail factory must return exactly 64 lowercase hex characters',
+      );
+    }
+    mkdirSync(options.directory, { recursive: true, mode: 0o700 });
+    try {
+      writeFileSync(tailPath, `${minted}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      tail = minted;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      tail = readPersistedTail(tailPath);
+      if (tail === null) {
+        throw new QuantumRappidError(
+          'missing-rappid-tail',
+          `RAPPID tail disappeared while being created: ${tailPath}`,
+        );
+      }
+    }
+  }
+
+  return formatRappid({
+    owner: rappidLabel(options.owner, 'openrappter'),
+    name: rappidLabel(options.name, 'alpha'),
+    hex: rappidHex(tail),
+  });
 }
 
 /**

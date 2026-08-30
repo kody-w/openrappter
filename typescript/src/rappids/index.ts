@@ -73,7 +73,16 @@ export {
   sha256Hex,
   traitMilli,
 } from './canonical.js';
-export { directoryHex, formatRappid, isRappid, parseRappid, rappidHex } from './identity.js';
+export {
+  directoryHex,
+  formatRappid,
+  isRappid,
+  loadOrCreateStableRappid,
+  parseRappid,
+  rappidHex,
+  stableRappidTailPath,
+} from './identity.js';
+export type { StableRappidOptions } from './identity.js';
 export {
   PPQ,
   STEP,

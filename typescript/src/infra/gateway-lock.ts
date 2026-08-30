@@ -13,6 +13,7 @@ import {
 import { createHash } from 'crypto';
 import { createRequire } from 'module';
 import { dirname, join } from 'path';
+import { liveIdentityMetadata } from './process-identity.js';
 
 /**
  * The alpha's runtime lock.
@@ -182,6 +183,12 @@ export interface GatewayEndpoint {
   port: number;
   pid: number;
   startedAt: string;
+  /** Stable logical identity, unchanged when this process restarts. */
+  rappid?: string;
+  /** PID-linked identity for the process that wrote this endpoint. */
+  live_id?: string;
+  /** OS process start marker paired with `pid`. */
+  incarnation?: string;
 }
 
 /**
@@ -192,12 +199,21 @@ export interface GatewayEndpoint {
  */
 export function writeGatewayEndpoint(endpoint: GatewayEndpoint): void {
   try {
+    const identity = liveIdentityMetadata();
+    if (identity && endpoint.pid !== identity.pid) {
+      throw new Error(
+        `Endpoint PID ${endpoint.pid} does not match declared live identity PID ${identity.pid}.`,
+      );
+    }
+    const record: GatewayEndpoint = identity
+      ? { ...endpoint, ...identity }
+      : endpoint;
     const file = gatewayEndpointFileFor({
-      ...(endpoint.instance ? { instance: endpoint.instance } : {}),
-      port: endpoint.port,
+      ...(record.instance ? { instance: record.instance } : {}),
+      port: record.port,
     });
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify(endpoint, null, 2), { mode: 0o600 });
+    writeFileSync(file, JSON.stringify(record, null, 2), { mode: 0o600 });
   } catch {
     // Not being able to say where you are is not a reason to stop existing.
   }

@@ -137,6 +137,11 @@ describe('Gateway RPC Methods', () => {
       expect(methods.has('config.apply')).toBe(true);
     });
 
+    it('should register safe feature status', () => {
+      expect(methods.has('features.get')).toBe(true);
+      expect(methods.has('features.status')).toBe(true);
+    });
+
     it('should register cron methods', () => {
       expect(methods.has('cron.update')).toBe(true);
       expect(methods.has('cron.status')).toBe(true);
@@ -505,6 +510,7 @@ describe('Gateway RPC Methods', () => {
       expect(groups.has('health')).toBe(true);
       expect(groups.has('rappter')).toBe(true);
       expect(groups.has('experimental')).toBe(true);
+      expect(groups.has('features')).toBe(true);
       expect(groups.has('voice')).toBe(true);
       expect(groups.has('auth')).toBe(true);
       expect(groups.has('zen')).toBe(true);
@@ -512,7 +518,7 @@ describe('Gateway RPC Methods', () => {
       expect(groups.has('twin')).toBe(true);
       expect(groups.has('edge')).toBe(true);
 
-      expect(groups.size).toBe(26);
+      expect(groups.size).toBe(27);
     });
 
     it('chat group should have expected methods', () => {

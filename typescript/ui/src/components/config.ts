@@ -7,6 +7,10 @@ import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 import { createConfigState, loadConfig, saveConfig, updateConfigRaw, type ConfigState } from '../services/config.js';
+import {
+  FEATURE_RELEASE_METADATA,
+  type PromotableFeature,
+} from '../../../src/config/features.js';
 import * as YAML from 'yaml';
 
 // ── Section metadata ──
@@ -22,6 +26,10 @@ const SECTION_META: Record<string, { label: string; description: string }> = {
   logging:   { label: 'Logging',   description: 'Log levels and output configuration' },
   models:    { label: 'Models',    description: 'AI model configurations and providers' },
   cron:      { label: 'Cron',      description: 'Scheduled tasks and automation' },
+  experimental: {
+    label: 'Experimental',
+    description: 'Default-off gates for future capabilities',
+  },
 };
 
 // ── SVG icons (Lucide-style, 20×20 stroke currentColor) ──
@@ -37,6 +45,7 @@ const sectionIcons: Record<string, TemplateResult> = {
   logging: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>`,
   models: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>`,
   cron: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`,
+  experimental: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 3h6"></path><path d="M10 9V3"></path><path d="M14 9V3"></path><path d="m8 9-4.5 8.5A2.4 2.4 0 0 0 5.6 21h12.8a2.4 2.4 0 0 0 2.1-3.5L16 9"></path><path d="M7 15h10"></path></svg>`,
   default: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`,
 };
 
@@ -49,10 +58,13 @@ type ViewMode = 'form' | 'raw';
 // ── Helpers ──
 
 function parseConfig(raw: string, format: 'yaml' | 'json'): Record<string, unknown> | null {
-  if (!raw.trim()) return null;
+  if (!raw.trim()) return {};
   try {
-    if (format === 'json') return JSON.parse(raw);
-    return YAML.parse(raw) as Record<string, unknown>;
+    const parsed = format === 'json' ? JSON.parse(raw) : YAML.parse(raw);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
   } catch { return null; }
 }
 
@@ -208,6 +220,37 @@ export class OpenRappterConfig extends LitElement {
     }
     .field-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
     .field-row span { margin: 0; }
+
+    .experimental-note {
+      padding: 0.625rem 0.75rem; border-radius: 0.375rem;
+      background: rgba(245, 158, 11, 0.12); color: var(--text-secondary);
+      font-size: 0.75rem; line-height: 1.5;
+    }
+    .experimental-group {
+      display: flex; flex-direction: column; gap: 0.5rem;
+      padding: 0.625rem 0.75rem; border-left: 2px solid var(--border);
+    }
+    .experimental-group.nested {
+      margin-left: 1.5rem;
+    }
+    .experimental-group[aria-disabled="true"] {
+      opacity: 0.65;
+    }
+    .experimental-label {
+      display: flex; flex-direction: column; gap: 0.125rem;
+    }
+    .experimental-label strong {
+      color: var(--text-primary); font-size: 0.8125rem; font-weight: 600;
+    }
+    .experimental-label small {
+      color: var(--text-secondary); font-size: 0.75rem; line-height: 1.4;
+    }
+    .feature-maturity {
+      align-self: flex-start; padding: 0.125rem 0.375rem;
+      border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 999px;
+      color: #fbbf24; font-size: 0.625rem; font-weight: 600;
+      letter-spacing: 0.03em; text-transform: uppercase;
+    }
 
     .field pre {
       margin: 0; padding: 0.5rem; background: var(--bg-tertiary); border: 1px solid var(--border);
@@ -434,7 +477,9 @@ export class OpenRappterConfig extends LitElement {
       </div>`;
     }
 
-    const entries = Object.keys(parsed)
+    const keys = new Set(Object.keys(parsed));
+    keys.add('experimental');
+    const entries = [...keys]
       .filter(key => matchesSearch(key, this.searchQuery))
       .sort();
 
@@ -470,10 +515,149 @@ export class OpenRappterConfig extends LitElement {
         </div>
         ${expanded ? html`
           <div class="config-section-card__content">
-            ${this.renderValue(value, [key])}
+            ${key === 'experimental'
+              ? this.renderExperimentalSettings(value)
+              : this.renderValue(value, [key])}
           </div>
         ` : nothing}
       </section>
+    `;
+  }
+
+  private renderExperimentalSettings(value: unknown) {
+    const experimental =
+      value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : {};
+    const harnessValue = experimental.harnessAdapters;
+    const harness =
+      harnessValue !== null && typeof harnessValue === 'object' && !Array.isArray(harnessValue)
+        ? harnessValue as Record<string, unknown>
+        : {};
+    const groupValue = experimental.brainSurgeonGroupChat;
+    const group =
+      groupValue !== null && typeof groupValue === 'object' && !Array.isArray(groupValue)
+        ? groupValue as Record<string, unknown>
+        : {};
+    const enabled = experimental.enabled === true;
+    const harnessEnabled = enabled && harness.enabled === true;
+
+    return html`
+      <div class="experimental-note">
+        These capabilities are unfinished and remain off unless every parent
+        gate is enabled. Restart the gateway after saving to apply changes.
+      </div>
+
+      <label class="field-row">
+        <input
+          type="checkbox"
+          data-feature-toggle="experimental.enabled"
+          .checked=${enabled}
+          @change=${(e: Event) =>
+            this.patchConfig(
+              ['experimental', 'enabled'],
+              (e.target as HTMLInputElement).checked,
+            )}
+        >
+        <span class="experimental-label">
+          <strong>Enable experimental features</strong>
+          <small>Master gate for every feature in this section.</small>
+        </span>
+      </label>
+
+      <div class="experimental-group" aria-disabled=${String(!enabled)}>
+        <label class="field-row">
+          <input
+            type="checkbox"
+            data-feature-toggle="experimental.harnessAdapters.enabled"
+            .checked=${harness.enabled === true}
+            ?disabled=${!enabled}
+            @change=${(e: Event) =>
+              this.patchConfig(
+                ['experimental', 'harnessAdapters', 'enabled'],
+                (e.target as HTMLInputElement).checked,
+              )}
+          >
+          <span class="experimental-label">
+            <strong>Harness adapters</strong>
+            <small>Allow explicitly selected external harness integrations.</small>
+          </span>
+        </label>
+
+        <div class="experimental-group nested" aria-disabled=${String(!harnessEnabled)}>
+          <label class="field-row">
+            <input
+              type="checkbox"
+              data-feature-toggle="experimental.harnessAdapters.hermes"
+              .checked=${harness.hermes === true}
+              ?disabled=${!harnessEnabled}
+              @change=${(e: Event) =>
+                this.patchConfig(
+                  ['experimental', 'harnessAdapters', 'hermes'],
+                  (e.target as HTMLInputElement).checked,
+                )}
+            >
+            <span class="experimental-label">
+              <strong>Hermes adapter</strong>
+              ${this.renderMaturity('hermes')}
+              <small>Expose the Hermes gate to a future adapter implementation.</small>
+            </span>
+          </label>
+
+          <label class="field-row">
+            <input
+              type="checkbox"
+              data-feature-toggle="experimental.harnessAdapters.pi"
+              .checked=${harness.pi === true}
+              ?disabled=${!harnessEnabled}
+              @change=${(e: Event) =>
+                this.patchConfig(
+                  ['experimental', 'harnessAdapters', 'pi'],
+                  (e.target as HTMLInputElement).checked,
+                )}
+            >
+            <span class="experimental-label">
+              <strong>Pi adapter</strong>
+              ${this.renderMaturity('pi')}
+              <small>Expose the Pi gate to a future adapter implementation.</small>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="experimental-group" aria-disabled=${String(!enabled)}>
+        <label class="field-row">
+          <input
+            type="checkbox"
+            data-feature-toggle="experimental.brainSurgeonGroupChat.enabled"
+            .checked=${group.enabled === true}
+            ?disabled=${!enabled}
+            @change=${(e: Event) =>
+              this.patchConfig(
+                ['experimental', 'brainSurgeonGroupChat', 'enabled'],
+                (e.target as HTMLInputElement).checked,
+              )}
+          >
+          <span class="experimental-label">
+            <strong>Brain Surgeon group chat</strong>
+            ${this.renderMaturity('brainSurgeonGroupChat')}
+            <small>Expose the gate only; no group controls are rendered yet.</small>
+          </span>
+        </label>
+      </div>
+    `;
+  }
+
+  private renderMaturity(feature: PromotableFeature) {
+    const maturity = FEATURE_RELEASE_METADATA[feature].maturity;
+    const label = maturity
+      .split('-')
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' · ');
+    return html`
+      <span class="feature-maturity" data-feature-maturity=${maturity}>
+        ${label}
+      </span>
     `;
   }
 

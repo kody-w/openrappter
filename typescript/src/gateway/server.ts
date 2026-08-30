@@ -32,6 +32,7 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
+import { registerFeaturesMethods } from './methods/features-methods.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
 import {
@@ -56,6 +57,8 @@ import { parseChatRequest } from './chat-request.js';
 import { buildTwinResponse, parseTwinEnvelope, sayText } from './twin-chat.js';
 import type { InstalledSkill } from '../skills/registry.js';
 import { liveIdentityMetadata } from '../infra/process-identity.js';
+import * as YAML from 'yaml';
+import { validateConfig } from '../config/schema.js';
 
 /**
  * The part of `SkillsRegistry` the gateway needs.
@@ -587,7 +590,35 @@ export class GatewayServer {
   }
 
   private saveConfig(content: string) {
-    fs.writeFileSync(this.configPath, content, 'utf-8');
+    const tempPath = path.join(
+      this.dataDir,
+      `.${path.basename(this.configPath)}.${randomUUID()}.tmp`,
+    );
+    let fileDescriptor: number | undefined;
+    let directoryDescriptor: number | undefined;
+    try {
+      fileDescriptor = fs.openSync(tempPath, 'wx', 0o600);
+      fs.writeFileSync(fileDescriptor, content, 'utf-8');
+      fs.fsyncSync(fileDescriptor);
+      fs.closeSync(fileDescriptor);
+      fileDescriptor = undefined;
+      fs.renameSync(tempPath, this.configPath);
+      if (process.platform !== 'win32') {
+        directoryDescriptor = fs.openSync(this.dataDir, 'r');
+        fs.fsyncSync(directoryDescriptor);
+        fs.closeSync(directoryDescriptor);
+        directoryDescriptor = undefined;
+      }
+    } catch (error) {
+      if (fileDescriptor !== undefined) {
+        try { fs.closeSync(fileDescriptor); } catch { /* preserve original error */ }
+      }
+      if (directoryDescriptor !== undefined) {
+        try { fs.closeSync(directoryDescriptor); } catch { /* preserve original error */ }
+      }
+      try { fs.unlinkSync(tempPath); } catch { /* already absent */ }
+      throw error;
+    }
   }
 
   /**
@@ -3220,22 +3251,60 @@ export class GatewayServer {
       if (typeof raw !== 'string') {
         throw new Error('config.set requires a string `raw` (or legacy `content`/`config`)');
       }
+      const current = this.loadConfig();
       // A baseHash that no longer matches means someone else wrote after this
       // client read. Overwriting would silently discard their edit.
       if (params.baseHash) {
-        const currentHash = this.configHash(this.loadConfig());
-        if (params.baseHash !== currentHash) {
+        const currentHash = this.configHash(current);
+        if (params.baseHash !== currentHash && raw !== current) {
           throw new Error(
             'Config changed since it was loaded; reload before saving to avoid discarding the other edit',
           );
         }
       }
-      this.saveConfig(raw);
+      if (raw !== current) {
+        this.saveConfig(raw);
+      }
       return { saved: true, applied: true, hash: this.configHash(raw) };
     };
 
     this.registerMethod('config.set', writeConfig, { requiresAuth: true });
     this.registerMethod('config.apply', writeConfig, { requiresAuth: true });
+
+    registerFeaturesMethods(this, {
+      loadFeatureConfig: () => {
+        const raw = this.loadConfig();
+        const evidence = {
+          configHash: this.configHash(raw),
+          configValid: true,
+        };
+        try {
+          const parsed = raw.trim() ? YAML.parse(raw) : {};
+          const validated = validateConfig(parsed);
+          if (!validated.success) {
+            return {
+              config: undefined,
+              evidence: {
+                ...evidence,
+                configValid: false,
+              },
+            };
+          }
+          return {
+            config: validated.data ?? {},
+            evidence,
+          };
+        } catch {
+          return {
+            config: undefined,
+            evidence: {
+              ...evidence,
+              configValid: false,
+            },
+          };
+        }
+      },
+    });
 
     // ── Execution approvals ────────────────────────────────────────────────
     //

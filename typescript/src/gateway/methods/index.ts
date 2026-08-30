@@ -40,6 +40,7 @@ import { registerConnectionsMethods } from './connections-methods.js';
 import { registerSystemMethods } from './system-methods.js';
 import { registerRappterMethods } from './rappter-methods.js';
 import { registerExperimentalMethods } from './experimental-methods.js';
+import { registerFeaturesMethods } from './features-methods.js';
 import { registerAuthMethods } from './auth-methods.js';
 import { registerZenMethods } from './zen-methods.js';
 import { registerBackupMethods } from './backup-methods.js';
@@ -83,6 +84,7 @@ export function registerAllMethods(
   registerSystemMethods(server, deps);
   registerRappterMethods(server, deps);
   registerExperimentalMethods(server, deps);
+  registerFeaturesMethods(server, deps);
   registerAuthMethods(server, deps);
   registerZenMethods(server, deps);
   registerBackupMethods(server, deps);
@@ -110,6 +112,7 @@ export {
   registerSystemMethods,
   registerRappterMethods,
   registerExperimentalMethods,
+  registerFeaturesMethods,
   registerAuthMethods,
   registerZenMethods,
   registerBackupMethods,

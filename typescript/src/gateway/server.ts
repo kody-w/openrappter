@@ -589,6 +589,85 @@ export class GatewayServer {
     } catch { /* ignore write errors */ }
   }
 
+  private saveSessionsStrict(nextSessions: Map<string, ChatSession>): void {
+    const targetPath = this.sessionsPath;
+    const tempPath = path.join(
+      this.dataDir,
+      `.${path.basename(targetPath)}.${randomUUID()}.tmp`,
+    );
+    const previous = fs.existsSync(targetPath)
+      ? fs.readFileSync(targetPath, 'utf8')
+      : null;
+    let fileDescriptor: number | undefined;
+    let directoryDescriptor: number | undefined;
+    let renamed = false;
+    try {
+      fileDescriptor = fs.openSync(tempPath, 'wx', 0o600);
+      fs.writeFileSync(
+        fileDescriptor,
+        JSON.stringify(Array.from(nextSessions.values()), null, 2),
+        'utf8',
+      );
+      fs.fsyncSync(fileDescriptor);
+      fs.closeSync(fileDescriptor);
+      fileDescriptor = undefined;
+      fs.renameSync(tempPath, targetPath);
+      renamed = true;
+      if (process.platform !== 'win32') {
+        directoryDescriptor = fs.openSync(this.dataDir, 'r');
+        fs.fsyncSync(directoryDescriptor);
+        fs.closeSync(directoryDescriptor);
+        directoryDescriptor = undefined;
+      }
+    } catch (error) {
+      if (fileDescriptor !== undefined) {
+        try { fs.closeSync(fileDescriptor); } catch { /* preserve original error */ }
+      }
+      if (directoryDescriptor !== undefined) {
+        try { fs.closeSync(directoryDescriptor); } catch { /* preserve original error */ }
+      }
+      try { fs.unlinkSync(tempPath); } catch { /* already absent */ }
+      if (renamed) this.restoreSessionsSnapshot(previous);
+      throw error;
+    }
+  }
+
+  private restoreSessionsSnapshot(previous: string | null): void {
+    if (previous === null) {
+      try { fs.unlinkSync(this.sessionsPath); } catch { /* best-effort rollback */ }
+      return;
+    }
+    const rollbackPath = path.join(
+      this.dataDir,
+      `.${path.basename(this.sessionsPath)}.${randomUUID()}.tmp`,
+    );
+    let fileDescriptor: number | undefined;
+    let directoryDescriptor: number | undefined;
+    try {
+      fileDescriptor = fs.openSync(rollbackPath, 'wx', 0o600);
+      fs.writeFileSync(fileDescriptor, previous, 'utf8');
+      fs.fsyncSync(fileDescriptor);
+      fs.closeSync(fileDescriptor);
+      fileDescriptor = undefined;
+      fs.renameSync(rollbackPath, this.sessionsPath);
+      if (process.platform !== 'win32') {
+        directoryDescriptor = fs.openSync(this.dataDir, 'r');
+        fs.fsyncSync(directoryDescriptor);
+        fs.closeSync(directoryDescriptor);
+        directoryDescriptor = undefined;
+      }
+    } catch {
+      if (fileDescriptor !== undefined) {
+        try { fs.closeSync(fileDescriptor); } catch { /* best-effort rollback */ }
+      }
+      if (directoryDescriptor !== undefined) {
+        try { fs.closeSync(directoryDescriptor); } catch { /* best-effort rollback */ }
+      }
+    } finally {
+      try { fs.unlinkSync(rollbackPath); } catch { /* renamed or already absent */ }
+    }
+  }
+
   private createGroupService(registry: ParticipantRegistry): GroupService {
     return new GroupService({
       registry,
@@ -615,7 +694,7 @@ export class GatewayServer {
           };
         },
         saveSession: async (session) => {
-          this.sessionStore.set(session.id, {
+          const stored: ChatSession = {
             id: session.id,
             agentId: session.agentId,
             channelId: session.channelId,
@@ -631,8 +710,11 @@ export class GatewayServer {
             metadata: { ...session.metadata },
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
-          });
-          this.saveSessions();
+          };
+          const nextSessions = new Map(this.sessionStore);
+          nextSessions.set(stored.id, stored);
+          this.saveSessionsStrict(nextSessions);
+          this.sessionStore = nextSessions;
         },
       },
     });

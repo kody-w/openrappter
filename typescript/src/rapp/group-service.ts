@@ -418,12 +418,13 @@ export class GroupService {
               completedAt: this.now().toISOString(),
               ...(truncated ? { truncated: true } : {}),
             };
-            group.transcript.push(turn);
+            const nextTranscript = [...group.transcript, turn];
+            await this.persist(group, nextTranscript, turn.completedAt);
+            group.transcript = nextTranscript;
             workingHistory = [...workingHistory, attributedTurn(turn)]
               .slice(-MAX_CONVERSATION_HISTORY_MESSAGES);
             outputChars += retained.length;
             group.updatedAt = turn.completedAt;
-            await this.persist(group);
 
             if (truncated || outputChars >= this.limits.maxOutputChars) {
               active.boundary = 'output';
@@ -561,7 +562,11 @@ export class GroupService {
     };
   }
 
-  private async persist(group: GroupRecord): Promise<void> {
+  private async persist(
+    group: GroupRecord,
+    transcript: readonly GroupTranscriptEnvelope[],
+    updatedAt: string,
+  ): Promise<void> {
     if (!this.storage) return;
     const session: Session = {
       id: `rapp-group:${group.id}`,
@@ -571,14 +576,14 @@ export class GroupService {
       metadata: {
         schema: GROUP_TRANSCRIPT_SCHEMA,
       },
-      messages: group.transcript.map(turn => ({
+      messages: transcript.map(turn => ({
         id: turn.id,
         role: 'assistant',
         content: JSON.stringify(turn),
         timestamp: turn.completedAt,
       })),
       createdAt: group.createdAt,
-      updatedAt: group.updatedAt,
+      updatedAt,
     };
     try {
       await this.storage.saveSession(session);

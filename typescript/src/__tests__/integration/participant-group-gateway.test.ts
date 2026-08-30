@@ -1,8 +1,11 @@
 import {
   mkdtempSync,
+  readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import fs from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -21,6 +24,45 @@ const IDS = [
   `rappid:@openrappter/gateway-a:${'a'.repeat(64)}`,
   `rappid:@openrappter/gateway-b:${'b'.repeat(64)}`,
   `rappid:@openrappter/gateway-c:${'c'.repeat(64)}`,
+] as const;
+
+const persistenceFailures = [
+  {
+    name: 'write',
+    message: 'simulated group transcript write failure',
+    install: () => vi.spyOn(fs, 'writeFileSync').mockImplementationOnce(() => {
+      throw new Error('simulated group transcript write failure');
+    }),
+  },
+  {
+    name: 'rename',
+    message: 'simulated group transcript rename failure',
+    install: () => vi.spyOn(fs, 'renameSync').mockImplementationOnce(() => {
+      throw new Error('simulated group transcript rename failure');
+    }),
+  },
+  {
+    name: 'file fsync',
+    message: 'simulated group transcript file sync failure',
+    install: () => vi.spyOn(fs, 'fsyncSync').mockImplementationOnce(() => {
+      throw new Error('simulated group transcript file sync failure');
+    }),
+  },
+  {
+    name: 'directory fsync',
+    message: 'simulated group transcript directory sync failure',
+    install: () => {
+      const realFsync = fs.fsyncSync.bind(fs);
+      let syncCount = 0;
+      return vi.spyOn(fs, 'fsyncSync').mockImplementation((descriptor) => {
+        syncCount++;
+        if (syncCount === 2) {
+          throw new Error('simulated group transcript directory sync failure');
+        }
+        realFsync(descriptor);
+      });
+    },
+  },
 ] as const;
 
 interface FakeParticipant extends RappParticipant {
@@ -106,6 +148,7 @@ let dataDir: string | undefined;
 afterEach(async () => {
   await server?.stop();
   server = undefined;
+  vi.restoreAllMocks();
   if (dataDir) rmSync(dataDir, { recursive: true, force: true });
   dataDir = undefined;
 });
@@ -203,4 +246,75 @@ describe('participant and group gateway methods', () => {
     const history = await rpc(server.port, 'group.history', { groupId });
     expect(history.result?.transcript).toHaveLength(3);
   });
+
+  it.each(persistenceFailures)(
+    'reports production $name failure without replacing prior durable or memory state',
+    async (failure) => {
+      if (failure.name === 'directory fsync' && process.platform === 'win32') return;
+      dataDir = mkdtempSync(join(process.cwd(), '.participant-gateway-persistence-'));
+      writeFileSync(
+        join(dataDir, 'config.yaml'),
+        [
+          'experimental:',
+          '  enabled: true',
+          '  brainSurgeonGroupChat:',
+          '    enabled: true',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+      const registry = new ParticipantRegistry();
+      await registry.register(fakeParticipant(0), { aliases: ['p1'] });
+      await registry.register(fakeParticipant(1), { aliases: ['p2'] });
+      server = new GatewayServer({
+        port: 0,
+        bind: 'loopback',
+        auth: { mode: 'none' },
+        dataDir,
+      });
+      server.setParticipantServices(registry);
+      await server.start();
+
+      const created = await rpc(server.port, 'group.create', {
+        participants: ['p1', 'p2'],
+      });
+      const groupId = String(created.result?.id);
+      const baseline = await rpc(server.port, 'group.send', {
+        groupId,
+        userInput: 'Persist this baseline.',
+      });
+      expect(baseline.result?.transcript).toHaveLength(2);
+      const sessionsPath = join(dataDir, 'sessions.json');
+      const priorBytes = readFileSync(sessionsPath, 'utf8');
+
+      failure.install();
+      const failed = await rpc(server.port, 'group.send', {
+        groupId,
+        userInput: 'This turn must not commit.',
+      });
+
+      expect(failed.error).toBeUndefined();
+      expect(failed.result).toMatchObject({
+        status: 'partial',
+        persistenceError: expect.stringContaining(failure.message),
+        transcriptLength: 2,
+        outputChars: 0,
+      });
+      expect(failed.result?.transcript).toHaveLength(2);
+      expect(readFileSync(sessionsPath, 'utf8')).toBe(priorBytes);
+      expect(readdirSync(dataDir).filter(name => name.endsWith('.tmp'))).toEqual([]);
+
+      await server.stop();
+      server = new GatewayServer({
+        port: 0,
+        bind: 'loopback',
+        auth: { mode: 'none' },
+        dataDir,
+      });
+      server.setParticipantServices(registry);
+      await server.start();
+      const restarted = await rpc(server.port, 'group.history', { groupId });
+      expect(restarted.result?.transcript).toHaveLength(2);
+    },
+  );
 });

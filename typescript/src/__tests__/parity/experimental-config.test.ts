@@ -12,6 +12,7 @@ import {
   FEATURE_RELEASE_METADATA,
   FEATURE_RING_ORDER,
   getEffectiveFeatures,
+  getFeatureGateStatus,
   getFeatureReleaseMatrix,
 } from '../../config/features.js';
 import { validateConfig } from '../../config/schema.js';
@@ -24,6 +25,7 @@ describe('experimentalConfigSchema', () => {
       enabled: false,
       hermes: false,
       pi: false,
+      grok: false,
     });
     expect(result.brainSurgeonGroupChat).toEqual({ enabled: false });
     expect(result.voiceMode.enabled).toBe(false);
@@ -46,6 +48,7 @@ describe('experimentalConfigSchema', () => {
         enabled: true,
         hermes: true,
         pi: true,
+        grok: true,
       },
       brainSurgeonGroupChat: {
         enabled: true,
@@ -75,6 +78,7 @@ describe('experimentalConfigSchema', () => {
       enabled: true,
       hermes: true,
       pi: true,
+      grok: true,
     });
     expect(result.brainSurgeonGroupChat.enabled).toBe(true);
     expect(result.voiceMode.engine).toBe('vosk');
@@ -131,14 +135,24 @@ describe('getEffectiveFeatures', () => {
     ['non-object experimental section', { experimental: true }],
     ['missing master gate', {
       experimental: {
-        harnessAdapters: { enabled: true, hermes: true, pi: true },
+        harnessAdapters: {
+          enabled: true,
+          hermes: true,
+          pi: true,
+          grok: true,
+        },
         brainSurgeonGroupChat: { enabled: true },
       },
     }],
     ['truthy non-boolean master gate', {
       experimental: {
         enabled: 1,
-        harnessAdapters: { enabled: true, hermes: true, pi: true },
+        harnessAdapters: {
+          enabled: true,
+          hermes: true,
+          pi: true,
+          grok: true,
+        },
         brainSurgeonGroupChat: { enabled: true },
       },
     }],
@@ -148,6 +162,7 @@ describe('getEffectiveFeatures', () => {
       harnessAdapters: false,
       hermes: false,
       pi: false,
+      grok: false,
       brainSurgeonGroupChat: false,
     });
   });
@@ -160,6 +175,7 @@ describe('getEffectiveFeatures', () => {
           enabled: false,
           hermes: true,
           pi: true,
+          grok: true,
         },
       },
     })).toEqual({
@@ -167,6 +183,7 @@ describe('getEffectiveFeatures', () => {
       harnessAdapters: false,
       hermes: false,
       pi: false,
+      grok: false,
       brainSurgeonGroupChat: false,
     });
   });
@@ -179,6 +196,7 @@ describe('getEffectiveFeatures', () => {
           enabled: true,
           hermes: 'true',
           pi: true,
+          grok: 1,
         },
         brainSurgeonGroupChat: {
           enabled: 'true',
@@ -189,6 +207,7 @@ describe('getEffectiveFeatures', () => {
       harnessAdapters: true,
       hermes: false,
       pi: true,
+      grok: false,
       brainSurgeonGroupChat: false,
     });
   });
@@ -201,6 +220,7 @@ describe('getEffectiveFeatures', () => {
           enabled: true,
           hermes: true,
           pi: true,
+          grok: true,
         },
         brainSurgeonGroupChat: {
           enabled: true,
@@ -211,7 +231,41 @@ describe('getEffectiveFeatures', () => {
       harnessAdapters: true,
       hermes: true,
       pi: true,
+      grok: true,
       brainSurgeonGroupChat: true,
+    });
+  });
+
+  it('reports persisted Grok intent and every blocking parent', () => {
+    expect(getFeatureGateStatus({
+      experimental: {
+        enabled: false,
+        harnessAdapters: {
+          enabled: false,
+          grok: true,
+        },
+      },
+    }).grok).toEqual({
+      requested: true,
+      enabled: false,
+      blockedBy: [
+        'experimental.enabled',
+        'experimental.harnessAdapters.enabled',
+      ],
+    });
+
+    expect(getFeatureGateStatus({
+      experimental: {
+        enabled: true,
+        harnessAdapters: {
+          enabled: false,
+          grok: true,
+        },
+      },
+    }).grok).toEqual({
+      requested: true,
+      enabled: false,
+      blockedBy: ['experimental.harnessAdapters.enabled'],
     });
   });
 });
@@ -226,6 +280,11 @@ describe('feature release maturity', () => {
       },
       pi: {
         configPath: 'experimental.harnessAdapters.pi',
+        maturity: 'frontier-experimental',
+        defaultEnabled: false,
+      },
+      grok: {
+        configPath: 'experimental.harnessAdapters.grok',
         maturity: 'frontier-experimental',
         defaultEnabled: false,
       },
@@ -258,6 +317,7 @@ describe('feature release maturity', () => {
           enabled: true,
           hermes: true,
           pi: false,
+          grok: true,
         },
         brainSurgeonGroupChat: {
           enabled: true,
@@ -294,21 +354,36 @@ describe('feature release maturity', () => {
           configPath: 'experimental.harnessAdapters.hermes',
           maturity: 'frontier-experimental',
           defaultEnabled: false,
+          requested: true,
           enabled: true,
+          blockedBy: [],
         },
         {
           id: 'pi',
           configPath: 'experimental.harnessAdapters.pi',
           maturity: 'frontier-experimental',
           defaultEnabled: false,
+          requested: false,
           enabled: false,
+          blockedBy: [],
+        },
+        {
+          id: 'grok',
+          configPath: 'experimental.harnessAdapters.grok',
+          maturity: 'frontier-experimental',
+          defaultEnabled: false,
+          requested: true,
+          enabled: true,
+          blockedBy: [],
         },
         {
           id: 'brainSurgeonGroupChat',
           configPath: 'experimental.brainSurgeonGroupChat.enabled',
           maturity: 'frontier-experimental',
           defaultEnabled: false,
+          requested: true,
           enabled: true,
+          blockedBy: [],
         },
       ],
     });

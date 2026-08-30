@@ -64,6 +64,7 @@ describe('features.get RPC', () => {
       harnessAdapters: false,
       hermes: false,
       pi: false,
+      grok: false,
       brainSurgeonGroupChat: false,
     });
     expect(Object.values(result ?? {}).every(value => typeof value === 'boolean'))
@@ -81,6 +82,7 @@ describe('features.get RPC', () => {
       '    enabled: true',
       '    hermes: true',
       '    pi: false',
+      '    grok: true',
       '    command: never-return-this',
       '  brainSurgeonGroupChat:',
       '    enabled: true',
@@ -102,6 +104,7 @@ describe('features.get RPC', () => {
       harnessAdapters: true,
       hermes: true,
       pi: false,
+      grok: true,
       brainSurgeonGroupChat: true,
     });
     expect(JSON.stringify(first.result)).not.toContain('never-return-this');
@@ -157,21 +160,36 @@ describe('features.get RPC', () => {
           configPath: 'experimental.harnessAdapters.hermes',
           maturity: 'frontier-experimental',
           defaultEnabled: false,
+          requested: true,
           enabled: true,
+          blockedBy: [],
         },
         {
           id: 'pi',
           configPath: 'experimental.harnessAdapters.pi',
           maturity: 'frontier-experimental',
           defaultEnabled: false,
+          requested: false,
           enabled: false,
+          blockedBy: [],
+        },
+        {
+          id: 'grok',
+          configPath: 'experimental.harnessAdapters.grok',
+          maturity: 'frontier-experimental',
+          defaultEnabled: false,
+          requested: true,
+          enabled: true,
+          blockedBy: [],
         },
         {
           id: 'brainSurgeonGroupChat',
           configPath: 'experimental.brainSurgeonGroupChat.enabled',
           maturity: 'frontier-experimental',
           defaultEnabled: false,
+          requested: true,
           enabled: true,
+          blockedBy: [],
         },
       ],
     });
@@ -182,6 +200,8 @@ describe('features.get RPC', () => {
     const restartedPort = await startServer(dataDir);
     const restarted = await rpc(restartedPort, 'features.get');
     expect(restarted.result).toEqual(first.result);
+    const restartedStatus = await rpc(restartedPort, 'features.status');
+    expect(restartedStatus.result).toEqual(status.result);
   });
 
   it('returns disabled flags instead of leaking parser errors', async () => {
@@ -199,6 +219,7 @@ describe('features.get RPC', () => {
       harnessAdapters: false,
       hermes: false,
       pi: false,
+      grok: false,
       brainSurgeonGroupChat: false,
     });
 
@@ -237,6 +258,7 @@ describe('features.get RPC', () => {
       harnessAdapters: false,
       hermes: false,
       pi: false,
+      grok: false,
       brainSurgeonGroupChat: false,
     });
     const status = await rpc(port, 'features.status');
@@ -244,6 +266,98 @@ describe('features.get RPC', () => {
       configHash: expect.any(String),
       configValid: false,
     });
+  });
+
+  it('fails closed for a non-boolean Grok child gate', async () => {
+    const port = await startServer();
+    writeFileSync(
+      join(dataDir!, 'config.yaml'),
+      [
+        'experimental:',
+        '  enabled: true',
+        '  harnessAdapters:',
+        '    enabled: true',
+        '    grok: "true"',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    expect((await rpc(port, 'features.get')).result).toEqual({
+      experimental: false,
+      harnessAdapters: false,
+      hermes: false,
+      pi: false,
+      grok: false,
+      brainSurgeonGroupChat: false,
+    });
+    expect((await rpc(port, 'features.status')).result?.evidence).toEqual({
+      configHash: expect.any(String),
+      configValid: false,
+    });
+  });
+
+  it('reports persisted Grok intent as blocked until both parents are on', async () => {
+    const port = await startServer();
+    const raw = [
+      'experimental:',
+      '  enabled: false',
+      '  harnessAdapters:',
+      '    enabled: false',
+      '    grok: true',
+      '',
+    ].join('\n');
+    writeFileSync(join(dataDir!, 'config.yaml'), raw, 'utf8');
+
+    expect((await rpc(port, 'features.get')).result?.grok).toBe(false);
+    const status = await rpc(port, 'features.status');
+    const grok = (
+      status.result?.features as Array<Record<string, unknown>> | undefined
+    )?.find(feature => feature.id === 'grok');
+    expect(grok).toEqual({
+      id: 'grok',
+      configPath: 'experimental.harnessAdapters.grok',
+      maturity: 'frontier-experimental',
+      defaultEnabled: false,
+      requested: true,
+      enabled: false,
+      blockedBy: [
+        'experimental.enabled',
+        'experimental.harnessAdapters.enabled',
+      ],
+    });
+  });
+
+  it('changes config evidence hash exactly when persisted Grok intent changes', async () => {
+    const port = await startServer();
+    const before = await rpc(port, 'features.status');
+    const initialHash = (
+      before.result?.evidence as Record<string, unknown> | undefined
+    )?.configHash;
+    expect(initialHash).toEqual(expect.any(String));
+
+    const { result: snapshot } = await rpc(port, 'config.get');
+    const raw = [
+      'experimental:',
+      '  enabled: false',
+      '  harnessAdapters:',
+      '    enabled: false',
+      '    grok: true',
+      '',
+    ].join('\n');
+    const saved = await rpc(port, 'config.set', {
+      raw,
+      baseHash: snapshot?.hash,
+    });
+    expect(saved.error).toBeUndefined();
+
+    const after = await rpc(port, 'features.status');
+    const persistedHash = (
+      after.result?.evidence as Record<string, unknown> | undefined
+    )?.configHash;
+    expect(persistedHash).toBe(saved.result?.hash);
+    expect(persistedHash).not.toBe(initialHash);
+    expect((await rpc(port, 'features.status')).result).toEqual(after.result);
   });
 
   it('treats a repeated successful save as an idempotent retry', async () => {

@@ -11,6 +11,7 @@ export interface EffectiveFeatures {
   harnessAdapters: boolean;
   hermes: boolean;
   pi: boolean;
+  grok: boolean;
   brainSurgeonGroupChat: boolean;
 }
 
@@ -35,7 +36,11 @@ export type FeatureReleaseNode =
 export type PromotableFeature =
   | 'hermes'
   | 'pi'
+  | 'grok'
   | 'brainSurgeonGroupChat';
+export type FeatureBlockingGate =
+  | 'experimental.enabled'
+  | 'experimental.harnessAdapters.enabled';
 
 export interface FeatureReleaseMetadata {
   configPath: string;
@@ -54,6 +59,11 @@ export const FEATURE_RELEASE_METADATA = {
     maturity: 'frontier-experimental',
     defaultEnabled: false,
   },
+  grok: {
+    configPath: 'experimental.harnessAdapters.grok',
+    maturity: 'frontier-experimental',
+    defaultEnabled: false,
+  },
   brainSurgeonGroupChat: {
     configPath: 'experimental.brainSurgeonGroupChat.enabled',
     maturity: 'frontier-experimental',
@@ -63,7 +73,9 @@ export const FEATURE_RELEASE_METADATA = {
 
 export interface FeatureReleaseStatus extends FeatureReleaseMetadata {
   id: PromotableFeature;
+  requested: boolean;
   enabled: boolean;
+  blockedBy: FeatureBlockingGate[];
 }
 
 export interface FeatureConfigEvidence {
@@ -110,8 +122,65 @@ export function getEffectiveFeatures(config: unknown): EffectiveFeatures {
     harnessAdapters: harnessAdaptersEnabled,
     hermes: harnessAdaptersEnabled && harnessAdapters?.hermes === true,
     pi: harnessAdaptersEnabled && harnessAdapters?.pi === true,
+    grok: harnessAdaptersEnabled && harnessAdapters?.grok === true,
     brainSurgeonGroupChat:
       experimentalEnabled && brainSurgeonGroupChat?.enabled === true,
+  };
+}
+
+export function getFeatureGateStatus(
+  config: unknown,
+): Record<
+  PromotableFeature,
+  {
+    requested: boolean;
+    enabled: boolean;
+    blockedBy: FeatureBlockingGate[];
+  }
+> {
+  const root = record(config);
+  const experimental = record(root?.experimental);
+  const harnessAdapters = record(experimental?.harnessAdapters);
+  const group = record(experimental?.brainSurgeonGroupChat);
+  const experimentalEnabled = experimental?.enabled === true;
+  const harnessEnabled = harnessAdapters?.enabled === true;
+  const effective = getEffectiveFeatures(config);
+
+  const adapterStatus = (
+    feature: 'hermes' | 'pi' | 'grok',
+  ): {
+    requested: boolean;
+    enabled: boolean;
+    blockedBy: FeatureBlockingGate[];
+  } => {
+    const requested = harnessAdapters?.[feature] === true;
+    const blockedBy: FeatureBlockingGate[] = [];
+    if (requested && !experimentalEnabled) {
+      blockedBy.push('experimental.enabled');
+    }
+    if (requested && !harnessEnabled) {
+      blockedBy.push('experimental.harnessAdapters.enabled');
+    }
+    return {
+      requested,
+      enabled: effective[feature],
+      blockedBy,
+    };
+  };
+
+  const groupRequested = group?.enabled === true;
+  return {
+    hermes: adapterStatus('hermes'),
+    pi: adapterStatus('pi'),
+    grok: adapterStatus('grok'),
+    brainSurgeonGroupChat: {
+      requested: groupRequested,
+      enabled: effective.brainSurgeonGroupChat,
+      blockedBy:
+        groupRequested && !experimentalEnabled
+          ? ['experimental.enabled']
+          : [],
+    },
   };
 }
 
@@ -122,10 +191,11 @@ export function getFeatureReleaseMatrix(
     configValid: true,
   },
 ): FeatureReleaseMatrix {
-  const effective = getEffectiveFeatures(config);
+  const gateStatus = getFeatureGateStatus(config);
   const featureIds: PromotableFeature[] = [
     'hermes',
     'pi',
+    'grok',
     'brainSurgeonGroupChat',
   ];
   const promotionOrder = [...FEATURE_PROMOTION_ORDER];
@@ -146,7 +216,7 @@ export function getFeatureReleaseMatrix(
     features: featureIds.map(id => ({
       id,
       ...FEATURE_RELEASE_METADATA[id],
-      enabled: effective[id],
+      ...gateStatus[id],
     })),
   };
 }

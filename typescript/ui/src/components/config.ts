@@ -9,6 +9,8 @@ import { gateway } from '../services/gateway.js';
 import { createConfigState, loadConfig, saveConfig, updateConfigRaw, type ConfigState } from '../services/config.js';
 import {
   FEATURE_RELEASE_METADATA,
+  getFeatureGateStatus,
+  type FeatureBlockingGate,
   type PromotableFeature,
 } from '../../../src/config/features.js';
 import * as YAML from 'yaml';
@@ -250,6 +252,9 @@ export class OpenRappterConfig extends LitElement {
       border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 999px;
       color: #fbbf24; font-size: 0.625rem; font-weight: 600;
       letter-spacing: 0.03em; text-transform: uppercase;
+    }
+    .feature-blocked {
+      color: #fbbf24; font-size: 0.6875rem; line-height: 1.4;
     }
 
     .field pre {
@@ -549,6 +554,7 @@ export class OpenRappterConfig extends LitElement {
         : {};
     const enabled = experimental.enabled === true;
     const harnessEnabled = enabled && harness.enabled === true;
+    const gateStatus = getFeatureGateStatus({ experimental });
 
     return html`
       <div class="experimental-note">
@@ -609,6 +615,7 @@ export class OpenRappterConfig extends LitElement {
               <strong>Hermes adapter</strong>
               ${this.renderMaturity('hermes')}
               <small>Expose the Hermes gate to a future adapter implementation.</small>
+              ${this.renderBlockedIntent(gateStatus.hermes.blockedBy)}
             </span>
           </label>
 
@@ -628,6 +635,30 @@ export class OpenRappterConfig extends LitElement {
               <strong>Pi adapter</strong>
               ${this.renderMaturity('pi')}
               <small>Expose the Pi gate to a future adapter implementation.</small>
+              ${this.renderBlockedIntent(gateStatus.pi.blockedBy)}
+            </span>
+          </label>
+
+          <label class="field-row">
+            <input
+              type="checkbox"
+              data-feature-toggle="experimental.harnessAdapters.grok"
+              .checked=${gateStatus.grok.requested}
+              ?disabled=${!harnessEnabled}
+              @change=${(e: Event) =>
+                this.patchConfig(
+                  ['experimental', 'harnessAdapters', 'grok'],
+                  (e.target as HTMLInputElement).checked,
+                )}
+            >
+            <span class="experimental-label">
+              <strong>Grok Build</strong>
+              ${this.renderMaturity('grok')}
+              <small>
+                Official Grok Build harness using OpenRappter’s shared Copilot
+                authority; no separate xAI account is required.
+              </small>
+              ${this.renderBlockedIntent(gateStatus.grok.blockedBy)}
             </span>
           </label>
         </div>
@@ -650,6 +681,9 @@ export class OpenRappterConfig extends LitElement {
             <strong>Brain Surgeon group chat</strong>
             ${this.renderMaturity('brainSurgeonGroupChat')}
             <small>Expose the gate only; no group controls are rendered yet.</small>
+            ${this.renderBlockedIntent(
+              gateStatus.brainSurgeonGroupChat.blockedBy,
+            )}
           </span>
         </label>
       </div>
@@ -666,6 +700,23 @@ export class OpenRappterConfig extends LitElement {
       <span class="feature-maturity" data-feature-maturity=${maturity}>
         ${label}
       </span>
+    `;
+  }
+
+  private renderBlockedIntent(blockedBy: FeatureBlockingGate[]) {
+    if (blockedBy.length === 0) return nothing;
+    const labels: Record<FeatureBlockingGate, string> = {
+      'experimental.enabled': 'Enable experimental features',
+      'experimental.harnessAdapters.enabled': 'Harness adapters',
+    };
+    return html`
+      <small
+        class="feature-blocked"
+        data-blocked-by=${blockedBy.join(',')}
+      >
+        Blocked until ${blockedBy.map(gate => labels[gate]).join(' and ')}
+        ${blockedBy.length === 1 ? 'is' : 'are'} on.
+      </small>
     `;
   }
 

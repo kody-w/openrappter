@@ -38,6 +38,7 @@ const harnessAdaptersDefaults = {
   enabled: false,
   hermes: false,
   pi: false,
+  grok: false,
 };
 
 const brainSurgeonGroupChatDefaults = {
@@ -53,6 +54,7 @@ export const experimentalConfigSchema = z.object({
     enabled: z.boolean().default(false),
     hermes: z.boolean().default(false),
     pi: z.boolean().default(false),
+    grok: z.boolean().default(false),
   }).default(harnessAdaptersDefaults),
 
   /** Future multi-participant Brain Surgeon conversations. */

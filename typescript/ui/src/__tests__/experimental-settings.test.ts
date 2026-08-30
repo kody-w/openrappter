@@ -93,6 +93,7 @@ describe('experimental settings', () => {
     expect(text).not.toContain('Experimental');
     expect(text).not.toContain('Hermes adapter');
     expect(text).not.toContain('Pi adapter');
+    expect(text).not.toContain('Grok');
     expect(text).not.toContain('Brain Surgeon group chat');
     expect(text).not.toContain('Runtime');
     expect(text).not.toContain('PID');
@@ -112,6 +113,7 @@ describe('experimental settings', () => {
     expect(toggle('experimental.harnessAdapters.enabled')?.disabled).toBe(true);
     expect(toggle('experimental.harnessAdapters.hermes')?.disabled).toBe(true);
     expect(toggle('experimental.harnessAdapters.pi')?.disabled).toBe(true);
+    expect(toggle('experimental.harnessAdapters.grok')?.disabled).toBe(true);
     expect(toggle('experimental.brainSurgeonGroupChat.enabled')?.disabled)
       .toBe(true);
     expect(element.shadowRoot?.textContent).toContain(
@@ -122,8 +124,9 @@ describe('experimental settings', () => {
         '[data-feature-maturity]',
       ) ?? [],
     );
-    expect(maturity).toHaveLength(3);
+    expect(maturity).toHaveLength(4);
     expect(maturity.map(node => node.dataset.featureMaturity)).toEqual([
+      'frontier-experimental',
       'frontier-experimental',
       'frontier-experimental',
       'frontier-experimental',
@@ -131,7 +134,16 @@ describe('experimental settings', () => {
     expect(maturity.every(node =>
       node.textContent?.trim() === 'Frontier · Experimental',
     )).toBe(true);
-    expect(element.shadowRoot?.textContent).not.toContain('Grail');
+    const visibleText = (element.shadowRoot?.textContent ?? '')
+      .replace(/\s+/g, ' ');
+    expect(visibleText).not.toContain('Grail');
+    expect(visibleText).toContain('Grok Build');
+    expect(visibleText).toContain(
+      'shared Copilot authority',
+    );
+    expect(visibleText).toContain(
+      'no separate xAI account is required',
+    );
   });
 
   it('shows Experimental when the config already contains that section', async () => {
@@ -140,6 +152,30 @@ describe('experimental settings', () => {
     );
     expect(element.shadowRoot?.textContent).toContain('Experimental');
     expect(element.shadowRoot?.textContent).not.toContain('Hermes adapter');
+    expect(element.shadowRoot?.textContent).not.toContain('Grok Build');
+  });
+
+  it('preserves Grok intent but explains disabled parent gates', async () => {
+    const element = await renderConfig([
+      'experimental:',
+      '  enabled: false',
+      '  harnessAdapters:',
+      '    enabled: false',
+      '    grok: true',
+      '',
+    ].join('\n'), true);
+    const grok = element.shadowRoot?.querySelector<HTMLInputElement>(
+      '[data-feature-toggle="experimental.harnessAdapters.grok"]',
+    );
+    const blocked = element.shadowRoot?.querySelector<HTMLElement>(
+      '[data-blocked-by="experimental.enabled,experimental.harnessAdapters.enabled"]',
+    );
+
+    expect(grok?.checked).toBe(true);
+    expect(grok?.disabled).toBe(true);
+    expect(blocked?.textContent).toContain(
+      'Enable experimental features and Harness adapters',
+    );
   });
 
   it('persists nested gates through config.set', async () => {
@@ -172,6 +208,7 @@ describe('experimental settings', () => {
     await enableToggle(element, 'experimental.harnessAdapters.enabled');
     await enableToggle(element, 'experimental.harnessAdapters.hermes');
     await enableToggle(element, 'experimental.harnessAdapters.pi');
+    await enableToggle(element, 'experimental.harnessAdapters.grok');
     await enableToggle(element, 'experimental.brainSurgeonGroupChat.enabled');
 
     const save = element.shadowRoot?.querySelector<HTMLButtonElement>(
@@ -194,6 +231,7 @@ describe('experimental settings', () => {
           enabled: true,
           hermes: true,
           pi: true,
+          grok: true,
         },
         brainSurgeonGroupChat: {
           enabled: true,
@@ -237,6 +275,7 @@ describe('default application chrome', () => {
     expect(labels).not.toContain('Experimental');
     expect(labels).not.toContain('Hermes');
     expect(labels).not.toContain('Pi');
+    expect(labels).not.toContain('Grok');
     expect(labels).not.toContain('Group Chat');
   });
 
@@ -256,6 +295,7 @@ describe('default application chrome', () => {
       .toEqual(['🦖 OpenRappter', '🧠 Brainstem']);
     expect(chat.shadowRoot?.textContent).not.toContain('Hermes');
     expect(chat.shadowRoot?.textContent).not.toContain('Pi adapter');
+    expect(chat.shadowRoot?.textContent).not.toContain('Grok Build');
     expect(chat.shadowRoot?.textContent).not.toContain('Group Chat');
   });
 });

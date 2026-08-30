@@ -57,7 +57,6 @@ import { parseChatRequest } from './chat-request.js';
 import { buildTwinResponse, parseTwinEnvelope, sayText } from './twin-chat.js';
 import type { InstalledSkill } from '../skills/registry.js';
 import * as YAML from 'yaml';
-import { validateConfig } from '../config/schema.js';
 
 /**
  * The part of `SkillsRegistry` the gateway needs.
@@ -3263,7 +3262,7 @@ export class GatewayServer {
     this.registerMethod('config.apply', writeConfig, { requiresAuth: true });
 
     registerFeaturesMethods(this, {
-      loadFeatureConfig: () => {
+      loadFeatureConfig: async () => {
         const raw = this.loadConfig();
         const evidence = {
           configHash: this.configHash(raw),
@@ -3271,6 +3270,7 @@ export class GatewayServer {
         };
         try {
           const parsed = raw.trim() ? YAML.parse(raw) : {};
+          const { validateConfig } = await import('../config/schema.js');
           const validated = validateConfig(parsed);
           if (!validated.success) {
             return {

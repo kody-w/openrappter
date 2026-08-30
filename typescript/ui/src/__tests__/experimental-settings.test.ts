@@ -72,19 +72,36 @@ async function enableToggle(
   await element.updateComplete;
 }
 
+async function revealExperimental(element: ConfigElement): Promise<void> {
+  const search =
+    element.shadowRoot?.querySelector<HTMLInputElement>('.search-input');
+  expect(search).toBeTruthy();
+  search!.value = 'experimental';
+  search!.dispatchEvent(new Event('input', { bubbles: true }));
+  await element.updateComplete;
+}
+
 describe('experimental settings', () => {
-  it('keeps feature-specific controls dark until Experimental is opened', async () => {
-    const element = await renderConfig();
+  it.each([
+    ['empty config', ''],
+    ['empty object', '{}\n'],
+    ['ordinary default config', 'gateway:\n  port: 18790\n'],
+  ])('keeps all experimental UI absent for %s', async (_name, raw) => {
+    const element = await renderConfig(raw);
     const text = element.shadowRoot?.textContent ?? '';
 
-    expect(text).toContain('Experimental');
+    expect(text).not.toContain('Experimental');
     expect(text).not.toContain('Hermes adapter');
     expect(text).not.toContain('Pi adapter');
     expect(text).not.toContain('Brain Surgeon group chat');
+    expect(text).not.toContain('Runtime');
+    expect(text).not.toContain('PID');
+    expect(text).not.toContain('RAPPID');
   });
 
-  it('renders every gate off and enforces the parent hierarchy', async () => {
+  it('reveals default-off gates only after explicit Settings search', async () => {
     const element = await renderConfig('{}\n', true);
+    await revealExperimental(element);
     const toggle = (path: string) =>
       element.shadowRoot?.querySelector<HTMLInputElement>(
         `[data-feature-toggle="${path}"]`,
@@ -117,6 +134,14 @@ describe('experimental settings', () => {
     expect(element.shadowRoot?.textContent).not.toContain('Grail');
   });
 
+  it('shows Experimental when the config already contains that section', async () => {
+    const element = await renderConfig(
+      'experimental:\n  enabled: false\n',
+    );
+    expect(element.shadowRoot?.textContent).toContain('Experimental');
+    expect(element.shadowRoot?.textContent).not.toContain('Hermes adapter');
+  });
+
   it('persists nested gates through config.set', async () => {
     let savedRaw = '';
     const call = vi.fn(async (
@@ -141,6 +166,7 @@ describe('experimental settings', () => {
       call,
     } as unknown as GatewayClient;
     const element = await renderConfig('{}\n', true, client);
+    await revealExperimental(element);
 
     await enableToggle(element, 'experimental.enabled');
     await enableToggle(element, 'experimental.harnessAdapters.enabled');

@@ -55,6 +55,7 @@ import { buildChatEnvelope } from './chat-envelope.js';
 import { parseChatRequest } from './chat-request.js';
 import { buildTwinResponse, parseTwinEnvelope, sayText } from './twin-chat.js';
 import type { InstalledSkill } from '../skills/registry.js';
+import { liveIdentityMetadata } from '../infra/process-identity.js';
 
 /**
  * The part of `SkillsRegistry` the gateway needs.
@@ -1006,6 +1007,7 @@ export class GatewayServer {
   }
 
   getStatus(): GatewayStatus {
+    const identity = liveIdentityMetadata();
     return {
       running: !!this.wss,
       port: this.port,
@@ -1013,6 +1015,7 @@ export class GatewayServer {
       uptime: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0,
       version: VERSION,
       startedAt: this.startedAt ? new Date(this.startedAt).toISOString() : '',
+      ...(identity ?? {}),
       metrics: this.metrics.snapshot(this.connections.size),
     };
   }
@@ -1152,12 +1155,14 @@ export class GatewayServer {
   private handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
     if (req.url === '/livez' && req.method === 'GET') {
       const live = Boolean(this.wss);
+      const identity = liveIdentityMetadata();
       res.writeHead(live ? 200 : 503, {
         'Content-Type': 'application/json',
         Connection: 'close',
       });
       res.end(JSON.stringify({
         live,
+        ...(identity ?? {}),
         timestamp: new Date().toISOString(),
       }));
       return;
@@ -1180,6 +1185,7 @@ export class GatewayServer {
         // terminates the process. One GET /readyz killed the daemon.
         const payload = JSON.stringify({
           ...result,
+          ...(liveIdentityMetadata() ?? {}),
           timestamp: new Date().toISOString(),
         });
         res.writeHead(result.ready ? 200 : 503, {
@@ -1204,6 +1210,7 @@ export class GatewayServer {
           ready: false,
           status: 'degraded',
           reason: 'readiness_check_failed',
+          ...(liveIdentityMetadata() ?? {}),
           timestamp: new Date().toISOString(),
         }));
       });
@@ -1911,6 +1918,7 @@ export class GatewayServer {
   }
 
   private getHealthResponse(): HealthResponse {
+    const identity = liveIdentityMetadata();
     return {
       status: this.wss ? 'ok' : 'error',
       version: VERSION,
@@ -1931,6 +1939,7 @@ export class GatewayServer {
        * `alpha` is a real answer, not a default — see infra/current-instance.
        */
       instance: currentInstanceDeclared() ? (currentInstanceName() ?? 'alpha') : undefined,
+      ...(identity ?? {}),
       uptime: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0,
       timestamp: new Date().toISOString(),
       checks: {

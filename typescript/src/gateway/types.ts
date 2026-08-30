@@ -78,6 +78,12 @@ export interface GatewayStatus {
   uptime: number;
   version: string;
   startedAt: string;
+  /** Stable logical identity, unchanged across process restarts. */
+  rappid?: string;
+  /** PID-linked identity for this running process incarnation. */
+  live_id?: string;
+  pid?: number;
+  incarnation?: string;
   /** Bounded, low-cardinality observability snapshot (see `gateway/observability.ts`). */
   metrics?: GatewayMetricsSnapshot;
 }
@@ -287,6 +293,12 @@ export interface HealthResponse {
    * that collapse is the fail-open this field exists to close.
    */
   instance?: string;
+  /** Stable logical identity, unchanged across process restarts. */
+  rappid?: string;
+  /** PID-linked identity for this running process incarnation. */
+  live_id?: string;
+  pid?: number;
+  incarnation?: string;
   uptime: number;
   timestamp: string;
   checks: {

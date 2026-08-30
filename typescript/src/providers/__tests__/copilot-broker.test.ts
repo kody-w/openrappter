@@ -178,6 +178,135 @@ describe("CopilotLoopbackBroker", () => {
     });
   });
 
+  it("never routes an account A grant through account B after selection changes", async () => {
+    const upstreamUrls: string[] = [];
+    const sharedAuthority = new CopilotAuthority({
+      accounts: [
+        createCopilotAccount({
+          id: "account-a",
+          token: "ghu_account_a",
+          source: "auth-profile",
+          default: true,
+        }),
+        createCopilotAccount({
+          id: "account-b",
+          token: "ghu_account_b",
+          source: "auth-profile",
+        }),
+      ],
+      selectedAccountId: "account-a",
+      exchange: async (candidate) => ({
+        token: `api-token-${candidate.id}`,
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        baseUrl: `https://api.${candidate.id}.example`,
+        source: "test",
+      }),
+      fetchImpl: vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        upstreamUrls.push(url);
+        if (url.endsWith("/v1/models")) {
+          return new Response(JSON.stringify({
+            data: [{ id: "gpt-4.1" }],
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({
+          choices: [{ message: { role: "assistant", content: url } }],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as typeof fetch,
+    });
+    const broker = new CopilotLoopbackBroker({ authority: sharedAuthority });
+    brokers.push(broker);
+    await broker.start();
+    const accountAGrant = await broker.issueGrant({
+      allowedModels: ["gpt-4.1"],
+    });
+    const accountAClient = new CopilotBrokerClient(accountAGrant);
+
+    sharedAuthority.selectAccount("account-b");
+    const oldGrantResponse = await accountAClient.chat({
+      model: "gpt-4.1",
+      messages: [{ role: "user", content: "must not cross accounts" }],
+    });
+
+    expect(oldGrantResponse.status).toBe(410);
+    await expect(oldGrantResponse.json()).resolves.toMatchObject({
+      error: { code: "expired_grant" },
+    });
+    expect(upstreamUrls.some((url) =>
+      url.startsWith("https://api.account-b.example/")
+    )).toBe(false);
+
+    const accountBGrant = await broker.issueGrant({
+      allowedModels: ["gpt-4.1"],
+    });
+    const accountBClient = new CopilotBrokerClient(accountBGrant);
+    const newGrantResponse = await accountBClient.chat({
+      model: "gpt-4.1",
+      messages: [{ role: "user", content: "new account grant" }],
+    });
+
+    expect(newGrantResponse.status).toBe(200);
+    expect(upstreamUrls.filter((url) =>
+      url === "https://api.account-b.example/chat/completions"
+    )).toHaveLength(1);
+  });
+
+  it("checks the bound account even when an account resolver changes silently", async () => {
+    let activeAccount = createCopilotAccount({
+      id: "account-a",
+      token: "ghu_account_a",
+      source: "auth-profile",
+      default: true,
+    });
+    const upstreamUrls: string[] = [];
+    const sharedAuthority = new CopilotAuthority({
+      accountResolver: async () => [activeAccount],
+      allowAmbientCredentials: false,
+      exchange: async (candidate) => ({
+        token: `api-token-${candidate.id}`,
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        baseUrl: `https://api.${candidate.id}.example`,
+        source: "test",
+      }),
+      fetchImpl: vi.fn(async (input: string | URL | Request) => {
+        upstreamUrls.push(String(input));
+        return new Response(JSON.stringify({
+          data: [{ id: "gpt-4.1" }],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as typeof fetch,
+    });
+    const broker = new CopilotLoopbackBroker({ authority: sharedAuthority });
+    brokers.push(broker);
+    await broker.start();
+    const grant = await broker.issueGrant({ allowedModels: ["gpt-4.1"] });
+    const client = new CopilotBrokerClient(grant);
+
+    activeAccount = createCopilotAccount({
+      id: "account-b",
+      token: "ghu_account_b",
+      source: "auth-profile",
+      default: true,
+    });
+    const response = await client.chat({
+      model: "gpt-4.1",
+      messages: [{ role: "user", content: "must stay on account A" }],
+    });
+
+    expect(response.status).toBe(410);
+    expect(upstreamUrls.some((url) =>
+      url.startsWith("https://api.account-b.example/")
+    )).toBe(false);
+  });
+
   it("fails closed for a model outside the grant policy", async () => {
     const broker = await startedBroker();
     const grant = await broker.issueGrant({ allowedModels: ["gpt-4.1"] });

@@ -112,10 +112,16 @@ export interface CopilotProviderStatus {
 
 export interface CopilotModelCatalog {
   accountId: string;
+  credentialGeneration: number;
   models: readonly string[];
   verified: boolean;
   source: "live" | "cache" | "fallback";
   expiresAt: number;
+}
+
+export interface CopilotAuthorityBinding {
+  accountId: string;
+  credentialGeneration: number;
 }
 
 export interface CopilotSession {
@@ -140,6 +146,7 @@ export interface CopilotRequestContext {
 
 export interface CopilotAuthorization {
   accountId: string;
+  credentialGeneration: number;
   endpoint: string;
   expiresAt: number;
   headers: Record<string, string>;
@@ -323,7 +330,8 @@ export class CopilotAuthority {
   private readonly negativeCache = new Map<string, NegativeCacheEntry>();
   private readonly modelCache = new Map<string, ModelCacheEntry>();
   private readonly refreshedCredentials = new Map<string, CopilotCredential>();
-  private generation = 0;
+  private resolutionGeneration = 0;
+  private credentialGeneration = 0;
   private policy: CopilotModelPolicy;
   private status: CopilotProviderStatus;
 
@@ -383,7 +391,7 @@ export class CopilotAuthority {
   }
 
   selectAccount(accountId: string | undefined): void {
-    this.invalidate();
+    this.invalidate({ credentialsChanged: true });
     this.selectedAccountId = accountId;
     this.status = {
       state: "unavailable",
@@ -402,7 +410,10 @@ export class CopilotAuthority {
       authoritative?: boolean;
     },
   ): void {
-    this.invalidate({ clearPersistentCache: true });
+    this.invalidate({
+      clearPersistentCache: true,
+      credentialsChanged: true,
+    });
     this.explicitAccounts = token
       ? [createCopilotAccount({
           token,
@@ -467,7 +478,7 @@ export class CopilotAuthority {
     signal?: AbortSignal;
     forceRefresh?: boolean;
   }): Promise<{ account: CopilotAccount; session: CopilotSession }> {
-    const generation = this.generation;
+    const generation = this.resolutionGeneration;
     const accounts = await this.listAccounts();
     this.assertGeneration(generation);
     if (accounts.length === 0) {
@@ -517,8 +528,12 @@ export class CopilotAuthority {
     }
   }
 
-  invalidate(options?: { clearPersistentCache?: boolean }): void {
-    this.generation++;
+  invalidate(options?: {
+    clearPersistentCache?: boolean;
+    credentialsChanged?: boolean;
+  }): void {
+    this.resolutionGeneration++;
+    if (options?.credentialsChanged) this.credentialGeneration++;
     this.sessions.clear();
     this.inFlight.clear();
     this.negativeCache.clear();
@@ -546,10 +561,23 @@ export class CopilotAuthority {
 
   async authorizeRequest(
     context: CopilotRequestContext = {},
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      binding?: CopilotAuthorityBinding;
+    },
   ): Promise<CopilotAuthorization> {
     if (context.model) this.assertModelAllowed(context.model);
+    if (options?.binding) this.assertBinding(options.binding);
     const internal = await this.resolveInternalSession(options);
+    if (options?.binding) {
+      this.assertBinding(options.binding);
+      if (internal.accountId !== options.binding.accountId) {
+        throw new CopilotAuthorityError(
+          "unavailable",
+          "The selected Copilot account no longer matches this authorization",
+        );
+      }
+    }
     const headers: Record<string, string> = {
       Accept: context.accept ?? "application/json",
       Authorization: `Bearer ${internal.token}`,
@@ -563,6 +591,7 @@ export class CopilotAuthority {
     if (context.vision) headers["Copilot-Vision-Request"] = "true";
     return {
       accountId: internal.accountId,
+      credentialGeneration: this.credentialGeneration,
       endpoint: internal.endpoint,
       expiresAt: internal.expiresAt,
       headers,
@@ -573,6 +602,7 @@ export class CopilotAuthority {
     pathname: string,
     init: RequestInit = {},
     context: CopilotRequestContext = {},
+    binding?: CopilotAuthorityBinding,
   ): Promise<Response> {
     if (!pathname.startsWith("/") || pathname.startsWith("//")) {
       throw new CopilotAuthorityError(
@@ -582,6 +612,7 @@ export class CopilotAuthority {
     }
     const authorization = await this.authorizeRequest(context, {
       signal: init.signal ?? undefined,
+      binding,
     });
     const headers = new Headers(init.headers);
     for (const [key, value] of Object.entries(authorization.headers)) {
@@ -606,11 +637,18 @@ export class CopilotAuthority {
     requireVerified?: boolean;
     signal?: AbortSignal;
   }): Promise<CopilotModelCatalog> {
+    const generation = this.resolutionGeneration;
     const session = await this.resolveSession({ signal: options?.signal });
+    this.assertGeneration(generation);
+    const binding: CopilotAuthorityBinding = {
+      accountId: session.accountId,
+      credentialGeneration: this.credentialGeneration,
+    };
     const cached = this.modelCache.get(session.accountId);
     if (!options?.refresh && cached && cached.expiresAt > this.now()) {
       return {
         accountId: session.accountId,
+        credentialGeneration: binding.credentialGeneration,
         models: [...cached.models],
         verified: cached.verified,
         source: "cache",
@@ -624,7 +662,10 @@ export class CopilotAuthority {
         "/v1/models",
         { signal: options?.signal },
         { intent: "model-discovery" },
+        binding,
       );
+      this.assertGeneration(generation);
+      this.assertBinding(binding);
       if (response.ok) {
         const body = await response.json() as {
           data?: Array<{ id?: unknown }>;
@@ -651,6 +692,7 @@ export class CopilotAuthority {
       this.modelCache.set(session.accountId, entry);
       return {
         accountId: session.accountId,
+        credentialGeneration: binding.credentialGeneration,
         models: [...entry.models],
         verified: true,
         source: "live",
@@ -658,9 +700,12 @@ export class CopilotAuthority {
       };
     } catch (error) {
       if (isAbortError(error)) throw error;
+      this.assertGeneration(generation);
+      this.assertBinding(binding);
       if (cached?.verified && cached.staleUntil > this.now()) {
         return {
           accountId: session.accountId,
+          credentialGeneration: binding.credentialGeneration,
           models: [...cached.models],
           verified: true,
           source: "cache",
@@ -677,6 +722,7 @@ export class CopilotAuthority {
       const filtered = this.filterModels(COPILOT_DEFAULT_MODELS);
       return {
         accountId: session.accountId,
+        credentialGeneration: binding.credentialGeneration,
         models: filtered,
         verified: false,
         source: "fallback",
@@ -689,7 +735,7 @@ export class CopilotAuthority {
     signal?: AbortSignal;
     forceRefresh?: boolean;
   }): Promise<InternalCopilotSession> {
-    const generation = this.generation;
+    const generation = this.resolutionGeneration;
     const accounts = await this.listAccounts();
     this.assertGeneration(generation);
     if (accounts.length === 0) {
@@ -725,7 +771,7 @@ export class CopilotAuthority {
     account: CopilotAccount,
     options?: { signal?: AbortSignal; forceRefresh?: boolean },
   ): Promise<InternalCopilotSession> {
-    const generation = this.generation;
+    const generation = this.resolutionGeneration;
     await this.refreshAccountCredential(account, options?.signal, generation);
     this.assertGeneration(generation);
     const secret = copilotCredentialToken(account.credential);
@@ -770,7 +816,7 @@ export class CopilotAuthority {
       .catch((error: unknown) => {
         const normalized = this.normalizeExchangeError(error, account);
         if (
-          generation === this.generation
+          generation === this.resolutionGeneration
           && !isAbortError(error)
           && this.negativeCacheTtlMs > 0
         ) {
@@ -793,7 +839,7 @@ export class CopilotAuthority {
   private async refreshAccountCredential(
     account: CopilotAccount,
     signal?: AbortSignal,
-    generation = this.generation,
+    generation = this.resolutionGeneration,
   ): Promise<void> {
     const credential = account.credential;
     if (
@@ -814,6 +860,8 @@ export class CopilotAuthority {
       this.assertGeneration(generation);
       account.credential = refreshed;
       this.refreshedCredentials.set(account.id, refreshed);
+      this.credentialGeneration++;
+      this.modelCache.clear();
     } catch (error) {
       if (isAbortError(error)) throw error;
       throw new CopilotAuthorityError(
@@ -836,11 +884,35 @@ export class CopilotAuthority {
   }
 
   private assertGeneration(generation: number): void {
-    if (generation !== this.generation) {
+    if (generation !== this.resolutionGeneration) {
       throw new CopilotAuthorityError(
         "unavailable",
         "Copilot account resolution was superseded by a newer account state",
         { retryable: true },
+      );
+    }
+  }
+
+  assertBinding(binding: CopilotAuthorityBinding): void {
+    if (binding.credentialGeneration !== this.credentialGeneration) {
+      throw new CopilotAuthorityError(
+        "unavailable",
+        "The Copilot account authorization has changed",
+      );
+    }
+  }
+
+  async assertBindingActive(
+    binding: CopilotAuthorityBinding,
+    options?: { signal?: AbortSignal },
+  ): Promise<void> {
+    this.assertBinding(binding);
+    const session = await this.resolveSession({ signal: options?.signal });
+    this.assertBinding(binding);
+    if (session.accountId !== binding.accountId) {
+      throw new CopilotAuthorityError(
+        "unavailable",
+        "The selected Copilot account no longer matches this authorization",
       );
     }
   }

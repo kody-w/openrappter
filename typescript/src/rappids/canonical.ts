@@ -20,7 +20,7 @@
 
 import { createHash } from 'node:crypto';
 
-import type { JsonValue } from './types.js';
+import type { JsonObject, JsonValue } from './types.js';
 
 /**
  * Domain separation, in the shape RAPP/1 §5 already established and
@@ -33,6 +33,8 @@ export const PROPOSAL_DOMAIN = 'quantum-rappid/1:proposal';
 export const RAPP_PARTICLE_DOMAIN = 'rapp/1:particle';
 export const RAPP_WAVE_DOMAIN = 'rapp/1:wave';
 export const RAPP_EGG_DOMAIN = 'rapp/1:egg';
+export const RAPP_MAX_CANONICAL_BYTES = 1024 * 1024;
+export const RAPP_MAX_CANONICAL_DEPTH = 64;
 
 /** JSON with sorted keys, no spaces and ASCII escapes. */
 export function canonicalJson(value: JsonValue): string {
@@ -90,32 +92,37 @@ export function sha256Hex(data: Uint8Array | string): string {
   return createHash('sha256').update(data).digest('hex');
 }
 
-function validateRappValue(value: JsonValue, depth = 1): void {
-  if (depth > 64) throw new TypeError('RAPP/1 value exceeds depth 64');
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') {
-    if (typeof value === 'string') {
-      for (let index = 0; index < value.length; index += 1) {
-        const unit = value.charCodeAt(index);
-        if (
-          unit >= 0xd800
-          && unit <= 0xdfff
-          && !(
-            unit <= 0xdbff
-            && index + 1 < value.length
-            && value.charCodeAt(index + 1) >= 0xdc00
-            && value.charCodeAt(index + 1) <= 0xdfff
-          )
-          && !(
-            unit >= 0xdc00
-            && index > 0
-            && value.charCodeAt(index - 1) >= 0xd800
-            && value.charCodeAt(index - 1) <= 0xdbff
-          )
-        ) {
-          throw new TypeError('RAPP/1 string contains an unpaired surrogate');
-        }
+function validateRappString(value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const following = value.charCodeAt(index + 1);
+      if (!Number.isInteger(following) || following < 0xdc00 || following > 0xdfff) {
+        throw new TypeError('RAPP/1 string contains an unpaired surrogate');
       }
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      throw new TypeError('RAPP/1 string contains an unpaired surrogate');
     }
+  }
+}
+
+/**
+ * Refuse values outside the exact-integer RAPP/1 profile before hashing.
+ *
+ * JavaScript's default string comparison is lexicographic over UTF-16 code
+ * units, which is exactly RFC 8785 member ordering. Valid surrogate pairs are
+ * therefore accepted in keys; only unpaired surrogates are non-I-JSON.
+ */
+export function assertRappCanonicalValue(
+  value: unknown,
+  depth = 1,
+): asserts value is JsonValue {
+  if (depth > RAPP_MAX_CANONICAL_DEPTH) {
+    throw new TypeError(`RAPP/1 value exceeds depth ${RAPP_MAX_CANONICAL_DEPTH}`);
+  }
+  if (value === null || typeof value === 'boolean' || typeof value === 'string') {
+    if (typeof value === 'string') validateRappString(value);
     return;
   }
   if (typeof value === 'number') {
@@ -125,16 +132,178 @@ function validateRappValue(value: JsonValue, depth = 1): void {
     return;
   }
   if (Array.isArray(value)) {
-    for (const item of value) validateRappValue(item, depth + 1);
+    for (const item of value) assertRappCanonicalValue(item, depth + 1);
     return;
   }
-  for (const [key, item] of Object.entries(value)) {
-    if ([...key].some((character) => character.codePointAt(0)! > 0xffff)) {
-      throw new TypeError('RAPP/1 exact profile refuses supplementary-plane object keys');
-    }
-    validateRappValue(key, depth + 1);
-    validateRappValue(item, depth + 1);
+  if (
+    typeof value !== 'object'
+    || value === null
+    || (
+      Object.getPrototypeOf(value) !== Object.prototype
+      && Object.getPrototypeOf(value) !== null
+    )
+  ) {
+    throw new TypeError(`RAPP/1 value is not I-JSON: ${typeof value}`);
   }
+  for (const [key, item] of Object.entries(value)) {
+    validateRappString(key);
+    assertRappCanonicalValue(item, depth + 1);
+  }
+}
+
+/**
+ * Parse the exact-integer RAPP/1 JSON profile without losing duplicate members
+ * or unsafe number tokens through JSON.parse's last-value-wins behavior.
+ */
+export function parseRappJson(source: string): JsonValue {
+  if (typeof source !== 'string') {
+    throw new TypeError('RAPP/1 JSON input must be a string');
+  }
+  if (Buffer.byteLength(source, 'utf8') > RAPP_MAX_CANONICAL_BYTES) {
+    throw new TypeError('RAPP/1 JSON input exceeds 1 MiB');
+  }
+
+  let offset = 0;
+  const whitespace = (): void => {
+    while (
+      source[offset] === ' '
+      || source[offset] === '\n'
+      || source[offset] === '\r'
+      || source[offset] === '\t'
+    ) {
+      offset += 1;
+    }
+  };
+  const stringValue = (): string => {
+    if (source[offset] !== '"') throw new TypeError(`expected string at offset ${offset}`);
+    const start = offset;
+    offset += 1;
+    let escaped = false;
+    while (offset < source.length) {
+      const character = source[offset];
+      if (!escaped && character === '"') {
+        offset += 1;
+        let value: unknown;
+        try {
+          value = JSON.parse(source.slice(start, offset));
+        } catch {
+          throw new TypeError(`invalid JSON string at offset ${start}`);
+        }
+        if (typeof value !== 'string') throw new TypeError(`invalid JSON string at offset ${start}`);
+        validateRappString(value);
+        return value;
+      }
+      if (!escaped && character === '\\') escaped = true;
+      else escaped = false;
+      offset += 1;
+    }
+    throw new TypeError(`unterminated JSON string at offset ${start}`);
+  };
+  const numberValue = (): number => {
+    const start = offset;
+    if (source[offset] === '-') offset += 1;
+    if (source[offset] === '0') {
+      offset += 1;
+      if (/[0-9]/.test(source[offset] ?? '')) {
+        throw new TypeError(`invalid leading zero at offset ${start}`);
+      }
+    } else {
+      if (!/[1-9]/.test(source[offset] ?? '')) {
+        throw new TypeError(`invalid JSON number at offset ${start}`);
+      }
+      while (/[0-9]/.test(source[offset] ?? '')) offset += 1;
+    }
+    if (source[offset] === '.' || source[offset] === 'e' || source[offset] === 'E') {
+      throw new TypeError('RAPP/1 exact-integer profile refuses fractional or exponent number tokens');
+    }
+    const token = source.slice(start, offset);
+    const value = Number(token);
+    if (!Number.isSafeInteger(value)) {
+      throw new TypeError('RAPP/1 exact-integer profile refuses integers outside uint53 precision');
+    }
+    return value;
+  };
+  const value = (depth: number): JsonValue => {
+    if (depth > RAPP_MAX_CANONICAL_DEPTH) {
+      throw new TypeError(`RAPP/1 value exceeds depth ${RAPP_MAX_CANONICAL_DEPTH}`);
+    }
+    whitespace();
+    const character = source[offset];
+    if (character === '"') return stringValue();
+    if (character === '[') {
+      offset += 1;
+      whitespace();
+      const result: JsonValue[] = [];
+      if (source[offset] === ']') {
+        offset += 1;
+        return result;
+      }
+      for (;;) {
+        result.push(value(depth + 1));
+        whitespace();
+        if (source[offset] === ']') {
+          offset += 1;
+          return result;
+        }
+        if (source[offset] !== ',') {
+          throw new TypeError(`expected comma or ] at offset ${offset}`);
+        }
+        offset += 1;
+      }
+    }
+    if (character === '{') {
+      offset += 1;
+      whitespace();
+      const result: JsonObject = Object.create(null) as JsonObject;
+      const keys = new Set<string>();
+      if (source[offset] === '}') {
+        offset += 1;
+        return result;
+      }
+      for (;;) {
+        whitespace();
+        const key = stringValue();
+        if (keys.has(key)) throw new TypeError(`duplicate JSON member: ${key}`);
+        keys.add(key);
+        whitespace();
+        if (source[offset] !== ':') throw new TypeError(`expected colon at offset ${offset}`);
+        offset += 1;
+        result[key] = value(depth + 1);
+        whitespace();
+        if (source[offset] === '}') {
+          offset += 1;
+          return result;
+        }
+        if (source[offset] !== ',') {
+          throw new TypeError(`expected comma or } at offset ${offset}`);
+        }
+        offset += 1;
+      }
+    }
+    if (source.startsWith('true', offset)) {
+      offset += 4;
+      return true;
+    }
+    if (source.startsWith('false', offset)) {
+      offset += 5;
+      return false;
+    }
+    if (source.startsWith('null', offset)) {
+      offset += 4;
+      return null;
+    }
+    if (character === '-' || /[0-9]/.test(character ?? '')) return numberValue();
+    throw new TypeError(`invalid JSON value at offset ${offset}`);
+  };
+
+  const parsed = value(1);
+  whitespace();
+  if (offset !== source.length) {
+    throw new TypeError(`trailing JSON data at offset ${offset}`);
+  }
+  // Applies canonical byte size and all decoded string/value checks.
+  rappCanonicalJson(parsed);
+  return parsed;
 }
 
 function renderRappCanonical(value: JsonValue): string {
@@ -145,6 +314,8 @@ function renderRappCanonical(value: JsonValue): string {
   if (Array.isArray(value)) {
     return `[${value.map((item) => renderRappCanonical(item)).join(',')}]`;
   }
+  // Array.prototype.sort without a comparator orders by UTF-16 code units,
+  // matching RFC 8785 even when a valid key is outside the BMP.
   return `{${Object.keys(value).sort().map((key) =>
     `${JSON.stringify(key)}:${renderRappCanonical(value[key])}`,
   ).join(',')}}`;
@@ -152,9 +323,9 @@ function renderRappCanonical(value: JsonValue): string {
 
 /** RAPP/1's exact-value canonical profile: UTF-8, sorted keys, no whitespace. */
 export function rappCanonicalJson(value: JsonValue): string {
-  validateRappValue(value);
+  assertRappCanonicalValue(value);
   const rendered = renderRappCanonical(value);
-  if (Buffer.byteLength(rendered, 'utf8') > 1024 * 1024) {
+  if (Buffer.byteLength(rendered, 'utf8') > RAPP_MAX_CANONICAL_BYTES) {
     throw new TypeError('RAPP/1 canonical form exceeds 1 MiB');
   }
   return rendered;

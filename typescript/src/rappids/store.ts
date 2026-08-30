@@ -26,11 +26,21 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import {
   RAPP_EGG_DOMAIN,
   RAPP_PARTICLE_DOMAIN,
-  RAPP_WAVE_DOMAIN,
   rappH,
   rappHb,
   sha256Hex,
 } from './canonical.js';
+import {
+  RAPP_FRAME_KEYS,
+  RAPP_FRAME_SPEC,
+  RAPP_FRAME_TIME_PATTERN,
+  hashRappBodyFrame,
+  isRappFrameUtc,
+  rappFrameDigest,
+  rappFrameToJson,
+  verifyRappFrame,
+  type RappBodyFrameProfile,
+} from '../rapp/frame.js';
 import { isRappid, parseRappid, validateParentPointer } from './identity.js';
 import { noteFromJson } from './midi.js';
 import { QuantumRappidError } from './types.js';
@@ -44,6 +54,7 @@ import type {
   JsonValue,
   LoadedOrganism,
   MusicalParameters,
+  RappDimensionPayload,
   RappidDocument,
   SonicProfile,
   TraitsDocument,
@@ -56,7 +67,7 @@ export const SONIC_PROFILE = 'sonic/sonic-profile.json';
 export const SONIC_PROFILE_SIDECAR = 'sonic/sonic-profile.sha256';
 export const FRAMES_DIRECTORY = 'frames';
 export const OBJECTS_DIRECTORY = 'objects/rapp-1-egg';
-export const BODY_FRAME_SCHEMA = 'rapp/1';
+export const BODY_FRAME_SCHEMA = RAPP_FRAME_SPEC;
 
 /**
  * Frame timestamps are RFC 3339 UTC to the second, and only that.
@@ -66,8 +77,7 @@ export const BODY_FRAME_SCHEMA = 'rapp/1';
  * preview can state exact bytes instead of an estimate that drifts by the
  * length of a timestamp.
  */
-export const FRAME_TIME_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+export const FRAME_TIME_PATTERN = RAPP_FRAME_TIME_PATTERN;
 const LABEL = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function formatFrameTime(instant: Date): string {
@@ -473,19 +483,6 @@ export function mediaRef(bytes: Uint8Array, mediaType: string): JsonObject {
   };
 }
 
-const FRAME_KEYS = [
-  'spec',
-  'kind',
-  'stream_id',
-  'seq',
-  'utc',
-  'payload',
-  'payload_hash',
-  'frame_hash',
-  'prev',
-  'prev_wave',
-  'sig',
-] as const;
 const DIMENSION_PAYLOAD_KEYS = [
   'rappid',
   'dimension',
@@ -502,33 +499,28 @@ const MEDIA_TYPE =
 const MEMORY_STREAM =
   /^rappid:@[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*:[0-9a-f]{64}:[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SWARM_STREAM = /^net:[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const BODY_DIMENSION_FRAME_PROFILE: Readonly<
+  RappBodyFrameProfile<RappDimensionPayload, 'body.dimension'>
+> = Object.freeze({
+  name: 'openrappter-body-dimension',
+  kinds: Object.freeze(['body.dimension'] as const),
+  signature: 'unsigned-local',
+});
 
 export function bodyFrameToJson(frame: BodyFrame): JsonObject {
-  return {
-    spec: frame.spec,
-    kind: frame.kind,
-    stream_id: frame.stream_id,
-    seq: frame.seq,
-    utc: frame.utc,
-    payload: frame.payload,
-    payload_hash: frame.payload_hash,
-    frame_hash: frame.frame_hash,
-    prev: frame.prev,
-    prev_wave: frame.prev_wave,
-    sig: frame.sig,
-  };
+  return rappFrameToJson(frame);
 }
 
 /** The nine-key RAPP/1 wave preimage (frame_hash and sig removed). */
 export function bodyFrameBody(frame: BodyFrame): JsonObject {
-  const value = bodyFrameToJson(frame);
+  const value = rappFrameToJson(frame);
   delete value.frame_hash;
   delete value.sig;
   return value;
 }
 
 export function bodyFrameDigest(frame: BodyFrame): string {
-  return rappH(RAPP_WAVE_DOMAIN, bodyFrameBody(frame));
+  return rappFrameDigest(frame);
 }
 
 export function buildDimensionFrame(input: {
@@ -553,27 +545,20 @@ export function buildDimensionFrame(input: {
     media: input.media,
     sources: input.sources ?? [],
   };
-  const payloadHash = rappH(RAPP_PARTICLE_DOMAIN, payload);
-  const draft: BodyFrame = {
-    spec: 'rapp/1',
+  return hashRappBodyFrame({
     kind: 'body.dimension',
-    stream_id: input.rappid,
+    streamId: input.rappid,
     seq: input.seq,
     utc: input.utc,
     payload,
-    payload_hash: payloadHash,
-    frame_hash: '0'.repeat(64),
     prev: input.prev,
-    prev_wave: null,
-    sig: null,
-  };
-  return { ...draft, frame_hash: bodyFrameDigest(draft) };
+  }) as BodyFrame;
 }
 
 export function parseBodyFrame(raw: JsonObject, source: string): BodyFrame {
   if (
     Object.keys(raw).sort().join('\0')
-    !== [...FRAME_KEYS].sort().join('\0')
+    !== [...RAPP_FRAME_KEYS].sort().join('\0')
   ) {
     throw new QuantumRappidError(
       'frame-shape',
@@ -617,6 +602,23 @@ export function bodyFrameProblems(
   streamId: string,
 ): string[] {
   const problems: string[] = [];
+  const common = verifyRappFrame(frame, BODY_DIMENSION_FRAME_PROFILE, {
+    head,
+    streamIdOfRecord: streamId,
+  });
+  if (!common.ok && ['key-set', 'canonical'].includes(common.error.code)) {
+    return [common.error.message];
+  }
+  if (
+    !common.ok
+    && [
+      'stream-id',
+      'signature-format',
+      'signature-profile',
+    ].includes(common.error.code)
+  ) {
+    problems.push(common.error.message);
+  }
   if (frame.spec !== 'rapp/1') problems.push('spec is not rapp/1');
   if (frame.kind !== 'body.dimension') problems.push('kind is not body.dimension');
   if (frame.stream_id !== streamId) problems.push('stream_id does not match the organism');
@@ -624,11 +626,7 @@ export function bodyFrameProblems(
   if (!Number.isSafeInteger(frame.seq) || frame.seq < 0) {
     problems.push('seq is not a uint53');
   }
-  if (
-    !FRAME_TIME_PATTERN.test(frame.utc)
-    || Number.isNaN(Date.parse(frame.utc))
-    || new Date(frame.utc).toISOString() !== frame.utc
-  ) {
+  if (!isRappFrameUtc(frame.utc)) {
     problems.push('utc is not a valid fixed-width RFC 3339 timestamp');
   }
   if (!HEX64.test(frame.payload_hash)) problems.push('payload_hash is not 64hex');

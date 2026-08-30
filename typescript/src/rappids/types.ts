@@ -12,6 +12,8 @@
  * `python/openrappter/rappids/types.py`.
  */
 
+import type { RappFrame } from '../rapp/frame.js';
+
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 export interface JsonObject {
   [key: string]: JsonValue;
@@ -168,20 +170,11 @@ export interface RappDimensionPayload extends JsonObject {
   sources: JsonValue[];
 }
 
-/** The exact eleven-key RAPP/1 frame. No private OpenRappter envelope. */
-export interface BodyFrame {
-  spec: 'rapp/1';
-  kind: 'body.dimension';
-  stream_id: string;
-  seq: number;
-  utc: string;
-  payload: RappDimensionPayload;
-  payload_hash: string;
-  frame_hash: string;
-  prev: string | null;
+/** The body.dimension profile layered on the shared eleven-key RAPP/1 frame. */
+export type BodyFrame = RappFrame<RappDimensionPayload, 'body.dimension'> & {
   prev_wave: null;
   sig: null;
-}
+};
 
 export interface LoadedOrganism {
   directory: string;

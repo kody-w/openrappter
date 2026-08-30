@@ -139,6 +139,7 @@ describe('Gateway RPC Methods', () => {
 
     it('should register safe feature status', () => {
       expect(methods.has('features.get')).toBe(true);
+      expect(methods.has('features.status')).toBe(true);
     });
 
     it('should register cron methods', () => {

@@ -7,7 +7,12 @@ import {
   experimentalConfigSchema,
   experimentalFeatureDescriptions,
 } from '../../config/sections/experimental.js';
-import { getEffectiveFeatures } from '../../config/features.js';
+import {
+  FEATURE_PROMOTION_ORDER,
+  FEATURE_RELEASE_METADATA,
+  getEffectiveFeatures,
+  getFeatureReleaseMatrix,
+} from '../../config/features.js';
 import { validateConfig } from '../../config/schema.js';
 
 describe('experimentalConfigSchema', () => {
@@ -206,6 +211,75 @@ describe('getEffectiveFeatures', () => {
       hermes: true,
       pi: true,
       brainSurgeonGroupChat: true,
+    });
+  });
+});
+
+describe('feature release maturity', () => {
+  it('starts every promotable feature default-off in experimental Frontier', () => {
+    expect(FEATURE_RELEASE_METADATA).toEqual({
+      hermes: {
+        configPath: 'experimental.harnessAdapters.hermes',
+        maturity: 'frontier-experimental',
+        defaultEnabled: false,
+      },
+      pi: {
+        configPath: 'experimental.harnessAdapters.pi',
+        maturity: 'frontier-experimental',
+        defaultEnabled: false,
+      },
+      brainSurgeonGroupChat: {
+        configPath: 'experimental.brainSurgeonGroupChat.enabled',
+        maturity: 'frontier-experimental',
+        defaultEnabled: false,
+      },
+    });
+  });
+
+  it('defines the promotion path without changing effective gates', () => {
+    expect(FEATURE_PROMOTION_ORDER).toEqual([
+      'frontier-experimental',
+      'frontier',
+      'brainstem-experimental',
+      'grail-stable',
+    ]);
+    expect(getFeatureReleaseMatrix({
+      experimental: {
+        enabled: true,
+        harnessAdapters: {
+          enabled: true,
+          hermes: true,
+          pi: false,
+        },
+        brainSurgeonGroupChat: {
+          enabled: true,
+        },
+      },
+    })).toEqual({
+      promotionOrder: [...FEATURE_PROMOTION_ORDER],
+      features: [
+        {
+          id: 'hermes',
+          configPath: 'experimental.harnessAdapters.hermes',
+          maturity: 'frontier-experimental',
+          defaultEnabled: false,
+          enabled: true,
+        },
+        {
+          id: 'pi',
+          configPath: 'experimental.harnessAdapters.pi',
+          maturity: 'frontier-experimental',
+          defaultEnabled: false,
+          enabled: false,
+        },
+        {
+          id: 'brainSurgeonGroupChat',
+          configPath: 'experimental.brainSurgeonGroupChat.enabled',
+          maturity: 'frontier-experimental',
+          defaultEnabled: false,
+          enabled: true,
+        },
+      ],
     });
   });
 });

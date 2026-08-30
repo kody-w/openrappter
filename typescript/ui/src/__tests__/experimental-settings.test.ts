@@ -100,6 +100,21 @@ describe('experimental settings', () => {
     expect(element.shadowRoot?.textContent).toContain(
       'Restart the gateway after saving',
     );
+    const maturity = Array.from(
+      element.shadowRoot?.querySelectorAll<HTMLElement>(
+        '[data-feature-maturity]',
+      ) ?? [],
+    );
+    expect(maturity).toHaveLength(3);
+    expect(maturity.map(node => node.dataset.featureMaturity)).toEqual([
+      'frontier-experimental',
+      'frontier-experimental',
+      'frontier-experimental',
+    ]);
+    expect(maturity.every(node =>
+      node.textContent?.trim() === 'Frontier · Experimental',
+    )).toBe(true);
+    expect(element.shadowRoot?.textContent).not.toContain('Grail');
   });
 
   it('persists nested gates through config.set', async () => {

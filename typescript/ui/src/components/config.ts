@@ -7,6 +7,10 @@ import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 import { createConfigState, loadConfig, saveConfig, updateConfigRaw, type ConfigState } from '../services/config.js';
+import {
+  FEATURE_RELEASE_METADATA,
+  type PromotableFeature,
+} from '../../../src/config/features.js';
 import * as YAML from 'yaml';
 
 // ── Section metadata ──
@@ -240,6 +244,12 @@ export class OpenRappterConfig extends LitElement {
     }
     .experimental-label small {
       color: var(--text-secondary); font-size: 0.75rem; line-height: 1.4;
+    }
+    .feature-maturity {
+      align-self: flex-start; padding: 0.125rem 0.375rem;
+      border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 999px;
+      color: #fbbf24; font-size: 0.625rem; font-weight: 600;
+      letter-spacing: 0.03em; text-transform: uppercase;
     }
 
     .field pre {
@@ -589,6 +599,7 @@ export class OpenRappterConfig extends LitElement {
             >
             <span class="experimental-label">
               <strong>Hermes adapter</strong>
+              ${this.renderMaturity('hermes')}
               <small>Expose the Hermes gate to a future adapter implementation.</small>
             </span>
           </label>
@@ -607,6 +618,7 @@ export class OpenRappterConfig extends LitElement {
             >
             <span class="experimental-label">
               <strong>Pi adapter</strong>
+              ${this.renderMaturity('pi')}
               <small>Expose the Pi gate to a future adapter implementation.</small>
             </span>
           </label>
@@ -628,10 +640,24 @@ export class OpenRappterConfig extends LitElement {
           >
           <span class="experimental-label">
             <strong>Brain Surgeon group chat</strong>
+            ${this.renderMaturity('brainSurgeonGroupChat')}
             <small>Expose the gate only; no group controls are rendered yet.</small>
           </span>
         </label>
       </div>
+    `;
+  }
+
+  private renderMaturity(feature: PromotableFeature) {
+    const maturity = FEATURE_RELEASE_METADATA[feature].maturity;
+    const label = maturity
+      .split('-')
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' · ');
+    return html`
+      <span class="feature-maturity" data-feature-maturity=${maturity}>
+        ${label}
+      </span>
     `;
   }
 

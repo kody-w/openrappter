@@ -1,6 +1,8 @@
 import {
   getEffectiveFeatures,
+  getFeatureReleaseMatrix,
   type EffectiveFeatures,
+  type FeatureReleaseMatrix,
 } from '../../config/features.js';
 
 interface MethodRegistrar {
@@ -19,11 +21,19 @@ export function registerFeaturesMethods(
   server: MethodRegistrar,
   deps?: FeaturesMethodsDeps,
 ): void {
-  server.registerMethod<void, EffectiveFeatures>('features.get', async () => {
+  const loadConfig = (): unknown => {
     try {
-      return getEffectiveFeatures(deps?.loadConfig?.());
+      return deps?.loadConfig?.();
     } catch {
-      return getEffectiveFeatures(undefined);
+      return undefined;
     }
+  };
+
+  server.registerMethod<void, EffectiveFeatures>('features.get', async () => {
+    return getEffectiveFeatures(loadConfig());
+  });
+
+  server.registerMethod<void, FeatureReleaseMatrix>('features.status', async () => {
+    return getFeatureReleaseMatrix(loadConfig());
   });
 }

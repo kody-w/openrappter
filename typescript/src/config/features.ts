@@ -14,6 +14,53 @@ export interface EffectiveFeatures {
   brainSurgeonGroupChat: boolean;
 }
 
+export const FEATURE_PROMOTION_ORDER = [
+  'frontier-experimental',
+  'frontier',
+  'brainstem-experimental',
+  'grail-stable',
+] as const;
+
+export type FeatureMaturity = (typeof FEATURE_PROMOTION_ORDER)[number];
+export type PromotableFeature =
+  | 'hermes'
+  | 'pi'
+  | 'brainSurgeonGroupChat';
+
+export interface FeatureReleaseMetadata {
+  configPath: string;
+  maturity: FeatureMaturity;
+  defaultEnabled: boolean;
+}
+
+export const FEATURE_RELEASE_METADATA = {
+  hermes: {
+    configPath: 'experimental.harnessAdapters.hermes',
+    maturity: 'frontier-experimental',
+    defaultEnabled: false,
+  },
+  pi: {
+    configPath: 'experimental.harnessAdapters.pi',
+    maturity: 'frontier-experimental',
+    defaultEnabled: false,
+  },
+  brainSurgeonGroupChat: {
+    configPath: 'experimental.brainSurgeonGroupChat.enabled',
+    maturity: 'frontier-experimental',
+    defaultEnabled: false,
+  },
+} as const satisfies Record<PromotableFeature, FeatureReleaseMetadata>;
+
+export interface FeatureReleaseStatus extends FeatureReleaseMetadata {
+  id: PromotableFeature;
+  enabled: boolean;
+}
+
+export interface FeatureReleaseMatrix {
+  promotionOrder: FeatureMaturity[];
+  features: FeatureReleaseStatus[];
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -37,5 +84,21 @@ export function getEffectiveFeatures(config: unknown): EffectiveFeatures {
     pi: harnessAdaptersEnabled && harnessAdapters?.pi === true,
     brainSurgeonGroupChat:
       experimentalEnabled && brainSurgeonGroupChat?.enabled === true,
+  };
+}
+
+export function getFeatureReleaseMatrix(config: unknown): FeatureReleaseMatrix {
+  const effective = getEffectiveFeatures(config);
+  const featureIds = Object.keys(
+    FEATURE_RELEASE_METADATA,
+  ) as PromotableFeature[];
+
+  return {
+    promotionOrder: [...FEATURE_PROMOTION_ORDER],
+    features: featureIds.map(id => ({
+      id,
+      ...FEATURE_RELEASE_METADATA[id],
+      enabled: effective[id],
+    })),
   };
 }

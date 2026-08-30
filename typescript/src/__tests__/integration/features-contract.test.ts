@@ -103,6 +103,41 @@ describe('features.get RPC', () => {
     });
     expect(JSON.stringify(first.result)).not.toContain('never-return-this');
 
+    const status = await rpc(port, 'features.status');
+    expect(status.error).toBeUndefined();
+    expect(status.result).toEqual({
+      promotionOrder: [
+        'frontier-experimental',
+        'frontier',
+        'brainstem-experimental',
+        'grail-stable',
+      ],
+      features: [
+        {
+          id: 'hermes',
+          configPath: 'experimental.harnessAdapters.hermes',
+          maturity: 'frontier-experimental',
+          defaultEnabled: false,
+          enabled: true,
+        },
+        {
+          id: 'pi',
+          configPath: 'experimental.harnessAdapters.pi',
+          maturity: 'frontier-experimental',
+          defaultEnabled: false,
+          enabled: false,
+        },
+        {
+          id: 'brainSurgeonGroupChat',
+          configPath: 'experimental.brainSurgeonGroupChat.enabled',
+          maturity: 'frontier-experimental',
+          defaultEnabled: false,
+          enabled: true,
+        },
+      ],
+    });
+    expect(JSON.stringify(status.result)).not.toContain('never-return-this');
+
     await server?.stop();
     server = undefined;
     const restartedPort = await startServer(dataDir);

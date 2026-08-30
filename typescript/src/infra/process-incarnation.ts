@@ -68,15 +68,23 @@ export const CURRENT_PROCESS_INCARNATION =
 export const CURRENT_PROCESS_START_MARKER =
   CURRENT_PROCESS_INCARNATION ?? `runtime:${randomUUID()}`;
 
+export type ProcessIncarnationReader = (pid: number) => string | null;
+
 export function processMatchesIncarnation(
   pid: number,
   incarnation: string | undefined,
+  readIncarnation: ProcessIncarnationReader = (observedPid) =>
+    observedPid === process.pid
+      ? CURRENT_PROCESS_INCARNATION ?? null
+      : readProcessIncarnation(observedPid),
 ): boolean {
   if (!processAlive(pid)) return false;
+  // Legacy owner records contain only a PID. Preserve their historical
+  // compatibility until they are rewritten with an incarnation marker.
   if (!incarnation) return true;
-  const current =
-    pid === process.pid
-      ? CURRENT_PROCESS_INCARNATION
-      : readProcessIncarnation(pid);
-  return current === null || current === incarnation;
+  // A recorded marker is evidence that must be verified. If the operating
+  // system cannot provide the current marker, treating the live PID as a match
+  // would fail open and let PID reuse impersonate the persisted owner.
+  const current = readIncarnation(pid);
+  return current !== null && current === incarnation;
 }

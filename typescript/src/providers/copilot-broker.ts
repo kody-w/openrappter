@@ -4,6 +4,7 @@ import {
   CopilotAuthority,
   CopilotAuthorityError,
   redactCopilotSecrets,
+  type CopilotAuthorityBinding,
 } from "./copilot-authority.js";
 
 export interface CopilotBrokerDescriptor {
@@ -46,6 +47,7 @@ interface StoredGrant {
   expiresAt: number;
   allowedModels: readonly string[];
   defaultModel: string;
+  binding: CopilotAuthorityBinding;
 }
 
 export interface CopilotLoopbackBrokerOptions {
@@ -196,6 +198,10 @@ export class CopilotLoopbackBroker {
       expiresAt: this.now() + ttlMs,
       allowedModels: requestedModels,
       defaultModel,
+      binding: {
+        accountId: catalog.accountId,
+        credentialGeneration: catalog.credentialGeneration,
+      },
     };
     this.grantsById.set(grant.id, grant);
     return new CopilotBrokerGrant({
@@ -236,6 +242,7 @@ export class CopilotLoopbackBroker {
     try {
       this.cleanupExpiredState();
       const grant = this.authenticate(request);
+      await this.assertGrantBinding(grant, controller.signal);
       const pathname = new URL(request.url ?? "/", this.origin).pathname;
       if (request.method === "GET" && pathname === "/v1/models") {
         this.writeJson(response, 200, {
@@ -278,13 +285,16 @@ export class CopilotLoopbackBroker {
         "/chat/completions",
         upstreamInit,
         { model: requestedModel, initiator, intent, vision, accept },
+        grant.binding,
       );
       if (upstream.status === 401 || upstream.status === 403) {
         this.authority.invalidate({ clearPersistentCache: true });
+        await this.assertGrantBinding(grant, controller.signal);
         upstream = await this.authority.fetch(
           "/chat/completions",
           upstreamInit,
           { model: requestedModel, initiator, intent, vision, accept },
+          grant.binding,
         );
       }
       await this.pipeResponse(upstream, response);
@@ -319,6 +329,7 @@ export class CopilotLoopbackBroker {
         "A Copilot broker bearer grant is required",
       );
     }
+
     const candidateHash = bearerHash(authorization.slice("Bearer ".length));
     const revokedUntil = this.revokedBearerHashes.get(candidateHash.toString("hex"));
     if (revokedUntil && revokedUntil >= this.now()) {
@@ -346,6 +357,21 @@ export class CopilotLoopbackBroker {
       "unauthenticated",
       "The Copilot broker bearer grant is invalid",
     );
+  }
+
+  private async assertGrantBinding(
+    grant: StoredGrant,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      await this.authority.assertBindingActive(grant.binding, { signal });
+    } catch {
+      this.revoke(grant.id);
+      throw new CopilotAuthorityError(
+        "expired_grant",
+        "The Copilot broker grant no longer matches the active account",
+      );
+    }
   }
 
   private cleanupExpiredState(): void {

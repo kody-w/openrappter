@@ -142,6 +142,15 @@ describe('Gateway RPC Methods', () => {
       expect(methods.has('features.status')).toBe(true);
     });
 
+    it('should register participant and bounded group methods', () => {
+      expect(methods.has('participants.list')).toBe(true);
+      expect(methods.has('participants.status')).toBe(true);
+      expect(methods.has('group.create')).toBe(true);
+      expect(methods.has('group.send')).toBe(true);
+      expect(methods.has('group.cancel')).toBe(true);
+      expect(methods.has('group.history')).toBe(true);
+    });
+
     it('should register cron methods', () => {
       expect(methods.has('cron.update')).toBe(true);
       expect(methods.has('cron.status')).toBe(true);
@@ -517,8 +526,10 @@ describe('Gateway RPC Methods', () => {
       expect(groups.has('backup')).toBe(true);
       expect(groups.has('twin')).toBe(true);
       expect(groups.has('edge')).toBe(true);
+      expect(groups.has('participants')).toBe(true);
+      expect(groups.has('group')).toBe(true);
 
-      expect(groups.size).toBe(27);
+      expect(groups.size).toBe(29);
     });
 
     it('chat group should have expected methods', () => {
@@ -670,6 +681,13 @@ describe('Gateway RPC Methods', () => {
         // place and keeps no copy of what it replaced.
         'backup.delete',
         'backup.restore',
+        // Group transcripts and live participant identity are operator state.
+        'group.cancel',
+        'group.create',
+        'group.history',
+        'group.send',
+        'participants.list',
+        'participants.status',
         'rappter.create',
         'rappter.forget',
         'rappter.load',

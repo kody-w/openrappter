@@ -33,6 +33,7 @@ import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
 import { registerFeaturesMethods } from './methods/features-methods.js';
+import { registerParticipantMethods } from './methods/participant-methods.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
 import {
@@ -51,6 +52,10 @@ import { readGatewayLogs } from './log-store.js';
 import { renderAnatomyPage } from './anatomy-page.js';
 import type { RappterManager } from './rappter-manager.js';
 import type { SurgeonService } from '../surgeon/service.js';
+import { GroupService } from '../rapp/group-service.js';
+import { ParticipantRegistry } from '../rapp/participant-registry.js';
+import type { EffectiveFeatures, FeatureConfigEvidence } from '../config/features.js';
+import { getEffectiveFeatures } from '../config/features.js';
 import { VERSION } from '../version.js';
 import { buildChatEnvelope } from './chat-envelope.js';
 import { parseChatRequest } from './chat-request.js';
@@ -423,6 +428,8 @@ export class GatewayServer {
   private agentList?: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[];
   private cronStore: Record<string, unknown>[] = [];
   private surgeonService?: SurgeonService;
+  private participantRegistry: ParticipantRegistry;
+  private groupService: GroupService;
   /**
    * The approval queue `exec.pending`/`exec.respond` serve.
    *
@@ -457,6 +464,8 @@ export class GatewayServer {
       executionTimeoutMs: config?.executionTimeoutMs,
       shutdownTimeoutMs: config?.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT,
     };
+    this.participantRegistry = new ParticipantRegistry();
+    this.groupService = this.createGroupService(this.participantRegistry);
     this.loadSessions();
     this.loadCronStore();
   }
@@ -580,6 +589,55 @@ export class GatewayServer {
     } catch { /* ignore write errors */ }
   }
 
+  private createGroupService(registry: ParticipantRegistry): GroupService {
+    return new GroupService({
+      registry,
+      storage: {
+        getSession: async (id) => {
+          const session = this.sessionStore.get(id);
+          if (!session) return null;
+          return {
+            id: session.id,
+            channelId: session.channelId ?? 'rapp-group',
+            conversationId: session.conversationId ?? session.id,
+            agentId: session.agentId,
+            ...(session.userId ? { userId: session.userId } : {}),
+            metadata: { ...session.metadata },
+            messages: session.messages.map(message => ({
+              id: message.id,
+              role: message.role,
+              content: message.content,
+              ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+              timestamp: message.timestamp,
+            })),
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+          };
+        },
+        saveSession: async (session) => {
+          this.sessionStore.set(session.id, {
+            id: session.id,
+            agentId: session.agentId,
+            channelId: session.channelId,
+            conversationId: session.conversationId,
+            ...(session.userId ? { userId: session.userId } : {}),
+            messages: session.messages.map(message => ({
+              id: message.id,
+              role: message.role,
+              content: message.content,
+              ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+              timestamp: message.timestamp,
+            })),
+            metadata: { ...session.metadata },
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+          });
+          this.saveSessions();
+        },
+      },
+    });
+  }
+
   private loadConfig(): string {
     try {
       if (fs.existsSync(this.configPath)) {
@@ -587,6 +645,42 @@ export class GatewayServer {
       }
     } catch { /* ignore */ }
     return '';
+  }
+
+  private loadFeatureConfig(): {
+    config: unknown;
+    evidence: FeatureConfigEvidence;
+  } {
+    const raw = this.loadConfig();
+    const evidence = {
+      configHash: this.configHash(raw),
+      configValid: true,
+    };
+    try {
+      const parsed = raw.trim() ? YAML.parse(raw) : {};
+      const validated = validateConfig(parsed);
+      if (!validated.success) {
+        return {
+          config: undefined,
+          evidence: {
+            ...evidence,
+            configValid: false,
+          },
+        };
+      }
+      return {
+        config: validated.data ?? {},
+        evidence,
+      };
+    } catch {
+      return {
+        config: undefined,
+        evidence: {
+          ...evidence,
+          configValid: false,
+        },
+      };
+    }
   }
 
   private saveConfig(content: string) {
@@ -792,6 +886,14 @@ export class GatewayServer {
 
   setSurgeonService(service: SurgeonService): void {
     this.surgeonService = service;
+  }
+
+  setParticipantServices(
+    registry: ParticipantRegistry,
+    groupService: GroupService = this.createGroupService(registry),
+  ): void {
+    this.participantRegistry = registry;
+    this.groupService = groupService;
   }
 
   /** Override the approval engine served by `exec.*` (tests, embedders). */
@@ -3272,38 +3374,13 @@ export class GatewayServer {
     this.registerMethod('config.apply', writeConfig, { requiresAuth: true });
 
     registerFeaturesMethods(this, {
-      loadFeatureConfig: () => {
-        const raw = this.loadConfig();
-        const evidence = {
-          configHash: this.configHash(raw),
-          configValid: true,
-        };
-        try {
-          const parsed = raw.trim() ? YAML.parse(raw) : {};
-          const validated = validateConfig(parsed);
-          if (!validated.success) {
-            return {
-              config: undefined,
-              evidence: {
-                ...evidence,
-                configValid: false,
-              },
-            };
-          }
-          return {
-            config: validated.data ?? {},
-            evidence,
-          };
-        } catch {
-          return {
-            config: undefined,
-            evidence: {
-              ...evidence,
-              configValid: false,
-            },
-          };
-        }
-      },
+      loadFeatureConfig: () => this.loadFeatureConfig(),
+    });
+    registerParticipantMethods(this, {
+      registry: this.participantRegistry,
+      groupService: this.groupService,
+      loadFeatures: (): EffectiveFeatures =>
+        getEffectiveFeatures(this.loadFeatureConfig().config),
     });
 
     // ── Execution approvals ────────────────────────────────────────────────

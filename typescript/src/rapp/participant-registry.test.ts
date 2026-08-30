@@ -26,6 +26,7 @@ const FEATURES: EffectiveFeatures = {
   harnessAdapters: true,
   hermes: true,
   pi: true,
+  grok: true,
   brainSurgeonGroupChat: true,
 };
 

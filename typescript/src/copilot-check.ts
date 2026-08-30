@@ -10,6 +10,7 @@ import {
   createCopilotAccount,
   type CopilotAccount,
 } from './providers/copilot-authority.js';
+import { writeCopilotSecretJsonAtomically } from './providers/copilot-secure-file.js';
 
 const execAsync = promisify(exec);
 
@@ -92,9 +93,8 @@ export function hasAuthProfileAuthority(): boolean {
 /** Save a GitHub token to the credentials file */
 export function saveGitHubToken(token: string, source: CachedGitHubToken['source']): void {
   try {
-    fs.mkdirSync(CREDENTIALS_DIR, { recursive: true, mode: 0o700 });
     const payload: CachedGitHubToken = { token, savedAt: Date.now(), source };
-    fs.writeFileSync(GITHUB_TOKEN_FILE, JSON.stringify(payload, null, 2), { mode: 0o600 });
+    writeCopilotSecretJsonAtomically(GITHUB_TOKEN_FILE, payload);
   } catch { /* non-fatal */ }
 }
 

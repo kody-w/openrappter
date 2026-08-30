@@ -110,6 +110,14 @@ export interface CopilotProviderStatus {
   message?: string;
 }
 
+export interface CopilotModelCatalog {
+  accountId: string;
+  models: readonly string[];
+  verified: boolean;
+  source: "live" | "cache" | "fallback";
+  expiresAt: number;
+}
+
 export interface CopilotSession {
   accountId: string;
   endpoint: string;
@@ -159,6 +167,7 @@ export interface CopilotAuthorityOptions {
   exchangeRetryDelayMs?: number;
   negativeCacheTtlMs?: number;
   modelCacheTtlMs?: number;
+  modelStaleTtlMs?: number;
 }
 
 interface NegativeCacheEntry {
@@ -169,11 +178,14 @@ interface NegativeCacheEntry {
 interface ModelCacheEntry {
   models: string[];
   expiresAt: number;
+  staleUntil: number;
+  verified: boolean;
 }
 
 const TOKEN_SAFETY_MARGIN_MS = 5 * 60 * 1000;
 const DEFAULT_NEGATIVE_CACHE_TTL_MS = 30 * 1000;
 const DEFAULT_MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_MODEL_STALE_TTL_MS = 30 * 60 * 1000;
 const MAX_INTENT_LENGTH = 64;
 const TOKEN_PATTERN =
   /\b(?:gh[opsu]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|Bearer\s+[A-Za-z0-9._~+/-]+=*)\b/gi;
@@ -305,11 +317,13 @@ export class CopilotAuthority {
   private readonly exchangeRetryDelayMs: number;
   private readonly negativeCacheTtlMs: number;
   private readonly modelCacheTtlMs: number;
+  private readonly modelStaleTtlMs: number;
   private readonly sessions = new Map<string, InternalCopilotSession>();
   private readonly inFlight = new Map<string, Promise<InternalCopilotSession>>();
   private readonly negativeCache = new Map<string, NegativeCacheEntry>();
   private readonly modelCache = new Map<string, ModelCacheEntry>();
   private readonly refreshedCredentials = new Map<string, CopilotCredential>();
+  private generation = 0;
   private policy: CopilotModelPolicy;
   private status: CopilotProviderStatus;
 
@@ -342,6 +356,10 @@ export class CopilotAuthority {
       0,
       options.modelCacheTtlMs ?? DEFAULT_MODEL_CACHE_TTL_MS,
     );
+    this.modelStaleTtlMs = Math.max(
+      this.modelCacheTtlMs,
+      options.modelStaleTtlMs ?? DEFAULT_MODEL_STALE_TTL_MS,
+    );
     this.exchange = options.exchange ?? (async (account, exchangeOptions) => {
       return resolveCopilotApiToken({
         githubToken: copilotCredentialToken(account.credential),
@@ -365,6 +383,7 @@ export class CopilotAuthority {
   }
 
   selectAccount(accountId: string | undefined): void {
+    this.invalidate();
     this.selectedAccountId = accountId;
     this.status = {
       state: "unavailable",
@@ -448,7 +467,9 @@ export class CopilotAuthority {
     signal?: AbortSignal;
     forceRefresh?: boolean;
   }): Promise<{ account: CopilotAccount; session: CopilotSession }> {
+    const generation = this.generation;
     const accounts = await this.listAccounts();
+    this.assertGeneration(generation);
     if (accounts.length === 0) {
       const error = new CopilotAuthorityError(
         "unauthenticated",
@@ -475,6 +496,7 @@ export class CopilotAuthority {
           "unavailable",
           "No Copilot account is available",
         );
+    this.assertGeneration(generation);
     this.updateErrorStatus(error);
     throw error;
   }
@@ -496,6 +518,7 @@ export class CopilotAuthority {
   }
 
   invalidate(options?: { clearPersistentCache?: boolean }): void {
+    this.generation++;
     this.sessions.clear();
     this.inFlight.clear();
     this.negativeCache.clear();
@@ -574,13 +597,28 @@ export class CopilotAuthority {
     refresh?: boolean;
     signal?: AbortSignal;
   }): Promise<string[]> {
+    const catalog = await this.getModelCatalog(options);
+    return [...catalog.models];
+  }
+
+  async getModelCatalog(options?: {
+    refresh?: boolean;
+    requireVerified?: boolean;
+    signal?: AbortSignal;
+  }): Promise<CopilotModelCatalog> {
     const session = await this.resolveSession({ signal: options?.signal });
     const cached = this.modelCache.get(session.accountId);
     if (!options?.refresh && cached && cached.expiresAt > this.now()) {
-      return [...cached.models];
+      return {
+        accountId: session.accountId,
+        models: [...cached.models],
+        verified: cached.verified,
+        source: "cache",
+        expiresAt: cached.expiresAt,
+      };
     }
 
-    const models = new Set<string>(COPILOT_DEFAULT_MODELS);
+    const discoveredModels = new Set<string>();
     try {
       const response = await this.fetch(
         "/v1/models",
@@ -593,34 +631,67 @@ export class CopilotAuthority {
         };
         for (const item of body.data ?? []) {
           if (typeof item.id === "string" && item.id.trim()) {
-            models.add(item.id.trim());
+            discoveredModels.add(item.id.trim());
           }
         }
+      } else {
+        throw new CopilotAuthorityError(
+          "unavailable",
+          `Copilot model discovery failed with HTTP ${response.status}`,
+          { statusCode: 503, retryable: true },
+        );
       }
-    } catch {
-      // The fallback catalog remains useful when model discovery is unavailable.
+      const filtered = this.filterModels(discoveredModels);
+      const entry: ModelCacheEntry = {
+        models: filtered,
+        expiresAt: this.now() + this.modelCacheTtlMs,
+        staleUntil: this.now() + this.modelStaleTtlMs,
+        verified: true,
+      };
+      this.modelCache.set(session.accountId, entry);
+      return {
+        accountId: session.accountId,
+        models: [...entry.models],
+        verified: true,
+        source: "live",
+        expiresAt: entry.expiresAt,
+      };
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      if (cached?.verified && cached.staleUntil > this.now()) {
+        return {
+          accountId: session.accountId,
+          models: [...cached.models],
+          verified: true,
+          source: "cache",
+          expiresAt: cached.staleUntil,
+        };
+      }
+      if (options?.requireVerified) {
+        throw new CopilotAuthorityError(
+          "unavailable",
+          "Copilot model availability could not be verified for the selected account",
+          { retryable: true },
+        );
+      }
+      const filtered = this.filterModels(COPILOT_DEFAULT_MODELS);
+      return {
+        accountId: session.accountId,
+        models: filtered,
+        verified: false,
+        source: "fallback",
+        expiresAt: this.now(),
+      };
     }
-
-    const filtered = [...models].filter((model) => {
-      try {
-        this.assertModelAllowed(model);
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    this.modelCache.set(session.accountId, {
-      models: filtered,
-      expiresAt: this.now() + this.modelCacheTtlMs,
-    });
-    return filtered;
   }
 
   private async resolveInternalSession(options?: {
     signal?: AbortSignal;
     forceRefresh?: boolean;
   }): Promise<InternalCopilotSession> {
+    const generation = this.generation;
     const accounts = await this.listAccounts();
+    this.assertGeneration(generation);
     if (accounts.length === 0) {
       const error = new CopilotAuthorityError(
         "unauthenticated",
@@ -645,6 +716,7 @@ export class CopilotAuthority {
           "unavailable",
           "No Copilot account is available",
         );
+    this.assertGeneration(generation);
     this.updateErrorStatus(error);
     throw error;
   }
@@ -653,7 +725,9 @@ export class CopilotAuthority {
     account: CopilotAccount,
     options?: { signal?: AbortSignal; forceRefresh?: boolean },
   ): Promise<InternalCopilotSession> {
-    await this.refreshAccountCredential(account, options?.signal);
+    const generation = this.generation;
+    await this.refreshAccountCredential(account, options?.signal, generation);
+    this.assertGeneration(generation);
     const secret = copilotCredentialToken(account.credential);
     const fingerprint = tokenFingerprint(secret);
     const cached = this.sessions.get(fingerprint);
@@ -677,6 +751,7 @@ export class CopilotAuthority {
 
     const pending = this.exchangeWithRetries(account, options?.signal)
       .then((resolved) => {
+        this.assertGeneration(generation);
         const session: InternalCopilotSession = {
           accountId: account.id,
           endpoint: normalizeCopilotApiBaseUrl(
@@ -694,7 +769,11 @@ export class CopilotAuthority {
       })
       .catch((error: unknown) => {
         const normalized = this.normalizeExchangeError(error, account);
-        if (!isAbortError(error) && this.negativeCacheTtlMs > 0) {
+        if (
+          generation === this.generation
+          && !isAbortError(error)
+          && this.negativeCacheTtlMs > 0
+        ) {
           this.negativeCache.set(fingerprint, {
             error: normalized,
             expiresAt: this.now() + this.negativeCacheTtlMs,
@@ -703,7 +782,9 @@ export class CopilotAuthority {
         throw normalized;
       })
       .finally(() => {
-        this.inFlight.delete(fingerprint);
+        if (this.inFlight.get(fingerprint) === pending) {
+          this.inFlight.delete(fingerprint);
+        }
       });
     this.inFlight.set(fingerprint, pending);
     return pending;
@@ -712,6 +793,7 @@ export class CopilotAuthority {
   private async refreshAccountCredential(
     account: CopilotAccount,
     signal?: AbortSignal,
+    generation = this.generation,
   ): Promise<void> {
     const credential = account.credential;
     if (
@@ -729,6 +811,7 @@ export class CopilotAuthority {
     }
     try {
       const refreshed = await this.refreshCredential(account, { signal });
+      this.assertGeneration(generation);
       account.credential = refreshed;
       this.refreshedCredentials.set(account.id, refreshed);
     } catch (error) {
@@ -736,7 +819,28 @@ export class CopilotAuthority {
       throw new CopilotAuthorityError(
         "exchange_failure",
         `GitHub OAuth credential refresh failed for account ${account.id}`,
-        { retryable: true, cause: error },
+        { retryable: true },
+      );
+    }
+  }
+
+  private filterModels(models: Iterable<string>): string[] {
+    return [...models].filter((model) => {
+      try {
+        this.assertModelAllowed(model);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  private assertGeneration(generation: number): void {
+    if (generation !== this.generation) {
+      throw new CopilotAuthorityError(
+        "unavailable",
+        "Copilot account resolution was superseded by a newer account state",
+        { retryable: true },
       );
     }
   }
@@ -779,7 +883,6 @@ export class CopilotAuthority {
         {
           retryable: error.retryable,
           statusCode: error.statusCode,
-          cause: error,
         },
       );
     }
@@ -790,7 +893,7 @@ export class CopilotAuthority {
     return new CopilotAuthorityError(
       "exchange_failure",
       `Copilot token exchange failed for account ${account.id}: ${message}`,
-      { retryable: true, cause: error },
+      { retryable: true },
     );
   }
 

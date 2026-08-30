@@ -194,6 +194,104 @@ describe("CopilotLoopbackBroker", () => {
     });
   });
 
+  it("does not mint a grant when account model evidence is unavailable", async () => {
+    const broker = new CopilotLoopbackBroker({
+      authority: authority({
+        fetchImpl: vi.fn(async () => new Response("unavailable", {
+          status: 503,
+        })) as unknown as typeof fetch,
+      }),
+    });
+    brokers.push(broker);
+    await broker.start();
+
+    await expect(broker.issueGrant({
+      allowedModels: ["gpt-4.1"],
+    })).rejects.toMatchObject({
+      code: "unavailable",
+      retryable: true,
+    });
+  });
+
+  it("re-resolves once after an upstream authorization failure", async () => {
+    let chatAttempts = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).endsWith("/v1/models")) {
+        return new Response(JSON.stringify({
+          data: [{ id: "gpt-4.1" }],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      chatAttempts++;
+      if (chatAttempts === 1) {
+        return new Response("expired", { status: 401 });
+      }
+      return new Response(JSON.stringify({
+        choices: [{ message: { role: "assistant", content: "recovered" } }],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const broker = await startedBroker({ fetchImpl: fetchImpl as typeof fetch });
+    const grant = await broker.issueGrant({ allowedModels: ["gpt-4.1"] });
+    const client = new CopilotBrokerClient(grant);
+
+    const response = await client.chat({
+      model: "gpt-4.1",
+      messages: [{ role: "user", content: "recover" }],
+    });
+
+    expect(response.status).toBe(200);
+    expect(chatAttempts).toBe(2);
+    await expect(response.json()).resolves.toMatchObject({
+      choices: [{ message: { content: "recovered" } }],
+    });
+  });
+
+  it("aborts active upstream work before closing", async () => {
+    let upstreamSignal: AbortSignal | null = null;
+    const fetchImpl = vi.fn(async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      if (String(input).endsWith("/v1/models")) {
+        return new Response(JSON.stringify({
+          data: [{ id: "gpt-4.1" }],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      upstreamSignal = init?.signal ?? null;
+      return new Promise<Response>((_resolve, reject) => {
+        upstreamSignal?.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        }, { once: true });
+      });
+    });
+    const broker = await startedBroker({ fetchImpl: fetchImpl as typeof fetch });
+    const grant = await broker.issueGrant({ allowedModels: ["gpt-4.1"] });
+    const client = new CopilotBrokerClient(grant);
+    const pending = client.chat({
+      model: "gpt-4.1",
+      messages: [{ role: "user", content: "wait" }],
+    });
+    await vi.waitFor(() => expect(upstreamSignal).not.toBeNull());
+
+    await broker.close();
+
+    expect((upstreamSignal as AbortSignal | null)?.aborted).toBe(true);
+    const result = await pending.catch((error: unknown) => error);
+    if (result instanceof Response) {
+      expect(result.ok).toBe(false);
+    } else {
+      expect(result).toBeInstanceOf(Error);
+    }
+  });
+
   it("omits bearer credentials from serialized grant receipts", async () => {
     const broker = await startedBroker();
     const grant = await broker.issueGrant({ allowedModels: ["gpt-4.1"] });

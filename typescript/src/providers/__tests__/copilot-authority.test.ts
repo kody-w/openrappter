@@ -92,6 +92,41 @@ describe("CopilotAuthority", () => {
     expect(exchange).toHaveBeenCalledOnce();
   });
 
+  it("does not let a superseded account exchange repopulate authority state", async () => {
+    let releaseOld: ((value: ReturnType<typeof session>) => void) | undefined;
+    const exchange = vi.fn(async (candidate: { id: string }) => {
+      if (candidate.id === "old") {
+        return new Promise<ReturnType<typeof session>>((resolve) => {
+          releaseOld = resolve;
+        });
+      }
+      return session("new-api-token", "https://api.new.example");
+    });
+    const authority = new CopilotAuthority({
+      accountResolver: async () => [
+        account("old", "ghu_old", true),
+        account("new", "ghu_new"),
+      ],
+      selectedAccountId: "old",
+      exchange,
+    });
+
+    const oldResolution = authority.resolveSession();
+    await vi.waitFor(() => expect(releaseOld).toBeDefined());
+    authority.selectAccount("new");
+    await expect(authority.resolveSession()).resolves.toMatchObject({
+      accountId: "new",
+      endpoint: "https://api.new.example",
+    });
+    releaseOld?.(session("old-api-token", "https://api.old.example"));
+
+    await expect(oldResolution).rejects.toMatchObject({ code: "unavailable" });
+    expect(authority.getStatus()).toMatchObject({
+      state: "ready",
+      accountId: "new",
+    });
+  });
+
   it("negative-caches failed account exchanges", async () => {
     const exchange = vi.fn(async () => {
       throw new CopilotTokenExchangeError(
@@ -227,6 +262,72 @@ describe("CopilotAuthority", () => {
     expect(() => authority.assertModelAllowed("denied-model")).toThrowError(
       expect.objectContaining({ code: "forbidden_model" }),
     );
+  });
+
+  it("uses a previously verified account catalog during a bounded outage", async () => {
+    let now = 1_000;
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [{ id: "gpt-4.1" }],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockRejectedValue(new TypeError("network unavailable"));
+    const authority = new CopilotAuthority({
+      accounts: [account("one", "ghu_one")],
+      exchange: async () => ({
+        ...session(),
+        expiresAt: now + 60 * 60 * 1000,
+      }),
+      fetchImpl: fetchImpl as typeof fetch,
+      now: () => now,
+      modelCacheTtlMs: 10,
+      modelStaleTtlMs: 100,
+    });
+
+    await expect(authority.getModelCatalog({
+      requireVerified: true,
+    })).resolves.toMatchObject({
+      verified: true,
+      source: "live",
+    });
+
+    now += 11;
+    await expect(authority.getModelCatalog({
+      refresh: true,
+      requireVerified: true,
+    })).resolves.toMatchObject({
+      verified: true,
+      source: "cache",
+      models: expect.arrayContaining(["gpt-4.1"]),
+    });
+
+    now += 100;
+    await expect(authority.getModelCatalog({
+      refresh: true,
+      requireVerified: true,
+    })).rejects.toMatchObject({
+      code: "unavailable",
+      retryable: true,
+    });
+  });
+
+  it("fails closed when account model availability has no evidence", async () => {
+    const authority = new CopilotAuthority({
+      accounts: [account("one", "ghu_one")],
+      exchange: async () => session(),
+      fetchImpl: (
+        vi.fn(async () => new Response("unavailable", { status: 503 }))
+      ) as unknown as typeof fetch,
+    });
+
+    await expect(authority.getModelCatalog({
+      requireVerified: true,
+    })).rejects.toMatchObject({
+      code: "unavailable",
+      retryable: true,
+    });
   });
 
   it("distinguishes unavailable authentication states", async () => {

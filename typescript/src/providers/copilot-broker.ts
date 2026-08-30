@@ -75,6 +75,7 @@ export class CopilotLoopbackBroker {
   private readonly maxRequestBytes: number;
   private readonly grantsById = new Map<string, StoredGrant>();
   private readonly revokedBearerHashes = new Map<string, number>();
+  private readonly activeRequests = new Set<AbortController>();
   private server?: Server;
   private origin?: string;
 
@@ -131,12 +132,15 @@ export class CopilotLoopbackBroker {
   async close(): Promise<void> {
     this.grantsById.clear();
     this.revokedBearerHashes.clear();
+    for (const controller of this.activeRequests) controller.abort();
+    this.activeRequests.clear();
     const server = this.server;
     this.server = undefined;
     this.origin = undefined;
     if (!server) return;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
+      server.closeAllConnections();
     });
   }
 
@@ -160,7 +164,10 @@ export class CopilotLoopbackBroker {
       this.authority.assertModelAllowed(model);
     }
 
-    const available = new Set(await this.authority.availableModels());
+    const catalog = await this.authority.getModelCatalog({
+      requireVerified: true,
+    });
+    const available = new Set(catalog.models);
     for (const model of requestedModels) {
       if (!available.has(model)) {
         throw new CopilotAuthorityError(
@@ -209,7 +216,7 @@ export class CopilotLoopbackBroker {
     this.grantsById.delete(grantId);
     this.revokedBearerHashes.set(
       grant.bearerHash.toString("hex"),
-      Math.max(grant.expiresAt, this.now() + 1_000),
+      Math.max(grant.expiresAt, this.now() + this.maxGrantTtlMs),
     );
     return true;
   }
@@ -218,6 +225,14 @@ export class CopilotLoopbackBroker {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
+    const controller = new AbortController();
+    this.activeRequests.add(controller);
+    const abort = () => controller.abort();
+    const abortIfIncomplete = () => {
+      if (!response.writableEnded) controller.abort();
+    };
+    request.once("aborted", abort);
+    response.once("close", abortIfIncomplete);
     try {
       this.cleanupExpiredState();
       const grant = this.authenticate(request);
@@ -257,6 +272,7 @@ export class CopilotLoopbackBroker {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal: controller.signal,
       };
       let upstream = await this.authority.fetch(
         "/chat/completions",
@@ -288,6 +304,10 @@ export class CopilotLoopbackBroker {
       } else {
         response.destroy();
       }
+    } finally {
+      request.off("aborted", abort);
+      response.off("close", abortIfIncomplete);
+      this.activeRequests.delete(controller);
     }
   }
 
@@ -313,7 +333,7 @@ export class CopilotLoopbackBroker {
         this.grantsById.delete(grant.id);
         this.revokedBearerHashes.set(
           candidateHash.toString("hex"),
-          this.now() + 1_000,
+          this.now() + this.maxGrantTtlMs,
         );
         throw new CopilotAuthorityError(
           "expired_grant",

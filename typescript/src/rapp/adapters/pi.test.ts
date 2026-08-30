@@ -26,6 +26,7 @@ import {
   verifyPiAdapterReceipt,
   type PiAdapterReceipt,
   type PiGrantBroker,
+  type PiWindowsTaskkillInvocation,
 } from './pi.js';
 
 const RAPPID_A = `rappid:@openrappter/pi-adapter:${'a'.repeat(64)}`;
@@ -415,6 +416,108 @@ describe('PiRappParticipant', () => {
     }, controller.signal);
     setTimeout(() => controller.abort(), 50);
     expect(await errorCode(turn)).toBe('PI_ABORTED');
+  });
+
+  it('awaits shell-free Windows taskkill tree phases without leaking the bearer', async () => {
+    const root = testRoot();
+    const { binaryPath, recordPath } = fakePi(root, { delayMs: 5_000 });
+    const broker = new FakeBroker();
+    const invocations: PiWindowsTaskkillInvocation[] = [];
+    let signalForcedStarted!: () => void;
+    let releaseForced!: () => void;
+    const forcedStarted = new Promise<void>(resolvePromise => {
+      signalForcedStarted = resolvePromise;
+    });
+    const forcedGate = new Promise<void>(resolvePromise => {
+      releaseForced = resolvePromise;
+    });
+    const runner = vi.fn(async (
+      invocation: PiWindowsTaskkillInvocation,
+    ) => {
+      invocations.push({
+        ...invocation,
+        args: [...invocation.args],
+        env: { ...invocation.env },
+      });
+      expect(invocation.shell).toBe(false);
+      expect(invocation.env[PI_BROKER_BEARER_ENV]).toBeUndefined();
+      expect(JSON.stringify(invocation)).not.toContain(SECRET);
+      if (invocation.args.includes('/F')) {
+        signalForcedStarted();
+        await forcedGate;
+        process.kill(Number(invocation.args[1]), 'SIGKILL');
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const participant = new PiRappParticipant(participantOptions(
+      binaryPath,
+      broker,
+      {
+        timeoutMs: 50,
+        platform: 'win32',
+        processKillGraceMs: 20,
+        windowsTaskkillRunner: runner,
+      },
+    ));
+
+    let settled = false;
+    const observed = participant.chat({
+      userInput: 'hello',
+      conversationHistory: [],
+    }).then(
+      value => ({ value, error: undefined }),
+      error => ({ value: undefined, error: error as PiAdapterError }),
+    ).finally(() => {
+      settled = true;
+    });
+    await forcedStarted;
+    const record = JSON.parse(readFileSync(recordPath, 'utf8')) as FakePiRecord;
+
+    expect(settled).toBe(false);
+    expect(broker.revoked).toEqual(['grant-1']);
+    expect(existsSync(record.runtimeDir)).toBe(true);
+    expect(invocations.map(invocation => invocation.command)).toEqual([
+      'taskkill',
+      'taskkill',
+    ]);
+    expect(invocations.map(invocation => invocation.args)).toEqual([
+      ['/PID', expect.stringMatching(/^\d+$/), '/T'],
+      ['/PID', expect.stringMatching(/^\d+$/), '/T', '/F'],
+    ]);
+    expect(invocations[1].args[1]).toBe(invocations[0].args[1]);
+
+    releaseForced();
+    const outcome = await observed;
+    expect(outcome.error).toMatchObject({ code: 'PI_TIMEOUT' });
+    expect(outcome.value).toBeUndefined();
+    expect(existsSync(record.runtimeDir)).toBe(false);
+
+    const failingRoot = testRoot();
+    const failingPi = fakePi(failingRoot, { delayMs: 5_000 });
+    const failing = new PiRappParticipant(participantOptions(
+      failingPi.binaryPath,
+      new FakeBroker(),
+      {
+        timeoutMs: 50,
+        platform: 'win32',
+        processKillGraceMs: 10,
+        windowsTaskkillRunner: async (invocation) => {
+          if (invocation.args.includes('/F')) {
+            process.kill(Number(invocation.args[1]), 'SIGKILL');
+          }
+          return { code: 1, stdout: '', stderr: SECRET };
+        },
+      },
+    ));
+    await expect(failing.chat({
+      userInput: 'hello',
+      conversationHistory: [],
+    })).rejects.toSatisfy((error: unknown) => {
+      expect(error).toMatchObject({ code: 'PI_PROCESS_TREE_CLEANUP_FAILED' });
+      expect((error as Error).message).toContain('***REDACTED***');
+      expect((error as Error).message).not.toContain(SECRET);
+      return true;
+    });
   });
 
   it('rejects malformed, nonzero, oversized, and wrong-provider output', async () => {

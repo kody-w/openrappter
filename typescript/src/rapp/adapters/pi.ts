@@ -51,6 +51,8 @@ const DEFAULT_PI_OUTPUT_LIMIT_BYTES = 1024 * 1024;
 const MAX_PI_TIMEOUT_MS = 5 * 60_000;
 const MAX_PI_OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024;
 const PROCESS_KILL_GRACE_MS = 250;
+const TASKKILL_TIMEOUT_MS = 5_000;
+const TASKKILL_OUTPUT_LIMIT_BYTES = 16 * 1024;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '[::1]']);
 
 const PI_CAPABILITIES = Object.freeze({
@@ -75,6 +77,7 @@ export type PiAdapterErrorCode =
   | 'PI_PROCESS_FAILED'
   | 'PI_TIMEOUT'
   | 'PI_ABORTED'
+  | 'PI_PROCESS_TREE_CLEANUP_FAILED'
   | 'PI_OUTPUT_LIMIT_EXCEEDED'
   | 'PI_OUTPUT_MALFORMED'
   | 'PI_PROVIDER_MISMATCH'
@@ -95,6 +98,25 @@ export interface PiGrantBroker {
   issueGrant(options: CopilotBrokerGrantOptions): Promise<CopilotBrokerGrant>;
   revoke(grantId: string): boolean;
 }
+
+export interface PiWindowsTaskkillInvocation {
+  command: 'taskkill';
+  args: readonly string[];
+  env: NodeJS.ProcessEnv;
+  shell: false;
+  windowsHide: true;
+  timeoutMs: number;
+}
+
+export interface PiWindowsTaskkillResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+export type PiWindowsTaskkillRunner = (
+  invocation: PiWindowsTaskkillInvocation,
+) => Promise<PiWindowsTaskkillResult>;
 
 export interface PiAdapterReceipt {
   schema: typeof PI_ADAPTER_RECEIPT_SCHEMA;
@@ -138,6 +160,9 @@ export interface PiRappParticipantOptions {
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   receipt?: PiAdapterReceipt;
+  platform?: NodeJS.Platform;
+  processKillGraceMs?: number;
+  windowsTaskkillRunner?: PiWindowsTaskkillRunner;
 }
 
 interface PiExecutableEvidence {
@@ -378,6 +403,117 @@ function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
   }
 }
 
+function defaultWindowsTaskkillRunner(
+  invocation: PiWindowsTaskkillInvocation,
+): Promise<PiWindowsTaskkillResult> {
+  return new Promise<PiWindowsTaskkillResult>((resolvePromise, rejectPromise) => {
+    let child: ChildProcess;
+    try {
+      child = spawn(invocation.command, [...invocation.args], {
+        env: invocation.env,
+        shell: invocation.shell,
+        windowsHide: invocation.windowsHide,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      rejectPromise(error);
+      return;
+    }
+
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let outputBytes = 0;
+    let settled = false;
+    const collect = (target: Buffer[], chunk: Buffer | string): void => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const remaining = Math.max(0, TASKKILL_OUTPUT_LIMIT_BYTES - outputBytes);
+      if (remaining > 0) target.push(buffer.subarray(0, remaining));
+      outputBytes += buffer.length;
+    };
+    const cleanup = (): void => clearTimeout(timer);
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      rejectPromise(new Error(`taskkill timed out after ${invocation.timeoutMs}ms`));
+    }, invocation.timeoutMs);
+    timer.unref();
+
+    child.stdout?.on('data', (chunk: Buffer | string) => collect(stdout, chunk));
+    child.stderr?.on('data', (chunk: Buffer | string) => collect(stderr, chunk));
+    child.once('error', (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rejectPromise(error);
+    });
+    child.once('close', (code) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolvePromise({
+        code,
+        stdout: Buffer.concat(stdout).toString('utf8'),
+        stderr: Buffer.concat(stderr).toString('utf8'),
+      });
+    });
+  });
+}
+
+async function terminateWindowsProcessTree(options: {
+  child: ChildProcess;
+  env: NodeJS.ProcessEnv;
+  graceMs: number;
+  runner: PiWindowsTaskkillRunner;
+  secrets: readonly string[];
+}): Promise<void> {
+  const pid = options.child.pid;
+  if (pid === undefined) {
+    throw new PiAdapterError(
+      'PI_PROCESS_TREE_CLEANUP_FAILED',
+      'Pi process tree cleanup could not identify the Windows process.',
+    );
+  }
+
+  let lastFailure = '';
+  const runPhase = async (force: boolean): Promise<boolean> => {
+    const args = ['/PID', String(pid), '/T', ...(force ? ['/F'] : [])];
+    try {
+      const result = await options.runner({
+        command: 'taskkill',
+        args,
+        env: safeChildEnvironment(options.env),
+        shell: false,
+        windowsHide: true,
+        timeoutMs: TASKKILL_TIMEOUT_MS,
+      });
+      if (result.code === 0) return true;
+      const detail = sanitize(result.stderr || result.stdout, options.secrets).slice(0, 2_000);
+      lastFailure = `taskkill ${force ? 'forced' : 'graceful'} phase exited with code ${result.code ?? 'unknown'}${detail ? `: ${detail}` : ''}`;
+      return false;
+    } catch (error) {
+      lastFailure = `taskkill ${force ? 'forced' : 'graceful'} phase failed: ${sanitize(
+        error instanceof Error ? error.message : String(error),
+        options.secrets,
+      )}`;
+      return false;
+    }
+  };
+
+  const processExited = (): boolean =>
+    options.child.exitCode !== null || options.child.signalCode !== null;
+  const gracefulSucceeded = await runPhase(false);
+  if (gracefulSucceeded && processExited()) return;
+  await new Promise(resolvePromise => setTimeout(resolvePromise, options.graceMs));
+  if (gracefulSucceeded && processExited()) return;
+  if (!await runPhase(true)) {
+    throw new PiAdapterError(
+      'PI_PROCESS_TREE_CLEANUP_FAILED',
+      `Pi Windows process tree cleanup failed. ${lastFailure}`,
+    );
+  }
+}
+
 function runProcess(options: {
   executable: string;
   args: string[];
@@ -387,6 +523,10 @@ function runProcess(options: {
   maxOutputBytes: number;
   signal?: AbortSignal;
   secrets?: readonly string[];
+  platform?: NodeJS.Platform;
+  processKillGraceMs?: number;
+  windowsTaskkillRunner?: PiWindowsTaskkillRunner;
+  onTerminate?: () => void;
 }): Promise<ProcessResult> {
   if (options.signal?.aborted) {
     return Promise.reject(new PiAdapterError('PI_ABORTED', 'Pi invocation was cancelled.'));
@@ -399,7 +539,7 @@ function runProcess(options: {
         cwd: options.cwd,
         env: options.env,
         shell: false,
-        detached: process.platform !== 'win32',
+        detached: (options.platform ?? process.platform) !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
@@ -417,11 +557,15 @@ function runProcess(options: {
     let outputBytes = 0;
     let terminalError: PiAdapterError | undefined;
     let killTimer: NodeJS.Timeout | undefined;
+    let treeSettleTimer: NodeJS.Timeout | undefined;
+    let terminationPromise: Promise<void> | undefined;
+    let childClosed = false;
     let settled = false;
 
     const cleanup = (): void => {
       clearTimeout(timeoutTimer);
       if (killTimer) clearTimeout(killTimer);
+      if (treeSettleTimer) clearTimeout(treeSettleTimer);
       options.signal?.removeEventListener('abort', onAbort);
     };
     const reject = (error: PiAdapterError): void => {
@@ -433,8 +577,64 @@ function runProcess(options: {
     const terminate = (error: PiAdapterError): void => {
       if (terminalError) return;
       terminalError = error;
+      let revokeError: unknown;
+      try {
+        options.onTerminate?.();
+      } catch (callbackError) {
+        revokeError = callbackError;
+      }
+      const platform = options.platform ?? process.platform;
+      const graceMs = options.processKillGraceMs ?? PROCESS_KILL_GRACE_MS;
+      if (platform === 'win32') {
+        terminationPromise = terminateWindowsProcessTree({
+          child,
+          env: options.env,
+          graceMs,
+          runner: options.windowsTaskkillRunner ?? defaultWindowsTaskkillRunner,
+          secrets: options.secrets ?? [],
+        }).then(() => {
+          if (revokeError) {
+            throw new PiAdapterError(
+              'PI_PROCESS_TREE_CLEANUP_FAILED',
+              'Pi process tree stopped, but its broker grant could not be revoked.',
+              revokeError,
+            );
+          }
+          if (!childClosed && !settled) {
+            treeSettleTimer = setTimeout(() => {
+              reject(new PiAdapterError(
+                'PI_PROCESS_TREE_CLEANUP_FAILED',
+                'Windows taskkill completed but the Pi process tree did not exit.',
+              ));
+            }, graceMs);
+            treeSettleTimer.unref();
+          }
+        });
+        void terminationPromise.catch((terminationError: unknown) => {
+          reject(terminationError instanceof PiAdapterError
+            ? terminationError
+            : new PiAdapterError(
+                'PI_PROCESS_TREE_CLEANUP_FAILED',
+                `Pi Windows process tree cleanup failed: ${sanitize(
+                  terminationError instanceof Error
+                    ? terminationError.message
+                    : String(terminationError),
+                  options.secrets,
+                )}`,
+                terminationError,
+              ));
+        });
+        return;
+      }
+      if (revokeError) {
+        terminalError = new PiAdapterError(
+          'PI_PROCESS_TREE_CLEANUP_FAILED',
+          'Pi process termination could not revoke its broker grant.',
+          revokeError,
+        );
+      }
       killProcessTree(child, 'SIGTERM');
-      killTimer = setTimeout(() => killProcessTree(child, 'SIGKILL'), PROCESS_KILL_GRACE_MS);
+      killTimer = setTimeout(() => killProcessTree(child, 'SIGKILL'), graceMs);
       killTimer.unref();
     };
     const collect = (target: Buffer[], chunk: Buffer | string): void => {
@@ -471,19 +671,41 @@ function runProcess(options: {
       ));
     });
     child.once('close', (code, signal) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      if (terminalError) {
-        rejectPromise(terminalError);
-        return;
-      }
-      resolvePromise({
-        code,
-        signal,
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8'),
-      });
+      childClosed = true;
+      void (async () => {
+        if (terminationPromise) {
+          try {
+            await terminationPromise;
+          } catch (terminationError) {
+            reject(terminationError instanceof PiAdapterError
+              ? terminationError
+              : new PiAdapterError(
+                  'PI_PROCESS_TREE_CLEANUP_FAILED',
+                  `Pi Windows process tree cleanup failed: ${sanitize(
+                    terminationError instanceof Error
+                      ? terminationError.message
+                      : String(terminationError),
+                    options.secrets,
+                  )}`,
+                  terminationError,
+                ));
+            return;
+          }
+        }
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (terminalError) {
+          rejectPromise(terminalError);
+          return;
+        }
+        resolvePromise({
+          code,
+          signal,
+          stdout: Buffer.concat(stdout).toString('utf8'),
+          stderr: Buffer.concat(stderr).toString('utf8'),
+        });
+      })();
     });
   });
 }
@@ -733,6 +955,9 @@ export class PiRappParticipant implements RappParticipant {
   private readonly grantTtlMs: number;
   private readonly env?: NodeJS.ProcessEnv;
   private readonly now: () => number;
+  private readonly platform: NodeJS.Platform;
+  private readonly processKillGraceMs: number;
+  private readonly windowsTaskkillRunner?: PiWindowsTaskkillRunner;
   private currentDescriptor: Readonly<RappParticipantDescriptor>;
   private currentReceipt?: Readonly<PiAdapterReceipt>;
 
@@ -778,6 +1003,14 @@ export class PiRappParticipant implements RappParticipant {
     }
     this.env = options.env;
     this.now = options.now ?? Date.now;
+    this.platform = options.platform ?? process.platform;
+    this.processKillGraceMs = boundedInteger(
+      options.processKillGraceMs,
+      PROCESS_KILL_GRACE_MS,
+      10_000,
+      'processKillGraceMs',
+    );
+    this.windowsTaskkillRunner = options.windowsTaskkillRunner;
     this.currentReceipt = options.receipt === undefined
       ? undefined
       : verifyPiAdapterReceipt(options.receipt);
@@ -868,6 +1101,12 @@ export class PiRappParticipant implements RappParticipant {
       ttlMs: this.grantTtlMs,
     });
     const bearer = grant.authorization.bearerToken;
+    let grantRevoked = false;
+    const revokeGrant = (): void => {
+      if (grantRevoked) return;
+      this.broker.revoke(grant.descriptor.grantId);
+      grantRevoked = true;
+    };
     let runtimeDirectory: string | undefined;
     try {
       assertLoopbackGrant(grant, this.model, this.now(), this.timeoutMs);
@@ -889,6 +1128,10 @@ export class PiRappParticipant implements RappParticipant {
         maxOutputBytes: this.maxOutputBytes,
         signal,
         secrets: [bearer],
+        platform: this.platform,
+        processKillGraceMs: this.processKillGraceMs,
+        windowsTaskkillRunner: this.windowsTaskkillRunner,
+        onTerminate: revokeGrant,
       });
       if (result.code !== 0) {
         const detail = sanitize(result.stderr || result.stdout, [bearer]).slice(0, 2_000);
@@ -933,7 +1176,7 @@ export class PiRappParticipant implements RappParticipant {
     } finally {
       let cleanupError: unknown;
       try {
-        this.broker.revoke(grant.descriptor.grantId);
+        revokeGrant();
       } catch (error) {
         cleanupError = error;
       }
@@ -1062,6 +1305,9 @@ export class PiRappParticipant implements RappParticipant {
         timeoutMs: this.probeTimeoutMs,
         maxOutputBytes: 16 * 1024,
         signal,
+        platform: this.platform,
+        processKillGraceMs: this.processKillGraceMs,
+        windowsTaskkillRunner: this.windowsTaskkillRunner,
       });
     } finally {
       await rm(probeDirectory, { recursive: true, force: true });

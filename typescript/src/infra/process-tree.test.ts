@@ -16,6 +16,11 @@ import {
 const running: Array<Awaited<ReturnType<typeof spawnManagedProcessTree>>> = [];
 const parentSecret = 'PROCESS_TREE_PARENT_SECRET';
 
+vi.setConfig({
+  testTimeout: process.platform === 'win32' ? 120_000 : 5_000,
+  hookTimeout: process.platform === 'win32' ? 120_000 : 10_000,
+});
+
 function targetEnvironment(): Record<string, string> {
   if (process.platform !== 'win32') return {};
   return Object.fromEntries(
@@ -568,7 +573,7 @@ describe.runIf(process.platform === 'win32')('Windows Job Object integration', (
     };
 
     process.kill(tree.helper!.pid, 'SIGKILL');
-    await tree.wait();
+    await expect(tree.wait()).rejects.toBeInstanceOf(ProcessTreeOutputError);
     await expectDead(tree.target!);
     await expectDead(grandchild);
   });

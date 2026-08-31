@@ -420,6 +420,18 @@ namespace OpenRappter {
         });
         Task stdout = target.StandardOutput.BaseStream.CopyToAsync(output);
         Task stderr = target.StandardError.BaseStream.CopyToAsync(error);
+        Action<Task> stopOnRelayFault = relay => {
+          if (!relay.IsFaulted) return;
+          try {
+            TerminateRemainingJobProcesses(job);
+          } catch {
+            // If individual termination cannot be proven, close the entire Job
+            // immediately. The Node parent observes control loss as failure.
+            TerminateJobObject(job, 137);
+          }
+        };
+        stdout.ContinueWith(stopOnRelayFault, TaskContinuationOptions.OnlyOnFaulted);
+        stderr.ContinueWith(stopOnRelayFault, TaskContinuationOptions.OnlyOnFaulted);
 
         // A fast target may finish immediately after ready. Keep the helper and
         // Job alive until the Node parent has attached its exact control pipe.

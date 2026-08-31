@@ -24,6 +24,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { types as utilTypes } from 'node:util';
 
 import type { JsonObject, JsonValue } from './types.js';
 
@@ -154,6 +155,115 @@ export function assertRappCanonicalValue(
     validateRappString(key);
     assertRappCanonicalValue(item, depth + 1);
   }
+}
+
+/**
+ * Materialize a hostile programmatic JSON value without invoking accessors or
+ * rereading properties. Proxies are refused because their descriptor/ownKeys
+ * traps can present mutually inconsistent objects during one verification.
+ */
+export function snapshotRappJsonValue(value: unknown): JsonValue {
+  const snapshots = new WeakMap<object, JsonValue>();
+  const active = new WeakSet<object>();
+
+  const visit = (current: unknown, path: string): JsonValue => {
+    if (
+      current === null
+      || typeof current === 'string'
+      || typeof current === 'boolean'
+      || typeof current === 'number'
+    ) {
+      return current;
+    }
+    if (typeof current !== 'object') {
+      throw new TypeError(`${path} is not a JSON value`);
+    }
+    if (utilTypes.isProxy(current)) {
+      throw new TypeError(`${path} is a Proxy; RAPP verification requires stable descriptors`);
+    }
+    if (active.has(current)) throw new TypeError(`${path} contains a JSON cycle`);
+    const cached = snapshots.get(current);
+    if (cached !== undefined) return cached;
+
+    const keys = Reflect.ownKeys(current);
+    if (keys.some((key) => typeof key === 'symbol')) {
+      throw new TypeError(`${path} contains a symbol key`);
+    }
+    const stringKeys = keys as string[];
+    if (new Set(stringKeys).size !== stringKeys.length) {
+      throw new TypeError(`${path} contains duplicate own keys`);
+    }
+    const descriptors = new Map<string, PropertyDescriptor>();
+    for (const key of stringKeys) {
+      const descriptor = Object.getOwnPropertyDescriptor(current, key);
+      if (descriptor === undefined) {
+        throw new TypeError(`${path}.${key} changed shape during snapshot`);
+      }
+      if (!Object.hasOwn(descriptor, 'value')) {
+        throw new TypeError(`${path}.${key} is an accessor property`);
+      }
+      descriptors.set(key, descriptor);
+    }
+
+    active.add(current);
+    try {
+      if (Array.isArray(current)) {
+        const lengthDescriptor = descriptors.get('length');
+        if (
+          lengthDescriptor === undefined
+          || typeof lengthDescriptor.value !== 'number'
+          || !Number.isSafeInteger(lengthDescriptor.value)
+          || lengthDescriptor.value < 0
+        ) {
+          throw new TypeError(`${path}.length is invalid`);
+        }
+        const length = lengthDescriptor.value;
+        const indexKeys = stringKeys.filter((key) => key !== 'length');
+        if (
+          indexKeys.some((key) =>
+            !/^(0|[1-9]\d*)$/.test(key)
+            || Number(key) >= length,
+          )
+        ) {
+          throw new TypeError(`${path} contains a non-index array property`);
+        }
+        if (indexKeys.length !== length) {
+          throw new TypeError(`${path} contains an array hole`);
+        }
+        const result: JsonValue[] = [];
+        snapshots.set(current, result);
+        for (let index = 0; index < length; index += 1) {
+          const descriptor = descriptors.get(String(index));
+          if (descriptor === undefined || descriptor.enumerable !== true) {
+            throw new TypeError(`${path}[${index}] is missing or non-enumerable`);
+          }
+          result.push(visit(descriptor.value, `${path}[${index}]`));
+        }
+        return Object.freeze(result) as unknown as JsonValue[];
+      }
+
+      const prototype = Object.getPrototypeOf(current);
+      if (prototype !== Object.prototype && prototype !== null) {
+        throw new TypeError(`${path} is not a plain JSON object`);
+      }
+      const result = Object.create(null) as JsonObject;
+      snapshots.set(current, result);
+      for (const key of stringKeys) {
+        const descriptor = descriptors.get(key)!;
+        if (descriptor.enumerable !== true) {
+          throw new TypeError(`${path}.${key} is non-enumerable`);
+        }
+        result[key] = visit(descriptor.value, `${path}.${key}`);
+      }
+      return Object.freeze(result);
+    } finally {
+      active.delete(current);
+    }
+  };
+
+  const snapshot = visit(value, '$');
+  assertRappCanonicalValue(snapshot);
+  return snapshot;
 }
 
 /**
@@ -422,7 +532,11 @@ export function rappCanonicalJson(value: JsonValue): string {
 }
 
 export function rappH(space: string, value: JsonValue): string {
-  return sha256Hex(Buffer.from(`${space}\n${rappCanonicalJson(value)}`, 'utf8'));
+  return rappHashCanonical(space, rappCanonicalJson(value));
+}
+
+export function rappHashCanonical(space: string, canonical: string): string {
+  return sha256Hex(Buffer.from(`${space}\n${canonical}`, 'utf8'));
 }
 
 export function rappHb(space: string, bytes: Uint8Array): string {

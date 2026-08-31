@@ -73,8 +73,10 @@ export {
   roundHalfUp,
   rappCanonicalJson,
   rappH,
+  rappHashCanonical,
   rappHb,
   sha256Hex,
+  snapshotRappJsonValue,
   traitMilli,
 } from './canonical.js';
 export {

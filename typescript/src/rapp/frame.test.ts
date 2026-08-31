@@ -657,6 +657,150 @@ describe('ordered intrinsic verification', () => {
   });
 });
 
+describe('hostile programmatic frame snapshot', () => {
+  const verify = (frame: unknown) => verifyRappFrame(
+    frame,
+    RAPP_ACCEPTED_BODY_PULSE_PROFILE,
+    {
+      head: authority.predecessor,
+      streamIdOfRecord: authority.frame.stream_id,
+    },
+  );
+
+  it.each([
+    ['kind', 'body.pulse', 'body.dimension'],
+    ['payload_hash', authority.frame.payload_hash, '0'.repeat(64)],
+    ['seq', authority.frame.seq, authority.frame.seq + 1],
+    ['payload', authority.frame.payload, { forged: true }],
+  ])('refuses a Proxy that flips %s after repeated reads', (property, first, later) => {
+    let reads = 0;
+    const proxy = new Proxy(
+      clone(authority.frame) as unknown as Record<string, unknown>,
+      {
+        get(target, key, receiver) {
+          if (key === property) {
+            reads += 1;
+            return reads === 1 ? first : later;
+          }
+          return Reflect.get(target, key, receiver);
+        },
+      },
+    );
+    expect(verify(proxy)).toMatchObject({
+      ok: false,
+      error: { step: '1', code: 'key-set' },
+    });
+    expect(reads).toBe(0);
+  });
+
+  it('rejects accessors without invoking getter side effects or shape mutation', () => {
+    const frame = clone(authority.frame) as unknown as Record<string, unknown>;
+    let sideEffects = 0;
+    Object.defineProperty(frame, 'kind', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        sideEffects += 1;
+        frame.extra = true;
+        return sideEffects === 1 ? 'body.pulse' : 'body.dimension';
+      },
+    });
+    expect(verify(frame)).toMatchObject({
+      ok: false,
+      error: { step: '1', code: 'key-set' },
+    });
+    expect(sideEffects).toBe(0);
+    expect(Object.hasOwn(frame, 'extra')).toBe(false);
+  });
+
+  it('rejects Proxy ownKeys/descriptor inconsistencies before traps can race', () => {
+    let ownKeyCalls = 0;
+    let descriptorCalls = 0;
+    const proxy = new Proxy(
+      clone(authority.frame) as unknown as Record<string, unknown>,
+      {
+        ownKeys(target) {
+          ownKeyCalls += 1;
+          return Reflect.ownKeys(target);
+        },
+        getOwnPropertyDescriptor(target, key) {
+          descriptorCalls += 1;
+          if (descriptorCalls > 1 && key === 'kind') return undefined;
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        },
+      },
+    );
+    expect(verify(proxy)).toMatchObject({
+      ok: false,
+      error: { step: '1', code: 'key-set' },
+    });
+    expect(ownKeyCalls).toBe(0);
+    expect(descriptorCalls).toBe(0);
+  });
+
+  it('rejects a nested payload Proxy without reading or mutating it', () => {
+    let reads = 0;
+    const payload = new Proxy(clone(authority.frame.payload), {
+      get(target, key, receiver) {
+        reads += 1;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const frame = { ...clone(authority.frame), payload };
+    expect(verify(frame)).toMatchObject({
+      ok: false,
+      error: { step: '1', code: 'key-set' },
+    });
+    expect(reads).toBe(0);
+  });
+
+  it('rejects symbol keys, array holes/non-index properties, and inherited frame fields', () => {
+    const withSymbol =
+      clone(authority.frame) as unknown as Record<PropertyKey, unknown>;
+    withSymbol[Symbol('hidden')] = true;
+    expect(verify(withSymbol)).toMatchObject({ ok: false, error: { code: 'key-set' } });
+
+    const withHole = clone(authority.frame);
+    (withHole.payload as Record<string, unknown>).hole = new Array(2);
+    expect(verify(withHole)).toMatchObject({ ok: false, error: { code: 'key-set' } });
+
+    const withArrayProperty = clone(authority.frame);
+    const array = [1, 2] as number[] & { extra?: number };
+    array.extra = 3;
+    (withArrayProperty.payload as Record<string, unknown>).array = array;
+    expect(verify(withArrayProperty)).toMatchObject({
+      ok: false,
+      error: { code: 'key-set' },
+    });
+
+    const own = clone(authority.frame) as unknown as Record<string, unknown>;
+    const inherited = Object.create({ spec: own.spec }) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(own)) {
+      if (key !== 'spec') inherited[key] = value;
+    }
+    expect(verify(inherited)).toMatchObject({
+      ok: false,
+      error: { code: 'key-set' },
+    });
+  });
+
+  it('returns one immutable snapshot unaffected by later source mutation', () => {
+    const source = clone(authority.frame);
+    const verified = verify(source);
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) throw verified.error;
+    (source as unknown as { kind: string }).kind = 'body.dimension';
+    source.seq += 1;
+    (source.payload as Record<string, unknown>).revision = 'forged';
+    expect(verified.frame.kind).toBe('body.pulse');
+    expect(verified.frame.seq).toBe(authority.frame.seq);
+    expect(verified.frame.payload).toEqual(authority.frame.payload);
+    expect(verified.frame).not.toBe(source);
+    expect(Object.isFrozen(verified.frame)).toBe(true);
+    expect(Object.isFrozen(verified.frame.payload)).toBe(true);
+  });
+});
+
 describe('trusted chain policy and duplicate ordering', () => {
   const streamId = `rappid:@example/evidence:${'c'.repeat(64)}`;
   const genesis = buildRappFrame({

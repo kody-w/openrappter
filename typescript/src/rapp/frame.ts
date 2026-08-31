@@ -4,6 +4,8 @@ import {
   parseRappJson,
   rappCanonicalJson,
   rappH,
+  rappHashCanonical,
+  snapshotRappJsonValue,
 } from '../rappids/canonical.js';
 import type { JsonObject, JsonValue } from '../rappids/types.js';
 import {
@@ -511,20 +513,6 @@ function readFrameHead(value: unknown, label: string): RappFrameHead {
   });
 }
 
-function freezeRappValue<TValue extends JsonValue>(value: TValue): TValue {
-  if (value !== null && typeof value === 'object') {
-    for (const child of Array.isArray(value) ? value : Object.values(value)) {
-      freezeRappValue(child);
-    }
-    Object.freeze(value);
-  }
-  return value;
-}
-
-function immutableRappValue<TValue extends JsonValue>(value: TValue): TValue {
-  return freezeRappValue(parseRappJson(rappCanonicalJson(value)) as TValue);
-}
-
 function trustFor(
   profile: RappFrameProfile<JsonObject, string>,
   genesis: RappTrustAssessment['genesis'],
@@ -805,90 +793,104 @@ function verifyThroughWave<
   const selectedProfile = profileRecord(
     profile as unknown as RappFrameProfile<JsonObject, string>,
   );
-  if (!isRecord(value)) {
+  let materialized: JsonValue;
+  try {
+    materialized = snapshotRappJsonValue(value);
+  } catch (error) {
+    return fail(
+      'key-set',
+      '1',
+      error instanceof Error ? error.message : 'frame could not be snapshotted',
+    );
+  }
+  if (!isRecord(materialized)) {
     return fail('key-set', '1', 'frame is not a JSON object');
   }
-  if (Object.keys(value).sort().join('\0') !== FRAME_KEY_SET) {
+  const snapshot = materialized;
+  if (Object.keys(snapshot).sort().join('\0') !== FRAME_KEY_SET) {
     return fail('key-set', '1', 'frame does not have the exact eleven-key RAPP/1 envelope');
   }
-  if (value.spec !== RAPP_FRAME_SPEC) {
+  if (snapshot.spec !== RAPP_FRAME_SPEC) {
     return fail('spec', '1', 'spec is not rapp/1');
   }
-  if (!isRappFrameKind(value.kind)) {
+  if (!isRappFrameKind(snapshot.kind)) {
     return fail('kind', '1', 'kind does not match the RAPP/1 noun.verb grammar');
   }
-  const streamFamily = rappStreamFamily(value.stream_id);
+  const streamFamily = rappStreamFamily(snapshot.stream_id);
   if (streamFamily === null) {
     return fail('stream-id', '1', 'stream_id does not match a registered RAPP stream form');
   }
   if (selectedProfile.mode === 'authority') {
     const registeredFamily = protocolAuthorityFamilyForKind(
       selectedProfile.authority!,
-      value.kind,
+      snapshot.kind,
     );
     if (registeredFamily === null) {
       const identity = protocolAuthorityIdentity(selectedProfile.authority!);
       return fail(
         'unregistered-kind',
         '1',
-        `kind ${value.kind} is not registered by accepted authority ${identity.revision}`,
+        `kind ${snapshot.kind} is not registered by accepted authority ${identity.revision}`,
       );
     }
     if (registeredFamily !== streamFamily) {
       return fail(
         'kind-family',
         '1',
-        `registered ${registeredFamily} kind ${value.kind} cannot use a ${streamFamily} stream`,
+        `registered ${registeredFamily} kind ${snapshot.kind} cannot use a ${streamFamily} stream`,
       );
     }
   } else if (streamFamily !== selectedProfile.family) {
     return fail(
       'kind-family',
       '1',
-      `legacy ${selectedProfile.family} kind ${value.kind} cannot use a ${streamFamily} stream`,
+      `legacy ${selectedProfile.family} kind ${snapshot.kind} cannot use a ${streamFamily} stream`,
     );
   }
-  if (value.kind !== selectedProfile.kind) {
+  if (snapshot.kind !== selectedProfile.kind) {
     return fail(
       'profile-kind',
       '1',
-      `profile ${selectedProfile.name} verifies ${selectedProfile.kind}, not ${value.kind}`,
+      `profile ${selectedProfile.name} verifies ${selectedProfile.kind}, not ${snapshot.kind}`,
     );
   }
   if (
-    typeof value.seq !== 'number'
-    || !Number.isSafeInteger(value.seq)
-    || value.seq < 0
-    || value.seq > RAPP_UINT53_MAX
+    typeof snapshot.seq !== 'number'
+    || !Number.isSafeInteger(snapshot.seq)
+    || snapshot.seq < 0
+    || snapshot.seq > RAPP_UINT53_MAX
   ) {
     return fail('seq', '1', 'seq is not a uint53');
   }
-  if (!isRappFrameUtc(value.utc)) {
+  if (!isRappFrameUtc(snapshot.utc)) {
     return fail('utc', '1', 'utc is not a calendar-valid fixed-width RFC 3339 timestamp');
   }
-  if (!isRecord(value.payload)) {
+  if (!isRecord(snapshot.payload)) {
     return fail('payload', '1', 'payload is not a JSON object');
   }
-  if (typeof value.payload_hash !== 'string' || !HEX64.test(value.payload_hash)) {
+  if (typeof snapshot.payload_hash !== 'string' || !HEX64.test(snapshot.payload_hash)) {
     return fail('payload-hash-format', '1', 'payload_hash is not 64 lowercase hex');
   }
-  if (typeof value.frame_hash !== 'string' || !HEX64.test(value.frame_hash)) {
+  if (typeof snapshot.frame_hash !== 'string' || !HEX64.test(snapshot.frame_hash)) {
     return fail('frame-hash-format', '1', 'frame_hash is not 64 lowercase hex');
   }
-  if (value.prev !== null && (typeof value.prev !== 'string' || !HEX64.test(value.prev))) {
+  if (
+    snapshot.prev !== null
+    && (typeof snapshot.prev !== 'string' || !HEX64.test(snapshot.prev))
+  ) {
     return fail('prev-format', '1', 'prev is not null or 64 lowercase hex');
   }
   if (
-    value.prev_wave !== null
-    && (typeof value.prev_wave !== 'string' || !HEX64.test(value.prev_wave))
+    snapshot.prev_wave !== null
+    && (typeof snapshot.prev_wave !== 'string' || !HEX64.test(snapshot.prev_wave))
   ) {
     return fail('prev-wave-format', '1', 'prev_wave is not null or 64 lowercase hex');
   }
-  if (value.sig !== null && typeof value.sig !== 'string') {
+  if (snapshot.sig !== null && typeof snapshot.sig !== 'string') {
     return fail('signature-format', '1', 'sig is not null or a JWS string');
   }
   try {
-    rappCanonicalJson(value as JsonValue);
+    rappCanonicalJson(snapshot);
   } catch (error) {
     return fail(
       'canonical',
@@ -896,29 +898,38 @@ function verifyThroughWave<
       error instanceof Error ? error.message : 'frame is outside the RAPP/1 canonical domain',
     );
   }
-  const payloadProblem = profilePayloadProblem(profile, value.payload as JsonObject);
+  const payload = snapshot.payload as JsonObject;
+  const payloadProblem = profilePayloadProblem(profile, payload);
   if (payloadProblem !== null) {
     return fail('payload-profile', '1', payloadProblem);
   }
-  if (value.stream_id !== streamIdOfRecord) {
+  if (snapshot.stream_id !== streamIdOfRecord) {
     return fail('stream-binding', '1a', 'stream_id does not match the stream of record');
   }
   if (
     predecessorStreamId !== undefined
-    && value.stream_id !== predecessorStreamId
+    && snapshot.stream_id !== predecessorStreamId
   ) {
     return fail('stream-binding', '1a', 'predecessor belongs to a different stream');
   }
-  if (value.payload_hash !== rappH(RAPP_PARTICLE_DOMAIN, value.payload as JsonObject)) {
+  const payloadCanonical = rappCanonicalJson(payload);
+  if (
+    snapshot.payload_hash
+    !== rappHashCanonical(RAPP_PARTICLE_DOMAIN, payloadCanonical)
+  ) {
     return fail('payload-hash', '2', 'payload_hash does not cover the payload');
   }
-  const frame = value as unknown as RappFrame<TPayload, TKind>;
-  if (value.frame_hash !== rappFrameDigest(frame)) {
+  const frame = snapshot as unknown as RappFrame<TPayload, TKind>;
+  const waveCanonical = rappCanonicalJson(rappFrameWavePreimage(frame));
+  if (
+    snapshot.frame_hash
+    !== rappHashCanonical(RAPP_WAVE_DOMAIN, waveCanonical)
+  ) {
     return fail('frame-hash', '3', 'frame_hash does not cover the wave preimage');
   }
   return {
     ok: true,
-    frame: immutableRappValue(rappFrameToJson(frame)) as unknown as RappFrame<TPayload, TKind>,
+    frame,
     trust: trustFor(
       profile as unknown as RappFrameProfile<JsonObject, string>,
       'unbound',

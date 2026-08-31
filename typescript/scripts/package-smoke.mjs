@@ -251,6 +251,7 @@ try {
     process.stdout.write(JSON.stringify({
       output: Buffer.concat(chunks).toString("utf8"),
       code: exit.code,
+      complete: cleanup.complete,
       containmentEmpty: cleanup.containmentEmpty,
       reaped: cleanup.reaped,
     }));
@@ -264,6 +265,7 @@ try {
   if (
     processTreeStatus.output !== "managed-tree-package-ok" ||
     processTreeStatus.code !== 0 ||
+    processTreeStatus.complete !== true ||
     processTreeStatus.containmentEmpty !== true ||
     processTreeStatus.reaped !== true
   ) {

@@ -58,12 +58,15 @@ type PosixEvent =
 interface TargetExitState {
   promise: Promise<ManagedProcessExit>;
   current(): ManagedProcessExit | undefined;
+  failure(): Error | undefined;
   resolve(exit: ManagedProcessExit): void;
   reject(error: Error): void;
 }
 
 function targetExitState(): TargetExitState {
   let current: ManagedProcessExit | undefined;
+  let failure: Error | undefined;
+  let settled = false;
   let resolvePromise!: (exit: ManagedProcessExit) => void;
   let rejectPromise!: (error: Error) => void;
   const promise = new Promise<ManagedProcessExit>((resolve, reject) => {
@@ -77,13 +80,18 @@ function targetExitState(): TargetExitState {
   return {
     promise,
     current: () => current,
+    failure: () => failure,
     resolve: (exit) => {
-      if (current) return;
+      if (settled) return;
+      settled = true;
       current = exit;
       resolvePromise(exit);
     },
     reject: (error) => {
-      if (!current) rejectPromise(error);
+      if (settled) return;
+      settled = true;
+      failure = error;
+      rejectPromise(error);
     },
   };
 }
@@ -399,6 +407,35 @@ class PosixManagedProcessTree extends ManagedTreeBase {
     return this.observeEmpty(deadline);
   }
 
+  private cleanupResult(
+    graceful: boolean,
+    forced: boolean,
+  ): ManagedProcessCleanup {
+    const targetExit = this.targetExit.current();
+    const targetFailure = this.targetExit.failure();
+    const fallbackExit = this.helperExit.current() ?? {
+      code: null,
+      signal: null,
+    };
+    return {
+      complete: true,
+      exit: targetExit ?? fallbackExit,
+      ...(targetFailure
+        ? {
+            targetError: {
+              name: targetFailure.name,
+              message: targetFailure.message,
+            },
+          }
+        : {}),
+      graceful,
+      forced,
+      reaped: true,
+      containmentEmpty: true,
+      quarantineRequired: false,
+    };
+  }
+
   protected async terminateOnce(): Promise<ManagedProcessCleanup> {
     let forced = false;
     try {
@@ -411,12 +448,8 @@ class PosixManagedProcessTree extends ManagedTreeBase {
         const exit = this.targetExit.current() ?? this.helperExit.current()!;
         this.unbindAbort();
         return {
+          ...this.cleanupResult(true, false),
           exit,
-          graceful: true,
-          forced: false,
-          reaped: true,
-          containmentEmpty: true,
-          quarantineRequired: false,
         };
       }
       const gracefulDeadline = Date.now() + this.options.gracefulTerminationMs;
@@ -432,27 +465,15 @@ class PosixManagedProcessTree extends ManagedTreeBase {
           Date.now() + this.options.forceTerminationMs,
         )
       ) {
-        const exit = await this.wait();
         this.unbindAbort();
-        return {
-          exit,
-          graceful: true,
-          forced: false,
-          reaped: true,
-          containmentEmpty: true,
-          quarantineRequired: false,
-        };
+        return this.cleanupResult(true, false);
       }
       if (await this.observeEmpty(gracefulDeadline)) {
         const exit = this.targetExit.current() ?? this.helperExit.current()!;
         this.unbindAbort();
         return {
+          ...this.cleanupResult(true, false),
           exit,
-          graceful: true,
-          forced: false,
-          reaped: true,
-          containmentEmpty: true,
-          quarantineRequired: false,
         };
       }
 
@@ -468,16 +489,8 @@ class PosixManagedProcessTree extends ManagedTreeBase {
           this,
         );
       }
-      const exit = await this.wait();
       this.unbindAbort();
-      return {
-        exit,
-        graceful: false,
-        forced,
-        reaped: true,
-        containmentEmpty: true,
-        quarantineRequired: false,
-      };
+      return this.cleanupResult(false, forced);
     } catch (error) {
       if (error instanceof ProcessTreeCleanupError) throw error;
       throw new ProcessTreeCleanupError(

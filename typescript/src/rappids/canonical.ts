@@ -28,6 +28,34 @@ import { types as utilTypes } from 'node:util';
 
 import type { JsonObject, JsonValue } from './types.js';
 
+// Post-import poisoning is in scope and covered by tests. Same-realm intrinsic
+// replacement before module initialization is unsupported without a fresh
+// realm from which to obtain authenticated ECMAScript intrinsics.
+const SAFE_OWN_KEYS = Reflect.ownKeys;
+const SAFE_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
+const SAFE_HAS_OWN = Object.hasOwn;
+const SAFE_OBJECT_KEYS = Object.keys;
+const SAFE_REFLECT_APPLY = Reflect.apply;
+const SAFE_ARRAY_SORT = Array.prototype.sort;
+const SAFE_ARRAY_JOIN = Array.prototype.join;
+const SAFE_ARRAY_REVERSE = Array.prototype.reverse;
+
+function safeSort(values: string[]): string[] {
+  return SAFE_REFLECT_APPLY(SAFE_ARRAY_SORT, values, []) as string[];
+}
+
+function safeJoin(values: readonly string[], separator: string): string {
+  return SAFE_REFLECT_APPLY(
+    SAFE_ARRAY_JOIN,
+    values,
+    [separator],
+  ) as string;
+}
+
+function safeReverse<TValue>(values: TValue[]): TValue[] {
+  return SAFE_REFLECT_APPLY(SAFE_ARRAY_REVERSE, values, []) as TValue[];
+}
+
 /**
  * Domain separation, in the shape RAPP/1 §5 already established and
  * `src/identity/name.ts` already uses (`rapp/1:rappid`). New domains are added
@@ -48,10 +76,20 @@ export function canonicalJson(value: JsonValue): string {
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return canonicalNumber(value);
   if (typeof value === 'string') return canonicalString(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  const keys = Object.keys(value).sort();
-  const body = keys.map((key) => `${canonicalString(key)}:${canonicalJson(value[key])}`);
-  return `{${body.join(',')}}`;
+  if (Array.isArray(value)) {
+    const items: string[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      items[index] = canonicalJson(value[index]);
+    }
+    return `[${safeJoin(items, ',')}]`;
+  }
+  const keys = safeSort(SAFE_OBJECT_KEYS(value));
+  const body: string[] = [];
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    body[index] = `${canonicalString(key)}:${canonicalJson(value[key])}`;
+  }
+  return `{${safeJoin(body, ',')}}`;
 }
 
 /**
@@ -138,7 +176,9 @@ export function assertRappCanonicalValue(
     return;
   }
   if (Array.isArray(value)) {
-    for (const item of value) assertRappCanonicalValue(item, depth + 1);
+    for (let index = 0; index < value.length; index += 1) {
+      assertRappCanonicalValue(value[index], depth + 1);
+    }
     return;
   }
   if (
@@ -151,9 +191,12 @@ export function assertRappCanonicalValue(
   ) {
     throw new TypeError(`RAPP/1 value is not I-JSON: ${typeof value}`);
   }
-  for (const [key, item] of Object.entries(value)) {
+  const object = value as Record<string, unknown>;
+  const keys = SAFE_OBJECT_KEYS(object);
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
     validateRappString(key);
-    assertRappCanonicalValue(item, depth + 1);
+    assertRappCanonicalValue(object[key], depth + 1);
   }
 }
 
@@ -163,8 +206,26 @@ export function assertRappCanonicalValue(
  * traps can present mutually inconsistent objects during one verification.
  */
 export function snapshotRappJsonValue(value: unknown): JsonValue {
-  const snapshots = new WeakMap<object, JsonValue>();
-  const active = new WeakSet<object>();
+  const snapshotObjects: object[] = [];
+  const snapshotValues: JsonValue[] = [];
+  const active: object[] = [];
+
+  const snapshotFor = (object: object): JsonValue | undefined => {
+    for (let index = 0; index < snapshotObjects.length; index += 1) {
+      if (snapshotObjects[index] === object) return snapshotValues[index];
+    }
+    return undefined;
+  };
+  const isActive = (object: object): boolean => {
+    for (let index = 0; index < active.length; index += 1) {
+      if (active[index] === object) return true;
+    }
+    return false;
+  };
+  const remember = (object: object, snapshot: JsonValue): void => {
+    snapshotObjects[snapshotObjects.length] = object;
+    snapshotValues[snapshotValues.length] = snapshot;
+  };
 
   const visit = (current: unknown, path: string): JsonValue => {
     if (
@@ -181,34 +242,37 @@ export function snapshotRappJsonValue(value: unknown): JsonValue {
     if (utilTypes.isProxy(current)) {
       throw new TypeError(`${path} is a Proxy; RAPP verification requires stable descriptors`);
     }
-    if (active.has(current)) throw new TypeError(`${path} contains a JSON cycle`);
-    const cached = snapshots.get(current);
+    if (isActive(current)) throw new TypeError(`${path} contains a JSON cycle`);
+    const cached = snapshotFor(current);
     if (cached !== undefined) return cached;
 
-    const keys = Reflect.ownKeys(current);
-    if (keys.some((key) => typeof key === 'symbol')) {
-      throw new TypeError(`${path} contains a symbol key`);
-    }
+    const keys = SAFE_OWN_KEYS(current);
     const stringKeys = keys as string[];
-    if (new Set(stringKeys).size !== stringKeys.length) {
-      throw new TypeError(`${path} contains duplicate own keys`);
-    }
-    const descriptors = new Map<string, PropertyDescriptor>();
-    for (const key of stringKeys) {
-      const descriptor = Object.getOwnPropertyDescriptor(current, key);
+    const descriptors = Object.create(null) as Record<string, PropertyDescriptor>;
+    const seen = Object.create(null) as Record<string, true>;
+    for (let index = 0; index < keys.length; index += 1) {
+      const key = keys[index];
+      if (typeof key === 'symbol') {
+        throw new TypeError(`${path} contains a symbol key`);
+      }
+      if (SAFE_GET_OWN_PROPERTY_DESCRIPTOR(seen, key) !== undefined) {
+        throw new TypeError(`${path} contains duplicate own keys`);
+      }
+      seen[key] = true;
+      const descriptor = SAFE_GET_OWN_PROPERTY_DESCRIPTOR(current, key);
       if (descriptor === undefined) {
         throw new TypeError(`${path}.${key} changed shape during snapshot`);
       }
-      if (!Object.hasOwn(descriptor, 'value')) {
+      if (!SAFE_HAS_OWN(descriptor, 'value')) {
         throw new TypeError(`${path}.${key} is an accessor property`);
       }
-      descriptors.set(key, descriptor);
+      descriptors[key] = descriptor;
     }
 
-    active.add(current);
+    active[active.length] = current;
     try {
       if (Array.isArray(current)) {
-        const lengthDescriptor = descriptors.get('length');
+        const lengthDescriptor = descriptors.length;
         if (
           lengthDescriptor === undefined
           || typeof lengthDescriptor.value !== 'number'
@@ -218,26 +282,26 @@ export function snapshotRappJsonValue(value: unknown): JsonValue {
           throw new TypeError(`${path}.length is invalid`);
         }
         const length = lengthDescriptor.value;
-        const indexKeys = stringKeys.filter((key) => key !== 'length');
-        if (
-          indexKeys.some((key) =>
-            !/^(0|[1-9]\d*)$/.test(key)
-            || Number(key) >= length,
-          )
-        ) {
-          throw new TypeError(`${path} contains a non-index array property`);
+        let indexKeyCount = 0;
+        for (let index = 0; index < stringKeys.length; index += 1) {
+          const key = stringKeys[index];
+          if (key === 'length') continue;
+          indexKeyCount += 1;
+          if (!/^(0|[1-9]\d*)$/.test(key) || Number(key) >= length) {
+            throw new TypeError(`${path} contains a non-index array property`);
+          }
         }
-        if (indexKeys.length !== length) {
+        if (indexKeyCount !== length) {
           throw new TypeError(`${path} contains an array hole`);
         }
         const result: JsonValue[] = [];
-        snapshots.set(current, result);
+        remember(current, result);
         for (let index = 0; index < length; index += 1) {
-          const descriptor = descriptors.get(String(index));
+          const descriptor = descriptors[String(index)];
           if (descriptor === undefined || descriptor.enumerable !== true) {
             throw new TypeError(`${path}[${index}] is missing or non-enumerable`);
           }
-          result.push(visit(descriptor.value, `${path}[${index}]`));
+          result[index] = visit(descriptor.value, `${path}[${index}]`);
         }
         return Object.freeze(result) as unknown as JsonValue[];
       }
@@ -247,9 +311,10 @@ export function snapshotRappJsonValue(value: unknown): JsonValue {
         throw new TypeError(`${path} is not a plain JSON object`);
       }
       const result = Object.create(null) as JsonObject;
-      snapshots.set(current, result);
-      for (const key of stringKeys) {
-        const descriptor = descriptors.get(key)!;
+      remember(current, result);
+      for (let index = 0; index < stringKeys.length; index += 1) {
+        const key = stringKeys[index];
+        const descriptor = descriptors[key];
         if (descriptor.enumerable !== true) {
           throw new TypeError(`${path}.${key} is non-enumerable`);
         }
@@ -257,7 +322,7 @@ export function snapshotRappJsonValue(value: unknown): JsonValue {
       }
       return Object.freeze(result);
     } finally {
-      active.delete(current);
+      active.length -= 1;
     }
   };
 
@@ -339,10 +404,10 @@ export function parseRappJson(source: string): JsonValue {
         Number(left[left.length - 1 - index] ?? 0)
         + Number(right[right.length - 1 - index] ?? 0)
         + carry;
-      result.push(String(sum % 10));
+      result[result.length] = String(sum % 10);
       carry = Math.floor(sum / 10);
     }
-    return result.reverse().join('').replace(/^0+/, '') || '0';
+    return safeJoin(safeReverse(result), '').replace(/^0+/, '') || '0';
   };
   const subtractMagnitude = (left: string, right: string): string => {
     let borrow = 0;
@@ -358,9 +423,9 @@ export function parseRappJson(source: string): JsonValue {
       } else {
         borrow = 0;
       }
-      result.push(String(difference));
+      result[result.length] = String(difference);
     }
-    return result.reverse().join('').replace(/^0+/, '') || '0';
+    return safeJoin(safeReverse(result), '').replace(/^0+/, '') || '0';
   };
   const addSigned = (
     left: SignedDecimalInteger,
@@ -439,7 +504,7 @@ export function parseRappJson(source: string): JsonValue {
         return result;
       }
       for (;;) {
-        result.push(value(depth + 1));
+        result[result.length] = value(depth + 1);
         whitespace();
         if (source[offset] === ']') {
           offset += 1;
@@ -455,7 +520,7 @@ export function parseRappJson(source: string): JsonValue {
       offset += 1;
       whitespace();
       const result: JsonObject = Object.create(null) as JsonObject;
-      const keys = new Set<string>();
+      const keys = Object.create(null) as Record<string, true>;
       if (source[offset] === '}') {
         offset += 1;
         return result;
@@ -463,8 +528,10 @@ export function parseRappJson(source: string): JsonValue {
       for (;;) {
         whitespace();
         const key = stringValue();
-        if (keys.has(key)) throw new TypeError(`duplicate JSON member: ${key}`);
-        keys.add(key);
+        if (SAFE_GET_OWN_PROPERTY_DESCRIPTOR(keys, key) !== undefined) {
+          throw new TypeError(`duplicate JSON member: ${key}`);
+        }
+        keys[key] = true;
         whitespace();
         if (source[offset] !== ':') throw new TypeError(`expected colon at offset ${offset}`);
         offset += 1;
@@ -512,13 +579,21 @@ function renderRappCanonical(value: JsonValue): string {
   if (typeof value === 'number') return JSON.stringify(value);
   if (typeof value === 'string') return JSON.stringify(value);
   if (Array.isArray(value)) {
-    return `[${value.map((item) => renderRappCanonical(item)).join(',')}]`;
+    const items: string[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      items[index] = renderRappCanonical(value[index]);
+    }
+    return `[${safeJoin(items, ',')}]`;
   }
-  // Array.prototype.sort without a comparator orders by UTF-16 code units,
-  // matching RFC 8785 even when a valid key is outside the BMP.
-  return `{${Object.keys(value).sort().map((key) =>
-    `${JSON.stringify(key)}:${renderRappCanonical(value[key])}`,
-  ).join(',')}}`;
+  // The captured default sort orders by UTF-16 code units, matching RFC 8785
+  // even when a valid key is outside the BMP.
+  const keys = safeSort(SAFE_OBJECT_KEYS(value));
+  const entries: string[] = [];
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    entries[index] = `${JSON.stringify(key)}:${renderRappCanonical(value[key])}`;
+  }
+  return `{${safeJoin(entries, ',')}}`;
 }
 
 /** RAPP/1's exact-value canonical profile: UTF-8, sorted keys, no whitespace. */

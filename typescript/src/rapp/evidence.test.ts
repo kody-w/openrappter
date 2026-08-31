@@ -152,6 +152,27 @@ describe('RAPP/1 evidence helpers and trust', () => {
       .toEqual([genesis, child]);
   });
 
+  it('returns typed refusal rather than throwing for an authority Proxy', () => {
+    const proxy = new Proxy(ACCEPTED_RAPP_PROTOCOL_AUTHORITY, {
+      get(target, property, receiver) {
+        if (property === 'revision') return 'forged';
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    let result: ReturnType<typeof verifyRappEvidenceFrame> | undefined;
+    expect(() => {
+      result = verifyRappEvidenceFrame(genesis, {
+        head: null,
+        streamIdOfRecord: STREAM_ID,
+        authority: proxy,
+      });
+    }).not.toThrow();
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'authority-policy', step: '1' },
+    });
+  });
+
   it('is deterministic and retry-safe for identical selected authority and head', () => {
     const retry = buildRappEvidenceFrame({
       streamId: STREAM_ID,

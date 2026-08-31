@@ -8,7 +8,6 @@ import {
 } from './authority.js';
 import {
   RappFrameError,
-  assertRappFrameChain,
   buildRappFrame,
   createRappFrameProfile,
   isRappFrameKind,
@@ -70,16 +69,16 @@ const PAYLOAD_KEYS = [
   'data_hash',
   'reference_hashes',
   'protocol_revision',
-].sort().join('\0');
-const REVISION_KEYS = ['revision', 'frame_hash', 'payload_hash'].sort().join('\0');
-const EVIDENCE_PAYLOAD_OPTION_KEYS = new Set([
+] as const;
+const REVISION_KEYS = ['revision', 'frame_hash', 'payload_hash'] as const;
+const EVIDENCE_PAYLOAD_OPTION_KEYS = [
   'eventKind',
   'subject',
   'dataHash',
   'referenceHashes',
   'authority',
-]);
-const EVIDENCE_FRAME_INPUT_KEYS = new Set([
+] as const;
+const EVIDENCE_FRAME_INPUT_KEYS = [
   'streamId',
   'utc',
   'eventKind',
@@ -88,12 +87,15 @@ const EVIDENCE_FRAME_INPUT_KEYS = new Set([
   'referenceHashes',
   'head',
   'authority',
-]);
-const EVIDENCE_VERIFY_OPTION_KEYS = new Set([
+] as const;
+const EVIDENCE_VERIFY_OPTION_KEYS = [
   'head',
   'streamIdOfRecord',
   'authority',
-]);
+] as const;
+const SAFE_OWN_KEYS = Reflect.ownKeys;
+const SAFE_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
+const SAFE_HAS_OWN = Object.hasOwn;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return (
@@ -109,25 +111,65 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function evidenceOptionMap(
   value: unknown,
-  allowed: ReadonlySet<string>,
+  allowed: readonly string[],
   required: readonly string[],
   label: string,
 ): asserts value is Record<string, unknown> {
   if (!isRecord(value)) throw new TypeError(`${label} must be a plain object`);
-  for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== 'string' || !allowed.has(key)) {
+  const keys = SAFE_OWN_KEYS(value);
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    let supported = false;
+    if (typeof key === 'string') {
+      for (let allowedIndex = 0; allowedIndex < allowed.length; allowedIndex += 1) {
+        if (allowed[allowedIndex] === key) {
+          supported = true;
+          break;
+        }
+      }
+    }
+    if (!supported) {
       throw new TypeError(`${label} contains unsupported own key ${String(key)}`);
     }
+    const descriptor = SAFE_GET_OWN_PROPERTY_DESCRIPTOR(value, key as string);
+    if (descriptor === undefined || !SAFE_HAS_OWN(descriptor, 'value')) {
+      throw new TypeError(`${label}.${String(key)} must be an own data property`);
+    }
   }
-  for (const key of required) {
-    if (!Object.hasOwn(value, key)) {
+  for (let index = 0; index < required.length; index += 1) {
+    const key = required[index];
+    if (SAFE_GET_OWN_PROPERTY_DESCRIPTOR(value, key) === undefined) {
       throw new TypeError(`${label} is missing own key ${key}`);
     }
   }
 }
 
 function evidenceOwn(value: Record<string, unknown>, key: string): unknown {
-  return Object.hasOwn(value, key) ? value[key] : undefined;
+  const descriptor = SAFE_GET_OWN_PROPERTY_DESCRIPTOR(value, key);
+  return descriptor !== undefined && SAFE_HAS_OWN(descriptor, 'value')
+    ? descriptor.value
+    : undefined;
+}
+
+function hasExactOwnKeys(
+  value: object,
+  expected: readonly string[],
+): boolean {
+  const keys = SAFE_OWN_KEYS(value);
+  if (keys.length !== expected.length) return false;
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    if (typeof key !== 'string') return false;
+    let found = false;
+    for (let expectedIndex = 0; expectedIndex < expected.length; expectedIndex += 1) {
+      if (expected[expectedIndex] === key) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
+  }
+  return true;
 }
 
 function evidencePayloadProblem(
@@ -135,7 +177,7 @@ function evidencePayloadProblem(
   authority: ProtocolAuthority,
 ): string | null {
   const authorityIdentity = protocolAuthorityIdentity(authority);
-  if (Object.keys(payload).sort().join('\0') !== PAYLOAD_KEYS) {
+  if (!hasExactOwnKeys(payload, PAYLOAD_KEYS)) {
     return 'openrappter evidence payload does not have its exact key set';
   }
   if (payload.schema !== OPENRAPPTER_EVIDENCE_SCHEMA) {
@@ -154,21 +196,19 @@ function evidencePayloadProblem(
     return 'evidence reference_hashes is not an array';
   }
   const references: string[] = [];
-  for (const [index, hash] of payload.reference_hashes.entries()) {
+  for (let index = 0; index < payload.reference_hashes.length; index += 1) {
+    const hash = payload.reference_hashes[index];
     if (typeof hash !== 'string' || !HEX64.test(hash)) {
       return `evidence reference_hashes[${index}] is not 64 lowercase hex`;
     }
-    references.push(hash);
-  }
-  if (
-    references.join('\0')
-    !== [...new Set(references)].sort().join('\0')
-  ) {
-    return 'evidence reference_hashes must be sorted and de-duplicated';
+    references[index] = hash;
+    if (index > 0 && references[index - 1] >= hash) {
+      return 'evidence reference_hashes must be sorted and de-duplicated';
+    }
   }
 
   const revision = payload.protocol_revision;
-  if (!isRecord(revision) || Object.keys(revision).sort().join('\0') !== REVISION_KEYS) {
+  if (!isRecord(revision) || !hasExactOwnKeys(revision, REVISION_KEYS)) {
     return 'evidence protocol_revision does not have its exact key set';
   }
   if (revision.revision !== authorityIdentity.revision) {
@@ -195,6 +235,12 @@ function validateEvidencePayload(
     : { ok: false, error };
 }
 
+const EVIDENCE_PROFILE_AUTHORITIES: ProtocolAuthority[] = [];
+const EVIDENCE_PROFILES: Array<Readonly<RappFrameProfile<
+  OpenRappterEvidencePayload,
+  typeof OPENRAPPTER_EVIDENCE_FRAME_KIND
+>>> = [];
+
 export function createOpenRappterEvidenceProfile(
   authority: ProtocolAuthority = ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
 ): Readonly<RappFrameProfile<
@@ -204,8 +250,13 @@ export function createOpenRappterEvidenceProfile(
   if (!isSelectedProtocolAuthority(authority)) {
     throw new TypeError('evidence profiles require an immutable selected ProtocolAuthority');
   }
+  for (let index = 0; index < EVIDENCE_PROFILE_AUTHORITIES.length; index += 1) {
+    if (EVIDENCE_PROFILE_AUTHORITIES[index] === authority) {
+      return EVIDENCE_PROFILES[index];
+    }
+  }
   const authorityIdentity = protocolAuthorityIdentity(authority);
-  return createRappFrameProfile({
+  const profile = createRappFrameProfile({
     name: `${OPENRAPPTER_EVIDENCE_SCHEMA}:${authorityIdentity.revision}`,
     kind: OPENRAPPTER_EVIDENCE_FRAME_KIND,
     authority,
@@ -213,6 +264,9 @@ export function createOpenRappterEvidenceProfile(
     uniquePayloads: true,
     validatePayload: (payload) => validateEvidencePayload(payload, authority),
   });
+  EVIDENCE_PROFILE_AUTHORITIES[EVIDENCE_PROFILE_AUTHORITIES.length] = authority;
+  EVIDENCE_PROFILES[EVIDENCE_PROFILES.length] = profile;
+  return profile;
 }
 
 export const OPENRAPPTER_EVIDENCE_PROFILE =
@@ -244,7 +298,12 @@ export function buildOpenRappterEvidencePayload(input: {
       referenceHashes !== undefined
       && (
         !Array.isArray(referenceHashes)
-        || referenceHashes.some((value) => typeof value !== 'string')
+        || (() => {
+          for (let index = 0; index < referenceHashes.length; index += 1) {
+            if (typeof referenceHashes[index] !== 'string') return true;
+          }
+          return false;
+        })()
       )
     )
   ) {
@@ -257,12 +316,18 @@ export function buildOpenRappterEvidencePayload(input: {
   if (!isSelectedProtocolAuthority(authority)) {
     throw new TypeError('evidence payloads require an immutable selected ProtocolAuthority');
   }
+  const references: string[] = [];
+  if (referenceHashes !== undefined) {
+    for (let index = 0; index < referenceHashes.length; index += 1) {
+      references[index] = referenceHashes[index] as string;
+    }
+  }
   const payload: OpenRappterEvidencePayload = {
     schema: OPENRAPPTER_EVIDENCE_SCHEMA,
     event_kind: eventKind,
     subject,
     data_hash: dataHash,
-    reference_hashes: [...(referenceHashes ?? [])],
+    reference_hashes: references,
     protocol_revision: { ...protocolAuthorityIdentity(authority) },
   };
   const problem = evidencePayloadProblem(payload, authority);
@@ -339,13 +404,29 @@ export function verifyRappEvidenceFrame(
     };
   }
   const rawAuthority = evidenceOwn(options, 'authority');
-  return verifyRappFrame(
-    value,
-    createOpenRappterEvidenceProfile(
+  let profile: Readonly<RappFrameProfile<
+    OpenRappterEvidencePayload,
+    typeof OPENRAPPTER_EVIDENCE_FRAME_KIND
+  >>;
+  try {
+    profile = createOpenRappterEvidenceProfile(
       rawAuthority === undefined
         ? ACCEPTED_RAPP_PROTOCOL_AUTHORITY
         : rawAuthority as ProtocolAuthority,
-    ),
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: new RappFrameError(
+        'authority-policy',
+        '1',
+        error instanceof Error ? error.message : 'evidence authority is invalid',
+      ),
+    };
+  }
+  return verifyRappFrame(
+    value,
+    profile,
     {
       head: evidenceOwn(options, 'head') as RappFrameHead | null,
       streamIdOfRecord: evidenceOwn(options, 'streamIdOfRecord') as string,
@@ -370,7 +451,19 @@ export function verifyRappEvidenceChain(
   values: readonly unknown[],
   policy: RappChainTrustPolicy,
 ): RappFrameChainVerification<OpenRappterEvidenceFrame> {
-  const authority = rappChainTrustAuthority(policy);
+  let authority: ProtocolAuthority;
+  try {
+    authority = rappChainTrustAuthority(policy);
+  } catch (error) {
+    return {
+      ok: false,
+      error: new RappFrameError(
+        'authority-policy',
+        '1',
+        error instanceof Error ? error.message : 'evidence trust policy is invalid',
+      ),
+    };
+  }
   return verifyRappFrameChain(
     values,
     createOpenRappterEvidenceProfile(authority),
@@ -382,10 +475,7 @@ export function assertRappEvidenceChain(
   values: readonly unknown[],
   policy: RappChainTrustPolicy,
 ): readonly OpenRappterEvidenceFrame[] {
-  const authority = rappChainTrustAuthority(policy);
-  return assertRappFrameChain(
-    values,
-    createOpenRappterEvidenceProfile(authority),
-    policy,
-  );
+  const result = verifyRappEvidenceChain(values, policy);
+  if (!result.ok) throw result.error;
+  return result.frames;
 }

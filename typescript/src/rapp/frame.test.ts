@@ -24,6 +24,7 @@ import {
   ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
   ProtocolAuthority,
   RAPP_ACCEPTED_BODY_PULSE_PROFILE,
+  RAPP_ACCEPTED_BODY_STREAM_PROFILE,
   RAPP_FRAME_KEYS,
   RAPP_UINT53_MAX,
   RappFrameError,
@@ -35,6 +36,7 @@ import {
   isSelectedProtocolAuthority,
   protocolAuthorityDetails,
   protocolAuthorityFamilyForKind,
+  protocolAuthorityRegisteredKinds,
   rappFrameDigest,
   rappFrameToJson,
   rappFrameWavePreimage,
@@ -336,6 +338,120 @@ describe('RFC 8785 binary64 canonicalization', () => {
 });
 
 describe('registry-bound kind and family validation', () => {
+  it('survives post-import collection and iteration intrinsic poisoning', () => {
+    const mutations: Array<{
+      target: object;
+      key: PropertyKey;
+      descriptor: PropertyDescriptor | undefined;
+    }> = [];
+    const poison = (target: object, key: PropertyKey): void => {
+      mutations[mutations.length] = {
+        target,
+        key,
+        descriptor: Object.getOwnPropertyDescriptor(target, key),
+      };
+      Object.defineProperty(target, key, {
+        value() {
+          throw new Error(`poisoned ${String(key)}`);
+        },
+        configurable: true,
+        writable: true,
+      });
+    };
+
+    let family: string | null = 'body';
+    let resolved: ProtocolAuthority | null = ACCEPTED_RAPP_PROTOCOL_AUTHORITY;
+    let profileError: Error | null = null;
+    let verified: ReturnType<typeof verifyRappFrame> | null = null;
+    let chain: ReturnType<typeof verifyRappFrameChain> | null = null;
+    let evidenceRevision: string | null = null;
+    let registered: readonly string[] = [];
+    try {
+      poison(Map.prototype, 'has');
+      poison(Map.prototype, 'get');
+      poison(Map.prototype, 'keys');
+      poison(WeakMap.prototype, 'has');
+      poison(WeakMap.prototype, 'get');
+      poison(WeakSet.prototype, 'has');
+      poison(Object, 'hasOwn');
+      poison(Array.prototype, 'map');
+      poison(Array.prototype, 'filter');
+      poison(Array.prototype, 'some');
+      poison(Array.prototype, 'sort');
+      poison(Array.prototype, 'join');
+      poison(Array.prototype, 'includes');
+      poison(Array.prototype, 'find');
+      poison(Array.prototype, 'findIndex');
+      poison(Array.prototype, 'push');
+      poison(Array.prototype, 'reverse');
+      poison(Array.prototype, Symbol.iterator);
+
+      family = protocolAuthorityFamilyForKind(
+        ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
+        'body.dimension',
+      );
+      resolved = resolveProtocolAuthority('constructor');
+      registered = protocolAuthorityRegisteredKinds(
+        ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
+      );
+      profileError = captureError(() => createRappFrameProfile({
+        name: 'poisoned-forgery',
+        kind: 'body.dimension',
+      }));
+      verified = verifyRappFrame(
+        authority.frame,
+        RAPP_ACCEPTED_BODY_PULSE_PROFILE,
+        {
+          head: authority.predecessor,
+          streamIdOfRecord: authority.frame.stream_id,
+        },
+      );
+      const streamId = `rappid:@example/intrinsics:${'9'.repeat(64)}`;
+      const genesis = buildRappFrame({
+        kind: 'body.pulse',
+        streamId,
+        utc: '2026-08-30T20:00:00.000Z',
+        payload: { event: 'intrinsics' },
+        head: null,
+      }, RAPP_ACCEPTED_BODY_PULSE_PROFILE);
+      const policy = selectRappChainTrustPolicy({
+        trustedGenesis: {
+          streamId,
+          frameHash: genesis.frame_hash,
+          payloadHash: genesis.payload_hash,
+        },
+      });
+      chain = verifyRappFrameChain(
+        [genesis],
+        RAPP_ACCEPTED_BODY_STREAM_PROFILE,
+        policy,
+      );
+      evidenceRevision = buildOpenRappterEvidencePayload({
+        eventKind: 'install.verified',
+        subject: 'release:test',
+        dataHash: 'a'.repeat(64),
+      }).protocol_revision.revision;
+    } finally {
+      for (let index = mutations.length - 1; index >= 0; index -= 1) {
+        const mutation = mutations[index];
+        if (mutation.descriptor === undefined) {
+          delete (mutation.target as Record<PropertyKey, unknown>)[mutation.key];
+        } else {
+          Object.defineProperty(mutation.target, mutation.key, mutation.descriptor);
+        }
+      }
+    }
+
+    expect(family).toBeNull();
+    expect(resolved).toBeNull();
+    expect(registered).toContain('body.pulse');
+    expect(registered).not.toContain('body.dimension');
+    expect(profileError?.message).toMatch(/not registered/);
+    expect(verified).toMatchObject({ ok: true });
+    expect(chain).toMatchObject({ ok: true });
+    expect(evidenceRevision).toBe('rev-14');
+  });
+
   it('ignores Object.prototype pollution across authority, genesis, and option maps', () => {
     let family: string | null = null;
     let protoFamily: string | null = null;
@@ -657,6 +773,111 @@ describe('ordered intrinsic verification', () => {
   });
 });
 
+describe('registered mixed kinds and re-genesis refusal', () => {
+  const bodyStream = `rappid:@example/mixed:${'8'.repeat(64)}`;
+  const twinProfile = createRappFrameProfile<JsonObject, 'body.twin-pulse'>({
+    name: 'body-twin-pulse',
+    kind: 'body.twin-pulse',
+  });
+  const pulse = buildRappFrame({
+    kind: 'body.pulse',
+    streamId: bodyStream,
+    utc: '2026-08-30T20:00:00.000Z',
+    payload: { event: 'pulse' },
+    head: null,
+  }, RAPP_ACCEPTED_BODY_PULSE_PROFILE);
+  const twinPulse = buildRappFrame({
+    kind: 'body.twin-pulse',
+    streamId: bodyStream,
+    utc: '2026-08-30T20:00:01.000Z',
+    payload: { event: 'twin-pulse' },
+    head: pulse,
+  }, twinProfile);
+  const policy = selectRappChainTrustPolicy({
+    trustedGenesis: {
+      streamId: bodyStream,
+      frameHash: pulse.frame_hash,
+      payloadHash: pulse.payload_hash,
+    },
+  });
+
+  it('resolves the selected authority profile independently for each frame', () => {
+    expect(verifyRappFrameChain(
+      [pulse, twinPulse],
+      RAPP_ACCEPTED_BODY_STREAM_PROFILE,
+      policy,
+    )).toMatchObject({
+      ok: true,
+      head: { kind: 'body.twin-pulse' },
+      trust: { genesis: 'trusted', promotionGrade: false },
+    });
+  });
+
+  it('keeps the evidence/single-kind profile restricted to body.pulse', () => {
+    expect(verifyRappFrameChain(
+      [pulse, twinPulse],
+      RAPP_ACCEPTED_BODY_PULSE_PROFILE,
+      policy,
+    )).toMatchObject({
+      ok: false,
+      error: { code: 'profile-kind', step: '1', frameIndex: 1 },
+    });
+  });
+
+  it.each([
+    ['body.re-genesis', bodyStream],
+    ['memory.re-genesis', `${bodyStream}:session`],
+    ['swarm.re-genesis', 'net:re-genesis-test'],
+  ] as const)('refuses unsigned generic %s build and verification', (kind, streamId) => {
+    const profile = createRappFrameProfile<JsonObject, typeof kind>({
+      name: kind,
+      kind,
+    });
+    const frame = hashLegacyRappBodyFrame({
+      kind,
+      streamId,
+      seq: 0,
+      utc: '2026-08-30T20:00:00.000Z',
+      payload: {
+        migrated_from: {
+          stream_id: bodyStream,
+          terminal_hash: 'a'.repeat(64),
+        },
+      },
+      prev: null,
+    });
+    expect(verifyRappFrame(frame, profile, {
+      head: null,
+      streamIdOfRecord: streamId,
+    })).toMatchObject({
+      ok: false,
+      error: { code: 're-genesis-profile', step: '6' },
+    });
+    const reGenesisPolicy = selectRappChainTrustPolicy({
+      trustedGenesis: {
+        streamId,
+        frameHash: frame.frame_hash,
+        payloadHash: frame.payload_hash,
+      },
+    });
+    expect(verifyRappFrameChain(
+      [frame],
+      profile,
+      reGenesisPolicy,
+    )).toMatchObject({
+      ok: false,
+      error: { code: 're-genesis-profile', step: '6', frameIndex: 0 },
+    });
+    expect(() => buildRappFrame({
+      kind,
+      streamId,
+      utc: frame.utc,
+      payload: frame.payload,
+      head: null,
+    }, profile)).toThrow(/generic unsigned builders/);
+  });
+});
+
 describe('hostile programmatic frame snapshot', () => {
   const verify = (frame: unknown) => verifyRappFrame(
     frame,
@@ -894,6 +1115,74 @@ describe('trusted chain policy and duplicate ordering', () => {
       ok: false,
       error: { code: 'authority-policy', step: '1' },
     });
+  });
+
+  it('returns typed refusal for length-flipping chain Proxies', () => {
+    let lengthReads = 0;
+    const proxy = new Proxy([genesis], {
+      get(target, property, receiver) {
+        if (property === 'length') {
+          lengthReads += 1;
+          return lengthReads === 1 ? 1 : 2;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    let result: ReturnType<typeof verifyRappFrameChain> | undefined;
+    expect(() => {
+      result = verifyRappFrameChain(
+        proxy,
+        RAPP_ACCEPTED_BODY_STREAM_PROFILE,
+        policy,
+      );
+    }).not.toThrow();
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'key-set', step: '1' },
+    });
+    expect(lengthReads).toBe(0);
+  });
+
+  it('returns typed refusal for throwing getters and malformed chain arrays', () => {
+    let getterCalls = 0;
+    const accessor = [genesis];
+    Object.defineProperty(accessor, '0', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        getterCalls += 1;
+        throw new Error('must not execute');
+      },
+    });
+    expect(verifyRappFrameChain(
+      accessor,
+      RAPP_ACCEPTED_BODY_STREAM_PROFILE,
+      policy,
+    )).toMatchObject({ ok: false, error: { code: 'key-set', step: '1' } });
+    expect(getterCalls).toBe(0);
+
+    const hole = new Array(1);
+    expect(verifyRappFrameChain(
+      hole,
+      RAPP_ACCEPTED_BODY_STREAM_PROFILE,
+      policy,
+    )).toMatchObject({ ok: false, error: { code: 'key-set', step: '1' } });
+
+    const extra = [genesis] as unknown[] & { extra?: boolean };
+    extra.extra = true;
+    expect(verifyRappFrameChain(
+      extra,
+      RAPP_ACCEPTED_BODY_STREAM_PROFILE,
+      policy,
+    )).toMatchObject({ ok: false, error: { code: 'key-set', step: '1' } });
+
+    const symbol = [genesis] as unknown[] & Record<PropertyKey, unknown>;
+    symbol[Symbol('hidden')] = true;
+    expect(verifyRappFrameChain(
+      symbol,
+      RAPP_ACCEPTED_BODY_STREAM_PROFILE,
+      policy,
+    )).toMatchObject({ ok: false, error: { code: 'key-set', step: '1' } });
   });
 
   it('refuses a replacement genesis unless policy selects it', () => {

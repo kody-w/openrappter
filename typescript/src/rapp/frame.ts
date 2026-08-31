@@ -8,6 +8,7 @@ import {
   snapshotRappJsonValue,
 } from '../rappids/canonical.js';
 import type { JsonObject, JsonValue } from '../rappids/types.js';
+import { types as utilTypes } from 'node:util';
 import {
   ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
   isSelectedProtocolAuthority,
@@ -35,6 +36,13 @@ export const RAPP_FRAME_KEYS = [
 export const RAPP_UINT53_MAX = 2 ** 53 - 1;
 export const RAPP_FRAME_TIME_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+// Post-import intrinsic poisoning is in scope; same-realm poisoning before
+// this module initializes is unsupported because no JavaScript module can
+// authenticate already-replaced language intrinsics without a separate realm.
+const SAFE_OWN_KEYS = Reflect.ownKeys;
+const SAFE_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
+const SAFE_HAS_OWN = Object.hasOwn;
 
 export interface RappFrame<
   TPayload extends JsonObject = JsonObject,
@@ -67,27 +75,27 @@ export interface RappTrustAssessment {
 }
 
 const PROFILE_BRAND: unique symbol = Symbol('rapp-frame-profile');
-const PROFILE_OPTION_KEYS = new Set([
+const PROFILE_OPTION_KEYS = [
   'name',
   'kind',
   'authority',
   'signature',
   'validatePayload',
   'uniquePayloads',
-]);
-const LEGACY_PROFILE_OPTION_KEYS = new Set([
+] as const;
+const LEGACY_PROFILE_OPTION_KEYS = [
   'name',
   'kind',
   'family',
   'validatePayload',
   'uniquePayloads',
-]);
+] as const;
 interface RappFrameProfileRecord<
   TPayload extends JsonObject = JsonObject,
   TKind extends string = string,
 > {
   name: string;
-  kind: TKind;
+  kind: TKind | null;
   family: RappStreamFamily;
   authority: ProtocolAuthority | null;
   mode: 'authority' | 'legacy-integrity';
@@ -95,8 +103,8 @@ interface RappFrameProfileRecord<
   validatePayload?: RappFrameProfile<TPayload, TKind>['validatePayload'];
   uniquePayloads: boolean;
 }
-const PROFILE_RECORDS =
-  new WeakMap<object, RappFrameProfileRecord<JsonObject, string>>();
+const PROFILE_OBJECTS: object[] = [];
+const PROFILE_RECORDS: RappFrameProfileRecord<JsonObject, string>[] = [];
 
 export interface RappFrameProfile<
   TPayload extends JsonObject,
@@ -104,7 +112,7 @@ export interface RappFrameProfile<
 > {
   readonly [PROFILE_BRAND]: true;
   readonly name: string;
-  readonly kind: TKind;
+  readonly kind: TKind | null;
   readonly family: RappStreamFamily;
   readonly authority: ProtocolAuthority | null;
   readonly mode: 'authority' | 'legacy-integrity';
@@ -177,9 +185,8 @@ export function createRappFrameProfile<
     validatePayload: validatePayload as RappFrameProfile<TPayload, TKind>['validatePayload'],
     uniquePayloads: uniquePayloads ?? false,
   });
-  PROFILE_RECORDS.set(
-    profile,
-    frozenNullRecord({
+  PROFILE_OBJECTS[PROFILE_OBJECTS.length] = profile;
+  PROFILE_RECORDS[PROFILE_RECORDS.length] = frozenNullRecord({
       name,
       kind,
       family,
@@ -188,8 +195,7 @@ export function createRappFrameProfile<
       signature: (signature ?? 'unsigned-local') as 'unsigned-local',
       validatePayload: validatePayload as RappFrameProfile<JsonObject, string>['validatePayload'],
       uniquePayloads: uniquePayloads ?? false,
-    }) as RappFrameProfileRecord<JsonObject, string>,
-  );
+    }) as RappFrameProfileRecord<JsonObject, string>;
   return profile;
 }
 
@@ -217,7 +223,11 @@ export function createLegacyRappIntegrityProfile<
   if (
     typeof name !== 'string'
     || typeof kind !== 'string'
-    || !['body', 'memory', 'swarm'].includes(String(family))
+    || (
+      family !== 'body'
+      && family !== 'memory'
+      && family !== 'swarm'
+    )
   ) {
     throw new TypeError('legacy frame profile requires own name, kind, and family');
   }
@@ -238,9 +248,8 @@ export function createLegacyRappIntegrityProfile<
     validatePayload: validatePayload as RappFrameProfile<TPayload, TKind>['validatePayload'],
     uniquePayloads: uniquePayloads ?? false,
   });
-  PROFILE_RECORDS.set(
-    profile,
-    frozenNullRecord({
+  PROFILE_OBJECTS[PROFILE_OBJECTS.length] = profile;
+  PROFILE_RECORDS[PROFILE_RECORDS.length] = frozenNullRecord({
       name,
       kind,
       family: family as RappStreamFamily,
@@ -249,8 +258,7 @@ export function createLegacyRappIntegrityProfile<
       signature: 'unsigned-local',
       validatePayload: validatePayload as RappFrameProfile<JsonObject, string>['validatePayload'],
       uniquePayloads: uniquePayloads ?? false,
-    }) as RappFrameProfileRecord<JsonObject, string>,
-  );
+    }) as RappFrameProfileRecord<JsonObject, string>;
   return profile;
 }
 
@@ -262,6 +270,44 @@ export const RAPP_ACCEPTED_BODY_PULSE_PROFILE = createRappFrameProfile<
   kind: 'body.pulse',
   uniquePayloads: true,
 });
+
+function createAuthorityStreamProfile(
+  name: string,
+  family: RappStreamFamily,
+  authority: ProtocolAuthority,
+): Readonly<RappFrameProfile<JsonObject, string>> {
+  if (!isSelectedProtocolAuthority(authority)) {
+    throw new TypeError('stream profiles require an immutable selected ProtocolAuthority');
+  }
+  const profile = Object.freeze({
+    [PROFILE_BRAND]: true as const,
+    name,
+    kind: null,
+    family,
+    authority,
+    mode: 'authority' as const,
+    signature: 'unsigned-local' as const,
+    uniquePayloads: true,
+  });
+  PROFILE_OBJECTS[PROFILE_OBJECTS.length] = profile;
+  PROFILE_RECORDS[PROFILE_RECORDS.length] = frozenNullRecord({
+    name,
+    kind: null,
+    family,
+    authority,
+    mode: 'authority',
+    signature: 'unsigned-local',
+    uniquePayloads: true,
+  });
+  return profile;
+}
+
+/** Generic accepted body-stream verification; kind policy resolves per frame. */
+export const RAPP_ACCEPTED_BODY_STREAM_PROFILE = createAuthorityStreamProfile(
+  'rapp-accepted-body-stream',
+  'body',
+  ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
+);
 
 export type RappFrameVerificationStep = '1' | '1a' | '2' | '3' | '4' | '5' | '6';
 
@@ -297,6 +343,7 @@ export type RappFrameErrorCode =
   | 'prev-wave'
   | 'signature-required'
   | 'signature-profile'
+  | 're-genesis-profile'
   | 'empty-chain'
   | 'duplicate-seq'
   | 'duplicate-frame-hash'
@@ -350,22 +397,22 @@ export interface BuildRappFrameInput<TPayload extends JsonObject, TKind extends 
   head: RappFrameHead | null;
 }
 
-const VERIFY_FRAME_OPTION_KEYS = new Set(['head', 'streamIdOfRecord']);
-const BUILD_FRAME_INPUT_KEYS = new Set([
+const VERIFY_FRAME_OPTION_KEYS = ['head', 'streamIdOfRecord'] as const;
+const BUILD_FRAME_INPUT_KEYS = [
   'kind',
   'streamId',
   'utc',
   'payload',
   'head',
-]);
-const LEGACY_HASH_INPUT_KEYS = new Set([
+] as const;
+const LEGACY_HASH_INPUT_KEYS = [
   'kind',
   'streamId',
   'seq',
   'utc',
   'payload',
   'prev',
-]);
+] as const;
 const FRAME_HEAD_REQUIRED_KEYS = [
   'stream_id',
   'seq',
@@ -387,27 +434,28 @@ export interface PersistedRappHead {
 }
 
 const TRUST_POLICY_BRAND: unique symbol = Symbol('rapp-chain-trust-policy');
-const TRUST_POLICY_OPTION_KEYS = new Set([
+const TRUST_POLICY_OPTION_KEYS = [
   'authority',
   'trustedGenesis',
   'persistedHead',
-]);
-const TRUSTED_GENESIS_KEYS = new Set([
+] as const;
+const TRUSTED_GENESIS_KEYS = [
   'streamId',
   'frameHash',
   'payloadHash',
-]);
-const PERSISTED_HEAD_KEYS = new Set([
+] as const;
+const PERSISTED_HEAD_KEYS = [
   'streamId',
   'seq',
   'frameHash',
-]);
+] as const;
 interface RappChainTrustPolicyRecord {
   authority: ProtocolAuthority;
   trustedGenesis: Readonly<TrustedRappGenesis>;
   persistedHead: Readonly<PersistedRappHead> | null;
 }
-const TRUST_POLICY_RECORDS = new WeakMap<object, RappChainTrustPolicyRecord>();
+const TRUST_POLICY_OBJECTS: object[] = [];
+const TRUST_POLICY_RECORDS: RappChainTrustPolicyRecord[] = [];
 
 export interface RappChainTrustPolicy {
   readonly [TRUST_POLICY_BRAND]: true;
@@ -418,7 +466,6 @@ export interface RappChainTrustPolicy {
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const LCLABEL = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const FRAME_KEY_SET = [...RAPP_FRAME_KEYS].sort().join('\0');
 const RAPPID =
   /^rappid:@([a-z0-9]+(?:-[a-z0-9]+)*)\/([a-z0-9]+(?:-[a-z0-9]+)*):([0-9a-f]{64})$/;
 const MEMORY_STREAM =
@@ -447,23 +494,42 @@ function ownOption(
   value: Record<string, unknown>,
   key: string,
 ): unknown {
-  return Object.hasOwn(value, key) ? value[key] : undefined;
+  const descriptor = SAFE_GET_OWN_PROPERTY_DESCRIPTOR(value, key);
+  return descriptor !== undefined && SAFE_HAS_OWN(descriptor, 'value')
+    ? descriptor.value
+    : undefined;
 }
 
 function assertOptionMap(
   value: unknown,
-  allowed: ReadonlySet<string>,
+  allowed: readonly string[],
   required: readonly string[],
   label: string,
 ): asserts value is Record<string, unknown> {
   if (!isRecord(value)) throw new TypeError(`${label} must be a plain object`);
-  for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== 'string' || !allowed.has(key)) {
+  const keys = SAFE_OWN_KEYS(value);
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    let supported = false;
+    if (typeof key === 'string') {
+      for (let allowedIndex = 0; allowedIndex < allowed.length; allowedIndex += 1) {
+        if (allowed[allowedIndex] === key) {
+          supported = true;
+          break;
+        }
+      }
+    }
+    if (!supported) {
       throw new TypeError(`${label} contains unsupported own key ${String(key)}`);
     }
+    const descriptor = SAFE_GET_OWN_PROPERTY_DESCRIPTOR(value, key);
+    if (descriptor === undefined || !SAFE_HAS_OWN(descriptor, 'value')) {
+      throw new TypeError(`${label}.${String(key)} must be an own data property`);
+    }
   }
-  for (const key of required) {
-    if (!Object.hasOwn(value, key)) {
+  for (let index = 0; index < required.length; index += 1) {
+    const key = required[index];
+    if (SAFE_GET_OWN_PROPERTY_DESCRIPTOR(value, key) === undefined) {
       throw new TypeError(`${label} is missing own key ${key}`);
     }
   }
@@ -475,11 +541,74 @@ function assertOwnProperties(
   label: string,
 ): asserts value is Record<string, unknown> {
   if (!isRecord(value)) throw new TypeError(`${label} must be a plain object`);
-  for (const key of required) {
-    if (!Object.hasOwn(value, key)) {
+  for (let index = 0; index < required.length; index += 1) {
+    const key = required[index];
+    if (SAFE_GET_OWN_PROPERTY_DESCRIPTOR(value, key) === undefined) {
       throw new TypeError(`${label} is missing own key ${key}`);
     }
   }
+}
+
+function hasExactOwnKeys(
+  value: object,
+  expected: readonly string[],
+): boolean {
+  const keys = SAFE_OWN_KEYS(value);
+  if (keys.length !== expected.length) return false;
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    if (typeof key !== 'string') return false;
+    let found = false;
+    for (let expectedIndex = 0; expectedIndex < expected.length; expectedIndex += 1) {
+      if (expected[expectedIndex] === key) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
+  }
+  return true;
+}
+
+function snapshotChainContainer(value: unknown): readonly unknown[] {
+  if (!Array.isArray(value) || utilTypes.isProxy(value)) {
+    throw new TypeError('frame chain must be a stable ordinary array');
+  }
+  const keys = SAFE_OWN_KEYS(value);
+  const descriptors = Object.create(null) as Record<string, PropertyDescriptor>;
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    if (typeof key !== 'string') {
+      throw new TypeError('frame chain contains a symbol key');
+    }
+    const descriptor = SAFE_GET_OWN_PROPERTY_DESCRIPTOR(value, key);
+    if (descriptor === undefined || !SAFE_HAS_OWN(descriptor, 'value')) {
+      throw new TypeError(`frame chain ${key} is missing or an accessor`);
+    }
+    descriptors[key] = descriptor;
+  }
+  const lengthDescriptor = descriptors.length;
+  if (
+    lengthDescriptor === undefined
+    || typeof lengthDescriptor.value !== 'number'
+    || !Number.isSafeInteger(lengthDescriptor.value)
+    || lengthDescriptor.value < 0
+  ) {
+    throw new TypeError('frame chain length is invalid');
+  }
+  const length = lengthDescriptor.value;
+  if (keys.length !== length + 1) {
+    throw new TypeError('frame chain contains holes or extra properties');
+  }
+  const snapshot: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    if (descriptor === undefined || descriptor.enumerable !== true) {
+      throw new TypeError(`frame chain index ${index} is missing or non-enumerable`);
+    }
+    snapshot[index] = descriptor.value;
+  }
+  return Object.freeze(snapshot);
 }
 
 function readFrameHead(value: unknown, label: string): RappFrameHead {
@@ -555,29 +684,33 @@ function chainFail<TFrame extends RappFrame>(
 function profileIsValid(
   profile: RappFrameProfile<JsonObject, string>,
 ): boolean {
-  return PROFILE_RECORDS.has(profile);
+  for (let index = 0; index < PROFILE_OBJECTS.length; index += 1) {
+    if (PROFILE_OBJECTS[index] === profile) return true;
+  }
+  return false;
 }
 
 function policyIsValid(policy: RappChainTrustPolicy): boolean {
-  return TRUST_POLICY_RECORDS.has(policy);
+  for (let index = 0; index < TRUST_POLICY_OBJECTS.length; index += 1) {
+    if (TRUST_POLICY_OBJECTS[index] === policy) return true;
+  }
+  return false;
 }
 
 function profileRecord(
   profile: RappFrameProfile<JsonObject, string>,
 ): RappFrameProfileRecord<JsonObject, string> {
-  const record = PROFILE_RECORDS.get(profile);
-  if (record === undefined) {
-    throw new TypeError('frame profile is not an exact module-owned profile');
+  for (let index = 0; index < PROFILE_OBJECTS.length; index += 1) {
+    if (PROFILE_OBJECTS[index] === profile) return PROFILE_RECORDS[index];
   }
-  return record;
+  throw new TypeError('frame profile is not an exact module-owned profile');
 }
 
 function policyRecord(policy: RappChainTrustPolicy): RappChainTrustPolicyRecord {
-  const record = TRUST_POLICY_RECORDS.get(policy);
-  if (record === undefined) {
-    throw new TypeError('chain trust policy is not an exact module-owned policy');
+  for (let index = 0; index < TRUST_POLICY_OBJECTS.length; index += 1) {
+    if (TRUST_POLICY_OBJECTS[index] === policy) return TRUST_POLICY_RECORDS[index];
   }
-  return record;
+  throw new TypeError('chain trust policy is not an exact module-owned policy');
 }
 
 export function isRappBodyStream(value: unknown): value is string {
@@ -613,6 +746,37 @@ export function isRappFrameKind(value: unknown): value is string {
     labels.length === 2
     && labels.every((label) => label.length <= 64 && LCLABEL.test(label))
   );
+}
+
+function isRappReGenesisKind(kind: string): boolean {
+  const suffix = '.re-genesis';
+  return kind.length > suffix.length
+    && kind.slice(kind.length - suffix.length) === suffix;
+}
+
+interface RappKindPolicy {
+  kind: string;
+  family: RappStreamFamily;
+  signature: 'unsigned-local' | 'signature-required' | 're-genesis-dedicated';
+}
+
+function authorityKindPolicy(
+  authority: ProtocolAuthority,
+  kind: string,
+): Readonly<RappKindPolicy> | null {
+  const family = protocolAuthorityFamilyForKind(authority, kind);
+  if (family === null) return null;
+  const signature: RappKindPolicy['signature'] =
+    isRappReGenesisKind(kind)
+      ? 're-genesis-dedicated'
+      : family === 'swarm'
+        ? 'signature-required'
+        : 'unsigned-local';
+  return frozenNullRecord<RappKindPolicy>({
+    kind,
+    family,
+    signature,
+  });
 }
 
 export function isRappFrameUtc(value: unknown): value is string {
@@ -722,11 +886,12 @@ export function selectRappChainTrustPolicy(input: {
     trustedGenesis,
     persistedHead,
   });
-  TRUST_POLICY_RECORDS.set(policy, frozenNullRecord({
+  TRUST_POLICY_OBJECTS[TRUST_POLICY_OBJECTS.length] = policy;
+  TRUST_POLICY_RECORDS[TRUST_POLICY_RECORDS.length] = frozenNullRecord({
     authority,
     trustedGenesis,
     persistedHead,
-  }));
+  });
   return policy;
 }
 
@@ -807,7 +972,7 @@ function verifyThroughWave<
     return fail('key-set', '1', 'frame is not a JSON object');
   }
   const snapshot = materialized;
-  if (Object.keys(snapshot).sort().join('\0') !== FRAME_KEY_SET) {
+  if (!hasExactOwnKeys(snapshot, RAPP_FRAME_KEYS)) {
     return fail('key-set', '1', 'frame does not have the exact eleven-key RAPP/1 envelope');
   }
   if (snapshot.spec !== RAPP_FRAME_SPEC) {
@@ -821,11 +986,11 @@ function verifyThroughWave<
     return fail('stream-id', '1', 'stream_id does not match a registered RAPP stream form');
   }
   if (selectedProfile.mode === 'authority') {
-    const registeredFamily = protocolAuthorityFamilyForKind(
+    const kindPolicy = authorityKindPolicy(
       selectedProfile.authority!,
       snapshot.kind,
     );
-    if (registeredFamily === null) {
+    if (kindPolicy === null) {
       const identity = protocolAuthorityIdentity(selectedProfile.authority!);
       return fail(
         'unregistered-kind',
@@ -833,11 +998,18 @@ function verifyThroughWave<
         `kind ${snapshot.kind} is not registered by accepted authority ${identity.revision}`,
       );
     }
-    if (registeredFamily !== streamFamily) {
+    if (kindPolicy.family !== streamFamily) {
       return fail(
         'kind-family',
         '1',
-        `registered ${registeredFamily} kind ${snapshot.kind} cannot use a ${streamFamily} stream`,
+        `registered ${kindPolicy.family} kind ${snapshot.kind} cannot use a ${streamFamily} stream`,
+      );
+    }
+    if (kindPolicy.family !== selectedProfile.family) {
+      return fail(
+        'profile-kind',
+        '1',
+        `profile ${selectedProfile.name} is for ${selectedProfile.family} streams, not ${kindPolicy.family}`,
       );
     }
   } else if (streamFamily !== selectedProfile.family) {
@@ -847,7 +1019,10 @@ function verifyThroughWave<
       `legacy ${selectedProfile.family} kind ${snapshot.kind} cannot use a ${streamFamily} stream`,
     );
   }
-  if (snapshot.kind !== selectedProfile.kind) {
+  if (
+    selectedProfile.kind !== null
+    && snapshot.kind !== selectedProfile.kind
+  ) {
     return fail(
       'profile-kind',
       '1',
@@ -944,6 +1119,20 @@ function verifyContinuation<TFrame extends RappFrame>(
   head: RappFrameHead | null,
 ): RappFrameVerification<TFrame> {
   const selectedProfile = profileRecord(profile);
+  let kindPolicy: Readonly<RappKindPolicy>;
+  if (selectedProfile.authority === null) {
+    kindPolicy = frozenNullRecord({
+      kind: frame.kind,
+      family: selectedProfile.family,
+      signature: 'unsigned-local' as const,
+    });
+  } else {
+    const resolved = authorityKindPolicy(selectedProfile.authority, frame.kind);
+    if (resolved === null) {
+      return fail('unregistered-kind', '1', `kind ${frame.kind} is not registered`);
+    }
+    kindPolicy = resolved;
+  }
   if (head === null) {
     if (frame.seq !== 0 || frame.prev !== null) {
       return fail('genesis', '4', 'genesis must be seq 0 with prev null');
@@ -963,7 +1152,7 @@ function verifyContinuation<TFrame extends RappFrame>(
     }
   }
 
-  if (selectedProfile.family === 'swarm' && frame.seq > 0) {
+  if (kindPolicy.family === 'swarm' && frame.seq > 0) {
     if (head === null || frame.prev_wave !== head.frame_hash) {
       return fail('prev-wave', '5', 'prev_wave does not link the predecessor frame_hash');
     }
@@ -971,7 +1160,14 @@ function verifyContinuation<TFrame extends RappFrame>(
     return fail('prev-wave', '5', 'prev_wave must be null off a non-genesis swarm frame');
   }
 
-  if (selectedProfile.family === 'swarm' && frame.sig === null) {
+  if (kindPolicy.signature === 're-genesis-dedicated') {
+    return fail(
+      're-genesis-profile',
+      '6',
+      're-genesis requires a dedicated owner-signed, registry-authorized profile',
+    );
+  }
+  if (kindPolicy.signature === 'signature-required' && frame.sig === null) {
     return fail('signature-required', '6', 'swarm frames must be signed');
   }
   if (selectedProfile.signature === 'unsigned-local' && frame.sig !== null) {
@@ -1133,11 +1329,33 @@ export function buildRappFrame<
       `legacy integrity profile ${selectedProfile.name} is read-only and cannot emit conforming frames`,
     );
   }
+  if (selectedProfile.kind === null) {
+    throw new RappFrameError(
+      'profile-kind',
+      '1',
+      'generic stream profiles cannot emit; select an exact registered kind profile',
+    );
+  }
   if (kind !== selectedProfile.kind) {
     throw new RappFrameError(
       'profile-kind',
       '1',
       `profile ${selectedProfile.name} emits ${selectedProfile.kind}`,
+    );
+  }
+  const kindPolicy = authorityKindPolicy(selectedProfile.authority!, kind);
+  if (kindPolicy === null) {
+    throw new RappFrameError(
+      'unregistered-kind',
+      '1',
+      `kind ${kind} is not registered by the selected authority`,
+    );
+  }
+  if (kindPolicy.signature === 're-genesis-dedicated') {
+    throw new RappFrameError(
+      're-genesis-profile',
+      '6',
+      'generic unsigned builders cannot emit owner-authorized re-genesis',
     );
   }
   if (selectedHead !== null && selectedHead.seq >= RAPP_UINT53_MAX) {
@@ -1168,7 +1386,7 @@ export function buildRappFrame<
     frame_hash: '0'.repeat(64),
     prev: selectedHead === null ? null : selectedHead.payload_hash,
     prev_wave:
-      selectedProfile.family === 'swarm' && selectedHead !== null
+      kindPolicy.family === 'swarm' && selectedHead !== null
         ? selectedHead.frame_hash
         : null,
     sig: null,
@@ -1244,7 +1462,18 @@ export function verifyRappFrameChain<
   profile: RappFrameProfile<TPayload, TKind>,
   policy: RappChainTrustPolicy,
 ): RappFrameChainVerification<RappFrame<TPayload, TKind>> {
-  if (values.length === 0) {
+  let chainValues: readonly unknown[];
+  try {
+    chainValues = snapshotChainContainer(values);
+  } catch (error) {
+    return chainFail(
+      'key-set',
+      error instanceof Error ? error.message : 'frame chain container is invalid',
+      null,
+      '1',
+    );
+  }
+  if (chainValues.length === 0) {
     return chainFail('empty-chain', 'RAPP/1 frame chain is empty', null, null);
   }
   const selectedProfile = profileIsValid(
@@ -1269,8 +1498,8 @@ export function verifyRappFrameChain<
 
   const streamId = selectedPolicy.trustedGenesis.streamId;
   const intrinsicFrames: RappFrame<TPayload, TKind>[] = [];
-  for (let index = 0; index < values.length; index += 1) {
-    const result = verifyThroughWave(values[index], profile, streamId);
+  for (let index = 0; index < chainValues.length; index += 1) {
+    const result = verifyThroughWave(chainValues[index], profile, streamId);
     if (!result.ok) {
       return {
         ok: false,
@@ -1282,7 +1511,7 @@ export function verifyRappFrameChain<
         ),
       };
     }
-    intrinsicFrames.push(result.frame);
+    intrinsicFrames[intrinsicFrames.length] = result.frame;
   }
 
   const candidateFrames: RappFrame<TPayload, TKind>[] = [];
@@ -1290,10 +1519,16 @@ export function verifyRappFrameChain<
     const frame = intrinsicFrames[index];
     let predecessor: RappFrame<TPayload, TKind> | null = null;
     if (frame.seq > 0) {
-      predecessor =
-        candidateFrames.find((candidate) =>
-          candidate.payload_hash === frame.prev,
-        ) ?? null;
+      for (
+        let candidateIndex = 0;
+        candidateIndex < candidateFrames.length;
+        candidateIndex += 1
+      ) {
+        if (candidateFrames[candidateIndex].payload_hash === frame.prev) {
+          predecessor = candidateFrames[candidateIndex];
+          break;
+        }
+      }
       if (predecessor === null) {
         return chainFail(
           'prev-continuity',
@@ -1319,7 +1554,7 @@ export function verifyRappFrameChain<
         ),
       };
     }
-    candidateFrames.push(result.frame);
+    candidateFrames[candidateFrames.length] = result.frame;
   }
 
   const genesis = candidateFrames[0];
@@ -1345,13 +1580,23 @@ export function verifyRappFrameChain<
     }
   }
 
-  const sequence = new Map<number, { index: number; prev: string | null; frameHash: string }>();
-  const frameHashes = new Map<string, number>();
-  const payloadHashes = new Map<string, number>();
+  const sequence = Object.create(null) as Record<
+    string,
+    { index: number; prev: string | null; frameHash: string }
+  >;
+  const frameHashes = Object.create(null) as Record<string, number>;
+  const payloadHashes = Object.create(null) as Record<string, number>;
   for (let index = 0; index < candidateFrames.length; index += 1) {
     const frame = candidateFrames[index];
-    const existingSeq = sequence.get(frame.seq);
-    if (existingSeq !== undefined) {
+    const sequenceKey = String(frame.seq);
+    const existingSeqDescriptor =
+      SAFE_GET_OWN_PROPERTY_DESCRIPTOR(sequence, sequenceKey);
+    if (existingSeqDescriptor !== undefined) {
+      const existingSeq = existingSeqDescriptor.value as {
+        index: number;
+        prev: string | null;
+        frameHash: string;
+      };
       const fork =
         existingSeq.prev === frame.prev
         && existingSeq.frameHash !== frame.frame_hash;
@@ -1363,32 +1608,36 @@ export function verifyRappFrameChain<
         index,
       );
     }
-    sequence.set(frame.seq, {
+    sequence[sequenceKey] = {
       index,
       prev: frame.prev,
       frameHash: frame.frame_hash,
-    });
+    };
 
-    const existingFrame = frameHashes.get(frame.frame_hash);
-    if (existingFrame !== undefined) {
+    const existingFrameDescriptor =
+      SAFE_GET_OWN_PROPERTY_DESCRIPTOR(frameHashes, frame.frame_hash);
+    if (existingFrameDescriptor !== undefined) {
+      const existingFrame = existingFrameDescriptor.value as number;
       return chainFail(
         'duplicate-frame-hash',
         `duplicate frame_hash at indexes ${existingFrame} and ${index}`,
         index,
       );
     }
-    frameHashes.set(frame.frame_hash, index);
+    frameHashes[frame.frame_hash] = index;
 
     if (selectedProfile.uniquePayloads) {
-      const existingPayload = payloadHashes.get(frame.payload_hash);
-      if (existingPayload !== undefined) {
+      const existingPayloadDescriptor =
+        SAFE_GET_OWN_PROPERTY_DESCRIPTOR(payloadHashes, frame.payload_hash);
+      if (existingPayloadDescriptor !== undefined) {
+        const existingPayload = existingPayloadDescriptor.value as number;
         return chainFail(
           'duplicate-payload-hash',
           `duplicate payload_hash at indexes ${existingPayload} and ${index}`,
           index,
         );
       }
-      payloadHashes.set(frame.payload_hash, index);
+      payloadHashes[frame.payload_hash] = index;
     }
   }
 
@@ -1404,7 +1653,13 @@ export function verifyRappFrameChain<
         accepted.length - 1,
       );
     }
-    const knownIndex = accepted.findIndex((frame) => frame.seq === persisted.seq);
+    let knownIndex = -1;
+    for (let index = 0; index < accepted.length; index += 1) {
+      if (accepted[index].seq === persisted.seq) {
+        knownIndex = index;
+        break;
+      }
+    }
     const known = knownIndex < 0 ? undefined : accepted[knownIndex];
     if (known === undefined || known.frame_hash !== persisted.frameHash) {
       return chainFail(
@@ -1416,7 +1671,11 @@ export function verifyRappFrameChain<
     persistedState = finalHead.seq === persisted.seq ? 'matched' : 'advanced';
   }
 
-  const frames = Object.freeze([...accepted]);
+  const frameCopy: RappFrame<TPayload, TKind>[] = [];
+  for (let index = 0; index < accepted.length; index += 1) {
+    frameCopy[index] = accepted[index];
+  }
+  const frames = Object.freeze(frameCopy);
   return {
     ok: true,
     frames,

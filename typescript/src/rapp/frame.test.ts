@@ -22,6 +22,7 @@ import {
 import type { BodyFrame, JsonObject, JsonValue } from '../rappids/types.js';
 import {
   ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
+  ProtocolAuthority,
   RAPP_ACCEPTED_BODY_PULSE_PROFILE,
   RAPP_FRAME_KEYS,
   RAPP_UINT53_MAX,
@@ -33,6 +34,7 @@ import {
   rappFrameDigest,
   rappFrameToJson,
   rappFrameWavePreimage,
+  resolveProtocolAuthority,
   selectRappChainTrustPolicy,
   verifyRappFrame,
   verifyRappFrameChain,
@@ -42,7 +44,8 @@ import {
 } from './index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const AUTHORITY_FIXTURE_PATH = resolve(HERE, '__fixtures__/rev13-authority.json');
+const AUTHORITY_FIXTURE_PATH = resolve(HERE, '__fixtures__/rev14-authority.json');
+const REV13_FIXTURE_PATH = resolve(HERE, '__fixtures__/rev13-authority.json');
 const NUMBER_FIXTURE_PATH = resolve(HERE, '__fixtures__/rfc8785-number-vectors.json');
 
 interface AuthorityFixture {
@@ -51,6 +54,8 @@ interface AuthorityFixture {
     checkpoint_commit: string;
     revision: string;
     status: string;
+    normative_sha256?: string;
+    bootstrap_profile_sha256?: string;
   };
   expected: {
     frame_keys: string[];
@@ -75,6 +80,9 @@ interface NumberFixture {
 const authority = parseRappJson(
   readFileSync(AUTHORITY_FIXTURE_PATH, 'utf8'),
 ) as unknown as AuthorityFixture;
+const historicalRev13 = parseRappJson(
+  readFileSync(REV13_FIXTURE_PATH, 'utf8'),
+) as unknown as AuthorityFixture;
 const numberVectors = parseRappJson(
   readFileSync(NUMBER_FIXTURE_PATH, 'utf8'),
 ) as unknown as NumberFixture;
@@ -93,26 +101,62 @@ function rewave<TPayload extends JsonObject, TKind extends string>(
   return { ...frame, frame_hash: rappFrameDigest(frame) };
 }
 
-describe('accepted rev-13 authority', () => {
-  it('pins the verified accepted checkpoint, not a rev-14 draft', () => {
+describe('accepted rev-14 authority', () => {
+  it('pins the owner-ratified protected-main checkpoint', () => {
     expect(authority.authority).toEqual({
       repository: 'https://github.com/kody-w/rapp-1',
-      checkpoint_commit: '85b0b04cc0d39702278e7ee2a8ada3467ca9a045',
-      revision: 'rev-13',
+      checkpoint_commit: 'caf6ef276cafa92aa744499af90dc1a28559941a',
+      revision: 'rev-14',
       status: 'accepted',
+      normative_sha256: 'd345235be5bc698d78c5893285abd09f2e62a398f781123d1de8da313a01c7de',
+      bootstrap_profile_sha256: '1666e44acf532f854d4bf74868c9af9f9b362055692189ac858a7c8b52dcd5bb',
     });
     expect(ACCEPTED_RAPP_PROTOCOL_AUTHORITY).toMatchObject({
       status: 'accepted',
-      revision: 'rev-13',
-      frameHash: 'bbcee75ebbbf82d11d8ffd666fdda34c8233642de6d6e4f45910d43a24a001e3',
-      payloadHash: '78a89c06509b5100494b9c7e0f551acdc6209fd90aded734321f3580b0f07051',
+      revision: 'rev-14',
+      frameHash: '59629adab4e26d156f3d66ecfb766e08705919ea1d2adc92ba0ad2b17337dfc2',
+      payloadHash: 'c7549bbd3e133b833930e24e008817ea295734b870f41706455d3f45821aba3a',
       checkpointCommit: authority.authority.checkpoint_commit,
+      normativeSha256: authority.authority.normative_sha256,
+      bootstrapProfileSha256: authority.authority.bootstrap_profile_sha256,
     });
     expect(Object.isFrozen(ACCEPTED_RAPP_PROTOCOL_AUTHORITY)).toBe(true);
     expect(ACCEPTED_RAPP_PROTOCOL_AUTHORITY.identity()).toEqual({
-      revision: 'rev-13',
+      revision: 'rev-14',
       frame_hash: authority.expected.frame_hash,
       payload_hash: authority.expected.payload_hash,
+    });
+  });
+
+  it('preserves accepted rev-13 historical resolution', () => {
+    const resolved = resolveProtocolAuthority('rev-13');
+    expect(resolved).toBe(ProtocolAuthority.acceptedRev13);
+    expect(resolved).toMatchObject({
+      revision: historicalRev13.authority.revision,
+      frameHash: historicalRev13.expected.frame_hash,
+      payloadHash: historicalRev13.expected.payload_hash,
+      checkpointCommit: historicalRev13.authority.checkpoint_commit,
+      bootstrapProfileSha256: null,
+    });
+    expect(resolveProtocolAuthority('rev-14'))
+      .toBe(ACCEPTED_RAPP_PROTOCOL_AUTHORITY);
+    expect(resolveProtocolAuthority('rev-999')).toBeNull();
+    if (resolved === null) throw new Error('rev-13 authority did not resolve');
+    const historicalProfile = createRappFrameProfile<JsonObject, 'body.pulse'>({
+      name: 'historical-rev-13',
+      kind: 'body.pulse',
+      authority: resolved,
+    });
+    expect(verifyRappFrame(
+      historicalRev13.frame,
+      historicalProfile,
+      {
+        head: historicalRev13.predecessor,
+        streamIdOfRecord: historicalRev13.frame.stream_id,
+      },
+    )).toMatchObject({
+      ok: true,
+      trust: { authority: { revision: 'rev-13' } },
     });
   });
 
@@ -134,7 +178,7 @@ describe('accepted rev-13 authority', () => {
       .not.toContain('body.dimension');
   });
 
-  it('verifies the real rev-13 head, canonical bytes, and exact envelope', () => {
+  it('verifies the real ratified rev-14 head, canonical bytes, and exact envelope', () => {
     expect(Object.keys(authority.frame).sort()).toEqual(authority.expected.frame_keys);
     expect(Object.keys(authority.frame)).toHaveLength(11);
     expect([...RAPP_FRAME_KEYS].sort()).toEqual(authority.expected.frame_keys);
@@ -168,7 +212,7 @@ describe('accepted rev-13 authority', () => {
       trust: {
         classification: 'integrity-only',
         promotionGrade: false,
-        authority: { revision: 'rev-13' },
+        authority: { revision: 'rev-14' },
       },
     });
   });
@@ -231,7 +275,7 @@ describe('registry-bound kind and family validation', () => {
     expect(() => createRappFrameProfile({
       name: 'forged',
       kind: 'body.dimension',
-    })).toThrow(/not registered by accepted authority rev-13/);
+    })).toThrow(/not registered by accepted authority rev-14/);
   });
 
   it('does not accept a caller-constructed arbitrary allowlist profile', () => {

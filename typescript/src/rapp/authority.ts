@@ -19,7 +19,7 @@ export interface ProtocolAuthorityDraftMetadata {
   checkpoint?: string;
 }
 
-const REV13_KIND_FAMILIES: Readonly<Record<string, RappStreamFamily>> =
+const ACCEPTED_KIND_FAMILIES: Readonly<Record<string, RappStreamFamily>> =
   Object.freeze({
     'body.pulse': 'body',
     'body.re-genesis': 'body',
@@ -51,7 +51,20 @@ export class ProtocolAuthority {
     payloadHash: '78a89c06509b5100494b9c7e0f551acdc6209fd90aded734321f3580b0f07051',
     repository: 'https://github.com/kody-w/rapp-1',
     checkpointCommit: '85b0b04cc0d39702278e7ee2a8ada3467ca9a045',
-    kindFamilies: REV13_KIND_FAMILIES,
+    normativeSha256: 'e5abd6a32801761fdd5c151a4f90fa4c989b545da02d3cd26dfc4765fab8409a',
+    bootstrapProfileSha256: null,
+    kindFamilies: ACCEPTED_KIND_FAMILIES,
+  });
+
+  static readonly acceptedRev14 = new ProtocolAuthority({
+    revision: 'rev-14',
+    frameHash: '59629adab4e26d156f3d66ecfb766e08705919ea1d2adc92ba0ad2b17337dfc2',
+    payloadHash: 'c7549bbd3e133b833930e24e008817ea295734b870f41706455d3f45821aba3a',
+    repository: 'https://github.com/kody-w/rapp-1',
+    checkpointCommit: 'caf6ef276cafa92aa744499af90dc1a28559941a',
+    normativeSha256: 'd345235be5bc698d78c5893285abd09f2e62a398f781123d1de8da313a01c7de',
+    bootstrapProfileSha256: '1666e44acf532f854d4bf74868c9af9f9b362055692189ac858a7c8b52dcd5bb',
+    kindFamilies: ACCEPTED_KIND_FAMILIES,
   });
 
   readonly status: ProtocolAuthorityStatus = 'accepted';
@@ -60,6 +73,8 @@ export class ProtocolAuthority {
   readonly payloadHash: string;
   readonly repository: string;
   readonly checkpointCommit: string;
+  readonly normativeSha256: string;
+  readonly bootstrapProfileSha256: string | null;
   readonly kindFamilies: Readonly<Record<string, RappStreamFamily>>;
 
   private constructor(input: {
@@ -68,6 +83,8 @@ export class ProtocolAuthority {
     payloadHash: string;
     repository: string;
     checkpointCommit: string;
+    normativeSha256: string;
+    bootstrapProfileSha256: string | null;
     kindFamilies: Readonly<Record<string, RappStreamFamily>>;
   }) {
     this.revision = input.revision;
@@ -75,6 +92,8 @@ export class ProtocolAuthority {
     this.payloadHash = input.payloadHash;
     this.repository = input.repository;
     this.checkpointCommit = input.checkpointCommit;
+    this.normativeSha256 = input.normativeSha256;
+    this.bootstrapProfileSha256 = input.bootstrapProfileSha256;
     this.kindFamilies = input.kindFamilies;
     Object.freeze(this);
   }
@@ -97,4 +116,17 @@ export class ProtocolAuthority {
 }
 
 /** The selected authority used when callers do not explicitly supply one. */
-export const ACCEPTED_RAPP_PROTOCOL_AUTHORITY = ProtocolAuthority.acceptedRev13;
+export const ACCEPTED_RAPP_PROTOCOL_AUTHORITY = ProtocolAuthority.acceptedRev14;
+
+const ACCEPTED_AUTHORITIES: Readonly<Record<string, ProtocolAuthority>> =
+  Object.freeze({
+    'rev-13': ProtocolAuthority.acceptedRev13,
+    'rev-14': ProtocolAuthority.acceptedRev14,
+  });
+
+/** Resolve an accepted historical checkpoint without changing the selected default. */
+export function resolveProtocolAuthority(
+  revision: string,
+): ProtocolAuthority | null {
+  return ACCEPTED_AUTHORITIES[revision] ?? null;
+}

@@ -23,7 +23,7 @@ function clone<T>(value: T): T {
 }
 
 describe('selected authority evidence payload', () => {
-  it('defaults to the immutable accepted rev-13 authority', () => {
+  it('defaults to the immutable owner-ratified rev-14 authority', () => {
     const payload = buildOpenRappterEvidencePayload({
       eventKind: 'install.verified',
       subject: 'release:1.0.0',
@@ -38,7 +38,7 @@ describe('selected authority evidence payload', () => {
       data_hash: 'a'.repeat(64),
       reference_hashes: ['b'.repeat(64), 'c'.repeat(64)],
       protocol_revision: {
-        revision: 'rev-13',
+        revision: 'rev-14',
         frame_hash: ACCEPTED_RAPP_PROTOCOL_AUTHORITY.frameHash,
         payload_hash: ACCEPTED_RAPP_PROTOCOL_AUTHORITY.payloadHash,
       },
@@ -51,7 +51,7 @@ describe('selected authority evidence payload', () => {
   it('accepts only a selected ProtocolAuthority, never draft metadata', () => {
     expect(() => createOpenRappterEvidenceProfile({
       status: 'draft',
-      revision: 'rev-14',
+      revision: 'rev-15',
       checkpoint: 'unpublished',
     } as never)).toThrow(/selected ProtocolAuthority/);
   });
@@ -134,7 +134,7 @@ describe('RAPP/1 evidence helpers and trust', () => {
       trust: {
         classification: 'integrity-only',
         promotionGrade: false,
-        authority: { revision: 'rev-13' },
+        authority: { revision: 'rev-14' },
       },
     });
     const verified = verifyRappEvidenceChain([genesis, child], policy);

@@ -7,6 +7,7 @@ import {
   __spawnManagedProcessTreeForTest,
   ProcessTreeCleanupError,
   ProcessTreeContainmentError,
+  ProcessTreeOutputError,
   ProcessTreeStartupError,
   spawnManagedProcessTree,
   type ManagedPidEvidence,
@@ -37,7 +38,7 @@ async function managed(
     command: process.execPath,
     args: ['-e', script, '--', ...(options.args ?? [])],
     env: targetEnvironment(),
-    gracefulTerminationMs: options.gracefulTerminationMs ?? 100,
+    gracefulTerminationMs: options.gracefulTerminationMs ?? 1_000,
     forceTerminationMs: options.forceTerminationMs ?? 1_000,
     ...(options.signal ? { signal: options.signal } : {}),
   });
@@ -113,15 +114,31 @@ describe.skipIf(process.platform === 'win32')('POSIX managed process tree', () =
       incarnation: null,
     };
 
+    expect(tree.helper?.incarnation).toBeTruthy();
+    expect(tree.target.incarnation).toBeTruthy();
     expect(sameProcessAlive(tree.target!)).toBe(true);
     expect(sameProcessAlive(grandchild)).toBe(true);
     const cleanup = await tree.terminate();
 
     expect(cleanup.containmentEmpty).toBe(true);
-    expect(cleanup.graceful).toBe(true);
     expect(cleanup.reaped).toBe(true);
     await expectDead(tree.target!);
     await expectDead(grandchild);
+    await expectDead(tree.helper!);
+  });
+
+  it('gracefully terminates a cooperative target through the guardian', async () => {
+    const tree = await managed(`
+      process.stdout.write('ready\\n');
+      setInterval(() => {}, 1000);
+    `);
+    expect(await readLine(tree.stdout)).toBe('ready');
+
+    const cleanup = await tree.terminate();
+
+    expect(cleanup.graceful).toBe(true);
+    expect(cleanup.forced).toBe(false);
+    expect(cleanup.exit.signal).toBe('SIGTERM');
   });
 
   it('retains containment when the process-group leader exits first', async () => {
@@ -208,14 +225,16 @@ describe.skipIf(process.platform === 'win32')('POSIX managed process tree', () =
       gracefulTerminationMs: 40,
       forceTerminationMs: 1_000,
     }, {
-      signalProcessGroup: (processGroupId, signal) => {
-        if (signal === 'SIGTERM' && fail) {
+      writePosixControl: (control, command) => {
+        if (command === 'terminate' && fail) {
           fail = false;
-          const error = new Error('injected signal failure') as NodeJS.ErrnoException;
-          error.code = 'EACCES';
-          throw error;
+          return Promise.reject(new Error('injected control failure'));
         }
-        process.kill(-processGroupId, signal);
+        return new Promise((resolve, reject) => {
+          control.write(`${command}\n`, (error) => {
+            if (error) reject(error); else resolve();
+          });
+        });
       },
     });
     running.push(tree);
@@ -224,34 +243,31 @@ describe.skipIf(process.platform === 'win32')('POSIX managed process tree', () =
     expect((await tree.terminate()).containmentEmpty).toBe(true);
   });
 
-  it('treats post-TERM SIGCONT EPERM as observable, not as cleanup success', async () => {
+  it('never signals a reused PGID after guardian ownership is gone', async () => {
+    let strangerOwnsGroup = true;
+    const writeControl = vi.fn();
     const tree = await __spawnManagedProcessTreeForTest({
       command: process.execPath,
-      args: ['-e', `
-        process.stdout.write('ready\\n');
-        setInterval(() => {}, 1000);
-      `],
+      args: ['-e', 'process.stdout.write("done")'],
       env: {},
-      gracefulTerminationMs: 100,
-      forceTerminationMs: 1_000,
+      gracefulTerminationMs: 20,
+      forceTerminationMs: 100,
     }, {
-      signalProcessGroup: (processGroupId, signal) => {
-        if (signal === 'SIGCONT') {
-          const error = new Error('injected post-TERM race') as NodeJS.ErrnoException;
-          error.code = 'EPERM';
-          throw error;
-        }
-        process.kill(-processGroupId, signal);
-      },
-      afterSpawn: async (spawned) => {
-        await readLine(spawned.stdout);
+      processGroupMembers: () => strangerOwnsGroup ? [424_242] : [],
+      processGroupExists: () => strangerOwnsGroup,
+      writePosixControl: async (...args) => {
+        writeControl(...args);
       },
     });
-    running.push(tree);
+    await tree.wait();
+    process.kill(tree.helper!.pid, 'SIGKILL');
+    await expectDead(tree.helper!);
 
-    const cleanup = await tree.terminate();
-    expect(cleanup.containmentEmpty).toBe(true);
-    expect(cleanup.reaped).toBe(true);
+    await expect(tree.terminate()).rejects.toBeInstanceOf(ProcessTreeCleanupError);
+    expect(writeControl).not.toHaveBeenCalled();
+
+    strangerOwnsGroup = false;
+    expect((await tree.terminate()).containmentEmpty).toBe(true);
   });
 
   it('proves cleanup when setup fails after the child has spawned', async () => {
@@ -304,20 +320,23 @@ describe.skipIf(process.platform === 'win32')('POSIX managed process tree', () =
         gracefulTerminationMs: 40,
         forceTerminationMs: 1_000,
       }, {
-        signalProcessGroup: (processGroupId, signal) => {
-          if (signal === 'SIGTERM' && fail) {
+        writePosixControl: (control, command) => {
+          if (command === 'terminate' && fail) {
             fail = false;
-            const error = new Error('injected signal failure') as NodeJS.ErrnoException;
-            error.code = 'EACCES';
-            throw error;
+            return Promise.reject(new Error('injected control failure'));
           }
-          process.kill(-processGroupId, signal);
+          return new Promise((resolve, reject) => {
+            control.write(`${command}\n`, (error) => {
+              if (error) reject(error); else resolve();
+            });
+          });
         },
         afterSpawn: async (tree) => {
           await readLine(tree.stdout);
           throw new Error('injected setup failure');
         },
       });
+
     } catch (error) {
       startupError = error as ProcessTreeStartupError;
     }
@@ -326,6 +345,23 @@ describe.skipIf(process.platform === 'win32')('POSIX managed process tree', () =
     expect(startupError!.tree.target).toBeDefined();
     expect((await startupError!.tree.terminate()).containmentEmpty).toBe(true);
     await expectDead(startupError!.tree.target!);
+  });
+
+  it('keeps all numeric group signalling inside the live guardian', () => {
+    const directory = path.dirname(fileURLToPath(import.meta.url));
+    const guardian = readFileSync(
+      path.join(directory, 'process-tree-posix-helper.mjs'),
+      'utf8',
+    );
+    const supervisor = readFileSync(
+      path.join(directory, 'process-tree-posix.ts'),
+      'utf8',
+    );
+
+    expect(guardian).toContain("process.kill(-process.pid, 'SIGTERM')");
+    expect(guardian).toContain("process.kill(-process.pid, 'SIGCONT')");
+    expect(guardian).toContain("process.kill(-process.pid, 'SIGKILL')");
+    expect(supervisor).not.toMatch(/process\.kill\(\s*-[^,]+,\s*'SIG/);
   });
 
   it('fails closed before spawn when hostile setsid containment is requested', async () => {
@@ -453,10 +489,10 @@ describe('Windows Job Object helper contract', () => {
     expect(source).toContain('QuoteWindowsArgument');
     expect(source).toContain('UseShellExecute = false');
     expect(source).toContain('start.EnvironmentVariables.Clear()');
-    expect(source).toContain("process-tree-helper: startup failed");
     expect(source).not.toMatch(/cmd(?:\.exe)?\s*\/c/i);
     expect(source).not.toContain('WriteLine(config');
     expect(source).not.toContain('Write-Host');
+    expect(source).not.toContain('[Console]::Error.WriteLine');
     expect(source).not.toContain('Exception.Message');
     expect(source).not.toMatch(/File\.(?:Write|Append)|WriteAllText|WriteAllBytes/);
     expect(launcherSource).toContain('child.stdin.write(config)');
@@ -479,8 +515,39 @@ describe('Windows Job Object helper contract', () => {
       path.join(directory, '../../scripts/package-smoke.mjs'),
       'utf8',
     );
+    expect(packageJson).toContain('process-tree-posix-helper.mjs');
     expect(packageJson).toContain('process-tree-windows.ps1');
+    expect(packageSmoke).toContain('dist/infra/process-tree-posix-helper.mjs');
     expect(packageSmoke).toContain('dist/infra/process-tree-windows.ps1');
+  });
+
+  it('uses bounded full relay completion instead of the former 250ms window', () => {
+    expect(source).toContain('RelayTimeoutMs = 10000');
+    expect(source).toContain('TerminateRemainingJobProcesses(job)');
+    expect(source).toContain('AwaitOutputRelays(stdout, stderr)');
+    expect(source).toContain('"output_or_cleanup_failed"');
+    expect(source).not.toContain('Task.WaitAll(new[] { stdout, stderr }, 250)');
+    expect(source.indexOf('WaitForControlConnection(control)'))
+      .toBeLessThan(source.indexOf('target.WaitForExit()'));
+  });
+
+  it('runs native Job Object tests in CI and budgets exactly two non-Windows skips', () => {
+    const workflow = readFileSync(
+      path.join(directory, '../../../.github/workflows/flight-recorder.yml'),
+      'utf8',
+    );
+    const skipBudget = readFileSync(
+      path.join(directory, '../../../tools/skip-budget.mjs'),
+      'utf8',
+    );
+    expect(workflow).toContain(
+      'src/flight-recorder/windows-storage.test.ts src/infra/process-tree.test.ts',
+    );
+    expect(workflow).toContain('runs-on: windows-latest');
+    expect(skipBudget).toMatch(
+      /'src\/infra\/process-tree\.test\.ts':\s*\{\s*max:\s*2,/,
+    );
+    expect(skipBudget).toContain('flight-recorder.yml');
   });
 });
 
@@ -506,7 +573,7 @@ describe.runIf(process.platform === 'win32')('Windows Job Object integration', (
     await expectDead(grandchild);
   });
 
-  it('kills a surviving grandchild when the target exits naturally', async () => {
+  it('handles natural/fast exit, full delayed relay, and explicit relay failure', async () => {
     const tree = await managed(`
       const { spawn } = require('node:child_process');
       const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
@@ -524,5 +591,41 @@ describe.runIf(process.platform === 'win32')('Windows Job Object integration', (
     expect((await tree.wait()).code).toBe(0);
     await expectDead(grandchild);
     expect((await tree.terminate()).containmentEmpty).toBe(true);
+
+    const fast = await managed('process.stdout.write("fast-target")');
+    expect((await collect(fast.stdout)).toString('utf8')).toBe('fast-target');
+    expect((await fast.wait()).code).toBe(0);
+    expect((await fast.terminate()).containmentEmpty).toBe(true);
+
+    const byteCount = 2 * 1024 * 1024;
+    const delayedRelay = await managed(
+      `process.stdout.write(Buffer.alloc(${byteCount}, 0x5a))`,
+      { forceTerminationMs: 5_000 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const delayedOutput = await collect(delayedRelay.stdout);
+    expect(delayedOutput).toHaveLength(byteCount);
+    expect(delayedOutput.every((byte) => byte === 0x5a)).toBe(true);
+    expect((await delayedRelay.wait()).code).toBe(0);
+    expect((await delayedRelay.terminate()).containmentEmpty).toBe(true);
+
+    const relayFailure = await __spawnManagedProcessTreeForTest({
+      command: process.execPath,
+      args: ['-e', `
+        setTimeout(() => {
+          process.stdout.write(Buffer.alloc(8 * 1024 * 1024, 0x41));
+        }, 100);
+      `],
+      env: targetEnvironment(),
+      gracefulTerminationMs: 100,
+      forceTerminationMs: 5_000,
+    }, {
+      afterWindowsReady: (helper) => {
+        helper.stdout.destroy();
+      },
+    });
+    running.push(relayFailure);
+    await expect(relayFailure.wait()).rejects.toBeInstanceOf(ProcessTreeOutputError);
+    await expect(relayFailure.terminate()).rejects.toBeInstanceOf(ProcessTreeCleanupError);
   });
 });

@@ -11,6 +11,7 @@ export * from './backup.js';
 export {
   ProcessTreeCleanupError,
   ProcessTreeContainmentError,
+  ProcessTreeOutputError,
   ProcessTreeStartupError,
   spawnManagedProcessTree,
 } from './process-tree.js';

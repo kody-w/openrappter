@@ -126,6 +126,7 @@ try {
     "dist/infra/process-tree.js",
     "dist/infra/process-tree-internal.js",
     "dist/infra/process-tree-posix.js",
+    "dist/infra/process-tree-posix-helper.mjs",
     "dist/infra/process-tree-windows.js",
     "dist/infra/process-tree-windows.ps1",
   ]) {

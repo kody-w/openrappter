@@ -14,6 +14,7 @@ import {
   defaultProcessAlive,
   ManagedTreeBase,
   ProcessTreeCleanupError,
+  ProcessTreeOutputError,
   ProcessTreeStartupError,
   sleep,
   waitForSpawn,
@@ -35,6 +36,128 @@ interface WindowsReady {
   helper_incarnation: string;
   target_pid: number;
   target_incarnation: string;
+}
+
+type WindowsControlEvent =
+  | {
+      protocol: 1;
+      type: 'target_exit';
+      code: number | null;
+      signal: null;
+    }
+  | {
+      protocol: 1;
+      type: 'failure';
+      code: 'output_or_cleanup_failed';
+    };
+
+interface WindowsTargetExitState {
+  promise: Promise<ManagedProcessExit>;
+  current(): ManagedProcessExit | undefined;
+  resolve(exit: ManagedProcessExit): void;
+  reject(error: Error): void;
+}
+
+function targetExitState(): WindowsTargetExitState {
+  let current: ManagedProcessExit | undefined;
+  let settled = false;
+  let resolvePromise!: (exit: ManagedProcessExit) => void;
+  let rejectPromise!: (error: Error) => void;
+  const promise = new Promise<ManagedProcessExit>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  void promise.catch(() => {
+    // wait() exposes the failure; avoid an unhandled rejection before await.
+  });
+  return {
+    promise,
+    current: () => current,
+    resolve: (exit) => {
+      if (settled) return;
+      settled = true;
+      current = exit;
+      resolvePromise(exit);
+    },
+    reject: (error) => {
+      if (settled) return;
+      settled = true;
+      rejectPromise(error);
+    },
+  };
+}
+
+class WindowsControlProtocol {
+  private buffered = Buffer.alloc(0);
+  private settled = false;
+
+  constructor(
+    socket: Socket,
+    private readonly targetExit: WindowsTargetExitState,
+  ) {
+    socket.on('data', (chunk: Buffer) => this.onData(chunk));
+    socket.once('end', () => this.onClosed());
+    socket.once('close', () => this.onClosed());
+    socket.once('error', (error) => this.fail(error));
+  }
+
+  private onData(chunk: Buffer): void {
+    this.buffered = Buffer.concat([this.buffered, chunk]);
+    if (this.buffered.length > READY_MAX_BYTES) {
+      this.fail(new ProcessTreeOutputError('Windows helper event exceeded its bound.'));
+      return;
+    }
+    while (true) {
+      const newline = this.buffered.indexOf(0x0a);
+      if (newline < 0) return;
+      const line = this.buffered.subarray(0, newline);
+      this.buffered = this.buffered.subarray(newline + 1);
+      try {
+        this.handle(JSON.parse(line.toString('utf8')) as WindowsControlEvent);
+      } catch (error) {
+        this.fail(error as Error);
+        return;
+      }
+    }
+  }
+
+  private handle(event: WindowsControlEvent): void {
+    if (event.protocol !== 1) {
+      throw new ProcessTreeOutputError('Unsupported Windows helper event.');
+    }
+    if (event.type === 'failure') {
+      this.fail(new ProcessTreeOutputError(
+        'Windows helper could not drain output or clean contained descendants.',
+      ));
+      return;
+    }
+    if (
+      event.type !== 'target_exit'
+      || event.signal !== null
+      || (
+        event.code !== null
+        && (!Number.isSafeInteger(event.code) || event.code < 0)
+      )
+    ) {
+      throw new ProcessTreeOutputError('Windows helper returned an invalid target exit event.');
+    }
+    this.settled = true;
+    this.targetExit.resolve({ code: event.code, signal: null });
+  }
+
+  private onClosed(): void {
+    if (!this.settled && !this.targetExit.current()) {
+      this.fail(new ProcessTreeOutputError(
+        'Windows helper closed before confirming target output and cleanup.',
+      ));
+    }
+  }
+
+  private fail(error: Error): void {
+    if (this.settled) return;
+    this.settled = true;
+    this.targetExit.reject(error);
+  }
 }
 
 function powerShellPath(environment: NodeJS.ProcessEnv): string {
@@ -166,7 +289,8 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
   readonly stdout: PassThrough;
   readonly stderr: PassThrough;
 
-  private readonly exitState;
+  private readonly helperExit;
+  private readonly targetExit = targetExitState();
   private control: Socket | undefined;
 
   constructor(
@@ -182,7 +306,7 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
     this.stdout = new PassThrough();
     this.stderr = new PassThrough();
     child.stderr.pipe(this.stderr);
-    this.exitState = childExit(child);
+    this.helperExit = childExit(child);
   }
 
   declareReady(ready: WindowsReady): void {
@@ -201,10 +325,11 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
 
   attachControl(socket: Socket): void {
     this.control = socket;
+    new WindowsControlProtocol(socket, this.targetExit);
   }
 
   wait(): Promise<ManagedProcessExit> {
-    return this.exitState.promise;
+    return this.targetExit.promise;
   }
 
   private sameOwnedProcessAlive(evidence: ManagedPidEvidence | undefined): boolean {
@@ -218,7 +343,7 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
       // the kernel proof that no contained descendant can remain; the PID
       // evidence below additionally rejects a still-live/reused root process.
       if (
-        this.exitState.current()
+        this.helperExit.current()
         && !this.sameOwnedProcessAlive(this.helper)
         && !this.sameOwnedProcessAlive(this.target)
       ) {
@@ -249,17 +374,29 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
   }
 
   private killHelper(): void {
-    if (this.exitState.current()) return;
+    if (this.helperExit.current()) return;
     const killed = (this.hooks.killHelper ?? ((child) => child.kill('SIGKILL')))(this.child);
-    if (!killed && !this.exitState.current()) {
+    if (!killed && !this.helperExit.current()) {
       throw new Error('Windows process-tree helper could not be terminated.');
     }
+  }
+
+  async completedAfterReady(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    if (!await this.cleanupObserved(deadline)) return false;
+    if (!this.targetExit.current()) {
+      this.targetExit.resolve(this.helperExit.current()!);
+    }
+    return true;
   }
 
   protected async terminateOnce(): Promise<ManagedProcessCleanup> {
     let forced = false;
     try {
       if (await this.cleanupObserved(Date.now())) {
+        if (!this.targetExit.current()) {
+          this.targetExit.resolve(this.helperExit.current()!);
+        }
         const exit = await this.wait();
         this.control?.destroy();
         this.unbindAbort();
@@ -294,6 +431,9 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
           );
         } catch {
           this.killHelper();
+        }
+        if (!this.targetExit.current()) {
+          this.targetExit.resolve({ code: null, signal: 'SIGKILL' });
         }
         const controlDeadline = Date.now()
           + Math.floor(Math.max(0, forceDeadline - Date.now()) / 2);
@@ -376,10 +516,18 @@ export async function spawnWindowsProcessTree(
     child.stdin.write(config);
     const ready = await readReady(child, tree.stdout);
     tree.declareReady(ready);
-    const control = await (
-      hooks.connectWindowsControl ?? connectControl
-    )(pipeName, CONTROL_CONNECT_MS);
-    tree.attachControl(control);
+    try {
+      const control = await (
+        hooks.connectWindowsControl ?? connectControl
+      )(pipeName, CONTROL_CONNECT_MS);
+      tree.attachControl(control);
+    } catch (controlError) {
+      // A valid ready record can race a very short target. If the helper has
+      // already exited, Job closure and PID evidence prove completion; do not
+      // turn successful short work into a startup failure.
+      if (!await tree.completedAfterReady(500)) throw controlError;
+    }
+    hooks.afterWindowsReady?.(child);
     await hooks.afterSpawn?.(tree);
     if (options.signal?.aborted) {
       await tree.terminate();

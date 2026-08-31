@@ -15,7 +15,13 @@ using System.Web.Script.Serialization;
 namespace OpenRappter {
   public static class ManagedProcessTreeHelper {
     private const int ConfigMaxBytes = 1048576;
+    private const int RelayTimeoutMs = 10000;
+    private const int ControlConnectTimeoutMs = 10000;
+    private const int MaxJobProcesses = 4096;
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+    private const uint PROCESS_TERMINATE = 0x0001;
+    private const int ERROR_INVALID_PARAMETER = 87;
+    private const int JobObjectBasicProcessIdList = 3;
     private const int JobObjectExtendedLimitInformation = 9;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -67,6 +73,28 @@ namespace OpenRappter {
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool QueryInformationJobObject(
+      IntPtr job,
+      int informationClass,
+      IntPtr information,
+      uint informationLength,
+      out uint returnLength
+    );
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(
+      uint desiredAccess,
+      bool inheritHandle,
+      int processId
+    );
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
 
     private sealed class Config {
       public int version { get; set; }
@@ -197,13 +225,97 @@ namespace OpenRappter {
       output.Flush();
     }
 
+    private static void WriteControlEvent(
+      NamedPipeServerStream control,
+      Dictionary<string, object> value
+    ) {
+      var json = new JavaScriptSerializer().Serialize(value) + "\n";
+      var bytes = new UTF8Encoding(false).GetBytes(json);
+      if (bytes.Length > 4096) throw new InvalidDataException("Control event is too large.");
+      control.Write(bytes, 0, bytes.Length);
+      control.Flush();
+    }
+
+    private static void WaitForControlConnection(NamedPipeServerStream control) {
+      IAsyncResult pending = control.BeginWaitForConnection(null, null);
+      if (!pending.AsyncWaitHandle.WaitOne(ControlConnectTimeoutMs)) {
+        throw new TimeoutException("Process-tree control connection timed out.");
+      }
+      control.EndWaitForConnection(pending);
+    }
+
+    private static int[] JobProcessIds(IntPtr job) {
+      int bytes = 8 + (IntPtr.Size * MaxJobProcesses);
+      IntPtr buffer = Marshal.AllocHGlobal(bytes);
+      try {
+        uint returned;
+        Win32(
+          QueryInformationJobObject(
+            job,
+            JobObjectBasicProcessIdList,
+            buffer,
+            (uint)bytes,
+            out returned
+          ),
+          "QueryInformationJobObject"
+        );
+        int assigned = Marshal.ReadInt32(buffer, 0);
+        int listed = Marshal.ReadInt32(buffer, 4);
+        if (assigned > listed || listed > MaxJobProcesses) {
+          throw new InvalidOperationException("Job process list exceeded its bound.");
+        }
+        var result = new int[listed];
+        for (int index = 0; index < listed; index++) {
+          result[index] = Marshal.ReadIntPtr(
+            buffer,
+            8 + (index * IntPtr.Size)
+          ).ToInt32();
+        }
+        return result;
+      } finally {
+        Marshal.FreeHGlobal(buffer);
+      }
+    }
+
+    private static void TerminateRemainingJobProcesses(IntPtr job) {
+      int helperPid = Process.GetCurrentProcess().Id;
+      foreach (int pid in JobProcessIds(job)) {
+        if (pid == helperPid) continue;
+        IntPtr process = OpenProcess(PROCESS_TERMINATE, false, pid);
+        if (process == IntPtr.Zero) {
+          int error = Marshal.GetLastWin32Error();
+          if (error == ERROR_INVALID_PARAMETER) continue;
+          throw new Win32Exception(error, "A contained process could not be opened.");
+        }
+        try {
+          if (!TerminateProcess(process, 137)) {
+            int error = Marshal.GetLastWin32Error();
+            if (error != ERROR_INVALID_PARAMETER) {
+              throw new Win32Exception(error, "A contained process could not be terminated.");
+            }
+          }
+        } finally {
+          CloseHandle(process);
+        }
+      }
+    }
+
+    private static void AwaitOutputRelays(Task stdout, Task stderr) {
+      try {
+        if (!Task.WaitAll(new[] { stdout, stderr }, RelayTimeoutMs)) {
+          throw new TimeoutException("Process output relay timed out.");
+        }
+      } catch (AggregateException error) {
+        throw new IOException("Process output relay failed.", error.Flatten());
+      }
+    }
+
     private static void ControlLoop(
       NamedPipeServerStream control,
       Process target,
       IntPtr job
     ) {
       try {
-        control.WaitForConnection();
         using (var reader = new StreamReader(
           control,
           new UTF8Encoding(false, true),
@@ -269,7 +381,7 @@ namespace OpenRappter {
 
       using (var control = new NamedPipeServerStream(
         config.control_pipe,
-        PipeDirection.In,
+        PipeDirection.InOut,
         1,
         PipeTransmissionMode.Byte,
         PipeOptions.Asynchronous
@@ -300,7 +412,6 @@ namespace OpenRappter {
 
         WriteReady(output, target);
 
-        Task.Run(() => ControlLoop(control, target, job));
         Task.Run(async () => {
           try {
             await input.CopyToAsync(target.StandardInput.BaseStream);
@@ -310,14 +421,41 @@ namespace OpenRappter {
         Task stdout = target.StandardOutput.BaseStream.CopyToAsync(output);
         Task stderr = target.StandardError.BaseStream.CopyToAsync(error);
 
-        target.WaitForExit();
-        int exitCode = target.ExitCode;
-        try { Task.WaitAll(new[] { stdout, stderr }, 250); } catch { }
+        // A fast target may finish immediately after ready. Keep the helper and
+        // Job alive until the Node parent has attached its exact control pipe.
+        WaitForControlConnection(control);
+        Task.Run(() => ControlLoop(control, target, job));
 
-        // Returning preserves the target exit status. Process exit then closes
-        // the helper's only Job handle; KILL_ON_JOB_CLOSE atomically removes any
-        // descendant that outlived the target.
-        return exitCode;
+        try {
+          target.WaitForExit();
+          int exitCode = target.ExitCode;
+          try { target.StandardInput.Close(); } catch { }
+
+          // Descendants can inherit target stdio handles. Terminate every
+          // remaining contained process except this helper, then wait for both
+          // binary relays to reach EOF. No fixed success window may truncate.
+          TerminateRemainingJobProcesses(job);
+          AwaitOutputRelays(stdout, stderr);
+          WriteControlEvent(control, new Dictionary<string, object> {
+            { "protocol", 1 },
+            { "type", "target_exit" },
+            { "code", exitCode },
+            { "signal", null }
+          });
+
+          // Returning preserves the target exit status. Process exit closes the
+          // helper's only Job handle, enforcing KILL_ON_JOB_CLOSE once more.
+          return exitCode;
+        } catch {
+          try {
+            WriteControlEvent(control, new Dictionary<string, object> {
+              { "protocol", 1 },
+              { "type", "failure" },
+              { "code", "output_or_cleanup_failed" }
+            });
+          } catch { }
+          throw;
+        }
       }
     }
   }
@@ -329,8 +467,7 @@ try {
   $exitCode = [OpenRappter.ManagedProcessTreeHelper]::Run()
   exit $exitCode
 } catch {
-  # Fixed text only: target argv/environment may contain credentials and must
-  # never be echoed by helper diagnostics.
-  [Console]::Error.WriteLine('process-tree-helper: startup failed')
+  # Never write helper diagnostics onto the target's byte-exact stderr relay.
+  # The bounded control protocol reports post-ready failures without secrets.
   exit 125
 }

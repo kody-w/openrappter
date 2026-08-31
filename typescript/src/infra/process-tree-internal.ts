@@ -108,16 +108,32 @@ export class ProcessTreeContainmentError extends Error {
   }
 }
 
-export type GroupSignal = NodeJS.Signals | 0;
+export class ProcessTreeOutputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProcessTreeOutputError';
+  }
+}
 
 export interface ProcessTreeTestHooks {
   platform?: NodeJS.Platform;
   spawn?: typeof nodeSpawn;
-  signalProcessGroup?: (processGroupId: number, signal: GroupSignal) => void;
-  processGroupEmpty?: (processGroupId: number) => boolean;
+  processGroupMembers?: (
+    processGroupId: number,
+    timeoutMs: number,
+  ) => number[] | Promise<number[]>;
+  processGroupExists?: (processGroupId: number) => boolean;
   processAlive?: (evidence: ManagedPidEvidence) => boolean;
   killHelper?: (child: ChildProcessWithoutNullStreams) => boolean;
+  writePosixControl?: (
+    control: Writable,
+    command: 'terminate' | 'kill',
+  ) => Promise<void>;
+  finishPosixGuardian?: (child: ChildProcessWithoutNullStreams) => boolean;
+  afterWindowsReady?: (child: ChildProcessWithoutNullStreams) => void;
+  onPosixEvent?: (event: unknown) => void;
   afterSpawn?: (tree: ManagedProcessTreeHandle) => void | Promise<void>;
+  posixHelperPath?: string;
   windowsHelperPath?: string;
   connectWindowsControl?: (pipeName: string, timeoutMs: number) => Promise<Socket>;
 }

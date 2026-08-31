@@ -2,6 +2,7 @@ import {
   abortError,
   ProcessTreeCleanupError,
   ProcessTreeContainmentError,
+  ProcessTreeOutputError,
   ProcessTreeStartupError,
   type ManagedPidEvidence,
   type ManagedProcessCleanup,
@@ -22,6 +23,7 @@ const MAX_TERMINATION_MS = 60_000;
 export {
   ProcessTreeCleanupError,
   ProcessTreeContainmentError,
+  ProcessTreeOutputError,
   ProcessTreeStartupError,
 };
 export type {

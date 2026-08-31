@@ -86,7 +86,7 @@ jobs:
       - name: Validate TypeScript Windows storage
         working-directory: typescript
         run: |
-          npx vitest run src/flight-recorder/windows-storage.test.ts
+          npx vitest run src/flight-recorder/windows-storage.test.ts src/infra/process-tree.test.ts
           npm run build
 
       - name: Validate Python Windows storage

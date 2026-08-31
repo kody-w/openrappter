@@ -1,11 +1,16 @@
 /**
  * Canonical bytes, content addresses, and the one PRNG both runtimes share.
  *
- * Two runtimes only agree about a hash if they agree about the bytes, so the
- * canonical form is pinned here and nowhere else: keys sorted, no whitespace,
- * ASCII-escaped. Numbers use JavaScript's JSON number form; the Python mirror
- * implements that same binary64 rendering explicitly so parsed `1.0`, tiny
- * exponents, and large integral floats cannot fork a content address.
+ * Two runtimes only agree about a hash if they agree about the bytes. The
+ * historical `canonicalJson` helper remains ASCII-escaped for its existing
+ * Quantum RAPPID callers; `rappCanonicalJson` is the RAPP/1 RFC 8785 form:
+ * UTF-16 key ordering, raw UTF-8 strings, no whitespace, and ECMAScript
+ * binary64 number serialization.
+ *
+ * RAPP values use the full RFC 8785 binary64 number profile. JavaScript's
+ * JSON.stringify implements the required ECMAScript serialization; the strict
+ * parser additionally proves that an incoming decimal token denotes the same
+ * mathematical value after binary64 parsing, so lossy tokens are refused.
  *
  * The PRNG is a SHA-256 counter stream rather than a language RNG on purpose.
  * The generator that seeded the live sonic dimension used Python's Mersenne
@@ -108,7 +113,7 @@ function validateRappString(value: string): void {
 }
 
 /**
- * Refuse values outside the exact-integer RAPP/1 profile before hashing.
+ * Refuse values outside the finite binary64 RAPP/1 profile before hashing.
  *
  * JavaScript's default string comparison is lexicographic over UTF-16 code
  * units, which is exactly RFC 8785 member ordering. Valid surrogate pairs are
@@ -126,8 +131,8 @@ export function assertRappCanonicalValue(
     return;
   }
   if (typeof value === 'number') {
-    if (!Number.isSafeInteger(value)) {
-      throw new TypeError('Quantum RAPPID frames use the RAPP/1 exact-integer profile');
+    if (!Number.isFinite(value)) {
+      throw new TypeError('RAPP/1 canonical numbers must be finite binary64 values');
     }
     return;
   }
@@ -152,8 +157,8 @@ export function assertRappCanonicalValue(
 }
 
 /**
- * Parse the exact-integer RAPP/1 JSON profile without losing duplicate members
- * or unsafe number tokens through JSON.parse's last-value-wins behavior.
+ * Parse the RAPP/1 I-JSON profile without losing duplicate members or lossy
+ * number tokens through JSON.parse's last-value-wins behavior.
  */
 export function parseRappJson(source: string): JsonValue {
   if (typeof source !== 'string') {
@@ -199,27 +204,51 @@ export function parseRappJson(source: string): JsonValue {
     }
     throw new TypeError(`unterminated JSON string at offset ${start}`);
   };
+  const decimalIdentity = (token: string): string => {
+    const match =
+      /^(-)?(0|[1-9]\d*)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(token);
+    if (match === null) throw new TypeError('invalid JSON number token');
+    let digits = `${match[2]}${match[3] ?? ''}`.replace(/^0+/, '');
+    if (digits.length === 0) return '0';
+    let trailing = 0;
+    while (digits.endsWith('0')) {
+      digits = digits.slice(0, -1);
+      trailing += 1;
+    }
+    const exponentToken = match[4] ?? '0';
+    const exponentDigits = exponentToken.replace(/^[+-]?0*/, '');
+    if (exponentDigits.length > 6) {
+      // No finite non-zero binary64 value has an exponent remotely this large.
+      // Preserve a non-zero identity marker without constructing an enormous
+      // BigInt from attacker-controlled input.
+      return `${match[1] ?? ''}${digits}e${exponentToken}`;
+    }
+    const signedExponent =
+      exponentDigits.length === 0
+        ? 0n
+        : BigInt(`${exponentToken.startsWith('-') ? '-' : ''}${exponentDigits}`);
+    const exponent =
+      signedExponent
+      - BigInt((match[3] ?? '').length)
+      + BigInt(trailing);
+    return `${match[1] ?? ''}${digits}e${exponent}`;
+  };
   const numberValue = (): number => {
     const start = offset;
-    if (source[offset] === '-') offset += 1;
-    if (source[offset] === '0') {
-      offset += 1;
-      if (/[0-9]/.test(source[offset] ?? '')) {
-        throw new TypeError(`invalid leading zero at offset ${start}`);
-      }
-    } else {
-      if (!/[1-9]/.test(source[offset] ?? '')) {
-        throw new TypeError(`invalid JSON number at offset ${start}`);
-      }
-      while (/[0-9]/.test(source[offset] ?? '')) offset += 1;
-    }
-    if (source[offset] === '.' || source[offset] === 'e' || source[offset] === 'E') {
-      throw new TypeError('RAPP/1 exact-integer profile refuses fractional or exponent number tokens');
-    }
+    const matcher =
+      /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+    matcher.lastIndex = offset;
+    const match = matcher.exec(source);
+    if (match === null) throw new TypeError(`invalid JSON number at offset ${start}`);
+    offset = matcher.lastIndex;
     const token = source.slice(start, offset);
     const value = Number(token);
-    if (!Number.isSafeInteger(value)) {
-      throw new TypeError('RAPP/1 exact-integer profile refuses integers outside uint53 precision');
+    if (!Number.isFinite(value)) {
+      throw new TypeError('RAPP/1 number token is not a finite binary64 value');
+    }
+    const canonical = JSON.stringify(value);
+    if (canonical === undefined || decimalIdentity(token) !== decimalIdentity(canonical)) {
+      throw new TypeError('RAPP/1 number token does not survive the binary64 round-trip');
     }
     return value;
   };
@@ -309,7 +338,7 @@ export function parseRappJson(source: string): JsonValue {
 function renderRappCanonical(value: JsonValue): string {
   if (value === null) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (typeof value === 'number') return String(value);
+  if (typeof value === 'number') return JSON.stringify(value);
   if (typeof value === 'string') return JSON.stringify(value);
   if (Array.isArray(value)) {
     return `[${value.map((item) => renderRappCanonical(item)).join(',')}]`;

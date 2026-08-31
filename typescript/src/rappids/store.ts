@@ -34,12 +34,15 @@ import {
   RAPP_FRAME_KEYS,
   RAPP_FRAME_SPEC,
   RAPP_FRAME_TIME_PATTERN,
-  hashRappBodyFrame,
+  RappFrameError,
+  createLegacyRappIntegrityProfile,
+  hashLegacyRappBodyFrame,
   isRappFrameUtc,
   rappFrameDigest,
   rappFrameToJson,
   verifyRappFrame,
-  type RappBodyFrameProfile,
+  type RappFrameProfile,
+  type RappFrameVerification,
 } from '../rapp/frame.js';
 import { isRappid, parseRappid, validateParentPointer } from './identity.js';
 import { noteFromJson } from './midi.js';
@@ -499,12 +502,12 @@ const MEDIA_TYPE =
 const MEMORY_STREAM =
   /^rappid:@[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*:[0-9a-f]{64}:[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SWARM_STREAM = /^net:[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const BODY_DIMENSION_FRAME_PROFILE: Readonly<
-  RappBodyFrameProfile<RappDimensionPayload, 'body.dimension'>
-> = Object.freeze({
+export const LEGACY_BODY_DIMENSION_PROFILE: Readonly<
+  RappFrameProfile<RappDimensionPayload, 'body.dimension'>
+> = createLegacyRappIntegrityProfile({
   name: 'openrappter-body-dimension',
-  kinds: Object.freeze(['body.dimension'] as const),
-  signature: 'unsigned-local',
+  kind: 'body.dimension',
+  family: 'body',
 });
 
 export function bodyFrameToJson(frame: BodyFrame): JsonObject {
@@ -523,7 +526,7 @@ export function bodyFrameDigest(frame: BodyFrame): string {
   return rappFrameDigest(frame);
 }
 
-export function buildDimensionFrame(input: {
+export function buildLegacyDimensionFrame(input: {
   rappid: string;
   seq: number;
   utc: string;
@@ -545,7 +548,7 @@ export function buildDimensionFrame(input: {
     media: input.media,
     sources: input.sources ?? [],
   };
-  return hashRappBodyFrame({
+  return hashLegacyRappBodyFrame({
     kind: 'body.dimension',
     streamId: input.rappid,
     seq: input.seq,
@@ -555,7 +558,10 @@ export function buildDimensionFrame(input: {
   }) as BodyFrame;
 }
 
-export function parseBodyFrame(raw: JsonObject, source: string): BodyFrame {
+/** @deprecated body.dimension is unregistered; this builds legacy integrity data only. */
+export const buildDimensionFrame = buildLegacyDimensionFrame;
+
+export function parseLegacyBodyFrame(raw: JsonObject, source: string): BodyFrame {
   if (
     Object.keys(raw).sort().join('\0')
     !== [...RAPP_FRAME_KEYS].sort().join('\0')
@@ -596,13 +602,16 @@ export function parseBodyFrame(raw: JsonObject, source: string): BodyFrame {
   };
 }
 
-export function bodyFrameProblems(
+/** @deprecated body.dimension is unregistered; use parseLegacyBodyFrame explicitly. */
+export const parseBodyFrame = parseLegacyBodyFrame;
+
+export function legacyBodyFrameProblems(
   frame: BodyFrame,
   head: BodyFrame | null,
   streamId: string,
 ): string[] {
   const problems: string[] = [];
-  const common = verifyRappFrame(frame, BODY_DIMENSION_FRAME_PROFILE, {
+  const common = verifyRappFrame(frame, LEGACY_BODY_DIMENSION_PROFILE, {
     head,
     streamIdOfRecord: streamId,
   });
@@ -772,6 +781,33 @@ export function bodyFrameProblems(
   return problems;
 }
 
+export function verifyLegacyBodyDimensionFrame(
+  frame: BodyFrame,
+  head: BodyFrame | null,
+  streamId: string,
+): RappFrameVerification<BodyFrame> {
+  const common = verifyRappFrame(frame, LEGACY_BODY_DIMENSION_PROFILE, {
+    head,
+    streamIdOfRecord: streamId,
+  });
+  if (!common.ok) return common;
+  const problems = legacyBodyFrameProblems(frame, head, streamId);
+  if (problems.length > 0) {
+    return {
+      ok: false,
+      error: new RappFrameError(
+        'payload-profile',
+        '1',
+        problems.join('; '),
+      ),
+    };
+  }
+  return common as RappFrameVerification<BodyFrame>;
+}
+
+/** @deprecated body.dimension is unregistered; use legacyBodyFrameProblems explicitly. */
+export const bodyFrameProblems = legacyBodyFrameProblems;
+
 function frameFileName(seq: number): string {
   return `${String(seq).padStart(6, '0')}.json`;
 }
@@ -782,7 +818,10 @@ export function loadFrames(directory: string): BodyFrame[] {
   const files = readdirSync(framesDir)
     .filter((file) => file.endsWith('.json'))
     .sort();
-  return files.map((file) => parseBodyFrame(readJson(join(framesDir, file)), `${FRAMES_DIRECTORY}/${file}`));
+  return files.map((file) => parseLegacyBodyFrame(
+    readJson(join(framesDir, file)),
+    `${FRAMES_DIRECTORY}/${file}`,
+  ));
 }
 
 export function loadOrganism(directory: string): LoadedOrganism {
@@ -971,13 +1010,14 @@ export function writeDimensionAsset(
 }
 
 /**
- * Append one body frame. The only writer of organism history.
+ * Append one historical body.dimension frame. The only compatibility writer
+ * for pre-registry organism history; output is legacy integrity-only.
  *
  * `wx` is the whole guarantee: the file is created or the call fails. A frame
  * whose index already exists means two writers raced or history is being
  * rewritten, and both deserve an error rather than a silent overwrite.
  */
-export function appendBodyFrame(organism: LoadedOrganism, frame: BodyFrame): string {
+export function appendLegacyBodyFrame(organism: LoadedOrganism, frame: BodyFrame): string {
   if (!FRAME_TIME_PATTERN.test(frame.utc)) {
     throw new QuantumRappidError(
       'frame-time',
@@ -985,7 +1025,7 @@ export function appendBodyFrame(organism: LoadedOrganism, frame: BodyFrame): str
     );
   }
   const head = organism.frames.at(-1) ?? null;
-  const problems = bodyFrameProblems(
+  const problems = legacyBodyFrameProblems(
     frame,
     head,
     organism.document.rappid,
@@ -993,7 +1033,7 @@ export function appendBodyFrame(organism: LoadedOrganism, frame: BodyFrame): str
   if (problems.length > 0) {
     throw new QuantumRappidError(
       'frame-invalid',
-      `RAPP/1 frame refused: ${problems.join('; ')}`,
+      `Legacy body.dimension integrity frame refused: ${problems.join('; ')}`,
     );
   }
 
@@ -1017,3 +1057,6 @@ export function appendBodyFrame(organism: LoadedOrganism, frame: BodyFrame): str
   organism.frames.push(frame);
   return target;
 }
+
+/** @deprecated body.dimension is unregistered; use appendLegacyBodyFrame explicitly. */
+export const appendBodyFrame = appendLegacyBodyFrame;

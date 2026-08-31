@@ -1,0 +1,24 @@
+{
+  "accepted": [
+    { "token": "0", "canonical": "0" },
+    { "token": "-0", "canonical": "0" },
+    { "token": "1.0", "canonical": "1" },
+    { "token": "1e0", "canonical": "1" },
+    { "token": "4.50", "canonical": "4.5" },
+    { "token": "0.1", "canonical": "0.1" },
+    { "token": "1.5", "canonical": "1.5" },
+    { "token": "2e-3", "canonical": "0.002" },
+    { "token": "9007199254740992", "canonical": "9007199254740992" },
+    { "token": "9007199254740994", "canonical": "9007199254740994" },
+    { "token": "100000000000000000000", "canonical": "100000000000000000000" },
+    { "token": "1e21", "canonical": "1e+21" },
+    { "token": "1e-7", "canonical": "1e-7" }
+  ],
+  "rejected": [
+    "9007199254740993",
+    "-9007199254740993",
+    "0.10000000000000001",
+    "1e999",
+    "1e-999"
+  ]
+}

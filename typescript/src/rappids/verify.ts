@@ -24,7 +24,7 @@ import { directoryHex, identityDrift, parseRappid } from './identity.js';
 import {
   assetBytes,
   assetExists,
-  bodyFrameProblems,
+  legacyBodyFrameProblems,
   readRappObject,
   resolveWithin,
 } from './store.js';
@@ -214,12 +214,15 @@ function midiDnaCheck(sonic: LoadedOrganism['sonic'] & object): VerificationChec
 
 function frameChecks(organism: LoadedOrganism): VerificationCheck[] {
   if (organism.frames.length === 0) {
-    return [pass('frames.chain', 'no body frames yet: a compact organism is not a broken one')];
+    return [pass(
+      'frames.chain',
+      'no legacy body.dimension frames yet: a compact organism is not broken',
+    )];
   }
   const problems: string[] = [];
   let head: LoadedOrganism['frames'][number] | null = null;
   organism.frames.forEach((frame) => {
-    for (const problem of bodyFrameProblems(
+    for (const problem of legacyBodyFrameProblems(
       frame,
       head,
       organism.document.rappid,
@@ -230,7 +233,10 @@ function frameChecks(organism: LoadedOrganism): VerificationCheck[] {
   });
   return [
     problems.length === 0
-      ? pass('frames.chain', `${organism.frames.length} append-only frames chain cleanly`)
+      ? pass(
+        'frames.chain',
+        `${organism.frames.length} legacy body.dimension frames pass integrity-only chaining; this is not current-kind conformance`,
+      )
       : fail('frames.chain', problems.join('; ')),
   ];
 }

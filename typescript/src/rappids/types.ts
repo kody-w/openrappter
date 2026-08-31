@@ -170,11 +170,22 @@ export interface RappDimensionPayload extends JsonObject {
   sources: JsonValue[];
 }
 
-/** The body.dimension profile layered on the shared eleven-key RAPP/1 frame. */
-export type BodyFrame = RappFrame<RappDimensionPayload, 'body.dimension'> & {
+/**
+ * Unregistered historical body.dimension data.
+ *
+ * It remains readable for integrity and migration, but is not a currently
+ * conforming or promotion-grade RAPP kind.
+ */
+export type LegacyBodyDimensionFrame = RappFrame<
+  RappDimensionPayload,
+  'body.dimension'
+> & {
   prev_wave: null;
   sig: null;
 };
+
+/** @deprecated Use LegacyBodyDimensionFrame and explicit legacy integrity APIs. */
+export type BodyFrame = LegacyBodyDimensionFrame;
 
 export interface LoadedOrganism {
   directory: string;

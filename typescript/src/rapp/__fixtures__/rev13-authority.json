@@ -1,0 +1,442 @@
+{
+  "authority": {
+    "repository": "https://github.com/kody-w/rapp-1",
+    "checkpoint_commit": "85b0b04cc0d39702278e7ee2a8ada3467ca9a045",
+    "revision": "rev-13",
+    "status": "accepted"
+  },
+  "expected": {
+    "frame_keys": [
+      "frame_hash",
+      "kind",
+      "payload",
+      "payload_hash",
+      "prev",
+      "prev_wave",
+      "seq",
+      "sig",
+      "spec",
+      "stream_id",
+      "utc"
+    ],
+    "frame_canonical_bytes": 10792,
+    "frame_canonical_sha256": "9d1984794c23541f54104702a979dd268dbf5c15fdc9983037eae40979d4a261",
+    "payload_canonical_bytes": 10330,
+    "payload_canonical_sha256": "102c9416abc02713f15638962e16418fe1235f0434df273e848a792a3944b7c0",
+    "wave_canonical_bytes": 10701,
+    "wave_canonical_sha256": "ce35fcca21ecb77be9e56548e19c06a67962839e958d2ccfb787a9648a552729",
+    "payload_hash": "78a89c06509b5100494b9c7e0f551acdc6209fd90aded734321f3580b0f07051",
+    "frame_hash": "bbcee75ebbbf82d11d8ffd666fdda34c8233642de6d6e4f45910d43a24a001e3"
+  },
+  "predecessor": {
+    "stream_id": "rappid:@kody-w/rapp-1-anchor:a4298c417789ecff68b7be3df4d8b90d397c43f972eaf839977db16dbe02acc6",
+    "seq": 12,
+    "utc": "2026-08-30T18:33:07.718Z",
+    "payload_hash": "415f2f79e285039f476baf647e0e037b52cc4ead110a5c99a44634e12ffc055a",
+    "frame_hash": "d2bcf3a642237634025fece571187fc7db0e0a473192b03858a5a6c9735b8cc0"
+  },
+  "frame": {
+    "spec": "rapp/1",
+    "kind": "body.pulse",
+    "stream_id": "rappid:@kody-w/rapp-1-anchor:a4298c417789ecff68b7be3df4d8b90d397c43f972eaf839977db16dbe02acc6",
+    "seq": 13,
+    "utc": "2026-08-30T18:48:18.785Z",
+    "payload": {
+      "canonical_repo": "https://github.com/kody-w/rapp-1",
+      "commit": "5e30f66396f4cd125bce5718b1fef92d8d3ddab8",
+      "commit_utc": "2026-08-30T14:42:40-04:00",
+      "default_profile": "interop",
+      "exchange": {
+        "carrier": "POST /chat with {\"user_input\": <envelope>}; the reply is in the `response` field. Offline, the identical frames ride store-and-forward.",
+        "idempotence": "keyed on the request's payload_hash — a retry returns the existing reply, never a second one.",
+        "rule": "the responder appends its reply to its OWN chain BEFORE returning it, so the synchronous answer and the replicated answer are the same frame with the same frame_hash. A fast path must never state a fact the durable path disagrees with.",
+        "shape": "push a frame in, get a frame back shaped by what you pushed — ONE hop."
+      },
+      "frame_keys": [
+        "spec",
+        "kind",
+        "stream_id",
+        "seq",
+        "utc",
+        "payload",
+        "payload_hash",
+        "prev",
+        "prev_wave",
+        "sig",
+        "frame_hash"
+      ],
+      "kind_families": {
+        "body": {
+          "kinds": [
+            "body.pulse",
+            "body.twin-pulse",
+            "body.reconstructed",
+            "body.re-genesis"
+          ],
+          "logs": "an organism's biography",
+          "stream": "body-stream (bare rappid)"
+        },
+        "memory": {
+          "kinds": [
+            "memory.chat-turn",
+            "memory.tool-call",
+            "memory.save",
+            "memory.reconstructed",
+            "memory.re-genesis"
+          ],
+          "logs": "one organism's life",
+          "stream": "memory-stream"
+        },
+        "swarm": {
+          "kinds": [
+            "swarm.guidance",
+            "swarm.echo",
+            "swarm.telemetry",
+            "swarm.reconstructed",
+            "swarm.re-genesis"
+          ],
+          "logs": "the planetary wire",
+          "stream": "swarm-stream (net:label)"
+        }
+      },
+      "moods": {
+        "clear": {
+          "profile": "interop",
+          "when": {
+            "conditions": "clear,sunny"
+          },
+          "why": "good conditions, normal posture"
+        },
+        "early": {
+          "profile": "minimal",
+          "when": {
+            "hour_lt": "6"
+          },
+          "why": "same"
+        },
+        "night": {
+          "profile": "minimal",
+          "when": {
+            "hour_gte": "22"
+          },
+          "why": "low-attention hours; smallest honest context"
+        },
+        "storm": {
+          "profile": "audit",
+          "when": {
+            "conditions": "storm,rain,snow"
+          },
+          "why": "degraded links are when drift hides; lead with verification"
+        }
+      },
+      "normative_bytes": "65569",
+      "normative_path": "SPEC.md",
+      "normative_sha256": "e5abd6a32801761fdd5c151a4f90fa4c989b545da02d3cd26dfc4765fab8409a",
+      "observed_utc": "2026-08-30T18:48:18.785Z",
+      "profile_signals": {
+        "author": "authoring",
+        "build": "authoring",
+        "check": "audit",
+        "conform": "audit",
+        "drift": "audit",
+        "handshake": "interop",
+        "install": "onboarding",
+        "join": "onboarding",
+        "mint": "authoring",
+        "new": "onboarding",
+        "stranger": "interop",
+        "unknown-peer": "interop",
+        "verify": "audit",
+        "write": "authoring"
+      },
+      "profiles": {
+        "audit": {
+          "max_rules": "8",
+          "show": [
+            "keys",
+            "stale_terms"
+          ],
+          "types": [
+            "pattern",
+            "gotcha"
+          ],
+          "why": "judging conformance; refuse-never-repair and the identity law govern"
+        },
+        "authoring": {
+          "max_rules": "8",
+          "show": [
+            "keys",
+            "eggs"
+          ],
+          "types": [
+            "gotcha",
+            "fact"
+          ],
+          "why": "hand-building a frame; the envelope rules are what bite"
+        },
+        "interop": {
+          "max_rules": "6",
+          "show": [
+            "keys",
+            "stale_terms",
+            "pointer"
+          ],
+          "types": [
+            "gotcha"
+          ],
+          "why": "a peer may be out of date; lead with what it can get WRONG"
+        },
+        "minimal": {
+          "max_rules": "0",
+          "show": [
+            "stale_terms"
+          ],
+          "types": [],
+          "why": "smallest honest context"
+        },
+        "onboarding": {
+          "max_rules": "5",
+          "show": [
+            "keys",
+            "eggs",
+            "stale_terms",
+            "pointer"
+          ],
+          "types": [
+            "fact"
+          ],
+          "why": "new organism; needs the shape of the world, not the edge cases"
+        }
+      },
+      "registered_kinds": [
+        "body.pulse",
+        "body.re-genesis",
+        "body.reconstructed",
+        "body.twin-pulse",
+        "memory.chat-turn",
+        "memory.re-genesis",
+        "memory.reconstructed",
+        "memory.save",
+        "memory.tool-call",
+        "swarm.echo",
+        "swarm.guidance",
+        "swarm.re-genesis",
+        "swarm.reconstructed",
+        "swarm.telemetry"
+      ],
+      "revision": "rev-13",
+      "rules": [
+        {
+          "c": "spec MUST be exactly \"rapp/1\"; exactly the eleven keys, none missing, none extra; a field that does not apply is present as null, never omitted.",
+          "t": "fact"
+        },
+        {
+          "c": "Canonical form is RFC 8785 JCS and FORBIDS floats — numbers ride as strings. A float silently breaks byte-reproducibility.",
+          "t": "gotcha"
+        },
+        {
+          "c": "payload_hash = H(\"rapp/1:particle\", payload) — content only, reproducible across instances.",
+          "t": "fact"
+        },
+        {
+          "c": "frame_hash = H(\"rapp/1:wave\", frame minus {frame_hash, sig}) — unique per stream instance.",
+          "t": "fact"
+        },
+        {
+          "c": "prev_wave is non-null IFF the stream is a swarm-stream AND seq>0; null everywhere else, including EVERY genesis. Setting it on an ordinary chain makes the frame unverifiable.",
+          "t": "gotcha"
+        },
+        {
+          "c": "§6.2 MINT-ONCE: the 64-hex tail is minted from uuid4 entropy exactly once. A producer MUST NOT derive it from owner/slug or any name — sha256(\"owner/slug\") is prohibited (drift ID-01/C3). On read, reuse the stored tail; never re-mint.",
+          "t": "gotcha"
+        },
+        {
+          "c": "Verification REFUSES, never repairs or reparents. A frame that does not verify is quarantined and reported, not fixed.",
+          "t": "pattern"
+        },
+        {
+          "c": "A swarm-stream frame with sig==null is refused (§7.5 step 6), so unsigned coordination belongs on body/memory streams, which permit sig==null.",
+          "t": "gotcha"
+        },
+        {
+          "c": "Eggs are byte-reproducible: ZIP method `stored` only, timestamps 1980-01-01, contents sorted by UTF-8 path bytes. Two conformant packers of the same manifest emit BYTE-IDENTICAL eggs.",
+          "t": "fact"
+        },
+        {
+          "c": "Cross-stream merge order (Dream-Catcher) is ascending utc bytewise, ties broken by ascending frame_hash bytewise — this is how N streams compose into one view.",
+          "t": "pattern"
+        },
+        {
+          "c": "One writer per stream. Two writers computing seq=head.seq+1 produce duplicate seqs; distinct streams stay distinct.",
+          "t": "pattern"
+        },
+        {
+          "c": "§9.4 (rev-6): hatching an egg MUST mint a fresh §6.2 identity for the INSTANCE — the artifact rappid rides the egg unchanged and is shared by every install; the instance identity never is. The instance SHOULD record grown_from = the §9.1 egg address it grew from: written at mint, immutable, null when unknown, NEVER fabricated. Lineage, not inheritance — it confers no authority, no trust, no key material.",
+          "t": "fact"
+        },
+        {
+          "c": "§11.1 / Constitution Article 15: owner policy selects only release_scope; the activated registry selects grail_id; every ring rejects kernel-drift; execution consumes bytes from a sealed immutable object or equivalent write-excluded snapshot.",
+          "t": "gotcha"
+        },
+        {
+          "t": "gotcha",
+          "c": "A sealed egg is public ciphertext, not password-protected hosting: the signed manifest binds AES-256-GCM data and a scoped key service; no shared DEK belongs in the egg, URL, client, log, or frame."
+        },
+        {
+          "t": "fact",
+          "c": "RAPP CI/CD promotes one immutable release payload hash through an ordered evidence chain; no ring may rebuild, patch, substitute, or skip the candidate."
+        },
+        {
+          "t": "gotcha",
+          "c": "RAPP Deploy forbids in-place serving mutation: growth happens in an isolated candidate lineage and reaches users only through bounded, reversible waves."
+        },
+        {
+          "t": "pattern",
+          "c": "A new encounter may produce an offspring or cross with a fresh identity and typed parent addresses; lineage may continue indefinitely, but every attempt is bounded and parent authority never transfers implicitly."
+        },
+        {
+          "t": "fact",
+          "c": "kody-w/RAPP remains the public foundation and product home; kody-w/rapp-1 defines the interoperable protocol only."
+        }
+      ],
+      "vocabulary": {
+        "body": {
+          "status": "live",
+          "where": "§7.2 kind family"
+        },
+        "estate": {
+          "status": "live",
+          "where": "§9.2 egg variant"
+        },
+        "grail": {
+          "status": "live",
+          "where": "§3 terminology; §11.1 immutable Grail kernel conformance; Constitution Article 15"
+        },
+        "grown_from": {
+          "status": "live",
+          "where": "§9.4 instantiation — instance lineage key"
+        },
+        "instance": {
+          "status": "live",
+          "where": "§9.4 instantiation — a hatched install; fresh §6.2 identity, never shared"
+        },
+        "invite": {
+          "status": "live",
+          "where": "§9.2 egg variant"
+        },
+        "memory": {
+          "status": "live",
+          "where": "§7.2 kind family"
+        },
+        "metropolis": {
+          "status": "retired",
+          "where": "rapp-metropolis/1.0 tier 3; that doc is now a retirement notice in kody-w/rapp-estate — bytes only at git 24c8fdc, sha256 690f6109…"
+        },
+        "neighborhood": {
+          "status": "live",
+          "where": "§9.2 egg variant"
+        },
+        "organism": {
+          "status": "live",
+          "where": "§9.2 egg variant"
+        },
+        "rapp-frame/2.0": {
+          "status": "retired",
+          "where": "legacy envelope token, superseded by rapp/1 (§7.1)"
+        },
+        "rapp-frame/2.1": {
+          "status": "retired",
+          "where": "legacy envelope token, superseded by rapp/1 (§7.1)"
+        },
+        "rapp-protocol/1.0": {
+          "status": "retired",
+          "where": "legacy, superseded by rapp/1"
+        },
+        "rapp-rappid-spec/2.0": {
+          "status": "retired",
+          "where": "legacy, superseded by rapp/1 §6"
+        },
+        "rapplication": {
+          "status": "live",
+          "where": "§9.2 egg variant"
+        },
+        "rbox": {
+          "status": "not-in-spec",
+          "where": "operator's working word for a machine running an organism; the spec's words are `organism` (§9.2) and `instance` (§9.4)"
+        },
+        "session": {
+          "status": "live",
+          "where": "§9.2 egg variant"
+        },
+        "swarm": {
+          "status": "live",
+          "where": "§7.2 kind family"
+        },
+        "sealed": {
+          "status": "live",
+          "where": "§9.2 sealed egg variant and §9.2.1 profile"
+        },
+        "rapp-cicd": {
+          "status": "live",
+          "where": "§11.2 and protocols/rapp-cicd/1/SPEC.md"
+        },
+        "rapp-deploy": {
+          "status": "live",
+          "where": "§11.2 and protocols/rapp-deploy/1/SPEC.md"
+        },
+        "offspring": {
+          "status": "live",
+          "where": "§9.4 typed lineage and PHILOSOPHY.md"
+        },
+        "cross": {
+          "status": "live",
+          "where": "§9.4 typed multi-parent lineage and PHILOSOPHY.md"
+        }
+      },
+      "philosophy": {
+        "canonical_repository": "https://github.com/kody-w/RAPP",
+        "canonical_commit": "cb921ae59b5d762ce0bdd5493764cbb1c8b539fe",
+        "canonical_path": "PHILOSOPHY.md",
+        "canonical_sha256": "901826afd8be6e4b4bc24f83777b6d75ee29aabbff2a12655d2ab64a4e8e489c",
+        "mirror_path": "PHILOSOPHY.md",
+        "mirror_sha256": "901826afd8be6e4b4bc24f83777b6d75ee29aabbff2a12655d2ab64a4e8e489c"
+      },
+      "operational_profiles": {
+        "rapp-cicd/1": {
+          "status": "live",
+          "spec_path": "protocols/rapp-cicd/1/SPEC.md",
+          "spec_sha256": "6d27d10103a3204f3b65a2e246462d197016bce5203dd510ba3ce209740e8278",
+          "schema_path": "protocols/rapp-cicd/1/schema.json",
+          "schema_sha256": "5936057868f46fc74afa00532f4aea60cfbb667c7c2f09998e1e86a0c2e629cc"
+        },
+        "rapp-deploy/1": {
+          "status": "live",
+          "spec_path": "protocols/rapp-deploy/1/SPEC.md",
+          "spec_sha256": "b5fc84465fb201fd97d7059997490a8fae5bf79ec55e935b0cfd9b4c787108e5",
+          "schema_path": "protocols/rapp-deploy/1/schema.json",
+          "schema_sha256": "aca783f3274cd865926f6b943163189fa93a7bbc4c7d4258856a54779a4a71ba"
+        }
+      },
+      "constitution": {
+        "path": "CONSTITUTION.md",
+        "sha256": "545086b6cd241bfc4741e94c8cec3300e61d9f446f1571694f11b7ea549e5129",
+        "size_bytes": 13494
+      },
+      "foundation": {
+        "schema": "rapp-foundation-pointer/1",
+        "status": "canonical-product-home",
+        "repository": "https://github.com/kody-w/RAPP",
+        "commit": "cb921ae59b5d762ce0bdd5493764cbb1c8b539fe",
+        "path": "PHILOSOPHY.md",
+        "sha256": "901826afd8be6e4b4bc24f83777b6d75ee29aabbff2a12655d2ab64a4e8e489c",
+        "size_bytes": 2633,
+        "relationship": "kody-w/RAPP is the public RAPP foundation and product home; kody-w/rapp-1 is the interoperable protocol authority"
+      }
+    },
+    "payload_hash": "78a89c06509b5100494b9c7e0f551acdc6209fd90aded734321f3580b0f07051",
+    "prev": "415f2f79e285039f476baf647e0e037b52cc4ead110a5c99a44634e12ffc055a",
+    "prev_wave": null,
+    "sig": null,
+    "frame_hash": "bbcee75ebbbf82d11d8ffd666fdda34c8233642de6d6e4f45910d43a24a001e3"
+  }
+}

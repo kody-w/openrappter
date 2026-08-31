@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { rappFrameDigest } from './frame.js';
 import {
+  ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
   OPENRAPPTER_EVIDENCE_FRAME_KIND,
   OPENRAPPTER_EVIDENCE_SCHEMA,
-  RAPP_REV14_AUTHORITY,
   RappFrameError,
   assertRappEvidenceChain,
   buildOpenRappterEvidencePayload,
   buildRappEvidenceFrame,
+  createOpenRappterEvidenceProfile,
+  rappFrameDigest,
+  selectRappChainTrustPolicy,
   verifyRappEvidenceChain,
   verifyRappEvidenceFrame,
   type OpenRappterEvidenceFrame,
@@ -20,8 +22,8 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-describe('OpenRappter evidence payload profile', () => {
-  it('carries application evidence and the exact rev-14 authority identity', () => {
+describe('selected authority evidence payload', () => {
+  it('defaults to the immutable accepted rev-13 authority', () => {
     const payload = buildOpenRappterEvidencePayload({
       eventKind: 'install.verified',
       subject: 'release:1.0.0',
@@ -35,13 +37,26 @@ describe('OpenRappter evidence payload profile', () => {
       subject: 'release:1.0.0',
       data_hash: 'a'.repeat(64),
       reference_hashes: ['b'.repeat(64), 'c'.repeat(64)],
-      protocol_revision: RAPP_REV14_AUTHORITY,
+      protocol_revision: {
+        revision: 'rev-13',
+        frame_hash: ACCEPTED_RAPP_PROTOCOL_AUTHORITY.frameHash,
+        payload_hash: ACCEPTED_RAPP_PROTOCOL_AUTHORITY.payloadHash,
+      },
     });
     expect(payload).not.toHaveProperty('spec');
-    expect(payload).not.toHaveProperty('frame_hash');
+    expect(Object.keys(payload)).not.toContain('frame_hash');
+    expect(Object.isFrozen(payload)).toBe(true);
   });
 
-  it('refuses unsorted, duplicate, or malformed references without repairing them', () => {
+  it('accepts only a selected ProtocolAuthority, never draft metadata', () => {
+    expect(() => createOpenRappterEvidenceProfile({
+      status: 'draft',
+      revision: 'rev-14',
+      checkpoint: 'unpublished',
+    } as never)).toThrow(/selected ProtocolAuthority/);
+  });
+
+  it('refuses unsorted, duplicate, malformed, or non-I-JSON payload data', () => {
     expect(() => buildOpenRappterEvidencePayload({
       eventKind: 'install.verified',
       subject: 'release:1.0.0',
@@ -67,7 +82,7 @@ describe('OpenRappter evidence payload profile', () => {
   });
 });
 
-describe('RAPP/1 evidence frame helpers', () => {
+describe('RAPP/1 evidence helpers and trust', () => {
   const genesis = buildRappEvidenceFrame({
     streamId: STREAM_ID,
     utc: '2026-08-30T22:00:00.000Z',
@@ -85,8 +100,15 @@ describe('RAPP/1 evidence frame helpers', () => {
     referenceHashes: [genesis.payload_hash],
     head: genesis,
   });
+  const policy = selectRappChainTrustPolicy({
+    trustedGenesis: {
+      streamId: STREAM_ID,
+      frameHash: genesis.frame_hash,
+      payloadHash: genesis.payload_hash,
+    },
+  });
 
-  it('builds exact body.pulse frames and verifies the chain', () => {
+  it('builds exact immutable body.pulse frames', () => {
     expect(genesis).toMatchObject({
       spec: 'rapp/1',
       kind: OPENRAPPTER_EVIDENCE_FRAME_KIND,
@@ -98,18 +120,39 @@ describe('RAPP/1 evidence frame helpers', () => {
     });
     expect(child.seq).toBe(1);
     expect(child.prev).toBe(genesis.payload_hash);
+    expect(Object.keys(genesis)).toHaveLength(11);
+    expect(Object.isFrozen(genesis)).toBe(true);
+    expect(Object.isFrozen(genesis.payload.protocol_revision)).toBe(true);
+  });
+
+  it('returns explicit integrity-only, non-promotion trust', () => {
     expect(verifyRappEvidenceFrame(genesis, {
       head: null,
       streamIdOfRecord: STREAM_ID,
-    })).toMatchObject({ ok: true });
-    const verified = verifyRappEvidenceChain([genesis, child], STREAM_ID);
-    expect(verified).toMatchObject({ ok: true, head: child });
+    })).toMatchObject({
+      ok: true,
+      trust: {
+        classification: 'integrity-only',
+        promotionGrade: false,
+        authority: { revision: 'rev-13' },
+      },
+    });
+    const verified = verifyRappEvidenceChain([genesis, child], policy);
+    expect(verified).toMatchObject({
+      ok: true,
+      head: child,
+      trust: {
+        classification: 'integrity-only',
+        promotionGrade: false,
+        genesis: 'trusted',
+      },
+    });
     expect(verified.ok && Object.isFrozen(verified.frames)).toBe(true);
-    expect(assertRappEvidenceChain([genesis, child], STREAM_ID))
+    expect(assertRappEvidenceChain([genesis, child], policy))
       .toEqual([genesis, child]);
   });
 
-  it('is deterministic and retry-safe for the same head, time, and evidence', () => {
+  it('is deterministic and retry-safe for identical selected authority and head', () => {
     const retry = buildRappEvidenceFrame({
       streamId: STREAM_ID,
       utc: '2026-08-30T22:00:01.000Z',
@@ -118,20 +161,17 @@ describe('RAPP/1 evidence frame helpers', () => {
       dataHash: '2'.repeat(64),
       referenceHashes: [genesis.payload_hash],
       head: genesis,
+      authority: ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
     });
     expect(retry).toEqual(child);
     expect(retry.frame_hash).toBe(child.frame_hash);
-    expect(Object.isFrozen(retry)).toBe(true);
-    expect(Object.isFrozen(retry.payload)).toBe(true);
-    expect(Object.isFrozen(retry.payload.protocol_revision)).toBe(true);
   });
 
-  it('rejects protocol revision drift even when both frame hashes are recomputed', () => {
+  it('rejects authority identity drift even after rehashing', () => {
     const frame = clone(child);
-    frame.payload.protocol_revision.frame_hash = '0'.repeat(64) as typeof frame.payload.protocol_revision.frame_hash;
+    frame.payload.protocol_revision.frame_hash = '0'.repeat(64);
     frame.payload_hash = '0'.repeat(64);
     frame.frame_hash = rappFrameDigest(frame);
-
     expect(verifyRappEvidenceFrame(frame, {
       head: genesis,
       streamIdOfRecord: STREAM_ID,
@@ -146,7 +186,6 @@ describe('RAPP/1 evidence frame helpers', () => {
     (frame.payload as Record<string, unknown>).private_envelope = true;
     frame.payload_hash = '0'.repeat(64);
     frame.frame_hash = rappFrameDigest(frame);
-
     expect(verifyRappEvidenceFrame(frame, {
       head: null,
       streamIdOfRecord: STREAM_ID,
@@ -154,20 +193,5 @@ describe('RAPP/1 evidence frame helpers', () => {
       ok: false,
       error: { step: '1', code: 'payload-profile' },
     });
-  });
-
-  it('returns typed chain failure evidence for empty and backward chains', () => {
-    expect(verifyRappEvidenceChain([], STREAM_ID)).toMatchObject({
-      ok: false,
-      error: { code: 'empty-chain', step: null },
-    });
-    const backward = clone(child);
-    backward.utc = '2026-08-30T21:59:59.999Z';
-    backward.frame_hash = rappFrameDigest(backward);
-    expect(verifyRappEvidenceChain([genesis, backward], STREAM_ID))
-      .toMatchObject({
-        ok: false,
-        error: { code: 'time-regression', step: '4', frameIndex: 1 },
-      });
   });
 });

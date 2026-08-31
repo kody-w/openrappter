@@ -349,7 +349,7 @@ describe('identity', () => {
 });
 
 describe('growth', () => {
-  it('appends a verified frame without touching the identity', () => {
+  it('appends legacy integrity-only dimension history without touching identity', () => {
     const home = habitat('grow');
     const fixture = buildOrganism({ habitat: home });
     const before = loadOrganism(fixture.directory);
@@ -372,6 +372,10 @@ describe('growth', () => {
     expect(result.appended.kind).toBe('body.dimension');
     expect(result.summary.stats.frameHeight).toBe(1);
     expect(result.verification.ok).toBe(true);
+    expect(check(
+      loadOrganism(fixture.directory),
+      'frames.chain',
+    ).detail).toMatch(/legacy body\.dimension.*integrity-only/);
     expect(existsSync(result.framePath)).toBe(true);
     // The prediction quoted exact bytes, so it has to match what landed.
     expect(result.summary.stats.residentWeightBytes).toBe(

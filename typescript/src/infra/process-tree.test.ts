@@ -358,9 +358,47 @@ describe.skipIf(process.platform === 'win32')('POSIX managed process tree', () =
   });
 
   it('separates a target output error from verified guardian cleanup', async () => {
+    const iterations = 40;
+    for (let iteration = 0; iteration < iterations; iteration += 1) {
+      const output = `output-before-error-${iteration}`;
+      const tree = await __spawnManagedProcessTreeForTest({
+        command: process.execPath,
+        args: ['-e', `process.stdout.write(${JSON.stringify(output)})`],
+        env: {},
+        gracefulTerminationMs: 50,
+        forceTerminationMs: 1_000,
+      }, {
+        onPosixEvent: (event) => {
+          if ((event as { type?: string }).type === 'target_exit') {
+            throw new ProcessTreeOutputError('injected POSIX output failure');
+          }
+        },
+      });
+      running.push(tree);
+
+      expect((await collect(tree.stdout)).toString('utf8')).toBe(output);
+      await expect(tree.wait()).rejects.toBeInstanceOf(ProcessTreeOutputError);
+      const cleanup = await tree.terminate();
+      expect(cleanup).toMatchObject({
+        complete: true,
+        exit: { code: 0, signal: null },
+        containmentEmpty: true,
+        quarantineRequired: false,
+        targetError: {
+          name: 'ProcessTreeOutputError',
+          message: 'injected POSIX output failure',
+        },
+      });
+      await expectDead(tree.target);
+      await expectDead(tree.helper!);
+    }
+  }, 30_000);
+
+  it('does not swallow guardian cleanup failure after a target output error', async () => {
+    let failCleanup = true;
     const tree = await __spawnManagedProcessTreeForTest({
       command: process.execPath,
-      args: ['-e', 'process.stdout.write("output-before-error")'],
+      args: ['-e', 'process.stdout.write("output-before-cleanup-failure")'],
       env: {},
       gracefulTerminationMs: 50,
       forceTerminationMs: 1_000,
@@ -370,17 +408,65 @@ describe.skipIf(process.platform === 'win32')('POSIX managed process tree', () =
           throw new ProcessTreeOutputError('injected POSIX output failure');
         }
       },
+      finishPosixGuardian: (child) => {
+        if (failCleanup) {
+          failCleanup = false;
+          return false;
+        }
+        return child.kill('SIGHUP');
+      },
     });
     running.push(tree);
 
     await expect(tree.wait()).rejects.toBeInstanceOf(ProcessTreeOutputError);
-    const cleanup = await tree.terminate();
-    expect(cleanup).toMatchObject({
+    await expect(tree.terminate()).rejects.toBeInstanceOf(ProcessTreeCleanupError);
+    expect(await tree.terminate()).toMatchObject({
       complete: true,
       containmentEmpty: true,
-      quarantineRequired: false,
       targetError: { name: 'ProcessTreeOutputError' },
     });
+    await expectDead(tree.target);
+    await expectDead(tree.helper!);
+  });
+
+  it('fails closed when target incarnation has no exit observation', async () => {
+    let target: ManagedPidEvidence | undefined;
+    let helper: ManagedPidEvidence | undefined;
+
+    await expect(__spawnManagedProcessTreeForTest({
+      command: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+      env: {},
+      gracefulTerminationMs: 50,
+      forceTerminationMs: 1_000,
+    }, {
+      onPosixEvent: (event) => {
+        const ready = event as {
+          type?: string;
+          helper_pid?: number;
+          helper_incarnation?: string;
+          target_pid?: number;
+          target_incarnation?: string;
+        };
+        if (
+          ready.type !== 'ready'
+          || ready.helper_pid === undefined
+          || ready.helper_incarnation === undefined
+          || ready.target_pid === undefined
+        ) return;
+        helper = {
+          pid: ready.helper_pid,
+          incarnation: ready.helper_incarnation,
+        };
+        target = { pid: ready.target_pid, incarnation: null };
+        ready.target_incarnation = `unverified:${ready.target_pid}`;
+      },
+    })).rejects.toThrow('POSIX target incarnation could not be verified.');
+
+    expect(target).toBeDefined();
+    expect(helper).toBeDefined();
+    await expectDead(target!);
+    await expectDead(helper!);
   });
 
   it('keeps all numeric group signalling inside the live guardian', () => {

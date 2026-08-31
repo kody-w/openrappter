@@ -57,8 +57,10 @@ type PosixEvent =
 
 interface TargetExitState {
   promise: Promise<ManagedProcessExit>;
+  observed: Promise<ManagedProcessExit>;
   current(): ManagedProcessExit | undefined;
   failure(): Error | undefined;
+  observe(exit: ManagedProcessExit): void;
   resolve(exit: ManagedProcessExit): void;
   reject(error: Error): void;
 }
@@ -66,9 +68,13 @@ interface TargetExitState {
 function targetExitState(): TargetExitState {
   let current: ManagedProcessExit | undefined;
   let failure: Error | undefined;
-  let settled = false;
+  let waitSettled = false;
+  let resolveObserved!: (exit: ManagedProcessExit) => void;
   let resolvePromise!: (exit: ManagedProcessExit) => void;
   let rejectPromise!: (error: Error) => void;
+  const observed = new Promise<ManagedProcessExit>((resolve) => {
+    resolveObserved = resolve;
+  });
   const promise = new Promise<ManagedProcessExit>((resolve, reject) => {
     resolvePromise = resolve;
     rejectPromise = reject;
@@ -77,19 +83,28 @@ function targetExitState(): TargetExitState {
     // wait() still exposes the rejection; this prevents an output/protocol
     // failure from becoming unhandled before the caller begins awaiting it.
   });
+  const observe = (exit: ManagedProcessExit) => {
+    if (current) return;
+    // The valid exit record remains incarnation evidence even when delivering
+    // the wait()/output result subsequently fails.
+    current = exit;
+    resolveObserved(exit);
+  };
   return {
     promise,
+    observed,
     current: () => current,
     failure: () => failure,
+    observe,
     resolve: (exit) => {
-      if (settled) return;
-      settled = true;
-      current = exit;
+      observe(exit);
+      if (waitSettled) return;
+      waitSettled = true;
       resolvePromise(exit);
     },
     reject: (error) => {
-      if (settled) return;
-      settled = true;
+      if (waitSettled) return;
+      waitSettled = true;
       failure = error;
       rejectPromise(error);
     },
@@ -237,8 +252,8 @@ class PosixEventProtocol {
   }
 
   private handle(event: PosixEvent): void {
-    this.onEvent?.(event);
     if (!this.readySeen) {
+      this.onEvent?.(event);
       const ready = parseReady(event);
       this.readySeen = true;
       this.readyResolve(ready);
@@ -255,9 +270,13 @@ class PosixEventProtocol {
       if (event.signal !== null && typeof event.signal !== 'string') {
         throw new Error('POSIX guardian returned an invalid target signal.');
       }
-      this.targetExit.resolve({ code: event.code, signal: event.signal });
+      const exit = { code: event.code, signal: event.signal };
+      this.targetExit.observe(exit);
+      this.onEvent?.(event);
+      this.targetExit.resolve(exit);
       return;
     }
+    this.onEvent?.(event);
     throw new Error('Unknown POSIX guardian event.');
   }
 
@@ -568,7 +587,7 @@ export async function spawnPosixProcessTree(
     );
     if (!targetMatches && !ready.target_incarnation.startsWith('completed:')) {
       await Promise.race([
-        targetExit.promise.catch(() => undefined),
+        targetExit.observed,
         sleep(250),
       ]);
       if (!targetExit.current()) {

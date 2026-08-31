@@ -103,6 +103,7 @@ namespace OpenRappter {
       public string cwd { get; set; }
       public Dictionary<string, string> env { get; set; }
       public string control_pipe { get; set; }
+      public bool simulate_output_failure { get; set; }
     }
 
     private static void Win32(bool succeeded, string operation) {
@@ -447,6 +448,9 @@ namespace OpenRappter {
           // remaining contained process except this helper, then wait for both
           // binary relays to reach EOF. No fixed success window may truncate.
           TerminateRemainingJobProcesses(job);
+          if (config.simulate_output_failure) {
+            throw new IOException("Injected output relay failure.");
+          }
           AwaitOutputRelays(stdout, stderr);
           WriteControlEvent(control, new Dictionary<string, object> {
             { "protocol", 1 },

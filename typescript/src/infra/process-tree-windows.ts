@@ -485,6 +485,7 @@ export async function spawnWindowsProcessTree(
     cwd: options.cwd ?? null,
     env: options.env,
     control_pipe: pipeName,
+    simulate_output_failure: hooks.simulateWindowsRelayFailure === true,
   })}\n`, 'utf8');
   if (config.length > CONFIG_MAX_BYTES) {
     throw new Error(`Windows process-tree configuration exceeds ${CONFIG_MAX_BYTES} bytes.`);
@@ -527,7 +528,6 @@ export async function spawnWindowsProcessTree(
       // turn successful short work into a startup failure.
       if (!await tree.completedAfterReady(500)) throw controlError;
     }
-    hooks.afterWindowsReady?.(child);
     await hooks.afterSpawn?.(tree);
     if (options.signal?.aborted) {
       await tree.terminate();

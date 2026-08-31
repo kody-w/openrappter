@@ -86,9 +86,30 @@ jobs:
       - name: Validate TypeScript Windows storage
         working-directory: typescript
         run: |
-          npx vitest run src/flight-recorder/windows-storage.test.ts src/infra/process-tree.test.ts
+          npx vitest run src/flight-recorder/windows-storage.test.ts
           npm run build
 
       - name: Validate Python Windows storage
         working-directory: python
         run: python -m pytest tests/test_flight_recorder_windows.py -q
+
+  process-tree-windows:
+    name: Managed process tree Windows
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: npm ci
+
+      - name: Exercise native Job Object containment
+        working-directory: typescript
+        run: npx vitest run src/infra/process-tree.test.ts

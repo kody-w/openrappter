@@ -546,8 +546,9 @@ describe('Windows Job Object helper contract', () => {
       'utf8',
     );
     expect(workflow).toContain(
-      'src/flight-recorder/windows-storage.test.ts src/infra/process-tree.test.ts',
+      'run: npx vitest run src/infra/process-tree.test.ts',
     );
+    expect(workflow).toContain('name: Managed process tree Windows');
     expect(workflow).toContain('runs-on: windows-latest');
     expect(skipBudget).toMatch(
       /'src\/infra\/process-tree\.test\.ts':\s*\{\s*max:\s*2,/,
@@ -616,18 +617,12 @@ describe.runIf(process.platform === 'win32')('Windows Job Object integration', (
 
     const relayFailure = await __spawnManagedProcessTreeForTest({
       command: process.execPath,
-      args: ['-e', `
-        setTimeout(() => {
-          process.stdout.write(Buffer.alloc(8 * 1024 * 1024, 0x41));
-        }, 100);
-      `],
+      args: ['-e', 'process.stdout.write("relay-failure")'],
       env: targetEnvironment(),
       gracefulTerminationMs: 100,
       forceTerminationMs: 5_000,
     }, {
-      afterWindowsReady: (helper) => {
-        helper.stdout.destroy();
-      },
+      simulateWindowsRelayFailure: true,
     });
     running.push(relayFailure);
     await expect(relayFailure.wait()).rejects.toBeInstanceOf(ProcessTreeOutputError);

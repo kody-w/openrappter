@@ -130,7 +130,7 @@ export interface ProcessTreeTestHooks {
     command: 'terminate' | 'kill',
   ) => Promise<void>;
   finishPosixGuardian?: (child: ChildProcessWithoutNullStreams) => boolean;
-  afterWindowsReady?: (child: ChildProcessWithoutNullStreams) => void;
+  simulateWindowsRelayFailure?: boolean;
   onPosixEvent?: (event: unknown) => void;
   afterSpawn?: (tree: ManagedProcessTreeHandle) => void | Promise<void>;
   posixHelperPath?: string;

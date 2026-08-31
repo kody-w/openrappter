@@ -54,12 +54,14 @@ type WindowsControlEvent =
 interface WindowsTargetExitState {
   promise: Promise<ManagedProcessExit>;
   current(): ManagedProcessExit | undefined;
+  failure(): Error | undefined;
   resolve(exit: ManagedProcessExit): void;
   reject(error: Error): void;
 }
 
 function targetExitState(): WindowsTargetExitState {
   let current: ManagedProcessExit | undefined;
+  let failure: Error | undefined;
   let settled = false;
   let resolvePromise!: (exit: ManagedProcessExit) => void;
   let rejectPromise!: (error: Error) => void;
@@ -73,6 +75,7 @@ function targetExitState(): WindowsTargetExitState {
   return {
     promise,
     current: () => current,
+    failure: () => failure,
     resolve: (exit) => {
       if (settled) return;
       settled = true;
@@ -82,6 +85,7 @@ function targetExitState(): WindowsTargetExitState {
     reject: (error) => {
       if (settled) return;
       settled = true;
+      failure = error;
       rejectPromise(error);
     },
   };
@@ -390,6 +394,35 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
     return true;
   }
 
+  private cleanupResult(
+    graceful: boolean,
+    forced: boolean,
+  ): ManagedProcessCleanup {
+    const targetExit = this.targetExit.current();
+    const targetFailure = this.targetExit.failure();
+    const fallbackExit = this.helperExit.current() ?? {
+      code: null,
+      signal: null,
+    };
+    return {
+      complete: true,
+      exit: targetExit ?? fallbackExit,
+      ...(targetFailure
+        ? {
+            targetError: {
+              name: targetFailure.name,
+              message: targetFailure.message,
+            },
+          }
+        : {}),
+      graceful,
+      forced,
+      reaped: true,
+      containmentEmpty: true,
+      quarantineRequired: false,
+    };
+  }
+
   protected async terminateOnce(): Promise<ManagedProcessCleanup> {
     let forced = false;
     try {
@@ -397,17 +430,9 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
         if (!this.targetExit.current()) {
           this.targetExit.resolve(this.helperExit.current()!);
         }
-        const exit = await this.wait();
         this.control?.destroy();
         this.unbindAbort();
-        return {
-          exit,
-          graceful: true,
-          forced: false,
-          reaped: true,
-          containmentEmpty: true,
-          quarantineRequired: false,
-        };
+        return this.cleanupResult(true, false);
       }
       this.stdin.end();
       try {
@@ -448,17 +473,9 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
         }
       }
 
-      const exit = await this.wait();
       this.control?.destroy();
       this.unbindAbort();
-      return {
-        exit,
-        graceful: !forced,
-        forced,
-        reaped: true,
-        containmentEmpty: true,
-        quarantineRequired: false,
-      };
+      return this.cleanupResult(!forced, forced);
     } catch (error) {
       if (error instanceof ProcessTreeCleanupError) throw error;
       throw new ProcessTreeCleanupError(

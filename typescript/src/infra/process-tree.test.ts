@@ -352,6 +352,32 @@ describe.skipIf(process.platform === 'win32')('POSIX managed process tree', () =
     await expectDead(startupError!.tree.target!);
   });
 
+  it('separates a target output error from verified guardian cleanup', async () => {
+    const tree = await __spawnManagedProcessTreeForTest({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write("output-before-error")'],
+      env: {},
+      gracefulTerminationMs: 50,
+      forceTerminationMs: 1_000,
+    }, {
+      onPosixEvent: (event) => {
+        if ((event as { type?: string }).type === 'target_exit') {
+          throw new ProcessTreeOutputError('injected POSIX output failure');
+        }
+      },
+    });
+    running.push(tree);
+
+    await expect(tree.wait()).rejects.toBeInstanceOf(ProcessTreeOutputError);
+    const cleanup = await tree.terminate();
+    expect(cleanup).toMatchObject({
+      complete: true,
+      containmentEmpty: true,
+      quarantineRequired: false,
+      targetError: { name: 'ProcessTreeOutputError' },
+    });
+  });
+
   it('keeps all numeric group signalling inside the live guardian', () => {
     const directory = path.dirname(fileURLToPath(import.meta.url));
     const guardian = readFileSync(
@@ -586,6 +612,12 @@ describe.runIf(process.platform === 'win32')('Windows Job Object integration', (
     await expect(tree.wait()).rejects.toBeInstanceOf(ProcessTreeOutputError);
     await expectDead(tree.target!);
     await expectDead(grandchild);
+    expect(await tree.terminate()).toMatchObject({
+      complete: true,
+      containmentEmpty: true,
+      quarantineRequired: false,
+      targetError: { name: 'ProcessTreeOutputError' },
+    });
   });
 
   it('handles natural/fast exit, full delayed relay, and explicit relay failure', async () => {
@@ -635,6 +667,11 @@ describe.runIf(process.platform === 'win32')('Windows Job Object integration', (
     });
     running.push(relayFailure);
     await expect(relayFailure.wait()).rejects.toBeInstanceOf(ProcessTreeOutputError);
-    await expect(relayFailure.terminate()).rejects.toBeInstanceOf(ProcessTreeCleanupError);
+    expect(await relayFailure.terminate()).toMatchObject({
+      complete: true,
+      containmentEmpty: true,
+      quarantineRequired: false,
+      targetError: { name: 'ProcessTreeOutputError' },
+    });
   });
 });

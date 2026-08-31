@@ -19,7 +19,13 @@ export interface ManagedProcessExit {
 }
 
 export interface ManagedProcessCleanup {
+  complete: true;
   exit: ManagedProcessExit;
+  /** Non-containment failure retained from wait()/output, when one occurred. */
+  targetError?: {
+    name: string;
+    message: string;
+  };
   graceful: boolean;
   forced: boolean;
   reaped: true;

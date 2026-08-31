@@ -188,6 +188,25 @@ describe('RAPP/1 evidence helpers and trust', () => {
     expect(retry.frame_hash).toBe(child.frame_hash);
   });
 
+  it('keeps payload uniqueness only for the explicit evidence application profile', () => {
+    const replayedEvidence = buildRappEvidenceFrame({
+      streamId: STREAM_ID,
+      utc: '2026-08-30T22:00:02.000Z',
+      eventKind: 'install.started',
+      subject: 'release:1.0.0',
+      dataHash: '1'.repeat(64),
+      head: genesis,
+    });
+    expect(replayedEvidence.payload_hash).toBe(genesis.payload_hash);
+    expect(verifyRappEvidenceChain(
+      [genesis, replayedEvidence],
+      policy,
+    )).toMatchObject({
+      ok: false,
+      error: { code: 'duplicate-payload-hash', frameIndex: 1 },
+    });
+  });
+
   it('rejects authority identity drift even after rehashing', () => {
     const frame = clone(child);
     frame.payload.protocol_revision.frame_hash = '0'.repeat(64);

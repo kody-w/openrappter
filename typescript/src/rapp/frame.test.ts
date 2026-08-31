@@ -920,6 +920,51 @@ describe('registered mixed kinds and re-genesis refusal', () => {
     });
   });
 
+  it('allows a body payload to recur and links its later occurrence by sequence', () => {
+    const repeatedPayload = { value: 'same-particle' };
+    const first = buildRappFrame({
+      kind: 'body.pulse',
+      streamId: bodyStream,
+      utc: '2026-08-30T21:00:00.000Z',
+      payload: repeatedPayload,
+      head: null,
+    }, RAPP_ACCEPTED_BODY_PULSE_PROFILE);
+    const middle = buildRappFrame({
+      kind: 'body.pulse',
+      streamId: bodyStream,
+      utc: '2026-08-30T21:00:01.000Z',
+      payload: { value: 'middle' },
+      head: first,
+    }, RAPP_ACCEPTED_BODY_PULSE_PROFILE);
+    const repeated = buildRappFrame({
+      kind: 'body.pulse',
+      streamId: bodyStream,
+      utc: '2026-08-30T21:00:02.000Z',
+      payload: repeatedPayload,
+      head: middle,
+    }, RAPP_ACCEPTED_BODY_PULSE_PROFILE);
+    const final = buildRappFrame({
+      kind: 'body.pulse',
+      streamId: bodyStream,
+      utc: '2026-08-30T21:00:03.000Z',
+      payload: { value: 'final' },
+      head: repeated,
+    }, RAPP_ACCEPTED_BODY_PULSE_PROFILE);
+    const repeatedPolicy = selectRappChainTrustPolicy({
+      trustedGenesis: {
+        streamId: bodyStream,
+        frameHash: first.frame_hash,
+        payloadHash: first.payload_hash,
+      },
+    });
+    expect(first.payload_hash).toBe(repeated.payload_hash);
+    expect(verifyRappFrameChain(
+      [first, middle, repeated, final],
+      RAPP_ACCEPTED_BODY_STREAM_PROFILE,
+      repeatedPolicy,
+    )).toMatchObject({ ok: true, head: final });
+  });
+
   it('keeps the evidence/single-kind profile restricted to body.pulse', () => {
     expect(verifyRappFrameChain(
       [pulse, twinPulse],
@@ -933,6 +978,7 @@ describe('registered mixed kinds and re-genesis refusal', () => {
 
   it('verifies a memory.chat-turn -> memory.save chain by per-frame authority policy', () => {
     const memoryStream = `${bodyStream}:session`;
+    const repeatedPayload = { value: 'same-particle' };
     const chatTurnProfile = createRappFrameProfile<JsonObject, 'memory.chat-turn'>({
       name: 'memory-chat-turn',
       kind: 'memory.chat-turn',
@@ -945,14 +991,14 @@ describe('registered mixed kinds and re-genesis refusal', () => {
       kind: 'memory.chat-turn',
       streamId: memoryStream,
       utc: '2026-08-30T20:00:00.000Z',
-      payload: { message: 'remember this' },
+      payload: repeatedPayload,
       head: null,
     }, chatTurnProfile);
     const save = buildRappFrame({
       kind: 'memory.save',
       streamId: memoryStream,
       utc: '2026-08-30T20:00:01.000Z',
-      payload: { key: 'fact', value: 'remember this' },
+      payload: repeatedPayload,
       head: chatTurn,
     }, saveProfile);
     const memoryPolicy = selectRappChainTrustPolicy({
@@ -976,12 +1022,13 @@ describe('registered mixed kinds and re-genesis refusal', () => {
     expect(() => createRappSwarmStreamProfile(undefined as never))
       .toThrow(/signature verifier/);
     const swarmStream = 'net:signed-test';
+    const repeatedPayload = { message: 'echo' };
     const echoUnsigned = hashLegacyRappBodyFrame({
       kind: 'swarm.echo',
       streamId: swarmStream,
       seq: 0,
       utc: '2026-08-30T20:00:00.000Z',
-      payload: { message: 'echo' },
+      payload: repeatedPayload,
       prev: null,
     });
     const echo = { ...echoUnsigned, sig: 'valid-signature' };
@@ -998,6 +1045,32 @@ describe('registered mixed kinds and re-genesis refusal', () => {
       prev_wave: echo.frame_hash,
       sig: 'valid-signature',
     });
+    const repeatedDraft = hashLegacyRappBodyFrame({
+      kind: 'swarm.echo',
+      streamId: swarmStream,
+      seq: 2,
+      utc: '2026-08-30T20:00:02.000Z',
+      payload: repeatedPayload,
+      prev: telemetry.payload_hash,
+    });
+    const repeated = rewave({
+      ...repeatedDraft,
+      prev_wave: telemetry.frame_hash,
+      sig: 'valid-signature',
+    });
+    const finalDraft = hashLegacyRappBodyFrame({
+      kind: 'swarm.telemetry',
+      streamId: swarmStream,
+      seq: 3,
+      utc: '2026-08-30T20:00:03.000Z',
+      payload: { status: 'final' },
+      prev: repeated.payload_hash,
+    });
+    const final = rewave({
+      ...finalDraft,
+      prev_wave: repeated.frame_hash,
+      sig: 'valid-signature',
+    });
     const swarmPolicy = selectRappChainTrustPolicy({
       trustedGenesis: {
         streamId: swarmStream,
@@ -1009,13 +1082,14 @@ describe('registered mixed kinds and re-genesis refusal', () => {
       (frame) => frame.sig === 'valid-signature',
     );
     expect(verifyRappFrameChain(
-      [echo, telemetry],
+      [echo, telemetry, repeated, final],
       swarmProfile,
       swarmPolicy,
     )).toMatchObject({
       ok: true,
-      head: { kind: 'swarm.telemetry' },
+      head: { kind: 'swarm.telemetry', seq: 3 },
     });
+    expect(echo.payload_hash).toBe(repeated.payload_hash);
   });
 
   it.each([
@@ -1531,7 +1605,7 @@ describe('trusted chain policy and duplicate ordering', () => {
       streamId,
       seq: 2,
       utc: '2026-08-30T20:00:03.000Z',
-      payload: { event: 'wrong-parent' },
+      payload: genesis.payload,
       prev: genesis.payload_hash,
     });
     expect(verifyRappFrameChain(

@@ -275,7 +275,7 @@ export const RAPP_ACCEPTED_BODY_PULSE_PROFILE = createRappFrameProfile<
 >({
   name: 'rapp-accepted-body-pulse',
   kind: 'body.pulse',
-  uniquePayloads: true,
+  uniquePayloads: false,
 });
 
 function createAuthorityStreamProfile(
@@ -297,7 +297,7 @@ function createAuthorityStreamProfile(
     mode: 'authority' as const,
     signature,
     verifySignature,
-    uniquePayloads: true,
+    uniquePayloads: false,
   });
   registerProfile(profile, frozenNullRecord({
     name,
@@ -307,7 +307,7 @@ function createAuthorityStreamProfile(
     mode: 'authority',
     signature,
     verifySignature,
-    uniquePayloads: true,
+    uniquePayloads: false,
   }));
   return profile;
 }
@@ -1620,20 +1620,35 @@ export function verifyRappFrameChain<
     const frame = intrinsicFrames[index];
     let predecessor: RappFrame<TPayload, TKind> | null = null;
     if (frame.seq > 0) {
+      let payloadHashSeen = false;
+      let predecessorMatches = 0;
       for (
         let candidateIndex = 0;
         candidateIndex < candidateFrames.length;
         candidateIndex += 1
       ) {
-        if (candidateFrames[candidateIndex].payload_hash === frame.prev) {
-          predecessor = candidateFrames[candidateIndex];
-          break;
+        const candidate = candidateFrames[candidateIndex];
+        if (candidate.payload_hash === frame.prev) {
+          payloadHashSeen = true;
+          if (candidate.seq === frame.seq - 1) {
+            predecessor = candidate;
+            predecessorMatches += 1;
+          }
         }
+      }
+      if (predecessorMatches > 1) {
+        return chainFail(
+          'duplicate-seq',
+          'more than one fully valid frame can satisfy the predecessor link',
+          index,
+        );
       }
       if (predecessor === null) {
         return chainFail(
-          'prev-continuity',
-          'prev does not identify an earlier fully valid predecessor',
+          payloadHashSeen ? 'seq-continuity' : 'prev-continuity',
+          payloadHashSeen
+            ? 'matching payload_hash exists only at the wrong sequence'
+            : 'prev does not identify an earlier fully valid predecessor',
           index,
         );
       }

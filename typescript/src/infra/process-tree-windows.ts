@@ -377,12 +377,50 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
     });
   }
 
-  private killHelper(): void {
+  private async waitForHelperExit(deadline: number): Promise<boolean> {
+    if (this.helperExit.current()) return true;
+    // ChildProcess.kill() can return false while the corresponding `exit`
+    // event is already queued. Give that concrete reap evidence one turn.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (this.helperExit.current()) return true;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (exited: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(exited);
+      };
+      const timer = setTimeout(
+        () => finish(this.helperExit.current() !== undefined),
+        remaining,
+      );
+      void this.helperExit.promise.then(() => finish(true));
+    });
+  }
+
+  private async killHelper(deadline: number): Promise<void> {
     if (this.helperExit.current()) return;
-    const killed = (this.hooks.killHelper ?? ((child) => child.kill('SIGKILL')))(this.child);
-    if (!killed && !this.helperExit.current()) {
-      throw new Error('Windows process-tree helper could not be terminated.');
+    let killed = false;
+    let killError: Error | undefined;
+    try {
+      killed = (
+        this.hooks.killHelper
+        ?? ((child) => child.kill('SIGKILL'))
+      )(this.child);
+    } catch (error) {
+      killError = error as Error;
     }
+    if (killed || await this.waitForHelperExit(deadline)) return;
+    if (killError) {
+      throw new Error(
+        `Windows process-tree helper could not be terminated: ${killError.message}`,
+        { cause: killError },
+      );
+    }
+    throw new Error('Windows process-tree helper could not be terminated.');
   }
 
   async completedAfterReady(timeoutMs: number): Promise<boolean> {
@@ -455,7 +493,7 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
             Math.min(250, Math.max(1, this.options.forceTerminationMs)),
           );
         } catch {
-          this.killHelper();
+          await this.killHelper(forceDeadline);
         }
         if (!this.targetExit.current()) {
           this.targetExit.resolve({ code: null, signal: 'SIGKILL' });
@@ -463,7 +501,7 @@ class WindowsManagedProcessTree extends ManagedTreeBase {
         const controlDeadline = Date.now()
           + Math.floor(Math.max(0, forceDeadline - Date.now()) / 2);
         if (!await this.cleanupObserved(controlDeadline)) {
-          this.killHelper();
+          await this.killHelper(forceDeadline);
         }
         if (!await this.cleanupObserved(forceDeadline)) {
           throw new ProcessTreeCleanupError(

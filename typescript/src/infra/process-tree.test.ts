@@ -1,5 +1,10 @@
+import {
+  spawn as spawnChild,
+  type ChildProcessWithoutNullStreams,
+} from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { Duplex } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -562,6 +567,89 @@ describe('Windows Job Object helper contract', () => {
       .toBeLessThan(source.indexOf('target.WaitForExit()'));
   });
 
+  it('accepts a helper exit that races a failed kill request', async () => {
+    const originalSystemRoot = process.env.SystemRoot;
+    let helper: ChildProcessWithoutNullStreams | undefined;
+    let helperReaped = false;
+    let helperExit: Promise<void> | undefined;
+    const killHelper = vi.fn((child: ChildProcessWithoutNullStreams) => {
+      expect(child.kill('SIGKILL')).toBe(true);
+      // Model ChildProcess.kill() losing the race with the exit it initiated.
+      return false;
+    });
+
+    class KillRaceControl extends Duplex {
+      override _read(): void {}
+
+      override _write(
+        chunk: Buffer,
+        _encoding: BufferEncoding,
+        callback: (error?: Error | null) => void,
+      ): void {
+        callback(
+          chunk.toString('utf8') === 'kill\n'
+            ? new Error('injected control write failure')
+            : undefined,
+        );
+      }
+    }
+
+    try {
+      process.env.SystemRoot ??= path.parse(process.execPath).root;
+      const spawn = vi.fn(() => {
+        helper = spawnChild(process.execPath, ['-e', `
+          process.stdin.once('data', () => {
+            const incarnation = 'fake:' + process.pid;
+            process.stdout.write(JSON.stringify({
+              protocol: 1,
+              helper_pid: process.pid,
+              helper_incarnation: incarnation,
+              target_pid: process.pid,
+              target_incarnation: incarnation
+            }) + '\\n');
+          });
+          setInterval(() => {}, 1000);
+        `], { stdio: ['pipe', 'pipe', 'pipe'] });
+        helperExit = new Promise((resolve) => {
+          helper!.once('exit', () => {
+            helperReaped = true;
+            resolve();
+          });
+        });
+        return helper;
+      });
+      const control = new KillRaceControl();
+      const tree = await __spawnManagedProcessTreeForTest({
+        command: process.execPath,
+        args: [],
+        env: {},
+        gracefulTerminationMs: 0,
+        forceTerminationMs: 1_000,
+      }, {
+        platform: 'win32',
+        spawn: spawn as never,
+        connectWindowsControl: async () => control as never,
+        killHelper,
+        processAlive: () => !helperReaped,
+      });
+
+      expect(await tree.terminate()).toMatchObject({
+        complete: true,
+        forced: true,
+        reaped: true,
+        containmentEmpty: true,
+        quarantineRequired: false,
+      });
+      expect(killHelper).toHaveBeenCalledOnce();
+      expect(helperReaped).toBe(true);
+    } finally {
+      if (helper && !helperReaped) helper.kill('SIGKILL');
+      await helperExit;
+      if (originalSystemRoot === undefined) delete process.env.SystemRoot;
+      else process.env.SystemRoot = originalSystemRoot;
+    }
+  });
+
   it('runs native Job Object tests in CI and budgets exactly two non-Windows skips', () => {
     const workflow = readFileSync(
       path.join(directory, '../../../.github/workflows/process-tree.yml'),
@@ -579,6 +667,9 @@ describe('Windows Job Object helper contract', () => {
       'npx vitest run src/infra/process-tree.test.ts',
     );
     expect(workflow).toContain('os: [ubuntu-latest, windows-latest]');
+    expect(workflow).toContain('actions/checkout@v7.0.1');
+    expect(workflow).toContain('actions/setup-node@v7.0.0');
+    expect(workflow).toContain('actions/upload-artifact@v7.0.1');
     expect(workflow).toContain('timeout-minutes: 12');
     expect(workflow).toContain('npm run build:server');
     expect(workflow).not.toContain('npm run build\n');

@@ -9,6 +9,7 @@ import type { JsonObject, JsonValue } from '../rappids/types.js';
 import {
   ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
   ProtocolAuthority,
+  isSelectedProtocolAuthority,
   type ProtocolAuthorityIdentity,
   type RappStreamFamily,
 } from './authority.js';
@@ -99,7 +100,7 @@ export function createRappFrameProfile<
   input: CreateRappFrameProfileInput<TPayload, TKind>,
 ): Readonly<RappFrameProfile<TPayload, TKind>> {
   const authority = input.authority ?? ACCEPTED_RAPP_PROTOCOL_AUTHORITY;
-  if (!(authority instanceof ProtocolAuthority)) {
+  if (!isSelectedProtocolAuthority(authority)) {
     throw new TypeError('frame profiles require an immutable selected ProtocolAuthority');
   }
   const family = authority.familyForKind(input.kind);
@@ -407,7 +408,7 @@ export function selectRappChainTrustPolicy(input: {
   persistedHead?: PersistedRappHead | null;
 }): Readonly<RappChainTrustPolicy> {
   const authority = input.authority ?? ACCEPTED_RAPP_PROTOCOL_AUTHORITY;
-  if (!(authority instanceof ProtocolAuthority)) {
+  if (!isSelectedProtocolAuthority(authority)) {
     throw new TypeError('chain trust policy requires an immutable selected ProtocolAuthority');
   }
   const genesis = input.trustedGenesis;
@@ -861,7 +862,44 @@ export function verifyRappFrameChain<
     intrinsicFrames.push(result.frame);
   }
 
-  const genesis = intrinsicFrames[0];
+  const candidateFrames: RappFrame<TPayload, TKind>[] = [];
+  for (let index = 0; index < intrinsicFrames.length; index += 1) {
+    const frame = intrinsicFrames[index];
+    let predecessor: RappFrame<TPayload, TKind> | null = null;
+    if (frame.seq > 0) {
+      predecessor =
+        candidateFrames.find((candidate) =>
+          candidate.payload_hash === frame.prev,
+        ) ?? null;
+      if (predecessor === null) {
+        return chainFail(
+          'prev-continuity',
+          'prev does not identify an earlier fully valid predecessor',
+          index,
+        );
+      }
+    }
+    const result: RappFrameVerification<RappFrame<TPayload, TKind>> =
+      verifyContinuation(
+        frame,
+        profile as unknown as RappFrameProfile<JsonObject, string>,
+        predecessor,
+      );
+    if (!result.ok) {
+      return {
+        ok: false,
+        error: new RappFrameError(
+          result.error.code,
+          result.error.step,
+          result.error.message,
+          index,
+        ),
+      };
+    }
+    candidateFrames.push(result.frame);
+  }
+
+  const genesis = candidateFrames[0];
   if (
     genesis.seq !== 0
     || genesis.prev !== null
@@ -874,8 +912,8 @@ export function verifyRappFrameChain<
       0,
     );
   }
-  for (let index = 1; index < intrinsicFrames.length; index += 1) {
-    if (intrinsicFrames[index].seq === 0) {
+  for (let index = 1; index < candidateFrames.length; index += 1) {
+    if (candidateFrames[index].seq === 0) {
       return chainFail(
         'unauthorized-re-genesis',
         'replacement genesis is not selected by the trust policy',
@@ -887,8 +925,8 @@ export function verifyRappFrameChain<
   const sequence = new Map<number, { index: number; prev: string | null; frameHash: string }>();
   const frameHashes = new Map<string, number>();
   const payloadHashes = new Map<string, number>();
-  for (let index = 0; index < intrinsicFrames.length; index += 1) {
-    const frame = intrinsicFrames[index];
+  for (let index = 0; index < candidateFrames.length; index += 1) {
+    const frame = candidateFrames[index];
     const existingSeq = sequence.get(frame.seq);
     if (existingSeq !== undefined) {
       const fork =
@@ -929,33 +967,9 @@ export function verifyRappFrameChain<
       }
       payloadHashes.set(frame.payload_hash, index);
     }
-
   }
 
-  const accepted: RappFrame<TPayload, TKind>[] = [];
-  let head: RappFrame<TPayload, TKind> | null = null;
-  for (let index = 0; index < intrinsicFrames.length; index += 1) {
-    const result: RappFrameVerification<RappFrame<TPayload, TKind>> =
-      verifyContinuation(
-        intrinsicFrames[index],
-        profile as unknown as RappFrameProfile<JsonObject, string>,
-        head,
-      );
-    if (!result.ok) {
-      return {
-        ok: false,
-        error: new RappFrameError(
-          result.error.code,
-          result.error.step,
-          result.error.message,
-          index,
-        ),
-      };
-    }
-    accepted.push(result.frame);
-    head = result.frame;
-  }
-
+  const accepted = candidateFrames;
   let persistedState: RappTrustAssessment['persistedHead'] = 'untracked';
   const persisted = policy.persistedHead;
   if (persisted !== null) {

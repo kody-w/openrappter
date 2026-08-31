@@ -204,6 +204,77 @@ export function parseRappJson(source: string): JsonValue {
     }
     throw new TypeError(`unterminated JSON string at offset ${start}`);
   };
+  interface SignedDecimalInteger {
+    negative: boolean;
+    digits: string;
+  }
+  const signedInteger = (token: string): SignedDecimalInteger => {
+    const negative = token.startsWith('-');
+    const digits = token.replace(/^[+-]?0*/, '') || '0';
+    return { negative: digits === '0' ? false : negative, digits };
+  };
+  const compareMagnitude = (left: string, right: string): number => {
+    if (left.length !== right.length) return left.length < right.length ? -1 : 1;
+    return left === right ? 0 : left < right ? -1 : 1;
+  };
+  const addMagnitude = (left: string, right: string): string => {
+    let carry = 0;
+    const result: string[] = [];
+    for (
+      let index = 0;
+      index < Math.max(left.length, right.length) || carry > 0;
+      index += 1
+    ) {
+      const sum =
+        Number(left[left.length - 1 - index] ?? 0)
+        + Number(right[right.length - 1 - index] ?? 0)
+        + carry;
+      result.push(String(sum % 10));
+      carry = Math.floor(sum / 10);
+    }
+    return result.reverse().join('').replace(/^0+/, '') || '0';
+  };
+  const subtractMagnitude = (left: string, right: string): string => {
+    let borrow = 0;
+    const result: string[] = [];
+    for (let index = 0; index < left.length; index += 1) {
+      let difference =
+        Number(left[left.length - 1 - index])
+        - Number(right[right.length - 1 - index] ?? 0)
+        - borrow;
+      if (difference < 0) {
+        difference += 10;
+        borrow = 1;
+      } else {
+        borrow = 0;
+      }
+      result.push(String(difference));
+    }
+    return result.reverse().join('').replace(/^0+/, '') || '0';
+  };
+  const addSigned = (
+    left: SignedDecimalInteger,
+    right: SignedDecimalInteger,
+  ): SignedDecimalInteger => {
+    if (left.negative === right.negative) {
+      return {
+        negative: left.negative,
+        digits: addMagnitude(left.digits, right.digits),
+      };
+    }
+    const comparison = compareMagnitude(left.digits, right.digits);
+    if (comparison === 0) return { negative: false, digits: '0' };
+    const larger = comparison > 0 ? left : right;
+    const smaller = comparison > 0 ? right : left;
+    return {
+      negative: larger.negative,
+      digits: subtractMagnitude(larger.digits, smaller.digits),
+    };
+  };
+  const signedSmallInteger = (value: number): SignedDecimalInteger => ({
+    negative: value < 0,
+    digits: String(Math.abs(value)),
+  });
   const decimalIdentity = (token: string): string => {
     const match =
       /^(-)?(0|[1-9]\d*)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(token);
@@ -215,23 +286,13 @@ export function parseRappJson(source: string): JsonValue {
       digits = digits.slice(0, -1);
       trailing += 1;
     }
-    const exponentToken = match[4] ?? '0';
-    const exponentDigits = exponentToken.replace(/^[+-]?0*/, '');
-    if (exponentDigits.length > 6) {
-      // No finite non-zero binary64 value has an exponent remotely this large.
-      // Preserve a non-zero identity marker without constructing an enormous
-      // BigInt from attacker-controlled input.
-      return `${match[1] ?? ''}${digits}e${exponentToken}`;
-    }
-    const signedExponent =
-      exponentDigits.length === 0
-        ? 0n
-        : BigInt(`${exponentToken.startsWith('-') ? '-' : ''}${exponentDigits}`);
-    const exponent =
-      signedExponent
-      - BigInt((match[3] ?? '').length)
-      + BigInt(trailing);
-    return `${match[1] ?? ''}${digits}e${exponent}`;
+    const exponent = addSigned(
+      signedInteger(match[4] ?? '0'),
+      signedSmallInteger(trailing - (match[3] ?? '').length),
+    );
+    const exponentText =
+      `${exponent.negative ? '-' : ''}${exponent.digits}`;
+    return `${match[1] ?? ''}${digits}e${exponentText}`;
   };
   const numberValue = (): number => {
     const start = offset;

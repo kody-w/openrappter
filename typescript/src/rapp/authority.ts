@@ -37,6 +37,9 @@ const ACCEPTED_KIND_FAMILIES: Readonly<Record<string, RappStreamFamily>> =
     'swarm.telemetry': 'swarm',
   });
 
+const AUTHORITY_CAPABILITY = Symbol('selected-protocol-authority');
+const MODULE_OWNED_AUTHORITIES = new WeakSet<ProtocolAuthority>();
+
 /**
  * Immutable, selected protocol authority.
  *
@@ -54,7 +57,7 @@ export class ProtocolAuthority {
     normativeSha256: 'e5abd6a32801761fdd5c151a4f90fa4c989b545da02d3cd26dfc4765fab8409a',
     bootstrapProfileSha256: null,
     kindFamilies: ACCEPTED_KIND_FAMILIES,
-  });
+  }, AUTHORITY_CAPABILITY);
 
   static readonly acceptedRev14 = new ProtocolAuthority({
     revision: 'rev-14',
@@ -65,7 +68,7 @@ export class ProtocolAuthority {
     normativeSha256: 'd345235be5bc698d78c5893285abd09f2e62a398f781123d1de8da313a01c7de',
     bootstrapProfileSha256: '1666e44acf532f854d4bf74868c9af9f9b362055692189ac858a7c8b52dcd5bb',
     kindFamilies: ACCEPTED_KIND_FAMILIES,
-  });
+  }, AUTHORITY_CAPABILITY);
 
   readonly status: ProtocolAuthorityStatus = 'accepted';
   readonly revision: string;
@@ -86,7 +89,10 @@ export class ProtocolAuthority {
     normativeSha256: string;
     bootstrapProfileSha256: string | null;
     kindFamilies: Readonly<Record<string, RappStreamFamily>>;
-  }) {
+  }, capability: symbol) {
+    if (capability !== AUTHORITY_CAPABILITY) {
+      throw new TypeError('ProtocolAuthority can only be created from a module-owned accepted checkpoint');
+    }
     this.revision = input.revision;
     this.frameHash = input.frameHash;
     this.payloadHash = input.payloadHash;
@@ -95,6 +101,7 @@ export class ProtocolAuthority {
     this.normativeSha256 = input.normativeSha256;
     this.bootstrapProfileSha256 = input.bootstrapProfileSha256;
     this.kindFamilies = input.kindFamilies;
+    MODULE_OWNED_AUTHORITIES.add(this);
     Object.freeze(this);
   }
 
@@ -123,6 +130,16 @@ const ACCEPTED_AUTHORITIES: Readonly<Record<string, ProtocolAuthority>> =
     'rev-13': ProtocolAuthority.acceptedRev13,
     'rev-14': ProtocolAuthority.acceptedRev14,
   });
+
+/** True only for the exact frozen authority objects owned by this module. */
+export function isSelectedProtocolAuthority(
+  value: unknown,
+): value is ProtocolAuthority {
+  if (!(value instanceof ProtocolAuthority) || !MODULE_OWNED_AUTHORITIES.has(value)) {
+    return false;
+  }
+  return ACCEPTED_AUTHORITIES[value.revision] === value;
+}
 
 /** Resolve an accepted historical checkpoint without changing the selected default. */
 export function resolveProtocolAuthority(

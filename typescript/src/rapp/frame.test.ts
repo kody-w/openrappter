@@ -268,9 +268,47 @@ describe('RFC 8785 binary64 canonicalization', () => {
       },
     )).toMatchObject({ ok: false, error: { step: '1', code: 'seq' } });
   });
+
+  it('normalizes a 1 MiB-bounded compensated exponent in linear time', () => {
+    const zeroCount = 1_000_000;
+    const token = `0.${'0'.repeat(zeroCount)}1e${zeroCount + 1}`;
+    expect(Buffer.byteLength(token)).toBeLessThan(RAPP_MAX_CANONICAL_BYTES);
+    const started = performance.now();
+    const value = parseRappJson(token);
+    const elapsed = performance.now() - started;
+    expect(value).toBe(1);
+    expect(rappCanonicalJson(value)).toBe('1');
+    expect(elapsed).toBeLessThan(3_000);
+  }, 10_000);
 });
 
 describe('registry-bound kind and family validation', () => {
+  it('rejects direct emitted-JavaScript ProtocolAuthority constructor forgery', () => {
+    const ForgedConstructor = ProtocolAuthority as unknown as new (
+      input: Record<string, unknown>,
+    ) => ProtocolAuthority;
+    expect(() => new ForgedConstructor({
+      revision: 'forged',
+      frameHash: 'a'.repeat(64),
+      payloadHash: 'b'.repeat(64),
+      repository: 'https://example.invalid',
+      checkpointCommit: 'c'.repeat(40),
+      normativeSha256: 'd'.repeat(64),
+      bootstrapProfileSha256: null,
+      kindFamilies: { 'body.dimension': 'body' },
+    })).toThrow(/module-owned accepted checkpoint/);
+  });
+
+  it('rejects prototype forgery that passes instanceof but lacks capability', () => {
+    const forged = Object.create(ProtocolAuthority.prototype) as ProtocolAuthority;
+    expect(forged).toBeInstanceOf(ProtocolAuthority);
+    expect(() => createRappFrameProfile({
+      name: 'forged',
+      kind: 'body.dimension',
+      authority: forged,
+    })).toThrow(/selected ProtocolAuthority/);
+  });
+
   it('does not let a caller register body.dimension through a profile', () => {
     expect(() => createRappFrameProfile({
       name: 'forged',
@@ -567,6 +605,31 @@ describe('trusted chain policy and duplicate ordering', () => {
     });
   });
 
+  it.each([
+    ['time regression', (frame: RappFrame<JsonObject, 'body.pulse'>) => rewave({
+      ...frame,
+      utc: '2026-01-01T00:00:00.000Z',
+    }), '4', 'time-regression'],
+    ['bad prev_wave', (frame: RappFrame<JsonObject, 'body.pulse'>) => rewave({
+      ...frame,
+      prev_wave: genesis.frame_hash,
+    }), '5', 'prev-wave'],
+    ['bad signature', (frame: RappFrame<JsonObject, 'body.pulse'>) => ({
+      ...frame,
+      sig: 'not-verified',
+    }), '6', 'signature-profile'],
+  ])('validates a fork candidate %s before indexing it', (_label, mutate, step, code) => {
+    const invalidCandidate = mutate(alternateChild);
+    expect(verifyRappFrameChain(
+      [genesis, child, invalidCandidate],
+      RAPP_ACCEPTED_BODY_PULSE_PROFILE,
+      policy,
+    )).toMatchObject({
+      ok: false,
+      error: { step, code, frameIndex: 2 },
+    });
+  });
+
   it('calls only two distinct valid children a fork', () => {
     expect(verifyRappFrameChain(
       [genesis, child, alternateChild],
@@ -598,7 +661,7 @@ describe('trusted chain policy and duplicate ordering', () => {
       policy,
     )).toMatchObject({
       ok: false,
-      error: { code: 'prev-continuity', step: '4', frameIndex: 2 },
+      error: { code: 'seq-continuity', step: '4', frameIndex: 2 },
     });
   });
 });

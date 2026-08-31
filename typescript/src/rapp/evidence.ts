@@ -8,7 +8,6 @@ import {
 } from './authority.js';
 import {
   RappFrameError,
-  assertRappFrame,
   assertRappFrameChain,
   buildRappFrame,
   createRappFrameProfile,
@@ -73,6 +72,28 @@ const PAYLOAD_KEYS = [
   'protocol_revision',
 ].sort().join('\0');
 const REVISION_KEYS = ['revision', 'frame_hash', 'payload_hash'].sort().join('\0');
+const EVIDENCE_PAYLOAD_OPTION_KEYS = new Set([
+  'eventKind',
+  'subject',
+  'dataHash',
+  'referenceHashes',
+  'authority',
+]);
+const EVIDENCE_FRAME_INPUT_KEYS = new Set([
+  'streamId',
+  'utc',
+  'eventKind',
+  'subject',
+  'dataHash',
+  'referenceHashes',
+  'head',
+  'authority',
+]);
+const EVIDENCE_VERIFY_OPTION_KEYS = new Set([
+  'head',
+  'streamIdOfRecord',
+  'authority',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return (
@@ -84,6 +105,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
       || Object.getPrototypeOf(value) === null
     )
   );
+}
+
+function evidenceOptionMap(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+  required: readonly string[],
+  label: string,
+): asserts value is Record<string, unknown> {
+  if (!isRecord(value)) throw new TypeError(`${label} must be a plain object`);
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string' || !allowed.has(key)) {
+      throw new TypeError(`${label} contains unsupported own key ${String(key)}`);
+    }
+  }
+  for (const key of required) {
+    if (!Object.hasOwn(value, key)) {
+      throw new TypeError(`${label} is missing own key ${key}`);
+    }
+  }
+}
+
+function evidenceOwn(value: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(value, key) ? value[key] : undefined;
 }
 
 function evidencePayloadProblem(
@@ -181,16 +225,44 @@ export function buildOpenRappterEvidencePayload(input: {
   referenceHashes?: readonly string[];
   authority?: ProtocolAuthority;
 }): OpenRappterEvidencePayload {
-  const authority = input.authority ?? ACCEPTED_RAPP_PROTOCOL_AUTHORITY;
+  evidenceOptionMap(
+    input,
+    EVIDENCE_PAYLOAD_OPTION_KEYS,
+    ['eventKind', 'subject', 'dataHash'],
+    'evidence payload input',
+  );
+  const eventKind = evidenceOwn(input, 'eventKind');
+  const subject = evidenceOwn(input, 'subject');
+  const dataHash = evidenceOwn(input, 'dataHash');
+  const referenceHashes = evidenceOwn(input, 'referenceHashes');
+  const rawAuthority = evidenceOwn(input, 'authority');
+  if (
+    typeof eventKind !== 'string'
+    || typeof subject !== 'string'
+    || typeof dataHash !== 'string'
+    || (
+      referenceHashes !== undefined
+      && (
+        !Array.isArray(referenceHashes)
+        || referenceHashes.some((value) => typeof value !== 'string')
+      )
+    )
+  ) {
+    throw new TypeError('evidence payload input has invalid own properties');
+  }
+  const authority =
+    rawAuthority === undefined
+      ? ACCEPTED_RAPP_PROTOCOL_AUTHORITY
+      : rawAuthority as ProtocolAuthority;
   if (!isSelectedProtocolAuthority(authority)) {
     throw new TypeError('evidence payloads require an immutable selected ProtocolAuthority');
   }
   const payload: OpenRappterEvidencePayload = {
     schema: OPENRAPPTER_EVIDENCE_SCHEMA,
-    event_kind: input.eventKind,
-    subject: input.subject,
-    data_hash: input.dataHash,
-    reference_hashes: [...(input.referenceHashes ?? [])],
+    event_kind: eventKind,
+    subject,
+    data_hash: dataHash,
+    reference_hashes: [...(referenceHashes ?? [])],
     protocol_revision: { ...protocolAuthorityIdentity(authority) },
   };
   const problem = evidencePayloadProblem(payload, authority);
@@ -214,14 +286,30 @@ export function buildOpenRappterEvidencePayload(input: {
 export function buildRappEvidenceFrame(
   input: BuildRappEvidenceFrameInput,
 ): OpenRappterEvidenceFrame {
-  const authority = input.authority ?? ACCEPTED_RAPP_PROTOCOL_AUTHORITY;
+  evidenceOptionMap(
+    input,
+    EVIDENCE_FRAME_INPUT_KEYS,
+    ['streamId', 'utc', 'eventKind', 'subject', 'dataHash', 'head'],
+    'evidence frame input',
+  );
+  const rawAuthority = evidenceOwn(input, 'authority');
+  const authority =
+    rawAuthority === undefined
+      ? ACCEPTED_RAPP_PROTOCOL_AUTHORITY
+      : rawAuthority as ProtocolAuthority;
   const profile = createOpenRappterEvidenceProfile(authority);
   return buildRappFrame({
     kind: OPENRAPPTER_EVIDENCE_FRAME_KIND,
-    streamId: input.streamId,
-    utc: input.utc,
-    payload: buildOpenRappterEvidencePayload({ ...input, authority }),
-    head: input.head,
+    streamId: evidenceOwn(input, 'streamId') as string,
+    utc: evidenceOwn(input, 'utc') as string,
+    payload: buildOpenRappterEvidencePayload({
+      eventKind: evidenceOwn(input, 'eventKind') as string,
+      subject: evidenceOwn(input, 'subject') as string,
+      dataHash: evidenceOwn(input, 'dataHash') as string,
+      referenceHashes: evidenceOwn(input, 'referenceHashes') as string[] | undefined,
+      authority,
+    }),
+    head: evidenceOwn(input, 'head') as RappFrameHead | null,
   }, profile);
 }
 
@@ -233,12 +321,35 @@ export function verifyRappEvidenceFrame(
     authority?: ProtocolAuthority;
   },
 ): RappFrameVerification<OpenRappterEvidenceFrame> {
+  try {
+    evidenceOptionMap(
+      options,
+      EVIDENCE_VERIFY_OPTION_KEYS,
+      ['head', 'streamIdOfRecord'],
+      'evidence verification options',
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: new RappFrameError(
+        'profile',
+        '1',
+        error instanceof Error ? error.message : 'evidence verification options are invalid',
+      ),
+    };
+  }
+  const rawAuthority = evidenceOwn(options, 'authority');
   return verifyRappFrame(
     value,
     createOpenRappterEvidenceProfile(
-      options.authority ?? ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
+      rawAuthority === undefined
+        ? ACCEPTED_RAPP_PROTOCOL_AUTHORITY
+        : rawAuthority as ProtocolAuthority,
     ),
-    options,
+    {
+      head: evidenceOwn(options, 'head') as RappFrameHead | null,
+      streamIdOfRecord: evidenceOwn(options, 'streamIdOfRecord') as string,
+    },
   );
 }
 
@@ -250,13 +361,9 @@ export function assertRappEvidenceFrame(
     authority?: ProtocolAuthority;
   },
 ): OpenRappterEvidenceFrame {
-  return assertRappFrame(
-    value,
-    createOpenRappterEvidenceProfile(
-      options.authority ?? ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
-    ),
-    options,
-  );
+  const result = verifyRappEvidenceFrame(value, options);
+  if (!result.ok) throw result.error;
+  return result.frame;
 }
 
 export function verifyRappEvidenceChain(

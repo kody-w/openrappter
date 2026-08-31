@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   RAPP_MAX_CANONICAL_BYTES,
@@ -27,6 +27,7 @@ import {
   RAPP_FRAME_KEYS,
   RAPP_UINT53_MAX,
   RappFrameError,
+  buildOpenRappterEvidencePayload,
   buildRappFrame,
   createRappFrameProfile,
   hashLegacyRappBodyFrame,
@@ -90,12 +91,59 @@ const numberVectors = parseRappJson(
   readFileSync(NUMBER_FIXTURE_PATH, 'utf8'),
 ) as unknown as NumberFixture;
 
+const POLLUTION_KEYS = [
+  'body.dimension',
+  'rev-forged',
+  'authority',
+  'trustedGenesis',
+  'frameHash',
+  'payloadHash',
+  'name',
+  'kind',
+  'eventKind',
+  'subject',
+  'dataHash',
+  '__proto__',
+  'constructor',
+] as const;
+const ORIGINAL_PROTOTYPE_DESCRIPTORS = new Map(
+  POLLUTION_KEYS.map((key) => [key, Object.getOwnPropertyDescriptor(Object.prototype, key)]),
+);
+
+function restoreObjectPrototype(): void {
+  for (const key of POLLUTION_KEYS) {
+    const descriptor = ORIGINAL_PROTOTYPE_DESCRIPTORS.get(key);
+    if (descriptor === undefined) delete (Object.prototype as Record<string, unknown>)[key];
+    else Object.defineProperty(Object.prototype, key, descriptor);
+  }
+}
+
+function polluteObjectPrototype(key: string, value: unknown): void {
+  Object.defineProperty(Object.prototype, key, {
+    value,
+    configurable: true,
+    enumerable: true,
+    writable: true,
+  });
+}
+
+afterEach(() => restoreObjectPrototype());
+
 function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function captureError(action: () => unknown): Error | null {
+  try {
+    action();
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
 }
 
 function rewave<TPayload extends JsonObject, TKind extends string>(
@@ -124,6 +172,8 @@ describe('accepted rev-14 authority', () => {
       bootstrapProfileSha256: authority.authority.bootstrap_profile_sha256,
     });
     expect(Object.isFrozen(ACCEPTED_RAPP_PROTOCOL_AUTHORITY)).toBe(true);
+    expect(Object.getPrototypeOf(ACCEPTED_RAPP_PROTOCOL_AUTHORITY.kindFamilies))
+      .toBeNull();
     expect(ACCEPTED_RAPP_PROTOCOL_AUTHORITY.identity()).toEqual({
       revision: 'rev-14',
       frame_hash: authority.expected.frame_hash,
@@ -286,6 +336,105 @@ describe('RFC 8785 binary64 canonicalization', () => {
 });
 
 describe('registry-bound kind and family validation', () => {
+  it('ignores Object.prototype pollution across authority, genesis, and option maps', () => {
+    let family: string | null = null;
+    let protoFamily: string | null = null;
+    let constructorFamily: string | null = null;
+    let resolved: ProtocolAuthority | null = null;
+    let constructorAuthority: ProtocolAuthority | null = null;
+    let profileError: Error | null = null;
+    let inheritedProfileError: Error | null = null;
+    let trustError: Error | null = null;
+    let evidenceInputError: Error | null = null;
+    let protoKeyError: Error | null = null;
+    let constructorKeyError: Error | null = null;
+    try {
+      polluteObjectPrototype('body.dimension', 'body');
+      polluteObjectPrototype('rev-forged', ACCEPTED_RAPP_PROTOCOL_AUTHORITY);
+      polluteObjectPrototype('authority', ACCEPTED_RAPP_PROTOCOL_AUTHORITY);
+      polluteObjectPrototype('trustedGenesis', {
+        streamId: authority.frame.stream_id,
+        frameHash: authority.frame.frame_hash,
+        payloadHash: authority.frame.payload_hash,
+      });
+      polluteObjectPrototype('frameHash', authority.frame.frame_hash);
+      polluteObjectPrototype('payloadHash', authority.frame.payload_hash);
+      polluteObjectPrototype('name', 'inherited-profile');
+      polluteObjectPrototype('kind', 'body.pulse');
+      polluteObjectPrototype('eventKind', 'install.verified');
+      polluteObjectPrototype('subject', 'release:forged');
+      polluteObjectPrototype('dataHash', 'f'.repeat(64));
+      polluteObjectPrototype('__proto__', { 'body.dimension': 'body' });
+      polluteObjectPrototype('constructor', { 'body.dimension': 'body' });
+
+      family = protocolAuthorityFamilyForKind(
+        ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
+        'body.dimension',
+      );
+      protoFamily = protocolAuthorityFamilyForKind(
+        ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
+        '__proto__',
+      );
+      constructorFamily = protocolAuthorityFamilyForKind(
+        ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
+        'constructor',
+      );
+      resolved = resolveProtocolAuthority('rev-forged');
+      constructorAuthority = resolveProtocolAuthority('constructor');
+      profileError = captureError(() => createRappFrameProfile({
+        name: 'polluted-kind',
+        kind: 'body.dimension',
+      }));
+      inheritedProfileError = captureError(() =>
+        createRappFrameProfile({} as never),
+      );
+      trustError = captureError(() =>
+        selectRappChainTrustPolicy({} as never),
+      );
+      evidenceInputError = captureError(() =>
+        buildOpenRappterEvidencePayload({} as never),
+      );
+      const protoOptions = Object.assign(Object.create(null), {
+        name: 'proto-own',
+        kind: 'body.pulse',
+      });
+      Object.defineProperty(protoOptions, '__proto__', {
+        value: 'polluted',
+        configurable: true,
+        enumerable: true,
+      });
+      protoKeyError = captureError(() =>
+        createRappFrameProfile(protoOptions),
+      );
+      const constructorOptions = Object.assign(Object.create(null), {
+        name: 'constructor-own',
+        kind: 'body.pulse',
+        constructor: 'polluted',
+      });
+      constructorKeyError = captureError(() =>
+        createRappFrameProfile(constructorOptions),
+      );
+    } finally {
+      restoreObjectPrototype();
+    }
+
+    expect(family).toBeNull();
+    expect(protoFamily).toBeNull();
+    expect(constructorFamily).toBeNull();
+    expect(resolved).toBeNull();
+    expect(constructorAuthority).toBeNull();
+    expect(profileError?.message).toMatch(/not registered/);
+    expect(inheritedProfileError?.message).toMatch(/missing own key/);
+    expect(trustError?.message).toMatch(/missing own key/);
+    expect(evidenceInputError?.message).toMatch(/missing own key/);
+    expect(protoKeyError?.message).toMatch(/unsupported own key __proto__/);
+    expect(constructorKeyError?.message).toMatch(/unsupported own key constructor/);
+    expect(createRappFrameProfile({
+      name: 'genuine-after-cleanup',
+      kind: 'body.pulse',
+    })).toMatchObject({ family: 'body' });
+  });
+
   it('rejects direct emitted-JavaScript ProtocolAuthority constructor forgery', () => {
     const ForgedConstructor = ProtocolAuthority as unknown as new (
       input: Record<string, unknown>,
@@ -562,6 +711,7 @@ describe('trusted chain policy and duplicate ordering', () => {
       },
     });
     expect(Object.isFrozen(policy)).toBe(true);
+    expect(Object.getPrototypeOf(policy.trustedGenesis)).toBeNull();
   });
 
   it('refuses an unselected caller-authored trust object', () => {

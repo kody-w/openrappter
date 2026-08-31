@@ -65,6 +65,21 @@ export interface RappTrustAssessment {
 }
 
 const PROFILE_BRAND: unique symbol = Symbol('rapp-frame-profile');
+const PROFILE_OPTION_KEYS = new Set([
+  'name',
+  'kind',
+  'authority',
+  'signature',
+  'validatePayload',
+  'uniquePayloads',
+]);
+const LEGACY_PROFILE_OPTION_KEYS = new Set([
+  'name',
+  'kind',
+  'family',
+  'validatePayload',
+  'uniquePayloads',
+]);
 interface RappFrameProfileRecord<
   TPayload extends JsonObject = JsonObject,
   TKind extends string = string,
@@ -116,39 +131,61 @@ export function createRappFrameProfile<
 >(
   input: CreateRappFrameProfileInput<TPayload, TKind>,
 ): Readonly<RappFrameProfile<TPayload, TKind>> {
-  const authority = input.authority ?? ACCEPTED_RAPP_PROTOCOL_AUTHORITY;
+  assertOptionMap(input, PROFILE_OPTION_KEYS, ['name', 'kind'], 'frame profile options');
+  const name = ownOption(input, 'name');
+  const kind = ownOption(input, 'kind');
+  const rawAuthority = ownOption(input, 'authority');
+  const signature = ownOption(input, 'signature');
+  const validatePayload = ownOption(input, 'validatePayload');
+  const uniquePayloads = ownOption(input, 'uniquePayloads');
+  if (typeof name !== 'string' || typeof kind !== 'string') {
+    throw new TypeError('frame profile name and kind must be own string properties');
+  }
+  if (signature !== undefined && signature !== 'unsigned-local') {
+    throw new TypeError('frame profile signature is invalid');
+  }
+  if (validatePayload !== undefined && typeof validatePayload !== 'function') {
+    throw new TypeError('frame profile validatePayload must be a function');
+  }
+  if (uniquePayloads !== undefined && typeof uniquePayloads !== 'boolean') {
+    throw new TypeError('frame profile uniquePayloads must be boolean');
+  }
+  const authority =
+    rawAuthority === undefined
+      ? ACCEPTED_RAPP_PROTOCOL_AUTHORITY
+      : rawAuthority as ProtocolAuthority;
   if (!isSelectedProtocolAuthority(authority)) {
     throw new TypeError('frame profiles require an immutable selected ProtocolAuthority');
   }
-  const family = protocolAuthorityFamilyForKind(authority, input.kind);
+  const family = protocolAuthorityFamilyForKind(authority, kind);
   if (family === null) {
     const identity = protocolAuthorityIdentity(authority);
     throw new TypeError(
-      `kind ${input.kind} is not registered by accepted authority ${identity.revision}`,
+      `kind ${kind} is not registered by accepted authority ${identity.revision}`,
     );
   }
   const profile = Object.freeze({
     [PROFILE_BRAND]: true as const,
-    name: input.name,
-    kind: input.kind,
+    name,
+    kind: kind as TKind,
     family,
     authority,
     mode: 'authority' as const,
-    signature: input.signature ?? 'unsigned-local',
-    validatePayload: input.validatePayload,
-    uniquePayloads: input.uniquePayloads ?? false,
+    signature: signature ?? 'unsigned-local',
+    validatePayload: validatePayload as RappFrameProfile<TPayload, TKind>['validatePayload'],
+    uniquePayloads: uniquePayloads ?? false,
   });
   PROFILE_RECORDS.set(
     profile,
-    Object.freeze({
-      name: input.name,
-      kind: input.kind,
+    frozenNullRecord({
+      name,
+      kind,
       family,
       authority,
       mode: 'authority',
-      signature: input.signature ?? 'unsigned-local',
-      validatePayload: input.validatePayload,
-      uniquePayloads: input.uniquePayloads ?? false,
+      signature: (signature ?? 'unsigned-local') as 'unsigned-local',
+      validatePayload: validatePayload as RappFrameProfile<JsonObject, string>['validatePayload'],
+      uniquePayloads: uniquePayloads ?? false,
     }) as RappFrameProfileRecord<JsonObject, string>,
   );
   return profile;
@@ -164,28 +201,52 @@ export function createLegacyRappIntegrityProfile<
   validatePayload?: RappFrameProfile<TPayload, TKind>['validatePayload'];
   uniquePayloads?: boolean;
 }): Readonly<RappFrameProfile<TPayload, TKind>> {
+  assertOptionMap(
+    input,
+    LEGACY_PROFILE_OPTION_KEYS,
+    ['name', 'kind', 'family'],
+    'legacy frame profile options',
+  );
+  const name = ownOption(input, 'name');
+  const kind = ownOption(input, 'kind');
+  const family = ownOption(input, 'family');
+  const validatePayload = ownOption(input, 'validatePayload');
+  const uniquePayloads = ownOption(input, 'uniquePayloads');
+  if (
+    typeof name !== 'string'
+    || typeof kind !== 'string'
+    || !['body', 'memory', 'swarm'].includes(String(family))
+  ) {
+    throw new TypeError('legacy frame profile requires own name, kind, and family');
+  }
+  if (validatePayload !== undefined && typeof validatePayload !== 'function') {
+    throw new TypeError('legacy frame profile validatePayload must be a function');
+  }
+  if (uniquePayloads !== undefined && typeof uniquePayloads !== 'boolean') {
+    throw new TypeError('legacy frame profile uniquePayloads must be boolean');
+  }
   const profile = Object.freeze({
     [PROFILE_BRAND]: true as const,
-    name: input.name,
-    kind: input.kind,
-    family: input.family,
+    name,
+    kind: kind as TKind,
+    family: family as RappStreamFamily,
     authority: null,
     mode: 'legacy-integrity' as const,
     signature: 'unsigned-local' as const,
-    validatePayload: input.validatePayload,
-    uniquePayloads: input.uniquePayloads ?? false,
+    validatePayload: validatePayload as RappFrameProfile<TPayload, TKind>['validatePayload'],
+    uniquePayloads: uniquePayloads ?? false,
   });
   PROFILE_RECORDS.set(
     profile,
-    Object.freeze({
-      name: input.name,
-      kind: input.kind,
-      family: input.family,
+    frozenNullRecord({
+      name,
+      kind,
+      family: family as RappStreamFamily,
       authority: null,
       mode: 'legacy-integrity',
       signature: 'unsigned-local',
-      validatePayload: input.validatePayload,
-      uniquePayloads: input.uniquePayloads ?? false,
+      validatePayload: validatePayload as RappFrameProfile<JsonObject, string>['validatePayload'],
+      uniquePayloads: uniquePayloads ?? false,
     }) as RappFrameProfileRecord<JsonObject, string>,
   );
   return profile;
@@ -287,6 +348,30 @@ export interface BuildRappFrameInput<TPayload extends JsonObject, TKind extends 
   head: RappFrameHead | null;
 }
 
+const VERIFY_FRAME_OPTION_KEYS = new Set(['head', 'streamIdOfRecord']);
+const BUILD_FRAME_INPUT_KEYS = new Set([
+  'kind',
+  'streamId',
+  'utc',
+  'payload',
+  'head',
+]);
+const LEGACY_HASH_INPUT_KEYS = new Set([
+  'kind',
+  'streamId',
+  'seq',
+  'utc',
+  'payload',
+  'prev',
+]);
+const FRAME_HEAD_REQUIRED_KEYS = [
+  'stream_id',
+  'seq',
+  'utc',
+  'payload_hash',
+  'frame_hash',
+] as const;
+
 export interface TrustedRappGenesis {
   streamId: string;
   frameHash: string;
@@ -300,6 +385,21 @@ export interface PersistedRappHead {
 }
 
 const TRUST_POLICY_BRAND: unique symbol = Symbol('rapp-chain-trust-policy');
+const TRUST_POLICY_OPTION_KEYS = new Set([
+  'authority',
+  'trustedGenesis',
+  'persistedHead',
+]);
+const TRUSTED_GENESIS_KEYS = new Set([
+  'streamId',
+  'frameHash',
+  'payloadHash',
+]);
+const PERSISTED_HEAD_KEYS = new Set([
+  'streamId',
+  'seq',
+  'frameHash',
+]);
 interface RappChainTrustPolicyRecord {
   authority: ProtocolAuthority;
   trustedGenesis: Readonly<TrustedRappGenesis>;
@@ -333,6 +433,82 @@ function isRecord(value: unknown): value is Record<string, unknown> {
       || Object.getPrototypeOf(value) === null
     )
   );
+}
+
+function frozenNullRecord<TValue extends object>(value: TValue): TValue {
+  return Object.freeze(
+    Object.assign(Object.create(null), value),
+  ) as TValue;
+}
+
+function ownOption(
+  value: Record<string, unknown>,
+  key: string,
+): unknown {
+  return Object.hasOwn(value, key) ? value[key] : undefined;
+}
+
+function assertOptionMap(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+  required: readonly string[],
+  label: string,
+): asserts value is Record<string, unknown> {
+  if (!isRecord(value)) throw new TypeError(`${label} must be a plain object`);
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string' || !allowed.has(key)) {
+      throw new TypeError(`${label} contains unsupported own key ${String(key)}`);
+    }
+  }
+  for (const key of required) {
+    if (!Object.hasOwn(value, key)) {
+      throw new TypeError(`${label} is missing own key ${key}`);
+    }
+  }
+}
+
+function assertOwnProperties(
+  value: unknown,
+  required: readonly string[],
+  label: string,
+): asserts value is Record<string, unknown> {
+  if (!isRecord(value)) throw new TypeError(`${label} must be a plain object`);
+  for (const key of required) {
+    if (!Object.hasOwn(value, key)) {
+      throw new TypeError(`${label} is missing own key ${key}`);
+    }
+  }
+}
+
+function readFrameHead(value: unknown, label: string): RappFrameHead {
+  assertOwnProperties(value, FRAME_HEAD_REQUIRED_KEYS, label);
+  const streamId = ownOption(value, 'stream_id');
+  const seq = ownOption(value, 'seq');
+  const utc = ownOption(value, 'utc');
+  const payloadHash = ownOption(value, 'payload_hash');
+  const frameHash = ownOption(value, 'frame_hash');
+  if (
+    typeof streamId !== 'string'
+    || typeof seq !== 'number'
+    || !Number.isSafeInteger(seq)
+    || seq < 0
+    || seq > RAPP_UINT53_MAX
+    || typeof utc !== 'string'
+    || !isRappFrameUtc(utc)
+    || typeof payloadHash !== 'string'
+    || !HEX64.test(payloadHash)
+    || typeof frameHash !== 'string'
+    || !HEX64.test(frameHash)
+  ) {
+    throw new TypeError(`${label} has invalid own fields`);
+  }
+  return frozenNullRecord({
+    stream_id: streamId,
+    seq,
+    utc,
+    payload_hash: payloadHash,
+    frame_hash: frameHash,
+  });
 }
 
 function freezeRappValue<TValue extends JsonValue>(value: TValue): TValue {
@@ -481,21 +657,63 @@ export function selectRappChainTrustPolicy(input: {
   trustedGenesis: TrustedRappGenesis;
   persistedHead?: PersistedRappHead | null;
 }): Readonly<RappChainTrustPolicy> {
-  const authority = input.authority ?? ACCEPTED_RAPP_PROTOCOL_AUTHORITY;
+  assertOptionMap(
+    input,
+    TRUST_POLICY_OPTION_KEYS,
+    ['trustedGenesis'],
+    'chain trust policy options',
+  );
+  const rawAuthority = ownOption(input, 'authority');
+  const rawGenesis = ownOption(input, 'trustedGenesis');
+  const rawPersisted = ownOption(input, 'persistedHead');
+  const authority =
+    rawAuthority === undefined
+      ? ACCEPTED_RAPP_PROTOCOL_AUTHORITY
+      : rawAuthority as ProtocolAuthority;
   if (!isSelectedProtocolAuthority(authority)) {
     throw new TypeError('chain trust policy requires an immutable selected ProtocolAuthority');
   }
-  const genesis = input.trustedGenesis;
+  assertOptionMap(
+    rawGenesis,
+    TRUSTED_GENESIS_KEYS,
+    ['streamId', 'frameHash', 'payloadHash'],
+    'trusted genesis',
+  );
+  const genesis = frozenNullRecord({
+    streamId: ownOption(rawGenesis, 'streamId'),
+    frameHash: ownOption(rawGenesis, 'frameHash'),
+    payloadHash: ownOption(rawGenesis, 'payloadHash'),
+  }) as unknown as Readonly<TrustedRappGenesis>;
   if (
-    rappStreamFamily(genesis.streamId) === null
+    typeof genesis.streamId !== 'string'
+    || typeof genesis.frameHash !== 'string'
+    || typeof genesis.payloadHash !== 'string'
+    || rappStreamFamily(genesis.streamId) === null
     || !HEX64.test(genesis.frameHash)
     || !HEX64.test(genesis.payloadHash)
   ) {
     throw new TypeError('trusted genesis must name a valid stream and two 64hex addresses');
   }
-  const persisted = input.persistedHead ?? null;
+  let persisted: Readonly<PersistedRappHead> | null = null;
+  if (rawPersisted !== undefined && rawPersisted !== null) {
+    assertOptionMap(
+      rawPersisted,
+      PERSISTED_HEAD_KEYS,
+      ['streamId', 'seq', 'frameHash'],
+      'persisted head',
+    );
+    persisted = frozenNullRecord({
+      streamId: ownOption(rawPersisted, 'streamId'),
+      seq: ownOption(rawPersisted, 'seq'),
+      frameHash: ownOption(rawPersisted, 'frameHash'),
+    }) as unknown as Readonly<PersistedRappHead>;
+  }
   if (persisted !== null) {
     if (
+      typeof persisted.streamId !== 'string'
+      || typeof persisted.seq !== 'number'
+      || typeof persisted.frameHash !== 'string'
+      ||
       persisted.streamId !== genesis.streamId
       || !Number.isSafeInteger(persisted.seq)
       || persisted.seq < 0
@@ -508,16 +726,15 @@ export function selectRappChainTrustPolicy(input: {
       throw new TypeError('persisted genesis conflicts with the selected trusted genesis');
     }
   }
-  const trustedGenesis = Object.freeze({ ...genesis });
-  const persistedHead =
-    persisted === null ? null : Object.freeze({ ...persisted });
+  const trustedGenesis = genesis;
+  const persistedHead = persisted;
   const policy = Object.freeze({
     [TRUST_POLICY_BRAND]: true as const,
     authority,
     trustedGenesis,
     persistedHead,
   });
-  TRUST_POLICY_RECORDS.set(policy, Object.freeze({
+  TRUST_POLICY_RECORDS.set(policy, frozenNullRecord({
     authority,
     trustedGenesis,
     persistedHead,
@@ -768,17 +985,48 @@ export function verifyRappFrame<
   profile: RappFrameProfile<TPayload, TKind>,
   options: VerifyRappFrameOptions,
 ): RappFrameVerification<RappFrame<TPayload, TKind>> {
+  try {
+    assertOptionMap(
+      options,
+      VERIFY_FRAME_OPTION_KEYS,
+      ['head', 'streamIdOfRecord'],
+      'frame verification options',
+    );
+  } catch (error) {
+    return fail(
+      'profile',
+      '1',
+      error instanceof Error ? error.message : 'frame verification options are invalid',
+    );
+  }
+  const head = ownOption(options, 'head');
+  const streamIdOfRecord = ownOption(options, 'streamIdOfRecord');
+  if (typeof streamIdOfRecord !== 'string') {
+    return fail('profile', '1', 'frame verification streamIdOfRecord must be an own string');
+  }
+  let selectedHead: RappFrameHead | null = null;
+  if (head !== null) {
+    try {
+      selectedHead = readFrameHead(head, 'frame predecessor');
+    } catch (error) {
+      return fail(
+        'profile',
+        '1',
+        error instanceof Error ? error.message : 'frame predecessor is invalid',
+      );
+    }
+  }
   const intrinsic = verifyThroughWave(
     value,
     profile,
-    options.streamIdOfRecord,
-    options.head?.stream_id,
+    streamIdOfRecord,
+    selectedHead?.stream_id,
   );
   if (!intrinsic.ok) return intrinsic;
   return verifyContinuation(
     intrinsic.frame,
     profile as unknown as RappFrameProfile<JsonObject, string>,
-    options.head,
+    selectedHead,
   );
 }
 
@@ -836,6 +1084,27 @@ export function buildRappFrame<
   input: BuildRappFrameInput<TPayload, TKind>,
   profile: RappFrameProfile<TPayload, TKind>,
 ): RappFrame<TPayload, TKind> {
+  assertOptionMap(
+    input,
+    BUILD_FRAME_INPUT_KEYS,
+    ['kind', 'streamId', 'utc', 'payload', 'head'],
+    'frame build input',
+  );
+  const kind = ownOption(input, 'kind');
+  const streamId = ownOption(input, 'streamId');
+  const utc = ownOption(input, 'utc');
+  const payload = ownOption(input, 'payload');
+  const head = ownOption(input, 'head');
+  if (
+    typeof kind !== 'string'
+    || typeof streamId !== 'string'
+    || typeof utc !== 'string'
+    || !isRecord(payload)
+  ) {
+    throw new RappFrameError('profile', '1', 'frame build input has invalid own properties');
+  }
+  const selectedHead =
+    head === null ? null : readFrameHead(head, 'frame build predecessor');
   if (!profileIsValid(profile as RappFrameProfile<JsonObject, string>)) {
     throw new RappFrameError(
       'profile',
@@ -853,14 +1122,14 @@ export function buildRappFrame<
       `legacy integrity profile ${selectedProfile.name} is read-only and cannot emit conforming frames`,
     );
   }
-  if (input.kind !== selectedProfile.kind) {
+  if (kind !== selectedProfile.kind) {
     throw new RappFrameError(
       'profile-kind',
       '1',
       `profile ${selectedProfile.name} emits ${selectedProfile.kind}`,
     );
   }
-  if (input.head !== null && input.head.seq >= RAPP_UINT53_MAX) {
+  if (selectedHead !== null && selectedHead.seq >= RAPP_UINT53_MAX) {
     throw new RappFrameError(
       'seq-continuity',
       '4',
@@ -869,7 +1138,7 @@ export function buildRappFrame<
   }
   let payloadHash: string;
   try {
-    payloadHash = rappH(RAPP_PARTICLE_DOMAIN, input.payload);
+    payloadHash = rappH(RAPP_PARTICLE_DOMAIN, payload as JsonObject);
   } catch (error) {
     throw new RappFrameError(
       'canonical',
@@ -879,24 +1148,24 @@ export function buildRappFrame<
   }
   const draft: RappFrame<TPayload, TKind> = {
     spec: RAPP_FRAME_SPEC,
-    kind: input.kind,
-    stream_id: input.streamId,
-    seq: input.head === null ? 0 : input.head.seq + 1,
-    utc: input.utc,
-    payload: input.payload,
+    kind: kind as TKind,
+    stream_id: streamId,
+    seq: selectedHead === null ? 0 : selectedHead.seq + 1,
+    utc,
+    payload: payload as TPayload,
     payload_hash: payloadHash,
     frame_hash: '0'.repeat(64),
-    prev: input.head === null ? null : input.head.payload_hash,
+    prev: selectedHead === null ? null : selectedHead.payload_hash,
     prev_wave:
-      selectedProfile.family === 'swarm' && input.head !== null
-        ? input.head.frame_hash
+      selectedProfile.family === 'swarm' && selectedHead !== null
+        ? selectedHead.frame_hash
         : null,
     sig: null,
   };
   const frame = { ...draft, frame_hash: rappFrameDigest(draft) };
   return assertRappFrame(frame, profile, {
-    head: input.head,
-    streamIdOfRecord: input.streamId,
+    head: selectedHead,
+    streamIdOfRecord: streamId,
   });
 }
 
@@ -917,17 +1186,39 @@ export function hashLegacyRappBodyFrame<
   payload: TPayload;
   prev: string | null;
 }): RappFrame<TPayload, TKind> {
-  const payloadHash = rappH(RAPP_PARTICLE_DOMAIN, input.payload);
+  assertOptionMap(
+    input,
+    LEGACY_HASH_INPUT_KEYS,
+    ['kind', 'streamId', 'seq', 'utc', 'payload', 'prev'],
+    'legacy frame hash input',
+  );
+  const kind = ownOption(input, 'kind');
+  const streamId = ownOption(input, 'streamId');
+  const seq = ownOption(input, 'seq');
+  const utc = ownOption(input, 'utc');
+  const payload = ownOption(input, 'payload');
+  const prev = ownOption(input, 'prev');
+  if (
+    typeof kind !== 'string'
+    || typeof streamId !== 'string'
+    || typeof seq !== 'number'
+    || typeof utc !== 'string'
+    || !isRecord(payload)
+    || (prev !== null && typeof prev !== 'string')
+  ) {
+    throw new TypeError('legacy frame hash input has invalid own properties');
+  }
+  const payloadHash = rappH(RAPP_PARTICLE_DOMAIN, payload as JsonObject);
   const draft: RappFrame<TPayload, TKind> = {
     spec: RAPP_FRAME_SPEC,
-    kind: input.kind,
-    stream_id: input.streamId,
-    seq: input.seq,
-    utc: input.utc,
-    payload: input.payload,
+    kind: kind as TKind,
+    stream_id: streamId,
+    seq,
+    utc,
+    payload: payload as TPayload,
     payload_hash: payloadHash,
     frame_hash: '0'.repeat(64),
-    prev: input.prev,
+    prev,
     prev_wave: null,
     sig: null,
   };

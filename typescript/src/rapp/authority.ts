@@ -26,23 +26,23 @@ export interface ProtocolAuthorityDraftMetadata {
   checkpoint?: string;
 }
 
-const ACCEPTED_KIND_FAMILIES: Readonly<Record<string, RappStreamFamily>> =
-  Object.freeze({
-    'body.pulse': 'body',
-    'body.re-genesis': 'body',
-    'body.reconstructed': 'body',
-    'body.twin-pulse': 'body',
-    'memory.chat-turn': 'memory',
-    'memory.re-genesis': 'memory',
-    'memory.reconstructed': 'memory',
-    'memory.save': 'memory',
-    'memory.tool-call': 'memory',
-    'swarm.echo': 'swarm',
-    'swarm.guidance': 'swarm',
-    'swarm.re-genesis': 'swarm',
-    'swarm.reconstructed': 'swarm',
-    'swarm.telemetry': 'swarm',
-  });
+const ACCEPTED_KIND_FAMILIES: ReadonlyMap<string, RappStreamFamily> =
+  new Map([
+    ['body.pulse', 'body'],
+    ['body.re-genesis', 'body'],
+    ['body.reconstructed', 'body'],
+    ['body.twin-pulse', 'body'],
+    ['memory.chat-turn', 'memory'],
+    ['memory.re-genesis', 'memory'],
+    ['memory.reconstructed', 'memory'],
+    ['memory.save', 'memory'],
+    ['memory.tool-call', 'memory'],
+    ['swarm.echo', 'swarm'],
+    ['swarm.guidance', 'swarm'],
+    ['swarm.re-genesis', 'swarm'],
+    ['swarm.reconstructed', 'swarm'],
+    ['swarm.telemetry', 'swarm'],
+  ] as const);
 
 const AUTHORITY_CAPABILITY = Symbol('selected-protocol-authority');
 const MODULE_OWNED_AUTHORITIES = new WeakSet<ProtocolAuthority>();
@@ -54,7 +54,7 @@ interface ProtocolAuthorityRecord {
   checkpointCommit: string;
   normativeSha256: string;
   bootstrapProfileSha256: string | null;
-  kindFamilies: Readonly<Record<string, RappStreamFamily>>;
+  kindFamilies: ReadonlyMap<string, RappStreamFamily>;
 }
 const AUTHORITY_RECORDS = new WeakMap<ProtocolAuthority, ProtocolAuthorityRecord>();
 
@@ -102,7 +102,9 @@ export class ProtocolAuthority {
     if (capability !== AUTHORITY_CAPABILITY) {
       throw new TypeError('ProtocolAuthority can only be created from a module-owned accepted checkpoint');
     }
-    const record = Object.freeze({ ...input });
+    const record = Object.freeze(
+      Object.assign(Object.create(null), input),
+    ) as ProtocolAuthorityRecord;
     this.revision = record.revision;
     this.frameHash = record.frameHash;
     this.payloadHash = record.payloadHash;
@@ -110,7 +112,10 @@ export class ProtocolAuthority {
     this.checkpointCommit = record.checkpointCommit;
     this.normativeSha256 = record.normativeSha256;
     this.bootstrapProfileSha256 = record.bootstrapProfileSha256;
-    this.kindFamilies = record.kindFamilies;
+    this.kindFamilies = Object.freeze(Object.assign(
+      Object.create(null),
+      Object.fromEntries(record.kindFamilies),
+    )) as Readonly<Record<string, RappStreamFamily>>;
     MODULE_OWNED_AUTHORITIES.add(this);
     AUTHORITY_RECORDS.set(this, record);
     Object.freeze(this);
@@ -129,11 +134,11 @@ export class ProtocolAuthority {
   }
 }
 
-const ACCEPTED_AUTHORITIES: Readonly<Record<string, ProtocolAuthority>> =
-  Object.freeze({
-    'rev-13': ProtocolAuthority.acceptedRev13,
-    'rev-14': ProtocolAuthority.acceptedRev14,
-  });
+const ACCEPTED_AUTHORITIES: ReadonlyMap<string, ProtocolAuthority> =
+  new Map([
+    ['rev-13', ProtocolAuthority.acceptedRev13],
+    ['rev-14', ProtocolAuthority.acceptedRev14],
+  ]);
 
 /** True only for the exact frozen authority objects owned by this module. */
 export function isSelectedProtocolAuthority(
@@ -147,7 +152,7 @@ export function isSelectedProtocolAuthority(
     return false;
   }
   const record = AUTHORITY_RECORDS.get(value as ProtocolAuthority);
-  return record !== undefined && ACCEPTED_AUTHORITIES[record.revision] === value;
+  return record !== undefined && ACCEPTED_AUTHORITIES.get(record.revision) === value;
 }
 
 function authorityRecord(authority: ProtocolAuthority): ProtocolAuthorityRecord {
@@ -187,14 +192,15 @@ export function protocolAuthorityFamilyForKind(
   authority: ProtocolAuthority,
   kind: string,
 ): RappStreamFamily | null {
-  return authorityRecord(authority).kindFamilies[kind] ?? null;
+  const families = authorityRecord(authority).kindFamilies;
+  return families.has(kind) ? families.get(kind)! : null;
 }
 
 export function protocolAuthorityRegisteredKinds(
   authority: ProtocolAuthority,
 ): readonly string[] {
   return Object.freeze(
-    Object.keys(authorityRecord(authority).kindFamilies).sort(),
+    [...authorityRecord(authority).kindFamilies.keys()].sort(),
   );
 }
 
@@ -208,5 +214,5 @@ export const ACCEPTED_RAPP_PROTOCOL_AUTHORITY = ProtocolAuthority.acceptedRev14;
 export function resolveProtocolAuthority(
   revision: string,
 ): ProtocolAuthority | null {
-  return ACCEPTED_AUTHORITIES[revision] ?? null;
+  return ACCEPTED_AUTHORITIES.get(revision) ?? null;
 }

@@ -538,7 +538,11 @@ describe('Windows Job Object helper contract', () => {
 
   it('runs native Job Object tests in CI and budgets exactly two non-Windows skips', () => {
     const workflow = readFileSync(
-      path.join(directory, '../../../.github/workflows/flight-recorder.yml'),
+      path.join(directory, '../../../.github/workflows/process-tree.yml'),
+      'utf8',
+    );
+    const reportGate = readFileSync(
+      path.join(directory, '../../../tools/process-tree-report.mjs'),
       'utf8',
     );
     const skipBudget = readFileSync(
@@ -546,14 +550,19 @@ describe('Windows Job Object helper contract', () => {
       'utf8',
     );
     expect(workflow).toContain(
-      'run: npx vitest run src/infra/process-tree.test.ts',
+      'npx vitest run src/infra/process-tree.test.ts',
     );
-    expect(workflow).toContain('name: Managed process tree Windows');
-    expect(workflow).toContain('runs-on: windows-latest');
+    expect(workflow).toContain('os: [ubuntu-latest, windows-latest]');
+    expect(workflow).toContain('timeout-minutes: 12');
+    expect(workflow).toContain('npm run build:server');
+    expect(workflow).not.toContain('npm run build\n');
+    expect(workflow).toContain('tools/process-tree-report.mjs');
+    expect(reportGate).toContain('windows.length !== 2');
+    expect(reportGate).toContain('windowsSkipped.length !== 0');
     expect(skipBudget).toMatch(
       /'src\/infra\/process-tree\.test\.ts':\s*\{\s*max:\s*2,/,
     );
-    expect(skipBudget).toContain('flight-recorder.yml');
+    expect(skipBudget).toContain('process-tree.yml');
   });
 });
 

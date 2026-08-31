@@ -28,7 +28,7 @@ import { readFileSync } from 'node:fs';
 const ALLOWED = {
   'src/infra/process-tree.test.ts': {
     max: 2,
-    why: 'Two Job Object integrations are Windows-only. flight-recorder.yml '
+    why: 'Two Job Object integrations are Windows-only. process-tree.yml '
       + 'runs this file explicitly on windows-latest, proving helper-close, '
       + 'natural/fast exit, descendant cleanup, and full relay failure handling.',
   },

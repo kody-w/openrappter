@@ -123,6 +123,11 @@ try {
     "dist/show-and-tell/store.js",
     "dist/show-and-tell/worker.js",
     "dist/cli/show-and-tell.js",
+    "dist/infra/process-tree.js",
+    "dist/infra/process-tree-internal.js",
+    "dist/infra/process-tree-posix.js",
+    "dist/infra/process-tree-windows.js",
+    "dist/infra/process-tree-windows.ps1",
   ]) {
     if (!packedFiles.has(required)) {
       throw new Error(`Tarball does not contain ${required}`);
@@ -193,6 +198,53 @@ try {
   });
   if (!/show-and-tell/i.test(showHelp.stdout)) {
     throw new Error("Installed package does not expose the Show-and-Tell CLI");
+  }
+
+  const installedProcessTree = pathToFileURL(
+    path.join(installedRoot, "dist", "infra", "process-tree.js"),
+  ).href;
+  const processTreeScript = `
+    import { spawnManagedProcessTree } from ${JSON.stringify(installedProcessTree)};
+    const env = process.platform === "win32"
+      ? Object.fromEntries(
+          ["SystemRoot", "WINDIR", "TEMP", "TMP"]
+            .map((key) => [key, process.env[key]])
+            .filter((entry) => typeof entry[1] === "string")
+        )
+      : {};
+    const tree = await spawnManagedProcessTree({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('managed-tree-package-ok')"],
+      env,
+      gracefulTerminationMs: 100,
+      forceTerminationMs: 2000,
+    });
+    const chunks = [];
+    for await (const chunk of tree.stdout) chunks.push(Buffer.from(chunk));
+    const exit = await tree.wait();
+    const cleanup = await tree.terminate();
+    process.stdout.write(JSON.stringify({
+      output: Buffer.concat(chunks).toString("utf8"),
+      code: exit.code,
+      containmentEmpty: cleanup.containmentEmpty,
+      reaped: cleanup.reaped,
+    }));
+  `;
+  const processTreeSmoke = run(
+    process.execPath,
+    ["--input-type=module", "--eval", processTreeScript],
+    { cwd: installRoot },
+  );
+  const processTreeStatus = parseJsonValue(processTreeSmoke.stdout, "{", "}");
+  if (
+    processTreeStatus.output !== "managed-tree-package-ok" ||
+    processTreeStatus.code !== 0 ||
+    processTreeStatus.containmentEmpty !== true ||
+    processTreeStatus.reaped !== true
+  ) {
+    throw new Error(
+      `Installed managed process tree failed:\n${processTreeSmoke.stdout}`,
+    );
   }
 
   const installedStore = pathToFileURL(
@@ -604,7 +656,7 @@ try {
   }
 
   console.log(
-    `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, and Show-and-Tell`,
+    `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, Show-and-Tell, and managed process trees`,
   );
 } finally {
   rmSync(scratch, {

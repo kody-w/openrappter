@@ -7,6 +7,13 @@ export interface ProtocolAuthorityIdentity {
   payload_hash: string;
 }
 
+export interface ProtocolAuthorityDetails extends ProtocolAuthorityIdentity {
+  repository: string;
+  checkpoint_commit: string;
+  normative_sha256: string;
+  bootstrap_profile_sha256: string | null;
+}
+
 /**
  * Metadata about an unselected protocol draft.
  *
@@ -39,6 +46,17 @@ const ACCEPTED_KIND_FAMILIES: Readonly<Record<string, RappStreamFamily>> =
 
 const AUTHORITY_CAPABILITY = Symbol('selected-protocol-authority');
 const MODULE_OWNED_AUTHORITIES = new WeakSet<ProtocolAuthority>();
+interface ProtocolAuthorityRecord {
+  revision: string;
+  frameHash: string;
+  payloadHash: string;
+  repository: string;
+  checkpointCommit: string;
+  normativeSha256: string;
+  bootstrapProfileSha256: string | null;
+  kindFamilies: Readonly<Record<string, RappStreamFamily>>;
+}
+const AUTHORITY_RECORDS = new WeakMap<ProtocolAuthority, ProtocolAuthorityRecord>();
 
 /**
  * Immutable, selected protocol authority.
@@ -80,50 +98,36 @@ export class ProtocolAuthority {
   readonly bootstrapProfileSha256: string | null;
   readonly kindFamilies: Readonly<Record<string, RappStreamFamily>>;
 
-  private constructor(input: {
-    revision: string;
-    frameHash: string;
-    payloadHash: string;
-    repository: string;
-    checkpointCommit: string;
-    normativeSha256: string;
-    bootstrapProfileSha256: string | null;
-    kindFamilies: Readonly<Record<string, RappStreamFamily>>;
-  }, capability: symbol) {
+  private constructor(input: ProtocolAuthorityRecord, capability: symbol) {
     if (capability !== AUTHORITY_CAPABILITY) {
       throw new TypeError('ProtocolAuthority can only be created from a module-owned accepted checkpoint');
     }
-    this.revision = input.revision;
-    this.frameHash = input.frameHash;
-    this.payloadHash = input.payloadHash;
-    this.repository = input.repository;
-    this.checkpointCommit = input.checkpointCommit;
-    this.normativeSha256 = input.normativeSha256;
-    this.bootstrapProfileSha256 = input.bootstrapProfileSha256;
-    this.kindFamilies = input.kindFamilies;
+    const record = Object.freeze({ ...input });
+    this.revision = record.revision;
+    this.frameHash = record.frameHash;
+    this.payloadHash = record.payloadHash;
+    this.repository = record.repository;
+    this.checkpointCommit = record.checkpointCommit;
+    this.normativeSha256 = record.normativeSha256;
+    this.bootstrapProfileSha256 = record.bootstrapProfileSha256;
+    this.kindFamilies = record.kindFamilies;
     MODULE_OWNED_AUTHORITIES.add(this);
+    AUTHORITY_RECORDS.set(this, record);
     Object.freeze(this);
   }
 
   identity(): Readonly<ProtocolAuthorityIdentity> {
-    return Object.freeze({
-      revision: this.revision,
-      frame_hash: this.frameHash,
-      payload_hash: this.payloadHash,
-    });
+    return protocolAuthorityIdentity(this);
   }
 
   familyForKind(kind: string): RappStreamFamily | null {
-    return this.kindFamilies[kind] ?? null;
+    return protocolAuthorityFamilyForKind(this, kind);
   }
 
   registeredKinds(): readonly string[] {
-    return Object.freeze(Object.keys(this.kindFamilies).sort());
+    return protocolAuthorityRegisteredKinds(this);
   }
 }
-
-/** The selected authority used when callers do not explicitly supply one. */
-export const ACCEPTED_RAPP_PROTOCOL_AUTHORITY = ProtocolAuthority.acceptedRev14;
 
 const ACCEPTED_AUTHORITIES: Readonly<Record<string, ProtocolAuthority>> =
   Object.freeze({
@@ -135,11 +139,70 @@ const ACCEPTED_AUTHORITIES: Readonly<Record<string, ProtocolAuthority>> =
 export function isSelectedProtocolAuthority(
   value: unknown,
 ): value is ProtocolAuthority {
-  if (!(value instanceof ProtocolAuthority) || !MODULE_OWNED_AUTHORITIES.has(value)) {
+  if (
+    typeof value !== 'object'
+    || value === null
+    || !MODULE_OWNED_AUTHORITIES.has(value as ProtocolAuthority)
+  ) {
     return false;
   }
-  return ACCEPTED_AUTHORITIES[value.revision] === value;
+  const record = AUTHORITY_RECORDS.get(value as ProtocolAuthority);
+  return record !== undefined && ACCEPTED_AUTHORITIES[record.revision] === value;
 }
+
+function authorityRecord(authority: ProtocolAuthority): ProtocolAuthorityRecord {
+  if (!isSelectedProtocolAuthority(authority)) {
+    throw new TypeError('authority is not an exact module-owned accepted checkpoint');
+  }
+  return AUTHORITY_RECORDS.get(authority)!;
+}
+
+export function protocolAuthorityIdentity(
+  authority: ProtocolAuthority,
+): Readonly<ProtocolAuthorityIdentity> {
+  const record = authorityRecord(authority);
+  return Object.freeze({
+    revision: record.revision,
+    frame_hash: record.frameHash,
+    payload_hash: record.payloadHash,
+  });
+}
+
+export function protocolAuthorityDetails(
+  authority: ProtocolAuthority,
+): Readonly<ProtocolAuthorityDetails> {
+  const record = authorityRecord(authority);
+  return Object.freeze({
+    revision: record.revision,
+    frame_hash: record.frameHash,
+    payload_hash: record.payloadHash,
+    repository: record.repository,
+    checkpoint_commit: record.checkpointCommit,
+    normative_sha256: record.normativeSha256,
+    bootstrap_profile_sha256: record.bootstrapProfileSha256,
+  });
+}
+
+export function protocolAuthorityFamilyForKind(
+  authority: ProtocolAuthority,
+  kind: string,
+): RappStreamFamily | null {
+  return authorityRecord(authority).kindFamilies[kind] ?? null;
+}
+
+export function protocolAuthorityRegisteredKinds(
+  authority: ProtocolAuthority,
+): readonly string[] {
+  return Object.freeze(
+    Object.keys(authorityRecord(authority).kindFamilies).sort(),
+  );
+}
+
+Object.freeze(ProtocolAuthority.prototype);
+Object.freeze(ProtocolAuthority);
+
+/** The selected authority used when callers do not explicitly supply one. */
+export const ACCEPTED_RAPP_PROTOCOL_AUTHORITY = ProtocolAuthority.acceptedRev14;
 
 /** Resolve an accepted historical checkpoint without changing the selected default. */
 export function resolveProtocolAuthority(

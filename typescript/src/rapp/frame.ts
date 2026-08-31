@@ -8,8 +8,10 @@ import {
 import type { JsonObject, JsonValue } from '../rappids/types.js';
 import {
   ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
-  ProtocolAuthority,
   isSelectedProtocolAuthority,
+  protocolAuthorityFamilyForKind,
+  protocolAuthorityIdentity,
+  type ProtocolAuthority,
   type ProtocolAuthorityIdentity,
   type RappStreamFamily,
 } from './authority.js';
@@ -63,6 +65,21 @@ export interface RappTrustAssessment {
 }
 
 const PROFILE_BRAND: unique symbol = Symbol('rapp-frame-profile');
+interface RappFrameProfileRecord<
+  TPayload extends JsonObject = JsonObject,
+  TKind extends string = string,
+> {
+  name: string;
+  kind: TKind;
+  family: RappStreamFamily;
+  authority: ProtocolAuthority | null;
+  mode: 'authority' | 'legacy-integrity';
+  signature: 'unsigned-local';
+  validatePayload?: RappFrameProfile<TPayload, TKind>['validatePayload'];
+  uniquePayloads: boolean;
+}
+const PROFILE_RECORDS =
+  new WeakMap<object, RappFrameProfileRecord<JsonObject, string>>();
 
 export interface RappFrameProfile<
   TPayload extends JsonObject,
@@ -103,13 +120,14 @@ export function createRappFrameProfile<
   if (!isSelectedProtocolAuthority(authority)) {
     throw new TypeError('frame profiles require an immutable selected ProtocolAuthority');
   }
-  const family = authority.familyForKind(input.kind);
+  const family = protocolAuthorityFamilyForKind(authority, input.kind);
   if (family === null) {
+    const identity = protocolAuthorityIdentity(authority);
     throw new TypeError(
-      `kind ${input.kind} is not registered by accepted authority ${authority.revision}`,
+      `kind ${input.kind} is not registered by accepted authority ${identity.revision}`,
     );
   }
-  return Object.freeze({
+  const profile = Object.freeze({
     [PROFILE_BRAND]: true as const,
     name: input.name,
     kind: input.kind,
@@ -120,6 +138,20 @@ export function createRappFrameProfile<
     validatePayload: input.validatePayload,
     uniquePayloads: input.uniquePayloads ?? false,
   });
+  PROFILE_RECORDS.set(
+    profile,
+    Object.freeze({
+      name: input.name,
+      kind: input.kind,
+      family,
+      authority,
+      mode: 'authority',
+      signature: input.signature ?? 'unsigned-local',
+      validatePayload: input.validatePayload,
+      uniquePayloads: input.uniquePayloads ?? false,
+    }) as RappFrameProfileRecord<JsonObject, string>,
+  );
+  return profile;
 }
 
 export function createLegacyRappIntegrityProfile<
@@ -132,7 +164,7 @@ export function createLegacyRappIntegrityProfile<
   validatePayload?: RappFrameProfile<TPayload, TKind>['validatePayload'];
   uniquePayloads?: boolean;
 }): Readonly<RappFrameProfile<TPayload, TKind>> {
-  return Object.freeze({
+  const profile = Object.freeze({
     [PROFILE_BRAND]: true as const,
     name: input.name,
     kind: input.kind,
@@ -143,6 +175,20 @@ export function createLegacyRappIntegrityProfile<
     validatePayload: input.validatePayload,
     uniquePayloads: input.uniquePayloads ?? false,
   });
+  PROFILE_RECORDS.set(
+    profile,
+    Object.freeze({
+      name: input.name,
+      kind: input.kind,
+      family: input.family,
+      authority: null,
+      mode: 'legacy-integrity',
+      signature: 'unsigned-local',
+      validatePayload: input.validatePayload,
+      uniquePayloads: input.uniquePayloads ?? false,
+    }) as RappFrameProfileRecord<JsonObject, string>,
+  );
+  return profile;
 }
 
 export const RAPP_ACCEPTED_BODY_PULSE_PROFILE = createRappFrameProfile<
@@ -254,6 +300,12 @@ export interface PersistedRappHead {
 }
 
 const TRUST_POLICY_BRAND: unique symbol = Symbol('rapp-chain-trust-policy');
+interface RappChainTrustPolicyRecord {
+  authority: ProtocolAuthority;
+  trustedGenesis: Readonly<TrustedRappGenesis>;
+  persistedHead: Readonly<PersistedRappHead> | null;
+}
+const TRUST_POLICY_RECORDS = new WeakMap<object, RappChainTrustPolicyRecord>();
 
 export interface RappChainTrustPolicy {
   readonly [TRUST_POLICY_BRAND]: true;
@@ -302,11 +354,15 @@ function trustFor(
   genesis: RappTrustAssessment['genesis'],
   persistedHead: RappTrustAssessment['persistedHead'],
 ): Readonly<RappTrustAssessment> {
+  const selected = profileRecord(profile);
   return Object.freeze({
     classification:
-      profile.mode === 'authority' ? 'integrity-only' : 'legacy-integrity-only',
+      selected.mode === 'authority' ? 'integrity-only' : 'legacy-integrity-only',
     promotionGrade: false,
-    authority: profile.authority?.identity() ?? null,
+    authority:
+      selected.authority === null
+        ? null
+        : protocolAuthorityIdentity(selected.authority),
     genesis,
     persistedHead,
   });
@@ -335,11 +391,29 @@ function chainFail<TFrame extends RappFrame>(
 function profileIsValid(
   profile: RappFrameProfile<JsonObject, string>,
 ): boolean {
-  return profile[PROFILE_BRAND] === true;
+  return PROFILE_RECORDS.has(profile);
 }
 
 function policyIsValid(policy: RappChainTrustPolicy): boolean {
-  return policy[TRUST_POLICY_BRAND] === true;
+  return TRUST_POLICY_RECORDS.has(policy);
+}
+
+function profileRecord(
+  profile: RappFrameProfile<JsonObject, string>,
+): RappFrameProfileRecord<JsonObject, string> {
+  const record = PROFILE_RECORDS.get(profile);
+  if (record === undefined) {
+    throw new TypeError('frame profile is not an exact module-owned profile');
+  }
+  return record;
+}
+
+function policyRecord(policy: RappChainTrustPolicy): RappChainTrustPolicyRecord {
+  const record = TRUST_POLICY_RECORDS.get(policy);
+  if (record === undefined) {
+    throw new TypeError('chain trust policy is not an exact module-owned policy');
+  }
+  return record;
 }
 
 export function isRappBodyStream(value: unknown): value is string {
@@ -434,12 +508,27 @@ export function selectRappChainTrustPolicy(input: {
       throw new TypeError('persisted genesis conflicts with the selected trusted genesis');
     }
   }
-  return Object.freeze({
+  const trustedGenesis = Object.freeze({ ...genesis });
+  const persistedHead =
+    persisted === null ? null : Object.freeze({ ...persisted });
+  const policy = Object.freeze({
     [TRUST_POLICY_BRAND]: true as const,
     authority,
-    trustedGenesis: Object.freeze({ ...genesis }),
-    persistedHead: persisted === null ? null : Object.freeze({ ...persisted }),
+    trustedGenesis,
+    persistedHead,
   });
+  TRUST_POLICY_RECORDS.set(policy, Object.freeze({
+    authority,
+    trustedGenesis,
+    persistedHead,
+  }));
+  return policy;
+}
+
+export function rappChainTrustAuthority(
+  policy: RappChainTrustPolicy,
+): ProtocolAuthority {
+  return policyRecord(policy).authority;
 }
 
 export function rappFrameToJson(frame: RappFrame): JsonObject {
@@ -477,7 +566,10 @@ function profilePayloadProblem<
   profile: RappFrameProfile<TPayload, TKind>,
   payload: JsonObject,
 ): string | null {
-  const result = profile.validatePayload?.(payload);
+  const selected = profileRecord(
+    profile as unknown as RappFrameProfile<JsonObject, string>,
+  );
+  const result = selected.validatePayload?.(payload);
   return result === undefined || result.ok ? null : result.error;
 }
 
@@ -493,6 +585,9 @@ function verifyThroughWave<
   if (!profileIsValid(profile as RappFrameProfile<JsonObject, string>)) {
     return fail('profile', '1', 'frame profile was not selected by a profile factory');
   }
+  const selectedProfile = profileRecord(
+    profile as unknown as RappFrameProfile<JsonObject, string>,
+  );
   if (!isRecord(value)) {
     return fail('key-set', '1', 'frame is not a JSON object');
   }
@@ -509,13 +604,17 @@ function verifyThroughWave<
   if (streamFamily === null) {
     return fail('stream-id', '1', 'stream_id does not match a registered RAPP stream form');
   }
-  if (profile.mode === 'authority') {
-    const registeredFamily = profile.authority!.familyForKind(value.kind);
+  if (selectedProfile.mode === 'authority') {
+    const registeredFamily = protocolAuthorityFamilyForKind(
+      selectedProfile.authority!,
+      value.kind,
+    );
     if (registeredFamily === null) {
+      const identity = protocolAuthorityIdentity(selectedProfile.authority!);
       return fail(
         'unregistered-kind',
         '1',
-        `kind ${value.kind} is not registered by accepted authority ${profile.authority!.revision}`,
+        `kind ${value.kind} is not registered by accepted authority ${identity.revision}`,
       );
     }
     if (registeredFamily !== streamFamily) {
@@ -525,18 +624,18 @@ function verifyThroughWave<
         `registered ${registeredFamily} kind ${value.kind} cannot use a ${streamFamily} stream`,
       );
     }
-  } else if (streamFamily !== profile.family) {
+  } else if (streamFamily !== selectedProfile.family) {
     return fail(
       'kind-family',
       '1',
-      `legacy ${profile.family} kind ${value.kind} cannot use a ${streamFamily} stream`,
+      `legacy ${selectedProfile.family} kind ${value.kind} cannot use a ${streamFamily} stream`,
     );
   }
-  if (value.kind !== profile.kind) {
+  if (value.kind !== selectedProfile.kind) {
     return fail(
       'profile-kind',
       '1',
-      `profile ${profile.name} verifies ${profile.kind}, not ${value.kind}`,
+      `profile ${selectedProfile.name} verifies ${selectedProfile.kind}, not ${value.kind}`,
     );
   }
   if (
@@ -616,6 +715,7 @@ function verifyContinuation<TFrame extends RappFrame>(
   profile: RappFrameProfile<JsonObject, string>,
   head: RappFrameHead | null,
 ): RappFrameVerification<TFrame> {
+  const selectedProfile = profileRecord(profile);
   if (head === null) {
     if (frame.seq !== 0 || frame.prev !== null) {
       return fail('genesis', '4', 'genesis must be seq 0 with prev null');
@@ -635,7 +735,7 @@ function verifyContinuation<TFrame extends RappFrame>(
     }
   }
 
-  if (profile.family === 'swarm' && frame.seq > 0) {
+  if (selectedProfile.family === 'swarm' && frame.seq > 0) {
     if (head === null || frame.prev_wave !== head.frame_hash) {
       return fail('prev-wave', '5', 'prev_wave does not link the predecessor frame_hash');
     }
@@ -643,10 +743,10 @@ function verifyContinuation<TFrame extends RappFrame>(
     return fail('prev-wave', '5', 'prev_wave must be null off a non-genesis swarm frame');
   }
 
-  if (profile.family === 'swarm' && frame.sig === null) {
+  if (selectedProfile.family === 'swarm' && frame.sig === null) {
     return fail('signature-required', '6', 'swarm frames must be signed');
   }
-  if (profile.signature === 'unsigned-local' && frame.sig !== null) {
+  if (selectedProfile.signature === 'unsigned-local' && frame.sig !== null) {
     return fail(
       'signature-profile',
       '6',
@@ -736,15 +836,29 @@ export function buildRappFrame<
   input: BuildRappFrameInput<TPayload, TKind>,
   profile: RappFrameProfile<TPayload, TKind>,
 ): RappFrame<TPayload, TKind> {
-  if (profile.mode !== 'authority') {
+  if (!profileIsValid(profile as RappFrameProfile<JsonObject, string>)) {
+    throw new RappFrameError(
+      'profile',
+      '1',
+      'frame profile was not selected by a profile factory',
+    );
+  }
+  const selectedProfile = profileRecord(
+    profile as unknown as RappFrameProfile<JsonObject, string>,
+  );
+  if (selectedProfile.mode !== 'authority') {
     throw new RappFrameError(
       'unregistered-kind',
       '1',
-      `legacy integrity profile ${profile.name} is read-only and cannot emit conforming frames`,
+      `legacy integrity profile ${selectedProfile.name} is read-only and cannot emit conforming frames`,
     );
   }
-  if (input.kind !== profile.kind) {
-    throw new RappFrameError('profile-kind', '1', `profile ${profile.name} emits ${profile.kind}`);
+  if (input.kind !== selectedProfile.kind) {
+    throw new RappFrameError(
+      'profile-kind',
+      '1',
+      `profile ${selectedProfile.name} emits ${selectedProfile.kind}`,
+    );
   }
   if (input.head !== null && input.head.seq >= RAPP_UINT53_MAX) {
     throw new RappFrameError(
@@ -774,7 +888,7 @@ export function buildRappFrame<
     frame_hash: '0'.repeat(64),
     prev: input.head === null ? null : input.head.payload_hash,
     prev_wave:
-      profile.family === 'swarm' && input.head !== null
+      selectedProfile.family === 'swarm' && input.head !== null
         ? input.head.frame_hash
         : null,
     sig: null,
@@ -831,10 +945,17 @@ export function verifyRappFrameChain<
   if (values.length === 0) {
     return chainFail('empty-chain', 'RAPP/1 frame chain is empty', null, null);
   }
+  const selectedProfile = profileIsValid(
+    profile as RappFrameProfile<JsonObject, string>,
+  )
+    ? profileRecord(profile as unknown as RappFrameProfile<JsonObject, string>)
+    : null;
+  const selectedPolicy = policyIsValid(policy) ? policyRecord(policy) : null;
   if (
-    !policyIsValid(policy)
-    || profile.mode !== 'authority'
-    || profile.authority !== policy.authority
+    selectedPolicy === null
+    || selectedProfile === null
+    || selectedProfile.mode !== 'authority'
+    || selectedProfile.authority !== selectedPolicy.authority
   ) {
     return chainFail(
       'authority-policy',
@@ -844,7 +965,7 @@ export function verifyRappFrameChain<
     );
   }
 
-  const streamId = policy.trustedGenesis.streamId;
+  const streamId = selectedPolicy.trustedGenesis.streamId;
   const intrinsicFrames: RappFrame<TPayload, TKind>[] = [];
   for (let index = 0; index < values.length; index += 1) {
     const result = verifyThroughWave(values[index], profile, streamId);
@@ -903,8 +1024,8 @@ export function verifyRappFrameChain<
   if (
     genesis.seq !== 0
     || genesis.prev !== null
-    || genesis.frame_hash !== policy.trustedGenesis.frameHash
-    || genesis.payload_hash !== policy.trustedGenesis.payloadHash
+    || genesis.frame_hash !== selectedPolicy.trustedGenesis.frameHash
+    || genesis.payload_hash !== selectedPolicy.trustedGenesis.payloadHash
   ) {
     return chainFail(
       'untrusted-genesis',
@@ -956,7 +1077,7 @@ export function verifyRappFrameChain<
     }
     frameHashes.set(frame.frame_hash, index);
 
-    if (profile.uniquePayloads) {
+    if (selectedProfile.uniquePayloads) {
       const existingPayload = payloadHashes.get(frame.payload_hash);
       if (existingPayload !== undefined) {
         return chainFail(
@@ -971,7 +1092,7 @@ export function verifyRappFrameChain<
 
   const accepted = candidateFrames;
   let persistedState: RappTrustAssessment['persistedHead'] = 'untracked';
-  const persisted = policy.persistedHead;
+  const persisted = selectedPolicy.persistedHead;
   if (persisted !== null) {
     const finalHead = accepted[accepted.length - 1];
     if (finalHead.seq < persisted.seq) {

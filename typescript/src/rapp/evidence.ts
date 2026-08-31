@@ -2,7 +2,9 @@ import type { JsonObject } from '../rappids/types.js';
 import { rappCanonicalJson } from '../rappids/canonical.js';
 import {
   ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
-  ProtocolAuthority,
+  isSelectedProtocolAuthority,
+  protocolAuthorityIdentity,
+  type ProtocolAuthority,
 } from './authority.js';
 import {
   RappFrameError,
@@ -11,6 +13,7 @@ import {
   buildRappFrame,
   createRappFrameProfile,
   isRappFrameKind,
+  rappChainTrustAuthority,
   verifyRappFrame,
   verifyRappFrameChain,
   type RappChainTrustPolicy,
@@ -87,6 +90,7 @@ function evidencePayloadProblem(
   payload: JsonObject,
   authority: ProtocolAuthority,
 ): string | null {
+  const authorityIdentity = protocolAuthorityIdentity(authority);
   if (Object.keys(payload).sort().join('\0') !== PAYLOAD_KEYS) {
     return 'openrappter evidence payload does not have its exact key set';
   }
@@ -123,13 +127,13 @@ function evidencePayloadProblem(
   if (!isRecord(revision) || Object.keys(revision).sort().join('\0') !== REVISION_KEYS) {
     return 'evidence protocol_revision does not have its exact key set';
   }
-  if (revision.revision !== authority.revision) {
-    return `evidence protocol revision is not selected authority ${authority.revision}`;
+  if (revision.revision !== authorityIdentity.revision) {
+    return `evidence protocol revision is not selected authority ${authorityIdentity.revision}`;
   }
-  if (revision.frame_hash !== authority.frameHash) {
+  if (revision.frame_hash !== authorityIdentity.frame_hash) {
     return 'evidence protocol frame_hash does not name the selected authority';
   }
-  if (revision.payload_hash !== authority.payloadHash) {
+  if (revision.payload_hash !== authorityIdentity.payload_hash) {
     return 'evidence protocol payload_hash does not name the selected authority';
   }
   return null;
@@ -153,8 +157,12 @@ export function createOpenRappterEvidenceProfile(
   OpenRappterEvidencePayload,
   typeof OPENRAPPTER_EVIDENCE_FRAME_KIND
 >> {
+  if (!isSelectedProtocolAuthority(authority)) {
+    throw new TypeError('evidence profiles require an immutable selected ProtocolAuthority');
+  }
+  const authorityIdentity = protocolAuthorityIdentity(authority);
   return createRappFrameProfile({
-    name: `${OPENRAPPTER_EVIDENCE_SCHEMA}:${authority.revision}`,
+    name: `${OPENRAPPTER_EVIDENCE_SCHEMA}:${authorityIdentity.revision}`,
     kind: OPENRAPPTER_EVIDENCE_FRAME_KIND,
     authority,
     signature: 'unsigned-local',
@@ -174,13 +182,16 @@ export function buildOpenRappterEvidencePayload(input: {
   authority?: ProtocolAuthority;
 }): OpenRappterEvidencePayload {
   const authority = input.authority ?? ACCEPTED_RAPP_PROTOCOL_AUTHORITY;
+  if (!isSelectedProtocolAuthority(authority)) {
+    throw new TypeError('evidence payloads require an immutable selected ProtocolAuthority');
+  }
   const payload: OpenRappterEvidencePayload = {
     schema: OPENRAPPTER_EVIDENCE_SCHEMA,
     event_kind: input.eventKind,
     subject: input.subject,
     data_hash: input.dataHash,
     reference_hashes: [...(input.referenceHashes ?? [])],
-    protocol_revision: { ...authority.identity() },
+    protocol_revision: { ...protocolAuthorityIdentity(authority) },
   };
   const problem = evidencePayloadProblem(payload, authority);
   if (problem !== null) {
@@ -252,9 +263,10 @@ export function verifyRappEvidenceChain(
   values: readonly unknown[],
   policy: RappChainTrustPolicy,
 ): RappFrameChainVerification<OpenRappterEvidenceFrame> {
+  const authority = rappChainTrustAuthority(policy);
   return verifyRappFrameChain(
     values,
-    createOpenRappterEvidenceProfile(policy.authority),
+    createOpenRappterEvidenceProfile(authority),
     policy,
   );
 }
@@ -263,9 +275,10 @@ export function assertRappEvidenceChain(
   values: readonly unknown[],
   policy: RappChainTrustPolicy,
 ): readonly OpenRappterEvidenceFrame[] {
+  const authority = rappChainTrustAuthority(policy);
   return assertRappFrameChain(
     values,
-    createOpenRappterEvidenceProfile(policy.authority),
+    createOpenRappterEvidenceProfile(authority),
     policy,
   );
 }

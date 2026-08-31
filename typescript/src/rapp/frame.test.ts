@@ -31,6 +31,9 @@ import {
   createRappFrameProfile,
   hashLegacyRappBodyFrame,
   isRappFrameUtc,
+  isSelectedProtocolAuthority,
+  protocolAuthorityDetails,
+  protocolAuthorityFamilyForKind,
   rappFrameDigest,
   rappFrameToJson,
   rappFrameWavePreimage,
@@ -309,6 +312,64 @@ describe('registry-bound kind and family validation', () => {
     })).toThrow(/selected ProtocolAuthority/);
   });
 
+  it('freezes prototype methods/getters and accepted-object prototype chains', () => {
+    expect(Object.isFrozen(ProtocolAuthority.prototype)).toBe(true);
+    expect(Object.isFrozen(ProtocolAuthority)).toBe(true);
+    expect(() => Object.defineProperty(
+      ProtocolAuthority.prototype,
+      'familyForKind',
+      { value: () => 'body' },
+    )).toThrow();
+    expect(() => Object.defineProperty(
+      ProtocolAuthority.prototype,
+      'revision',
+      { get: () => 'forged' },
+    )).toThrow();
+    expect(() => Object.setPrototypeOf(
+      ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
+      { familyForKind: () => 'body' },
+    )).toThrow();
+    expect(() => Object.setPrototypeOf(
+      ProtocolAuthority.prototype,
+      {},
+    )).toThrow();
+
+    expect(protocolAuthorityFamilyForKind(
+      ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
+      'body.pulse',
+    )).toBe('body');
+    expect(() => createRappFrameProfile({
+      name: 'still-forged',
+      kind: 'body.dimension',
+    })).toThrow(/not registered/);
+  });
+
+  it('rejects Proxy wrappers even when they forge methods and getters', () => {
+    const proxy = new Proxy(ACCEPTED_RAPP_PROTOCOL_AUTHORITY, {
+      get(target, property, receiver) {
+        if (property === 'familyForKind') return () => 'body';
+        if (property === 'revision') return 'forged';
+        if (property === 'kindFamilies') return { 'body.dimension': 'body' };
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    expect(isSelectedProtocolAuthority(proxy)).toBe(false);
+    expect(() => protocolAuthorityDetails(proxy)).toThrow(/module-owned accepted/);
+    expect(() => createRappFrameProfile({
+      name: 'proxy-forged',
+      kind: 'body.dimension',
+      authority: proxy,
+    })).toThrow(/selected ProtocolAuthority/);
+    expect(() => selectRappChainTrustPolicy({
+      authority: proxy,
+      trustedGenesis: {
+        streamId: authority.frame.stream_id,
+        frameHash: authority.frame.frame_hash,
+        payloadHash: authority.frame.payload_hash,
+      },
+    })).toThrow(/selected ProtocolAuthority/);
+  });
+
   it('does not let a caller register body.dimension through a profile', () => {
     expect(() => createRappFrameProfile({
       name: 'forged',
@@ -329,6 +390,24 @@ describe('registry-bound kind and family validation', () => {
     expect(verifyRappFrame(
       authority.frame,
       forged as never,
+      {
+        head: authority.predecessor,
+        streamIdOfRecord: authority.frame.stream_id,
+      },
+    )).toMatchObject({ ok: false, error: { code: 'profile' } });
+  });
+
+  it('rejects Proxy wrappers around a genuine selected frame profile', () => {
+    const proxy = new Proxy(RAPP_ACCEPTED_BODY_PULSE_PROFILE, {
+      get(target, property, receiver) {
+        if (property === 'kind') return 'body.dimension';
+        if (property === 'family') return 'body';
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    expect(verifyRappFrame(
+      authority.frame,
+      proxy,
       {
         head: authority.predecessor,
         streamIdOfRecord: authority.frame.stream_id,
@@ -494,6 +573,29 @@ describe('trusted chain policy and duplicate ordering', () => {
         trustedGenesis: policy.trustedGenesis,
         persistedHead: null,
       } as never,
+    )).toMatchObject({
+      ok: false,
+      error: { code: 'authority-policy', step: '1' },
+    });
+  });
+
+  it('rejects Proxy wrappers around a genuine selected trust policy', () => {
+    const proxy = new Proxy(policy, {
+      get(target, property, receiver) {
+        if (property === 'trustedGenesis') {
+          return {
+            ...target.trustedGenesis,
+            frameHash: replacementGenesis.frame_hash,
+            payloadHash: replacementGenesis.payload_hash,
+          };
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    expect(verifyRappFrameChain(
+      [replacementGenesis],
+      RAPP_ACCEPTED_BODY_PULSE_PROFILE,
+      proxy,
     )).toMatchObject({
       ok: false,
       error: { code: 'authority-policy', step: '1' },

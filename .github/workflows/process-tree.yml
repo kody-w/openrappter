@@ -2,6 +2,9 @@ name: Managed Process Tree
 
 on:
   pull_request:
+  push:
+    branches:
+      - canary/frontier-runtime-mesh
   workflow_dispatch:
 
 permissions:

@@ -25,12 +25,14 @@ import {
   ProtocolAuthority,
   RAPP_ACCEPTED_BODY_PULSE_PROFILE,
   RAPP_ACCEPTED_BODY_STREAM_PROFILE,
+  RAPP_ACCEPTED_MEMORY_STREAM_PROFILE,
   RAPP_FRAME_KEYS,
   RAPP_UINT53_MAX,
   RappFrameError,
   buildOpenRappterEvidencePayload,
   buildRappFrame,
   createRappFrameProfile,
+  createRappSwarmStreamProfile,
   hashLegacyRappBodyFrame,
   isRappFrameUtc,
   isSelectedProtocolAuthority,
@@ -383,6 +385,7 @@ describe('registry-bound kind and family validation', () => {
       poison(Array.prototype, 'find');
       poison(Array.prototype, 'findIndex');
       poison(Array.prototype, 'push');
+      poison(Array.prototype, 'splice');
       poison(Array.prototype, 'reverse');
       poison(Array.prototype, Symbol.iterator);
 
@@ -450,6 +453,110 @@ describe('registry-bound kind and family validation', () => {
     expect(verified).toMatchObject({ ok: true });
     expect(chain).toMatchObject({ ok: true });
     expect(evidenceRevision).toBe('rev-14');
+  });
+
+  it('does not expose private registries to numeric Array prototype setters', () => {
+    const indices = ['0', '1', '2', '14', '50', '100'];
+    const descriptors = Object.create(null) as Record<string, PropertyDescriptor | undefined>;
+    let captured = 0;
+    const methodDescriptors = {
+      push: Object.getOwnPropertyDescriptor(Array.prototype, 'push'),
+      splice: Object.getOwnPropertyDescriptor(Array.prototype, 'splice'),
+      iterator: Object.getOwnPropertyDescriptor(Array.prototype, Symbol.iterator),
+    };
+    let chainResult: ReturnType<typeof verifyRappFrameChain> | null = null;
+    let evidenceRevision: string | null = null;
+    let unregisteredError: Error | null = null;
+    try {
+      for (let index = 0; index < indices.length; index += 1) {
+        const key = indices[index];
+        descriptors[key] = Object.getOwnPropertyDescriptor(Array.prototype, key);
+        Object.defineProperty(Array.prototype, key, {
+          configurable: true,
+          set(_value: unknown) {
+            captured += 1;
+            Object.defineProperty(this, key, {
+              value: { forged: true },
+              configurable: true,
+              enumerable: true,
+              writable: true,
+            });
+          },
+        });
+      }
+      Object.defineProperty(Array.prototype, 'push', {
+        configurable: true,
+        value() { throw new Error('poisoned push'); },
+      });
+      Object.defineProperty(Array.prototype, 'splice', {
+        configurable: true,
+        value() { throw new Error('poisoned splice'); },
+      });
+      Object.defineProperty(Array.prototype, Symbol.iterator, {
+        configurable: true,
+        value() { throw new Error('poisoned iterator'); },
+      });
+
+      const profile = createRappFrameProfile<JsonObject, 'body.pulse'>({
+        name: 'numeric-setter-safe',
+        kind: 'body.pulse',
+      });
+      const streamId = `rappid:@example/numeric-setter:${'7'.repeat(64)}`;
+      const genesis = buildRappFrame({
+        kind: 'body.pulse',
+        streamId,
+        utc: '2026-08-30T20:00:00.000Z',
+        payload: { event: 'numeric-setter-safe' },
+        head: null,
+      }, profile);
+      const policy = selectRappChainTrustPolicy({
+        trustedGenesis: {
+          streamId,
+          frameHash: genesis.frame_hash,
+          payloadHash: genesis.payload_hash,
+        },
+      });
+      chainResult = verifyRappFrameChain(
+        [genesis],
+        RAPP_ACCEPTED_BODY_STREAM_PROFILE,
+        policy,
+      );
+      evidenceRevision = buildOpenRappterEvidencePayload({
+        eventKind: 'install.verified',
+        subject: 'release:numeric-setter',
+        dataHash: 'a'.repeat(64),
+      }).protocol_revision.revision;
+      unregisteredError = captureError(() => createRappFrameProfile({
+        name: 'still-unregistered',
+        kind: 'body.dimension',
+      }));
+    } finally {
+      const restoreMethod = (
+        key: PropertyKey,
+        descriptor: PropertyDescriptor | undefined,
+      ): void => {
+        if (descriptor === undefined) {
+          delete (Array.prototype as unknown as Record<PropertyKey, unknown>)[key];
+        }
+        else Object.defineProperty(Array.prototype, key, descriptor);
+      };
+      restoreMethod('push', methodDescriptors.push);
+      restoreMethod('splice', methodDescriptors.splice);
+      restoreMethod(Symbol.iterator, methodDescriptors.iterator);
+      for (let index = 0; index < indices.length; index += 1) {
+        const key = indices[index];
+        const descriptor = descriptors[key];
+        if (descriptor === undefined) {
+          delete (Array.prototype as unknown as Record<string, unknown>)[key];
+        } else {
+          Object.defineProperty(Array.prototype, key, descriptor);
+        }
+      }
+    }
+    expect(captured).toBe(0);
+    expect(chainResult).toMatchObject({ ok: true });
+    expect(evidenceRevision).toBe('rev-14');
+    expect(unregisteredError?.message).toMatch(/not registered/);
   });
 
   it('ignores Object.prototype pollution across authority, genesis, and option maps', () => {
@@ -821,6 +928,93 @@ describe('registered mixed kinds and re-genesis refusal', () => {
     )).toMatchObject({
       ok: false,
       error: { code: 'profile-kind', step: '1', frameIndex: 1 },
+    });
+  });
+
+  it('verifies a memory.chat-turn -> memory.save chain by per-frame authority policy', () => {
+    const memoryStream = `${bodyStream}:session`;
+    const chatTurnProfile = createRappFrameProfile<JsonObject, 'memory.chat-turn'>({
+      name: 'memory-chat-turn',
+      kind: 'memory.chat-turn',
+    });
+    const saveProfile = createRappFrameProfile<JsonObject, 'memory.save'>({
+      name: 'memory-save',
+      kind: 'memory.save',
+    });
+    const chatTurn = buildRappFrame({
+      kind: 'memory.chat-turn',
+      streamId: memoryStream,
+      utc: '2026-08-30T20:00:00.000Z',
+      payload: { message: 'remember this' },
+      head: null,
+    }, chatTurnProfile);
+    const save = buildRappFrame({
+      kind: 'memory.save',
+      streamId: memoryStream,
+      utc: '2026-08-30T20:00:01.000Z',
+      payload: { key: 'fact', value: 'remember this' },
+      head: chatTurn,
+    }, saveProfile);
+    const memoryPolicy = selectRappChainTrustPolicy({
+      trustedGenesis: {
+        streamId: memoryStream,
+        frameHash: chatTurn.frame_hash,
+        payloadHash: chatTurn.payload_hash,
+      },
+    });
+    expect(verifyRappFrameChain(
+      [chatTurn, save],
+      RAPP_ACCEPTED_MEMORY_STREAM_PROFILE,
+      memoryPolicy,
+    )).toMatchObject({
+      ok: true,
+      head: { kind: 'memory.save' },
+    });
+  });
+
+  it('requires explicit signature verification for generic swarm streams', () => {
+    expect(() => createRappSwarmStreamProfile(undefined as never))
+      .toThrow(/signature verifier/);
+    const swarmStream = 'net:signed-test';
+    const echoUnsigned = hashLegacyRappBodyFrame({
+      kind: 'swarm.echo',
+      streamId: swarmStream,
+      seq: 0,
+      utc: '2026-08-30T20:00:00.000Z',
+      payload: { message: 'echo' },
+      prev: null,
+    });
+    const echo = { ...echoUnsigned, sig: 'valid-signature' };
+    const telemetryDraft = hashLegacyRappBodyFrame({
+      kind: 'swarm.telemetry',
+      streamId: swarmStream,
+      seq: 1,
+      utc: '2026-08-30T20:00:01.000Z',
+      payload: { status: 'ok' },
+      prev: echo.payload_hash,
+    });
+    const telemetry = rewave({
+      ...telemetryDraft,
+      prev_wave: echo.frame_hash,
+      sig: 'valid-signature',
+    });
+    const swarmPolicy = selectRappChainTrustPolicy({
+      trustedGenesis: {
+        streamId: swarmStream,
+        frameHash: echo.frame_hash,
+        payloadHash: echo.payload_hash,
+      },
+    });
+    const swarmProfile = createRappSwarmStreamProfile(
+      (frame) => frame.sig === 'valid-signature',
+    );
+    expect(verifyRappFrameChain(
+      [echo, telemetry],
+      swarmProfile,
+      swarmPolicy,
+    )).toMatchObject({
+      ok: true,
+      head: { kind: 'swarm.telemetry' },
     });
   });
 

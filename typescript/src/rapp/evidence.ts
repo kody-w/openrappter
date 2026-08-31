@@ -96,6 +96,7 @@ const EVIDENCE_VERIFY_OPTION_KEYS = [
 const SAFE_OWN_KEYS = Reflect.ownKeys;
 const SAFE_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
 const SAFE_HAS_OWN = Object.hasOwn;
+const SAFE_DEFINE_PROPERTY = Object.defineProperty;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return (
@@ -151,6 +152,19 @@ function evidenceOwn(value: Record<string, unknown>, key: string): unknown {
     : undefined;
 }
 
+function safeArraySet<TValue>(
+  values: TValue[],
+  index: number,
+  value: TValue,
+): void {
+  SAFE_DEFINE_PROPERTY(values, String(index), {
+    value,
+    configurable: true,
+    enumerable: true,
+    writable: true,
+  });
+}
+
 function hasExactOwnKeys(
   value: object,
   expected: readonly string[],
@@ -201,7 +215,7 @@ function evidencePayloadProblem(
     if (typeof hash !== 'string' || !HEX64.test(hash)) {
       return `evidence reference_hashes[${index}] is not 64 lowercase hex`;
     }
-    references[index] = hash;
+    safeArraySet(references, index, hash);
     if (index > 0 && references[index - 1] >= hash) {
       return 'evidence reference_hashes must be sorted and de-duplicated';
     }
@@ -235,11 +249,15 @@ function validateEvidencePayload(
     : { ok: false, error };
 }
 
-const EVIDENCE_PROFILE_AUTHORITIES: ProtocolAuthority[] = [];
-const EVIDENCE_PROFILES: Array<Readonly<RappFrameProfile<
-  OpenRappterEvidencePayload,
-  typeof OPENRAPPTER_EVIDENCE_FRAME_KIND
->>> = [];
+interface EvidenceProfileNode {
+  authority: ProtocolAuthority;
+  profile: Readonly<RappFrameProfile<
+    OpenRappterEvidencePayload,
+    typeof OPENRAPPTER_EVIDENCE_FRAME_KIND
+  >>;
+  next: EvidenceProfileNode | null;
+}
+let evidenceProfiles: EvidenceProfileNode | null = null;
 
 export function createOpenRappterEvidenceProfile(
   authority: ProtocolAuthority = ACCEPTED_RAPP_PROTOCOL_AUTHORITY,
@@ -250,10 +268,10 @@ export function createOpenRappterEvidenceProfile(
   if (!isSelectedProtocolAuthority(authority)) {
     throw new TypeError('evidence profiles require an immutable selected ProtocolAuthority');
   }
-  for (let index = 0; index < EVIDENCE_PROFILE_AUTHORITIES.length; index += 1) {
-    if (EVIDENCE_PROFILE_AUTHORITIES[index] === authority) {
-      return EVIDENCE_PROFILES[index];
-    }
+  let cached = evidenceProfiles;
+  while (cached !== null) {
+    if (cached.authority === authority) return cached.profile;
+    cached = cached.next;
   }
   const authorityIdentity = protocolAuthorityIdentity(authority);
   const profile = createRappFrameProfile({
@@ -264,8 +282,11 @@ export function createOpenRappterEvidenceProfile(
     uniquePayloads: true,
     validatePayload: (payload) => validateEvidencePayload(payload, authority),
   });
-  EVIDENCE_PROFILE_AUTHORITIES[EVIDENCE_PROFILE_AUTHORITIES.length] = authority;
-  EVIDENCE_PROFILES[EVIDENCE_PROFILES.length] = profile;
+  const node = Object.create(null) as EvidenceProfileNode;
+  SAFE_DEFINE_PROPERTY(node, 'authority', { value: authority, enumerable: true });
+  SAFE_DEFINE_PROPERTY(node, 'profile', { value: profile, enumerable: true });
+  SAFE_DEFINE_PROPERTY(node, 'next', { value: evidenceProfiles, enumerable: true });
+  evidenceProfiles = Object.freeze(node);
   return profile;
 }
 
@@ -319,7 +340,7 @@ export function buildOpenRappterEvidencePayload(input: {
   const references: string[] = [];
   if (referenceHashes !== undefined) {
     for (let index = 0; index < referenceHashes.length; index += 1) {
-      references[index] = referenceHashes[index] as string;
+      safeArraySet(references, index, referenceHashes[index] as string);
     }
   }
   const payload: OpenRappterEvidencePayload = {

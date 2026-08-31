@@ -36,6 +36,7 @@ const SAFE_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
 const SAFE_HAS_OWN = Object.hasOwn;
 const SAFE_OBJECT_KEYS = Object.keys;
 const SAFE_REFLECT_APPLY = Reflect.apply;
+const SAFE_DEFINE_PROPERTY = Object.defineProperty;
 const SAFE_ARRAY_SORT = Array.prototype.sort;
 const SAFE_ARRAY_JOIN = Array.prototype.join;
 const SAFE_ARRAY_REVERSE = Array.prototype.reverse;
@@ -54,6 +55,19 @@ function safeJoin(values: readonly string[], separator: string): string {
 
 function safeReverse<TValue>(values: TValue[]): TValue[] {
   return SAFE_REFLECT_APPLY(SAFE_ARRAY_REVERSE, values, []) as TValue[];
+}
+
+function safeArraySet<TValue>(
+  values: TValue[],
+  index: number,
+  value: TValue,
+): void {
+  SAFE_DEFINE_PROPERTY(values, String(index), {
+    value,
+    configurable: true,
+    enumerable: true,
+    writable: true,
+  });
 }
 
 /**
@@ -79,7 +93,7 @@ export function canonicalJson(value: JsonValue): string {
   if (Array.isArray(value)) {
     const items: string[] = [];
     for (let index = 0; index < value.length; index += 1) {
-      items[index] = canonicalJson(value[index]);
+      safeArraySet(items, index, canonicalJson(value[index]));
     }
     return `[${safeJoin(items, ',')}]`;
   }
@@ -87,7 +101,7 @@ export function canonicalJson(value: JsonValue): string {
   const body: string[] = [];
   for (let index = 0; index < keys.length; index += 1) {
     const key = keys[index];
-    body[index] = `${canonicalString(key)}:${canonicalJson(value[key])}`;
+    safeArraySet(body, index, `${canonicalString(key)}:${canonicalJson(value[key])}`);
   }
   return `{${safeJoin(body, ',')}}`;
 }
@@ -206,25 +220,40 @@ export function assertRappCanonicalValue(
  * traps can present mutually inconsistent objects during one verification.
  */
 export function snapshotRappJsonValue(value: unknown): JsonValue {
-  const snapshotObjects: object[] = [];
-  const snapshotValues: JsonValue[] = [];
-  const active: object[] = [];
+  interface SnapshotNode {
+    object: object;
+    value: JsonValue;
+    next: SnapshotNode | null;
+  }
+  interface ActiveNode {
+    object: object;
+    next: ActiveNode | null;
+  }
+  let snapshots: SnapshotNode | null = null;
+  let active: ActiveNode | null = null;
 
   const snapshotFor = (object: object): JsonValue | undefined => {
-    for (let index = 0; index < snapshotObjects.length; index += 1) {
-      if (snapshotObjects[index] === object) return snapshotValues[index];
+    let node = snapshots;
+    while (node !== null) {
+      if (node.object === object) return node.value;
+      node = node.next;
     }
     return undefined;
   };
   const isActive = (object: object): boolean => {
-    for (let index = 0; index < active.length; index += 1) {
-      if (active[index] === object) return true;
+    let node = active;
+    while (node !== null) {
+      if (node.object === object) return true;
+      node = node.next;
     }
     return false;
   };
   const remember = (object: object, snapshot: JsonValue): void => {
-    snapshotObjects[snapshotObjects.length] = object;
-    snapshotValues[snapshotValues.length] = snapshot;
+    const node = Object.create(null) as SnapshotNode;
+    SAFE_DEFINE_PROPERTY(node, 'object', { value: object, enumerable: true });
+    SAFE_DEFINE_PROPERTY(node, 'value', { value: snapshot, enumerable: true });
+    SAFE_DEFINE_PROPERTY(node, 'next', { value: snapshots, enumerable: true });
+    snapshots = Object.freeze(node);
   };
 
   const visit = (current: unknown, path: string): JsonValue => {
@@ -269,7 +298,10 @@ export function snapshotRappJsonValue(value: unknown): JsonValue {
       descriptors[key] = descriptor;
     }
 
-    active[active.length] = current;
+    const activeNode = Object.create(null) as ActiveNode;
+    SAFE_DEFINE_PROPERTY(activeNode, 'object', { value: current, enumerable: true });
+    SAFE_DEFINE_PROPERTY(activeNode, 'next', { value: active, enumerable: true });
+    active = Object.freeze(activeNode);
     try {
       if (Array.isArray(current)) {
         const lengthDescriptor = descriptors.length;
@@ -301,7 +333,7 @@ export function snapshotRappJsonValue(value: unknown): JsonValue {
           if (descriptor === undefined || descriptor.enumerable !== true) {
             throw new TypeError(`${path}[${index}] is missing or non-enumerable`);
           }
-          result[index] = visit(descriptor.value, `${path}[${index}]`);
+          safeArraySet(result, index, visit(descriptor.value, `${path}[${index}]`));
         }
         return Object.freeze(result) as unknown as JsonValue[];
       }
@@ -322,7 +354,7 @@ export function snapshotRappJsonValue(value: unknown): JsonValue {
       }
       return Object.freeze(result);
     } finally {
-      active.length -= 1;
+      active = activeNode.next;
     }
   };
 
@@ -404,7 +436,7 @@ export function parseRappJson(source: string): JsonValue {
         Number(left[left.length - 1 - index] ?? 0)
         + Number(right[right.length - 1 - index] ?? 0)
         + carry;
-      result[result.length] = String(sum % 10);
+      safeArraySet(result, result.length, String(sum % 10));
       carry = Math.floor(sum / 10);
     }
     return safeJoin(safeReverse(result), '').replace(/^0+/, '') || '0';
@@ -423,7 +455,7 @@ export function parseRappJson(source: string): JsonValue {
       } else {
         borrow = 0;
       }
-      result[result.length] = String(difference);
+      safeArraySet(result, result.length, String(difference));
     }
     return safeJoin(safeReverse(result), '').replace(/^0+/, '') || '0';
   };
@@ -504,7 +536,7 @@ export function parseRappJson(source: string): JsonValue {
         return result;
       }
       for (;;) {
-        result[result.length] = value(depth + 1);
+        safeArraySet(result, result.length, value(depth + 1));
         whitespace();
         if (source[offset] === ']') {
           offset += 1;
@@ -581,7 +613,7 @@ function renderRappCanonical(value: JsonValue): string {
   if (Array.isArray(value)) {
     const items: string[] = [];
     for (let index = 0; index < value.length; index += 1) {
-      items[index] = renderRappCanonical(value[index]);
+      safeArraySet(items, index, renderRappCanonical(value[index]));
     }
     return `[${safeJoin(items, ',')}]`;
   }
@@ -591,7 +623,11 @@ function renderRappCanonical(value: JsonValue): string {
   const entries: string[] = [];
   for (let index = 0; index < keys.length; index += 1) {
     const key = keys[index];
-    entries[index] = `${JSON.stringify(key)}:${renderRappCanonical(value[key])}`;
+    safeArraySet(
+      entries,
+      index,
+      `${JSON.stringify(key)}:${renderRappCanonical(value[key])}`,
+    );
   }
   return `{${safeJoin(entries, ',')}}`;
 }

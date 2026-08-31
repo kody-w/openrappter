@@ -26,26 +26,39 @@ export interface ProtocolAuthorityDraftMetadata {
   checkpoint?: string;
 }
 
-type KindFamilyEntry = readonly [string, RappStreamFamily];
-const ACCEPTED_KIND_FAMILIES: readonly KindFamilyEntry[] = [
-    ['body.pulse', 'body'],
-    ['body.re-genesis', 'body'],
-    ['body.reconstructed', 'body'],
-    ['body.twin-pulse', 'body'],
-    ['memory.chat-turn', 'memory'],
-    ['memory.re-genesis', 'memory'],
-    ['memory.reconstructed', 'memory'],
-    ['memory.save', 'memory'],
-    ['memory.tool-call', 'memory'],
-    ['swarm.echo', 'swarm'],
-    ['swarm.guidance', 'swarm'],
-    ['swarm.re-genesis', 'swarm'],
-    ['swarm.reconstructed', 'swarm'],
-    ['swarm.telemetry', 'swarm'],
-] as const;
-for (let index = 0; index < ACCEPTED_KIND_FAMILIES.length; index += 1) {
-  Object.freeze(ACCEPTED_KIND_FAMILIES[index]);
+const SAFE_DEFINE_PROPERTY = Object.defineProperty;
+const SAFE_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
+const SAFE_OWN_KEYS = Reflect.ownKeys;
+
+function defineOwn(
+  target: object,
+  key: PropertyKey,
+  value: unknown,
+): void {
+  SAFE_DEFINE_PROPERTY(target, key, {
+    value,
+    configurable: false,
+    enumerable: true,
+    writable: false,
+  });
 }
+
+const ACCEPTED_KIND_FAMILIES =
+  Object.create(null) as Record<string, RappStreamFamily>;
+defineOwn(ACCEPTED_KIND_FAMILIES, 'body.pulse', 'body');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'body.re-genesis', 'body');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'body.reconstructed', 'body');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'body.twin-pulse', 'body');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'memory.chat-turn', 'memory');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'memory.re-genesis', 'memory');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'memory.reconstructed', 'memory');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'memory.save', 'memory');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'memory.tool-call', 'memory');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'swarm.echo', 'swarm');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'swarm.guidance', 'swarm');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'swarm.re-genesis', 'swarm');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'swarm.reconstructed', 'swarm');
+defineOwn(ACCEPTED_KIND_FAMILIES, 'swarm.telemetry', 'swarm');
 Object.freeze(ACCEPTED_KIND_FAMILIES);
 
 const AUTHORITY_CAPABILITY = Symbol('selected-protocol-authority');
@@ -57,10 +70,14 @@ interface ProtocolAuthorityRecord {
   checkpointCommit: string;
   normativeSha256: string;
   bootstrapProfileSha256: string | null;
-  kindFamilies: readonly KindFamilyEntry[];
+  kindFamilies: Readonly<Record<string, RappStreamFamily>>;
 }
-const AUTHORITY_OBJECTS: ProtocolAuthority[] = [];
-const AUTHORITY_RECORDS: ProtocolAuthorityRecord[] = [];
+interface AuthorityRegistryNode {
+  authority: ProtocolAuthority;
+  record: ProtocolAuthorityRecord;
+  next: AuthorityRegistryNode | null;
+}
+let authorityRegistry: AuthorityRegistryNode | null = null;
 
 /**
  * Immutable, selected protocol authority.
@@ -117,13 +134,20 @@ export class ProtocolAuthority {
     this.normativeSha256 = record.normativeSha256;
     this.bootstrapProfileSha256 = record.bootstrapProfileSha256;
     const publicFamilies = Object.create(null) as Record<string, RappStreamFamily>;
-    for (let index = 0; index < record.kindFamilies.length; index += 1) {
-      const entry = record.kindFamilies[index];
-      publicFamilies[entry[0]] = entry[1];
+    const familyKeys = SAFE_OWN_KEYS(record.kindFamilies);
+    for (let index = 0; index < familyKeys.length; index += 1) {
+      const key = familyKeys[index];
+      const descriptor = SAFE_GET_OWN_PROPERTY_DESCRIPTOR(record.kindFamilies, key);
+      if (typeof key === 'string' && descriptor !== undefined) {
+        defineOwn(publicFamilies, key, descriptor.value);
+      }
     }
     this.kindFamilies = Object.freeze(publicFamilies);
-    AUTHORITY_OBJECTS[AUTHORITY_OBJECTS.length] = this;
-    AUTHORITY_RECORDS[AUTHORITY_RECORDS.length] = record;
+    const node = Object.create(null) as AuthorityRegistryNode;
+    defineOwn(node, 'authority', this);
+    defineOwn(node, 'record', record);
+    defineOwn(node, 'next', authorityRegistry);
+    authorityRegistry = Object.freeze(node);
     Object.freeze(this);
   }
 
@@ -140,22 +164,17 @@ export class ProtocolAuthority {
   }
 }
 
-const ACCEPTED_AUTHORITIES: readonly (
-  readonly [string, ProtocolAuthority]
-)[] = [
-    ['rev-13', ProtocolAuthority.acceptedRev13],
-    ['rev-14', ProtocolAuthority.acceptedRev14],
-] as const;
-for (let index = 0; index < ACCEPTED_AUTHORITIES.length; index += 1) {
-  Object.freeze(ACCEPTED_AUTHORITIES[index]);
-}
+const ACCEPTED_AUTHORITIES =
+  Object.create(null) as Record<string, ProtocolAuthority>;
+defineOwn(ACCEPTED_AUTHORITIES, 'rev-13', ProtocolAuthority.acceptedRev13);
+defineOwn(ACCEPTED_AUTHORITIES, 'rev-14', ProtocolAuthority.acceptedRev14);
 Object.freeze(ACCEPTED_AUTHORITIES);
-Object.freeze(AUTHORITY_OBJECTS);
-Object.freeze(AUTHORITY_RECORDS);
 
 function findAuthorityRecord(value: unknown): ProtocolAuthorityRecord | null {
-  for (let index = 0; index < AUTHORITY_OBJECTS.length; index += 1) {
-    if (AUTHORITY_OBJECTS[index] === value) return AUTHORITY_RECORDS[index];
+  let node = authorityRegistry;
+  while (node !== null) {
+    if (node.authority === value) return node.record;
+    node = node.next;
   }
   return null;
 }
@@ -166,11 +185,11 @@ export function isSelectedProtocolAuthority(
 ): value is ProtocolAuthority {
   const record = findAuthorityRecord(value);
   if (record === null) return false;
-  for (let index = 0; index < ACCEPTED_AUTHORITIES.length; index += 1) {
-    const entry = ACCEPTED_AUTHORITIES[index];
-    if (entry[0] === record.revision) return entry[1] === value;
-  }
-  return false;
+  const accepted = SAFE_GET_OWN_PROPERTY_DESCRIPTOR(
+    ACCEPTED_AUTHORITIES,
+    record.revision,
+  );
+  return accepted !== undefined && accepted.value === value;
 }
 
 function authorityRecord(authority: ProtocolAuthority): ProtocolAuthorityRecord {
@@ -211,19 +230,20 @@ export function protocolAuthorityFamilyForKind(
   kind: string,
 ): RappStreamFamily | null {
   const families = authorityRecord(authority).kindFamilies;
-  for (let index = 0; index < families.length; index += 1) {
-    if (families[index][0] === kind) return families[index][1];
-  }
-  return null;
+  const descriptor = SAFE_GET_OWN_PROPERTY_DESCRIPTOR(families, kind);
+  return descriptor === undefined
+    ? null
+    : descriptor.value as RappStreamFamily;
 }
 
 export function protocolAuthorityRegisteredKinds(
   authority: ProtocolAuthority,
 ): readonly string[] {
   const families = authorityRecord(authority).kindFamilies;
+  const familyKeys = SAFE_OWN_KEYS(families);
   const kinds: string[] = [];
-  for (let index = 0; index < families.length; index += 1) {
-    kinds[index] = families[index][0];
+  for (let index = 0; index < familyKeys.length; index += 1) {
+    defineOwn(kinds, String(index), familyKeys[index]);
   }
   return Object.freeze(kinds);
 }
@@ -238,10 +258,11 @@ export const ACCEPTED_RAPP_PROTOCOL_AUTHORITY = ProtocolAuthority.acceptedRev14;
 export function resolveProtocolAuthority(
   revision: string,
 ): ProtocolAuthority | null {
-  for (let index = 0; index < ACCEPTED_AUTHORITIES.length; index += 1) {
-    if (ACCEPTED_AUTHORITIES[index][0] === revision) {
-      return ACCEPTED_AUTHORITIES[index][1];
-    }
-  }
-  return null;
+  const descriptor = SAFE_GET_OWN_PROPERTY_DESCRIPTOR(
+    ACCEPTED_AUTHORITIES,
+    revision,
+  );
+  return descriptor === undefined
+    ? null
+    : descriptor.value as ProtocolAuthority;
 }

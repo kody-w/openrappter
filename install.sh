@@ -857,6 +857,9 @@ MIN_NODE=20
 MIN_PYTHON_MINOR=10
 BIN_NAME="openrappter"
 NPM_PACKAGE="openrappter"
+VERIFIED_OPENRAPPTER_BIN=""
+VERIFIED_OPENRAPPTER_VERSION=""
+ACTIVE_OPENRAPPTER_BIN=""
 
 # Install method: "npm", "git", or "" (auto-detect/prompt)
 INSTALL_METHOD="${OPENRAPPTER_INSTALL_METHOD:-}"
@@ -1699,20 +1702,13 @@ install_via_npm() {
     persist_channel
     refresh_shell_command_cache
 
-    # Verify binary is on PATH
-    if command -v openrappter &>/dev/null; then
-        ui_success "openrappter binary found on PATH"
-    else
-        # Check npm global bin directory
-        local npm_bin_dir
-        npm_bin_dir="$(npm config get prefix 2>/dev/null)/bin"
-        if [[ -x "$npm_bin_dir/openrappter" ]]; then
-            ensure_path "$npm_bin_dir"
-            ui_success "openrappter binary found at $npm_bin_dir/openrappter"
-        else
-            ui_warn "openrappter binary not found on PATH — you may need to restart your shell"
-        fi
+    local installed_bin
+    installed_bin="$(resolve_owned_openrappter_bin 2>/dev/null || true)"
+    if [[ -z "$installed_bin" ]]; then
+        ui_error "npm reported success but its openrappter launcher is missing"
+        exit 1
     fi
+    ui_success "openrappter binary installed at $installed_bin"
 }
 
 # ── npm Conflict Resolution ────────────────────────────────
@@ -1900,6 +1896,168 @@ get_bin_dir() {
     fi
 }
 
+stable_openrappter_bin_dir() {
+    printf '%s/.local/bin\n' "${HOME%/}"
+}
+
+npm_global_bin_dir() {
+    local prefix
+    prefix="$(npm config get prefix 2>/dev/null || true)"
+    [[ -n "$prefix" && "$prefix" != "undefined" && "$prefix" != "null" ]] || return 1
+    printf '%s/bin\n' "${prefix%/}"
+}
+
+installed_package_json() {
+    local root
+    case "$INSTALL_METHOD" in
+        npm)
+            root="$(npm root -g 2>/dev/null || true)"
+            [[ -n "$root" ]] || return 1
+            printf '%s/openrappter/package.json\n' "${root%/}"
+            ;;
+        git)
+            printf '%s/typescript/package.json\n' "${INSTALL_DIR%/}"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+resolve_owned_openrappter_bin() {
+    local candidate=""
+    case "$INSTALL_METHOD" in
+        npm)
+            local npm_bin_dir
+            npm_bin_dir="$(npm_global_bin_dir 2>/dev/null || true)"
+            [[ -n "$npm_bin_dir" ]] && candidate="$npm_bin_dir/$BIN_NAME"
+            ;;
+        git)
+            candidate="$(get_bin_dir)/$BIN_NAME"
+            ;;
+    esac
+
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+    return 1
+}
+
+resolve_installed_package_version() {
+    local package_json
+    package_json="$(installed_package_json 2>/dev/null || true)"
+    [[ -n "$package_json" && -f "$package_json" ]] || return 1
+    node -e '
+const fs = require("fs");
+const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).version;
+if (typeof value !== "string" || value.length === 0) process.exit(1);
+process.stdout.write(value);
+' "$package_json"
+}
+
+paths_refer_to_same_file() {
+    local left="$1" right="$2"
+    [[ "$left" == "$right" ]] && return 0
+    [[ -e "$left" && -e "$right" && "$left" -ef "$right" ]]
+}
+
+ensure_owned_launcher_precedence() {
+    local owned="$1"
+    local stable_dir stable_launcher temporary
+    stable_dir="$(stable_openrappter_bin_dir)"
+    stable_launcher="$stable_dir/$BIN_NAME"
+    local current
+    current="$(type -P openrappter 2>/dev/null || true)"
+
+    if ! paths_refer_to_same_file "$stable_launcher" "$owned"; then
+        mkdir -p "$stable_dir"
+        temporary="${stable_launcher}.$$.new"
+        {
+            echo '#!/usr/bin/env bash'
+            echo '# openrappter launcher — installer-owned npm target'
+            echo 'set -euo pipefail'
+            printf 'exec %q "$@"\n' "$owned"
+        } > "$temporary"
+        chmod +x "$temporary"
+        mv -f "$temporary" "$stable_launcher"
+    else
+        stable_launcher="$owned"
+    fi
+
+    export PATH="$stable_dir:$PATH"
+    refresh_shell_command_cache
+
+    local shell_rc marker_start marker_end path_line fish_dir
+    shell_rc="$(get_shell_rc_file)"
+    marker_start="# >>> OpenRappter active launcher >>>"
+    marker_end="# <<< OpenRappter active launcher <<<"
+    if [[ "$(basename "${SHELL:-/bin/bash}")" == "fish" ]]; then
+        fish_dir="${stable_dir//\\/\\\\}"
+        fish_dir="${fish_dir//\"/\\\"}"
+        fish_dir="${fish_dir//\$/\\$}"
+        path_line="set -gx PATH \"$fish_dir\" \$PATH"
+    else
+        path_line="export PATH=\"$stable_dir:\$PATH\""
+    fi
+    if [[ -n "$shell_rc" ]]; then
+        mkdir -p "$(dirname "$shell_rc")"
+        if [[ -L "$shell_rc" && ! -e "$shell_rc" ]]; then
+            ui_warn "Could not persist PATH through broken symlink $shell_rc; use $stable_launcher directly."
+        elif [[ -e "$shell_rc" && ! -r "$shell_rc" ]]; then
+            ui_warn "Could not read $shell_rc; leaving it unchanged. Use $stable_launcher directly."
+        else
+            local has_start=false has_end=false
+            grep -qF "$marker_start" "$shell_rc" 2>/dev/null && has_start=true
+            grep -qF "$marker_end" "$shell_rc" 2>/dev/null && has_end=true
+            if [[ "$has_start" != "$has_end" ]]; then
+                ui_warn "Incomplete OpenRappter PATH block in $shell_rc; leaving it unchanged."
+            elif [[ "$has_start" == "false" ]] && ! {
+                echo ""
+                echo "$marker_start"
+                echo "$path_line"
+                echo "$marker_end"
+            } >> "$shell_rc"; then
+                ui_warn "Could not persist $stable_dir at the front of PATH; use $stable_launcher directly."
+            fi
+        fi
+    fi
+
+    if [[ -n "$current" ]] && ! paths_refer_to_same_file "$current" "$stable_launcher"; then
+        ui_warn "An older openrappter launcher at $current was shadowing this install."
+    fi
+    ACTIVE_OPENRAPPTER_BIN="$stable_launcher"
+    ui_info "Using installer-owned launcher: $stable_launcher"
+}
+
+verify_openrappter_install() {
+    local owned expected actual
+    owned="$(resolve_owned_openrappter_bin 2>/dev/null || true)"
+    if [[ -z "$owned" ]]; then
+        ui_error "The installer could not find the openrappter launcher it just created."
+        return 1
+    fi
+    expected="$(resolve_installed_package_version 2>/dev/null || true)"
+    if [[ -z "$expected" ]]; then
+        ui_error "The installed openrappter package has no readable version."
+        return 1
+    fi
+    actual="$("$owned" --version 2>/dev/null || true)"
+    if [[ -z "$actual" ]]; then
+        ui_error "The installed openrappter launcher did not report a version."
+        return 1
+    fi
+    if [[ "$actual" != "$expected" ]]; then
+        ui_error "Installed version mismatch: package.json reports $expected but $owned reports $actual."
+        return 1
+    fi
+
+    ensure_owned_launcher_precedence "$owned"
+    VERIFIED_OPENRAPPTER_BIN="$ACTIVE_OPENRAPPTER_BIN"
+    VERIFIED_OPENRAPPTER_VERSION="$expected"
+    ui_success "Verified openrappter $expected at $owned"
+}
+
 ensure_path() {
     local bin_dir="$1"
     if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
@@ -1920,7 +2078,10 @@ ensure_path() {
         if [[ -n "$shell_rc" ]]; then
             local path_line="export PATH=\"$bin_dir:\$PATH\""
             if [[ "$(basename "${SHELL:-/bin/bash}")" == "fish" ]]; then
-                path_line="set -gx PATH $bin_dir \$PATH"
+                local fish_dir="${bin_dir//\\/\\\\}"
+                fish_dir="${fish_dir//\"/\\\"}"
+                fish_dir="${fish_dir//\$/\\$}"
+                path_line="set -gx PATH \"$fish_dir\" \$PATH"
             fi
 
             if ! grep -qF "$bin_dir" "$shell_rc" 2>/dev/null; then
@@ -2072,6 +2233,12 @@ LAUNCHER
 resolve_openrappter_bin() {
     refresh_shell_command_cache
     local resolved=""
+    resolved="$(resolve_owned_openrappter_bin 2>/dev/null || true)"
+    if [[ -n "$resolved" && -x "$resolved" ]]; then
+        echo "$resolved"
+        return 0
+    fi
+
     resolved="$(type -P openrappter 2>/dev/null || true)"
     if [[ -n "$resolved" && -x "$resolved" ]]; then
         echo "$resolved"
@@ -2092,7 +2259,18 @@ resolve_openrappter_bin() {
 resolve_openrappter_version() {
     local version=""
 
-    # Try openrappter --version first (works for both npm and git installs)
+    if [[ -n "$VERIFIED_OPENRAPPTER_VERSION" ]]; then
+        echo "$VERIFIED_OPENRAPPTER_VERSION"
+        return 0
+    fi
+
+    version="$(resolve_installed_package_version 2>/dev/null || true)"
+    if [[ -n "$version" ]]; then
+        echo "$version"
+        return 0
+    fi
+
+    # Fall back to the installer-owned binary, then any PATH binary.
     local bin
     bin="$(resolve_openrappter_bin 2>/dev/null || true)"
     if [[ -n "$bin" ]]; then
@@ -2615,6 +2793,9 @@ main() {
     else
         install_via_git
     fi
+    if ! verify_openrappter_install; then
+        exit 1
+    fi
 
     # ── Copilot SDK (for git method; npm method has .env in home dir) ──
     if [[ "$INSTALL_METHOD" == "git" ]]; then
@@ -2645,15 +2826,14 @@ main() {
     fi
 
     # Verify binary
-    local OPENRAPPTER_BIN=""
-    OPENRAPPTER_BIN="$(resolve_openrappter_bin || true)"
+    local OPENRAPPTER_BIN="$VERIFIED_OPENRAPPTER_BIN"
 
     if [[ -n "$OPENRAPPTER_BIN" ]]; then
         "$OPENRAPPTER_BIN" --status 2>/dev/null || true
     fi
 
     local installed_version
-    installed_version=$(resolve_openrappter_version)
+    installed_version="$VERIFIED_OPENRAPPTER_VERSION"
 
     echo ""
     if [[ -n "$installed_version" ]]; then

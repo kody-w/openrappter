@@ -17,6 +17,9 @@ const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const expectedPackageVersion = JSON.parse(
+  readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+).version;
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const npmCli = process.env.npm_execpath;
 const scratch = mkdtempSync(path.join(packageRoot, ".package-smoke-"));
@@ -147,6 +150,28 @@ try {
   );
 
   const installedRoot = path.join(installRoot, "node_modules", "openrappter");
+  const installedPackageVersion = JSON.parse(
+    readFileSync(path.join(installedRoot, "package.json"), "utf8"),
+  ).version;
+  if (installedPackageVersion !== expectedPackageVersion) {
+    throw new Error(
+      `Installed package version drifted: ${expectedPackageVersion} -> ${installedPackageVersion}`,
+    );
+  }
+  const binary = path.join(installedRoot, "bin", "openrappter.mjs");
+  const installedCliVersion = run(process.execPath, [binary, "--version"], {
+    cwd: installRoot,
+    env: {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+    },
+  }).stdout.trim();
+  if (installedCliVersion !== installedPackageVersion) {
+    throw new Error(
+      `Installed CLI version drifted: package ${installedPackageVersion}, CLI ${installedCliVersion}`,
+    );
+  }
   const installedIndex = path.join(installedRoot, "ui", "dist", "index.html");
   if (
     !existsSync(installedIndex) ||
@@ -180,7 +205,6 @@ try {
   // the runtime path an ordinary npm install provides.
   runNpm(["rebuild", "better-sqlite3"], { cwd: installRoot });
 
-  const binary = path.join(installedRoot, "bin", "openrappter.mjs");
   const showHelp = run(process.execPath, [binary, "show", "--help"], {
     cwd: installRoot,
     env: {

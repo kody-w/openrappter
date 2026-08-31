@@ -185,7 +185,7 @@ fi
 printf "\n\033[1m▸ Launcher script generation\033[0m\n"
 
 TEMP_BIN="$(mktemp -d)"
-trap 'rm -rf "$TEMP_BIN"' EXIT
+trap 'rm -rf "$TEMP_BIN" "${VERSION_FIX_ROOT:-}"' EXIT
 
 create_launcher "$TEMP_BIN"
 assert_file_exists "$TEMP_BIN/$BIN_NAME" "launcher script is created"
@@ -197,6 +197,188 @@ assert_contains "$launcher_content" "typescript" "launcher references TypeScript
 assert_contains "$launcher_content" "python" "launcher references Python fallback"
 assert_contains "$launcher_content" "exec node" "launcher uses exec for Node.js"
 assert_contains "$launcher_content" '#!/usr/bin/env bash' "launcher has proper shebang"
+
+# ── Installed binary ownership and version ──
+printf "\n\033[1m▸ Installed binary ownership and version\033[0m\n"
+
+VERSION_FIX_ROOT="$(mktemp -d)"
+version_prefix="$VERSION_FIX_ROOT/current-prefix"
+version_root="$VERSION_FIX_ROOT/current-root"
+stale_bin="$VERSION_FIX_ROOT/stale-prefix/bin"
+mkdir -p "$version_prefix/bin" "$version_root/openrappter" "$stale_bin" "$VERSION_FIX_ROOT/home"
+printf '{"name":"openrappter","version":"1.13.0"}\n' \
+  > "$version_root/openrappter/package.json"
+cat > "$version_prefix/bin/openrappter" <<'EOF'
+#!/usr/bin/env bash
+printf '1.13.0\n'
+EOF
+cat > "$stale_bin/openrappter" <<'EOF'
+#!/usr/bin/env bash
+printf '1.9.1\n'
+EOF
+chmod +x "$version_prefix/bin/openrappter" "$stale_bin/openrappter"
+
+saved_path="$PATH"
+saved_home="$HOME"
+saved_shell="${SHELL:-}"
+saved_original_path="$ORIGINAL_PATH"
+saved_install_method="$INSTALL_METHOD"
+saved_verified_bin="$VERIFIED_OPENRAPPTER_BIN"
+saved_verified_version="$VERIFIED_OPENRAPPTER_VERSION"
+saved_active_bin="$ACTIVE_OPENRAPPTER_BIN"
+active_version_prefix="$version_prefix"
+active_version_root="$version_root"
+
+npm() {
+  if [[ "$*" == "config get prefix" ]]; then
+    printf '%s\n' "$active_version_prefix"
+  elif [[ "$*" == "root -g" ]]; then
+    printf '%s\n' "$active_version_root"
+  else
+    command npm "$@"
+  fi
+}
+
+HOME="$VERSION_FIX_ROOT/home"
+SHELL="/bin/bash"
+ORIGINAL_PATH="$stale_bin"
+PATH="$stale_bin:$saved_path"
+INSTALL_METHOD="npm"
+VERIFIED_OPENRAPPTER_BIN=""
+VERIFIED_OPENRAPPTER_VERSION=""
+hash -r
+
+assert_eq \
+  "$(resolve_owned_openrappter_bin)" \
+  "$version_prefix/bin/openrappter" \
+  "owned npm launcher resolves before stale PATH entries"
+assert_eq \
+  "$(resolve_openrappter_bin)" \
+  "$version_prefix/bin/openrappter" \
+  "binary resolver prefers the installer-owned launcher"
+assert_eq \
+  "$(resolve_installed_package_version)" \
+  "1.13.0" \
+  "installed package version comes from the selected npm prefix"
+
+verify_openrappter_install >/dev/null 2>&1
+stable_launcher="$HOME/.local/bin/openrappter"
+assert_eq "$VERIFIED_OPENRAPPTER_VERSION" "1.13.0" \
+  "verification records the package version"
+assert_eq "$VERIFIED_OPENRAPPTER_BIN" "$stable_launcher" \
+  "verification records the stable installer launcher"
+assert_eq "$(type -P openrappter)" "$stable_launcher" \
+  "verification puts the stable launcher ahead of a stale PATH binary"
+assert_contains "$(cat "$HOME/.bashrc")" "# >>> OpenRappter active launcher >>>" \
+  "shadow repair persists launcher precedence for new shells"
+assert_contains "$(cat "$stable_launcher")" "$version_prefix/bin/openrappter" \
+  "stable launcher points at the selected npm prefix"
+
+version_prefix_b="$VERSION_FIX_ROOT/next-prefix"
+version_root_b="$VERSION_FIX_ROOT/next-root"
+mkdir -p "$version_prefix_b/bin" "$version_root_b/openrappter"
+printf '{"name":"openrappter","version":"1.14.0"}\n' \
+  > "$version_root_b/openrappter/package.json"
+cat > "$version_prefix_b/bin/openrappter" <<'EOF'
+#!/usr/bin/env bash
+printf '1.14.0\n'
+EOF
+chmod +x "$version_prefix_b/bin/openrappter"
+active_version_prefix="$version_prefix_b"
+active_version_root="$version_root_b"
+VERIFIED_OPENRAPPTER_BIN=""
+VERIFIED_OPENRAPPTER_VERSION=""
+ACTIVE_OPENRAPPTER_BIN=""
+verify_openrappter_install >/dev/null 2>&1
+assert_eq "$VERIFIED_OPENRAPPTER_VERSION" "1.14.0" \
+  "verification follows a changed npm prefix"
+assert_contains "$(cat "$stable_launcher")" "$version_prefix_b/bin/openrappter" \
+  "stable launcher is rewritten for the new prefix"
+((TESTS_RUN++)) || true
+if grep -qF "$version_prefix/bin/openrappter" "$stable_launcher"; then
+  fail "stable launcher retains the old npm prefix"
+else
+  pass "stable launcher drops the old npm prefix"
+fi
+assert_contains "$(cat "$HOME/.bashrc")" "$HOME/.local/bin" \
+  "managed PATH block pins only the stable launcher directory"
+
+fish_home="$VERSION_FIX_ROOT/First Last"
+mkdir -p "$fish_home"
+HOME="$fish_home"
+SHELL="/usr/bin/fish"
+ACTIVE_OPENRAPPTER_BIN=""
+ensure_owned_launcher_precedence "$version_prefix_b/bin/openrappter" >/dev/null 2>&1
+fish_config="$fish_home/.config/fish/config.fish"
+assert_contains "$(cat "$fish_config")" "set -gx PATH \"$fish_home/.local/bin\" \$PATH" \
+  "Fish persistence quotes launcher paths containing spaces"
+
+symlink_home="$VERSION_FIX_ROOT/symlink-home"
+symlink_target="$VERSION_FIX_ROOT/dotfiles/bashrc"
+mkdir -p "$symlink_home" "$(dirname "$symlink_target")"
+printf '# user configuration\nexport KEEP_ME=1\n' > "$symlink_target"
+chmod 600 "$symlink_target"
+ln -s "$symlink_target" "$symlink_home/.bashrc"
+HOME="$symlink_home"
+SHELL="/bin/bash"
+ACTIVE_OPENRAPPTER_BIN=""
+ensure_owned_launcher_precedence "$version_prefix_b/bin/openrappter" >/dev/null 2>&1
+((TESTS_RUN++)) || true
+if [[ -L "$symlink_home/.bashrc" ]]; then
+  pass "PATH persistence preserves a symlink-managed shell RC"
+else
+  fail "PATH persistence replaced a symlink-managed shell RC"
+fi
+assert_contains "$(cat "$symlink_target")" "export KEEP_ME=1" \
+  "PATH persistence preserves existing shell configuration"
+if stat -f '%Lp' "$symlink_target" >/dev/null 2>&1; then
+  symlink_mode="$(stat -f '%Lp' "$symlink_target")"
+else
+  symlink_mode="$(stat -c '%a' "$symlink_target")"
+fi
+assert_eq "$symlink_mode" "600" \
+  "PATH persistence preserves restrictive shell RC permissions"
+
+incomplete_home="$VERSION_FIX_ROOT/incomplete-home"
+mkdir -p "$incomplete_home"
+printf '# before\n# >>> OpenRappter active launcher >>>\nexport KEEP_AFTER=1\n' \
+  > "$incomplete_home/.bashrc"
+incomplete_before="$(cat "$incomplete_home/.bashrc")"
+HOME="$incomplete_home"
+SHELL="/bin/bash"
+ACTIVE_OPENRAPPTER_BIN=""
+ensure_owned_launcher_precedence "$version_prefix_b/bin/openrappter" >/dev/null 2>&1
+assert_eq "$(cat "$incomplete_home/.bashrc")" "$incomplete_before" \
+  "incomplete managed block leaves the shell RC unchanged"
+
+HOME="$VERSION_FIX_ROOT/home"
+SHELL="/bin/bash"
+cat > "$version_prefix_b/bin/openrappter" <<'EOF'
+#!/usr/bin/env bash
+printf '1.9.1\n'
+EOF
+chmod +x "$version_prefix_b/bin/openrappter"
+((TESTS_RUN++)) || true
+if (
+  VERIFIED_OPENRAPPTER_BIN=""
+  VERIFIED_OPENRAPPTER_VERSION=""
+  verify_openrappter_install
+) >/dev/null 2>&1; then
+  fail "package and launcher version mismatch is refused"
+else
+  pass "package and launcher version mismatch is refused"
+fi
+
+unset -f npm
+PATH="$saved_path"
+HOME="$saved_home"
+SHELL="$saved_shell"
+ORIGINAL_PATH="$saved_original_path"
+INSTALL_METHOD="$saved_install_method"
+VERIFIED_OPENRAPPTER_BIN="$saved_verified_bin"
+VERIFIED_OPENRAPPTER_VERSION="$saved_verified_version"
+ACTIVE_OPENRAPPTER_BIN="$saved_active_bin"
+hash -r
 
 # ── UI Functions ──
 printf "\n\033[1m▸ UI functions\033[0m\n"
@@ -484,6 +666,8 @@ assert_contains "$script_content" "detect_existing_install" "script has install 
 assert_contains "$script_content" "choose_install_method" "script has method chooser"
 assert_contains "$script_content" "ensure_build_tools" "script has build tool detection"
 assert_contains "$script_content" "resolve_npm_conflicts" "script has conflict resolution"
+assert_contains "$script_content" "resolve_owned_openrappter_bin" "script resolves the installer-owned launcher"
+assert_contains "$script_content" "verify_openrappter_install" "script verifies package and launcher versions"
 assert_contains "$script_content" "detect_and_restart_gateway" "script has gateway restart"
 assert_contains "$script_content" "run_doctor_if_available" "script has doctor/migration"
 assert_contains "$script_content" "--method" "script supports --method flag"

@@ -95,6 +95,9 @@ $CLIENT_ID      = "Iv1.b507a08c87ecfe98"
 $COPILOT_SCOPE  = "read:user"
 $INSTALL_STAGE  = 0
 $INSTALL_TOTAL  = 4
+$script:InstalledOpenRappterBin = $null
+$script:InstalledOpenRappterVersion = ""
+$script:GitLauncherPath = $null
 
 # ── Environment variable overrides ──────────────────────────────────────────
 if ($env:OPENRAPPTER_INSTALL_METHOD) { $Method  = $env:OPENRAPPTER_INSTALL_METHOD }
@@ -290,6 +293,133 @@ function Get-ExistingInstall {
     return "none"
 }
 
+function Get-NpmGlobalPrefix {
+    try {
+        return (Invoke-Npm prefix -g | Where-Object { $_ } | Select-Object -Last 1).ToString().Trim()
+    } catch {
+        return $null
+    }
+}
+
+function Resolve-OwnedOpenRappterBin {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if ($Method -eq "npm") {
+        $prefix = Get-NpmGlobalPrefix
+        if ($prefix) {
+            $candidates.Add((Join-Path $prefix "openrappter.cmd"))
+            $candidates.Add((Join-Path $prefix "openrappter.exe"))
+            $candidates.Add((Join-Path $prefix "openrappter.ps1"))
+        }
+    } elseif ($Method -eq "git") {
+        if ($script:GitLauncherPath) {
+            $candidates.Add($script:GitLauncherPath)
+        }
+        $candidates.Add(
+            (Join-Path (Join-Path (Join-Path $env:USERPROFILE ".openrappter") "bin") "openrappter.cmd")
+        )
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+    return $null
+}
+
+function Resolve-InstalledPackageVersion {
+    $packagePath = $null
+    if ($Method -eq "npm") {
+        try {
+            $npmRoot = (Invoke-Npm root -g | Where-Object { $_ } | Select-Object -Last 1).ToString().Trim()
+            if ($npmRoot) {
+                $packagePath = Join-Path (Join-Path $npmRoot "openrappter") "package.json"
+            }
+        } catch {}
+    } elseif ($Method -eq "git") {
+        $packagePath = Join-Path (Join-Path $InstallDir "typescript") "package.json"
+    }
+
+    if (-not $packagePath -or -not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
+        return $null
+    }
+    try {
+        $metadata = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+        if ($metadata.version) { return $metadata.version.ToString() }
+    } catch {}
+    return $null
+}
+
+function Ensure-OwnedLauncherPrecedence {
+    param([Parameter(Mandatory = $true)][string]$OwnedBin)
+
+    $current = Get-Command openrappter -ErrorAction SilentlyContinue
+    if ($current) {
+        try {
+            $currentPath = [System.IO.Path]::GetFullPath($current.Source)
+            $ownedPath = [System.IO.Path]::GetFullPath($OwnedBin)
+            if ($currentPath -ieq $ownedPath) { return }
+        } catch {
+            # A malformed legacy PATH entry must not hide a verified launcher.
+        }
+    }
+
+    $ownedDir = Split-Path $OwnedBin
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $ownedFullPath = [System.IO.Path]::GetFullPath($ownedDir)
+    $segments = @()
+    foreach ($segment in @($userPath -split ";")) {
+        if (-not $segment) { continue }
+        try {
+            if ([System.IO.Path]::GetFullPath($segment) -ieq $ownedFullPath) {
+                continue
+            }
+        } catch {
+            # Retain opaque legacy entries rather than rejecting the install.
+        }
+        $segments += $segment
+    }
+    $nextUserPath = (@($ownedDir) + $segments) -join ";"
+    $env:Path = "$ownedDir;$env:Path"
+    try {
+        [Environment]::SetEnvironmentVariable("Path", $nextUserPath, "User")
+    } catch {
+        Write-Warn "Could not persist $ownedDir at the front of PATH. Use $OwnedBin directly in a new shell."
+    }
+
+    if ($current) {
+        Write-Warn "An older openrappter launcher at $($current.Source) was shadowing this install."
+    }
+    Write-Info "Using installer-owned launcher: $OwnedBin"
+}
+
+function Confirm-InstalledOpenRappter {
+    $owned = Resolve-OwnedOpenRappterBin
+    if (-not $owned) {
+        throw "The installer could not find the openrappter launcher it just created."
+    }
+    $expected = Resolve-InstalledPackageVersion
+    if (-not $expected) {
+        throw "The installed openrappter package has no readable version."
+    }
+    try {
+        $actual = (& $owned --version 2>$null | Select-Object -First 1).ToString().Trim()
+    } catch {
+        throw "The installed openrappter launcher did not report a version."
+    }
+    if (-not $actual) {
+        throw "The installed openrappter launcher did not report a version."
+    }
+    if ($actual -ne $expected) {
+        throw "Installed version mismatch: package.json reports $expected but $owned reports $actual."
+    }
+
+    Ensure-OwnedLauncherPrecedence -OwnedBin $owned
+    $script:InstalledOpenRappterBin = $owned
+    $script:InstalledOpenRappterVersion = $expected
+    Write-Success "Verified openrappter $expected at $owned"
+}
+
 # ── npm install ──────────────────────────────────────────────────────────────
 
 # Ring -> npm dist-tag. Only `stable` owns `latest`, so a prerelease ring can
@@ -341,13 +471,11 @@ function Install-ViaNpm {
         $ErrorActionPreference = $prevEAP
     }
 
-    # Verify
-    $bin = Get-Command openrappter -ErrorAction SilentlyContinue
-    if ($bin) {
-        Write-Success "openrappter installed at: $($bin.Source)"
-    } else {
-        Write-Warn "openrappter not found on PATH after install. You may need to restart your terminal."
+    $bin = Resolve-OwnedOpenRappterBin
+    if (-not $bin) {
+        throw "npm reported success but its openrappter launcher is missing"
     }
+    Write-Success "openrappter installed at: $bin"
 }
 
 # ── git install ──────────────────────────────────────────────────────────────
@@ -404,6 +532,7 @@ function Install-ViaGit {
 @echo off
 node "$distIndex" %*
 "@ | Set-Content -Path $launcherPath -Encoding ASCII
+$script:GitLauncherPath = $launcherPath
 
     # Add bin dir to user PATH if not already there
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -737,7 +866,11 @@ function Start-GatewayBrainstem {
         return
     }
 
-    $openrappterBin = Get-Command openrappter -ErrorAction SilentlyContinue
+    $openrappterBin = if ($script:InstalledOpenRappterBin) {
+        [pscustomobject]@{ Source = $script:InstalledOpenRappterBin }
+    } else {
+        Get-Command openrappter -ErrorAction SilentlyContinue
+    }
     if (-not $openrappterBin) {
         Write-Warn "openrappter not on PATH -- skipping gateway start. Restart your terminal and run: openrappter --daemon"
         return
@@ -801,11 +934,15 @@ function Start-GatewayBrainstem {
 # ── Doctor ───────────────────────────────────────────────────────────────────
 
 function Invoke-DoctorIfAvailable {
-    $bin = Get-Command openrappter -ErrorAction SilentlyContinue
+    $bin = if ($script:InstalledOpenRappterBin) {
+        [pscustomobject]@{ Source = $script:InstalledOpenRappterBin }
+    } else {
+        Get-Command openrappter -ErrorAction SilentlyContinue
+    }
     if (-not $bin) { return }
 
     try {
-        & openrappter doctor --json 2>$null | Out-Null
+        & $bin.Source doctor --json 2>$null | Out-Null
     } catch {}
 }
 
@@ -921,6 +1058,7 @@ function Main {
     } else {
         Install-ViaGit
     }
+    Confirm-InstalledOpenRappter
 
     # ── Copilot SDK setup ──
     Setup-CopilotSdk
@@ -939,25 +1077,18 @@ function Main {
     }
 
     # Verify binary
-    $openrappterBin = Get-Command openrappter -ErrorAction SilentlyContinue
+    $openrappterBin = if ($script:InstalledOpenRappterBin) {
+        [pscustomobject]@{ Source = $script:InstalledOpenRappterBin }
+    } else {
+        Get-Command openrappter -ErrorAction SilentlyContinue
+    }
     if ($openrappterBin) {
         try {
-            & openrappter --status 2>$null | Out-Null
+            & $openrappterBin.Source --status 2>$null | Out-Null
         } catch {}
     }
 
-    # Resolve installed version
-    $installedVersion = ""
-    try {
-        $verOutput = & openrappter --version 2>$null
-        if ($verOutput) { $installedVersion = $verOutput.Trim() }
-    } catch {}
-    if (-not $installedVersion -and (Test-Path (Join-Path (Join-Path $InstallDir "typescript") "package.json"))) {
-        try {
-            $pkg = Get-Content (Join-Path (Join-Path $InstallDir "typescript") "package.json") | ConvertFrom-Json
-            $installedVersion = $pkg.version
-        } catch {}
-    }
+    $installedVersion = $script:InstalledOpenRappterVersion
 
     # ── Success! ──
     Write-Host ""
@@ -997,7 +1128,7 @@ function Main {
         Write-Info "Running setup wizard..."
         Write-Host ""
         try {
-            & openrappter onboard
+            & $openrappterBin.Source onboard
         } catch {
             Write-Info "Setup wizard skipped. Run 'openrappter onboard' to complete setup."
         }

@@ -256,6 +256,56 @@ describe('install.ps1 gateway start', () => {
     expect(launch).toBeGreaterThan(guard);
   });
 
+  it('verifies the installer-owned launcher before setup or success', () => {
+    const main = functionBody(script, 'Main');
+    const install = main.indexOf('Install-ViaNpm');
+    const verify = main.indexOf('Confirm-InstalledOpenRappter');
+    const setup = main.indexOf('Setup-CopilotSdk');
+
+    expect(install).toBeGreaterThanOrEqual(0);
+    expect(verify).toBeGreaterThan(install);
+    expect(setup).toBeGreaterThan(verify);
+
+    const confirmation = functionBody(script, 'Confirm-InstalledOpenRappter');
+    expect(confirmation).toContain('Resolve-OwnedOpenRappterBin');
+    expect(confirmation).toContain('Resolve-InstalledPackageVersion');
+    expect(confirmation).toContain('& $owned --version');
+    expect(confirmation).toContain('$actual -ne $expected');
+    expect(confirmation).toContain('$script:InstalledOpenRappterBin = $owned');
+    expect(confirmation).toContain('$script:InstalledOpenRappterVersion = $expected');
+  });
+
+  it('does not treat an arbitrary PATH launcher as the npm artifact', () => {
+    const npmInstall = functionBody(script, 'Install-ViaNpm');
+    expect(npmInstall).toContain('Resolve-OwnedOpenRappterBin');
+    expect(npmInstall).not.toContain('Get-Command openrappter');
+
+    const resolver = functionBody(script, 'Resolve-OwnedOpenRappterBin');
+    expect(resolver).toContain('Get-NpmGlobalPrefix');
+    expect(resolver).toContain('"openrappter.cmd"');
+
+    const precedence = functionBody(script, 'Ensure-OwnedLauncherPrecedence');
+    expect(precedence).toContain('Get-Command openrappter');
+    expect(precedence).toContain('$env:Path = "$ownedDir;$env:Path"');
+    expect(precedence).toContain('SetEnvironmentVariable("Path", $nextUserPath, "User")');
+  });
+
+  it('uses the verified launcher for status, doctor, gateway, and onboarding', () => {
+    const main = functionBody(script, 'Main');
+    expect(main).toContain('$script:InstalledOpenRappterBin');
+    expect(main).toContain('& $openrappterBin.Source --status');
+    expect(main).toContain('$installedVersion = $script:InstalledOpenRappterVersion');
+    expect(main).toContain('& $openrappterBin.Source onboard');
+    expect(main).not.toContain('& openrappter --version');
+
+    const doctor = functionBody(script, 'Invoke-DoctorIfAvailable');
+    expect(doctor).toContain('$script:InstalledOpenRappterBin');
+    expect(doctor).toContain('& $bin.Source doctor --json');
+
+    const gateway = functionBody(script, 'Start-GatewayBrainstem');
+    expect(gateway).toContain('$script:InstalledOpenRappterBin');
+  });
+
   it('ships the same script it serves from docs/', async () => {
     // `irm https://kody-w.github.io/openrappter/install.ps1 | iex` fetches the
     // docs/ copy. Fixing only the repo root would leave every piped install on

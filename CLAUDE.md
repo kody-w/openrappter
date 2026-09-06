@@ -352,20 +352,29 @@ read–modify–write. Never delete, replace, or age-reclaim this lock database;
 process death releases its OS locks. SQLite acquisition waits at most five seconds
 (without blocking Node's event loop). Python retains its thread-level `RLock`.
 
-Success follows a private staged-file write, file fsync, atomic replacement and
-directory fsync. Newly created directory entries are synced too. Only a missing
-store is empty: corrupt JSON/UTF-8, invalid entry shapes, unreadable files and
-lock failures propagate errors without resetting data. Existing keys and
-unknown entry metadata are preserved. Linked store/lock files are rejected;
-directory aliases share a canonical lock path.
+On POSIX, success follows a private staged-file write, file fsync, atomic
+replacement and directory fsync; newly created directory entries are synced
+too. Windows retains the staged-file flush and atomic replacement, then opens
+the published file with write access and flushes it again. It never requires
+unsupported CRT directory handles. File-open, write, replacement and flush
+errors still propagate on both platforms; POSIX directory errors remain fatal.
+
+Only a missing store is empty: corrupt JSON/UTF-8, invalid entry shapes,
+unreadable files and lock failures propagate errors without resetting data.
+Existing keys and unknown entry metadata are preserved. Linked store/lock files
+are rejected; directory aliases share a canonical lock path. POSIX files are
+created with mode 0600; Windows files inherit the containing directory's ACL.
 
 Upgrade **all writers together**, stopping old flock-only Python and unlocked
 TypeScript processes first. Both runtimes must target the same file; the
 pre-existing Python `OPENRAPPTER_HOME` relocation limitation (#330) is unchanged.
-This protocol requires a local filesystem with reliable SQLite locking and
-directory fsync, not an unverified network filesystem. A failure after rename
-but before acknowledgement has an uncertain outcome; an unacknowledged fact
-may exist. Orphan `.pending` files are never read as committed memory.
+This protocol requires a local filesystem with reliable SQLite locking, not
+an unverified network filesystem. Tests exercise concurrent writers and process
+termination/restart; they do not certify physical-power-loss behavior. In
+particular, Windows file flushing does not establish a POSIX-style durability
+guarantee for rename/directory metadata. A failure after rename but before
+acknowledgement has an uncertain outcome; an unacknowledged fact may exist.
+Orphan `.pending` files are never read as committed memory.
 
 ## Language Parity
 

@@ -14,6 +14,7 @@ import os
 import secrets
 import sqlite3
 import stat
+import sys
 import threading
 import uuid
 from contextlib import contextmanager
@@ -39,7 +40,9 @@ def _ensure_memory_directory(directory):
         missing.append(current)
         current = current.parent
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if missing:
+    # Windows CRT cannot open directory descriptors. Do not turn that platform
+    # limitation into a constructor failure or swallow unrelated filesystem errors.
+    if missing and sys.platform != "win32":
         for item in [*missing, current]:
             descriptor = os.open(item, os.O_RDONLY)
             try:
@@ -128,7 +131,7 @@ def _write_memory_file(file, memory):
     content = json.dumps(memory, indent=2, allow_nan=False) + "\n"
     file = Path(file)
     temporary = file.with_name(f".{file.name}.{secrets.token_hex(16)}.pending")
-    directory = os.open(file.parent, os.O_RDONLY)
+    directory = None if sys.platform == "win32" else os.open(file.parent, os.O_RDONLY)
     created = False
     try:
         try:
@@ -142,9 +145,20 @@ def _write_memory_file(file, memory):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, file)
-        os.fsync(directory)
+        if directory is not None:
+            os.fsync(directory)
+        else:
+            # Windows os.fsync uses _commit/FlushFileBuffers and needs write
+            # access. This does not certify rename metadata against power loss.
+            published = os.open(file, os.O_RDWR)
+            try:
+                _regular_memory_file(os.fstat(published))
+                os.fsync(published)
+            finally:
+                os.close(published)
     finally:
-        os.close(directory)
+        if directory is not None:
+            os.close(directory)
         if created:
             try:
                 temporary.unlink()

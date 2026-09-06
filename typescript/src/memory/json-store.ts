@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { TextDecoder } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -16,6 +17,9 @@ function regularFile(status: fs.Stats): void {
 }
 
 function syncDirectory(directory: string): void {
+  // Windows CRT directory opens are unsupported. File flushing below remains
+  // mandatory; this is not a promise of power-loss durability for rename metadata.
+  if (os.platform() === 'win32') return;
   const descriptor = fs.openSync(directory, fs.constants.O_RDONLY);
   try {
     fs.fsyncSync(descriptor);
@@ -145,7 +149,9 @@ export function writeMemoryFile<T extends { message: string }>(file: string, mem
   validate(memory);
   const content = `${JSON.stringify(memory, null, 2)}\n`;
   const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${randomBytes(16).toString('hex')}.pending`);
-  const directory = fs.openSync(path.dirname(file), fs.constants.O_RDONLY);
+  const directory = os.platform() === 'win32'
+    ? null
+    : fs.openSync(path.dirname(file), fs.constants.O_RDONLY);
   let created = false;
   try {
     try {
@@ -162,10 +168,21 @@ export function writeMemoryFile<T extends { message: string }>(file: string, mem
       fs.closeSync(descriptor);
     }
     fs.renameSync(temporary, file);
-    // A successful rename alone is not a durable acknowledgement.
-    fs.fsyncSync(directory);
+    if (directory !== null) {
+      fs.fsyncSync(directory);
+    } else {
+      // FlushFileBuffers needs a writable file handle. Flush the published file
+      // too, without pretending this supplies a POSIX directory-fsync guarantee.
+      const published = fs.openSync(file, fs.constants.O_RDWR);
+      try {
+        regularFile(fs.fstatSync(published));
+        fs.fsyncSync(published);
+      } finally {
+        fs.closeSync(published);
+      }
+    }
   } finally {
-    fs.closeSync(directory);
+    if (directory !== null) fs.closeSync(directory);
     if (created) {
       try {
         fs.unlinkSync(temporary);

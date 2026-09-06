@@ -1,16 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import { MemoryAgent } from '../agents/MemoryAgent.js';
 import { readMemoryFile, withMemoryTransaction } from './json-store.js';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const require = createRequire(import.meta.url);
-const loader = require.resolve('tsx/esm');
+const loader = pathToFileURL(require.resolve('tsx/esm')).href;
+const nativeWindows = process.platform === 'win32';
 type Runtime = 'typescript' | 'python';
 let home: string;
 let file: string;
@@ -32,7 +34,9 @@ afterEach(async () => {
 });
 
 async function worker(runtime: Runtime, mode: string, prefix = 'child', count = 1, directory = home) {
-  const command = runtime === 'python' ? 'python3' : process.execPath;
+  const command = runtime === 'python'
+    ? (process.env.PYTHON ?? (nativeWindows ? 'python' : 'python3'))
+    : process.execPath;
   const args = runtime === 'python'
     ? ['-B', path.join(root, 'python/tests/fixtures/memory_writer.py')]
     : ['--import', loader, path.join(root, 'typescript/src/agents/__tests__/fixtures/memory-writer.ts')];
@@ -41,8 +45,13 @@ async function worker(runtime: Runtime, mode: string, prefix = 'child', count = 
     env: {
       PATH: process.env.PATH,
       HOME: home,
+      USERPROFILE: home,
+      SystemRoot: process.env.SystemRoot ?? process.env.SYSTEMROOT,
+      WINDIR: process.env.WINDIR,
       OPENRAPPTER_HOME: home,
       TMPDIR: home,
+      TEMP: home,
+      TMP: home,
       PYTHONPATH: path.join(root, 'python'),
       PYTHONDONTWRITEBYTECODE: '1',
       TSX_DISABLE_CACHE: '1',
@@ -87,7 +96,7 @@ function messages(): string[] {
 describe('memory transaction process protocol', () => {
   it('uses one lock identity through directory aliases', async () => {
     const alias = path.join(home, 'alias');
-    fs.symlinkSync(home, alias, 'dir');
+    fs.symlinkSync(home, alias, nativeWindows ? 'junction' : 'dir');
     const first = await worker('typescript', 'write', 'first', 8);
     const second = await worker('python', 'write', 'second', 8, alias);
     await Promise.all([first.release(), second.release()]);
@@ -195,6 +204,87 @@ describe('memory transaction failures', () => {
     expect(called).toBe(false);
   });
 
+  describe('platform-specific memory persistence', () => {
+    function windowsFileHandles() {
+      vi.spyOn(os, 'platform').mockReturnValue('win32');
+      const open = fs.openSync;
+      const directories: string[] = [];
+      vi.spyOn(fs, 'openSync').mockImplementation(((target, ...args) => {
+        if (fs.existsSync(target) && fs.statSync(target).isDirectory()) {
+          directories.push(String(target));
+          throw Object.assign(new Error('Windows CRT cannot open directories'), { code: 'EACCES' });
+        }
+        return open(target, ...args);
+      }) as typeof fs.openSync);
+      return directories;
+    }
+
+    it.each([false, true])('writes on Windows without directory handles (new directory: %s)', async nested => {
+      const directories = windowsFileHandles();
+      const directory = nested ? path.join(home, 'new', 'nested') : home;
+      const order: string[] = [];
+      const fsync = fs.fsyncSync;
+      const rename = fs.renameSync;
+      let replaced = false;
+      vi.spyOn(fs, 'fsyncSync').mockImplementation(descriptor => {
+        expect(fs.fstatSync(descriptor).isFile()).toBe(true);
+        order.push(replaced ? 'published-file-sync' : 'staged-file-sync');
+        fsync(descriptor);
+      });
+      vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+        rename(from, to);
+        replaced = true;
+        order.push('replace');
+      });
+      const result = JSON.parse(await new MemoryAgent(directory).perform({ action: 'remember', message: 'Windows fact' }));
+      expect(result.status).toBe('success');
+      expect(directories).toEqual([]);
+      expect(order).toEqual(['staged-file-sync', 'replace', 'published-file-sync']);
+      expect(readMemoryFile(path.join(directory, 'memory.json'))[result.key].message).toBe('Windows fact');
+    });
+
+    it.each([1, 2])('propagates Windows file-flush failure at stage %s', async failedStage => {
+      windowsFileHandles();
+      const before = fs.readFileSync(file);
+      const fsync = fs.fsyncSync;
+      let stage = 0;
+      vi.spyOn(fs, 'fsyncSync').mockImplementation(descriptor => {
+        if (++stage === failedStage) throw new Error('injected Windows file-flush failure');
+        fsync(descriptor);
+      });
+      await expect(new MemoryAgent(home).perform({ action: 'remember', message: 'not acknowledged' }))
+        .rejects.toThrow('Windows file-flush failure');
+      if (failedStage === 1) expect(fs.readFileSync(file)).toEqual(before);
+      else expect(messages()).toContain('not acknowledged');
+    });
+
+    it('does not swallow an access error when reopening the published Windows file', async () => {
+      vi.spyOn(os, 'platform').mockReturnValue('win32');
+      const open = fs.openSync;
+      vi.spyOn(fs, 'openSync').mockImplementation(((target, flags, ...args) => {
+        if (target === file && flags === fs.constants.O_RDWR) {
+          throw Object.assign(new Error('published file access denied'), { code: 'EACCES' });
+        }
+        return open(target, flags, ...args);
+      }) as typeof fs.openSync);
+      await expect(new MemoryAgent(home).perform({ action: 'remember', message: 'not acknowledged' }))
+        .rejects.toThrow('published file access denied');
+    });
+
+    it('keeps POSIX directory-open failures fatal', async () => {
+      vi.spyOn(os, 'platform').mockReturnValue('linux');
+      const before = fs.readFileSync(file);
+      const open = fs.openSync;
+      vi.spyOn(fs, 'openSync').mockImplementation(((target, ...args) => {
+        if (target === home) throw Object.assign(new Error('directory access denied'), { code: 'EACCES' });
+        return open(target, ...args);
+      }) as typeof fs.openSync);
+      await expect(new MemoryAgent(home).perform({ action: 'remember', message: 'must not commit' }))
+        .rejects.toThrow('directory access denied');
+      expect(fs.readFileSync(file)).toEqual(before);
+    });
+  });
+
   it.each(['symlink', 'hardlink'])('refuses a %s memory file instead of splitting lock identities', async kind => {
     const destination = path.join(home, 'original.json');
     fs.renameSync(file, destination);
@@ -223,7 +313,7 @@ describe('memory transaction failures', () => {
     });
     const response = JSON.parse(await new MemoryAgent(directory).perform({ action: 'remember', message: 'first fact' }));
     expect(response.status).toBe('success');
-    expect(syncedDirectories).toEqual([directory, path.dirname(directory), home, directory]);
+    expect(syncedDirectories).toEqual(nativeWindows ? [] : [directory, path.dirname(directory), home, directory]);
     expect(readMemoryFile(path.join(directory, 'memory.json'))[response.key].message).toBe('first fact');
   });
 
@@ -245,7 +335,7 @@ describe('memory transaction failures', () => {
     expect(fs.readdirSync(home).filter(name => name.endsWith('.pending'))).toEqual([]);
   });
 
-  it('fsyncs the new file before replacement and the directory before acknowledging', async () => {
+  it('flushes before replacement and completes the platform commit flush before acknowledging', async () => {
     const order: string[] = [];
     const fsync = fs.fsyncSync;
     const rename = fs.renameSync;
@@ -258,19 +348,20 @@ describe('memory transaction failures', () => {
       rename(from, to);
     });
     expect(JSON.parse(await new MemoryAgent(home).perform({ action: 'remember', message: 'durable fact' })).status).toBe('success');
-    expect(order).toEqual(['file-sync', 'replace', 'directory-sync']);
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    expect(order).toEqual(['file-sync', 'replace', nativeWindows ? 'file-sync' : 'directory-sync']);
+    if (!nativeWindows) expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   });
 
-  it.each([false, true])('does not acknowledge fsync failure (directory: %s)', async directory => {
+  it.each([false, true])('does not acknowledge fsync failure (after replacement: %s)', async afterReplacement => {
     const before = fs.readFileSync(file);
     const fsync = fs.fsyncSync;
+    let stage = 0;
     vi.spyOn(fs, 'fsyncSync').mockImplementation(descriptor => {
-      if (fs.fstatSync(descriptor).isDirectory() === directory) throw new Error('injected fsync failure');
+      if (++stage === (afterReplacement ? 2 : 1)) throw new Error('injected fsync failure');
       fsync(descriptor);
     });
     await expect(new MemoryAgent(home).perform({ action: 'remember', message: 'not acknowledged' })).rejects.toThrow('fsync failure');
-    if (!directory) expect(fs.readFileSync(file)).toEqual(before);
+    if (!afterReplacement) expect(fs.readFileSync(file)).toEqual(before);
     else expect(messages()).toContain('not acknowledged'); // Ambiguous outcome, never false success.
   });
 

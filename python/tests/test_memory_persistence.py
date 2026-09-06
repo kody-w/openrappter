@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import uuid
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
 import pytest
@@ -132,8 +133,12 @@ def launch_writer(tmp_path):
             env={
                 "PATH": os.environ.get("PATH", ""),
                 "HOME": str(home),
+                "USERPROFILE": str(home),
+                **{key: os.environ[key] for key in ("SYSTEMROOT", "WINDIR") if key in os.environ},
                 "OPENRAPPTER_HOME": str(home),
                 "TMPDIR": str(tmp_path),
+                "TEMP": str(tmp_path),
+                "TMP": str(tmp_path),
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
                 "PYTHONDONTWRITEBYTECODE": "1",
             },
@@ -272,10 +277,10 @@ def test_first_write_syncs_new_directory_entries(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "open", opened)
     monkeypatch.setattr(os, "fsync", sync)
     assert json.loads(agent.perform(content="first fact"))["status"] == "success"
-    assert synced == [
+    assert synced == ([] if sys.platform == "win32" else [
         tmp_path / "new" / "nested", tmp_path / "new", tmp_path,
         tmp_path / "new" / "nested",
-    ]
+    ])
 
 
 def test_read_failure_never_becomes_an_empty_snapshot(tmp_path, monkeypatch):
@@ -334,26 +339,142 @@ def test_fsync_order_and_private_file_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "fsync", synced)
     monkeypatch.setattr(os, "replace", replaced)
     assert json.loads(agent.perform(content="durable fact"))["status"] == "success"
-    assert order == ["file-sync", "replace", "directory-sync"]
-    assert stat.S_IMODE(agent.memory_file.stat().st_mode) == 0o600
+    assert order == ["file-sync", "replace", "file-sync" if sys.platform == "win32" else "directory-sync"]
+    if sys.platform != "win32":
+        assert stat.S_IMODE(agent.memory_file.stat().st_mode) == 0o600
 
 
-@pytest.mark.parametrize("directory", [False, True])
-def test_fsync_failure_is_never_acknowledged(tmp_path, monkeypatch, directory):
+@pytest.mark.parametrize("after_replacement", [False, True])
+def test_fsync_failure_is_never_acknowledged(tmp_path, monkeypatch, after_replacement):
     agent = memory_agent(tmp_path)
     agent.perform(content="existing fact")
     before = agent.memory_file.read_bytes()
     original = os.fsync
+    stage = 0
 
     def failed(descriptor):
-        if stat.S_ISDIR(os.fstat(descriptor).st_mode) == directory:
+        nonlocal stage
+        stage += 1
+        if stage == (2 if after_replacement else 1):
             raise OSError("injected fsync failure")
         return original(descriptor)
 
     monkeypatch.setattr(os, "fsync", failed)
     with pytest.raises(OSError, match="fsync failure"):
         agent.perform(content="not acknowledged")
-    if not directory:
+    if not after_replacement:
         assert agent.memory_file.read_bytes() == before
     else:
         assert any(entry["message"] == "not acknowledged" for entry in json_store._read_memory_file(agent.memory_file).values())
+
+
+def windows_file_handles(monkeypatch):
+    monkeypatch.setattr(json_store, "sys", SimpleNamespace(platform="win32"), raising=False)
+    original = os.open
+    directories = []
+
+    def opened(file, *args, **kwargs):
+        if Path(file).is_dir():
+            directories.append(Path(file))
+            raise PermissionError("Windows CRT cannot open directories")
+        return original(file, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", opened)
+    return directories
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_windows_writes_without_directory_handles(tmp_path, monkeypatch, nested):
+    agent = memory_agent(tmp_path)
+    directories = windows_file_handles(monkeypatch)
+    if nested:
+        agent.memory_file = tmp_path / "new" / "nested" / "memory.json"
+    order = []
+    fsync, replace = os.fsync, os.replace
+    replaced = False
+
+    def synced(descriptor):
+        assert stat.S_ISREG(os.fstat(descriptor).st_mode)
+        order.append("published-file-sync" if replaced else "staged-file-sync")
+        return fsync(descriptor)
+
+    def replaced_file(source, target):
+        nonlocal replaced
+        replace(source, target)
+        replaced = True
+        order.append("replace")
+
+    monkeypatch.setattr(os, "fsync", synced)
+    monkeypatch.setattr(os, "replace", replaced_file)
+    assert json.loads(agent.perform(content="Windows fact"))["status"] == "success"
+    assert directories == []
+    assert order == ["staged-file-sync", "replace", "published-file-sync"]
+    assert any(entry["message"] == "Windows fact" for entry in json_store._read_memory_file(agent.memory_file).values())
+
+
+def test_windows_constructor_does_not_require_directory_handles(tmp_path, monkeypatch):
+    directories = windows_file_handles(monkeypatch)
+    owner = tmp_path / "new-owner"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: owner))
+    ManageMemoryAgent()
+    assert (owner / ".openrappter").is_dir()
+    assert directories == []
+
+
+@pytest.mark.parametrize("failed_stage", [1, 2])
+def test_windows_flush_failures_are_not_acknowledged(tmp_path, monkeypatch, failed_stage):
+    agent = memory_agent(tmp_path)
+    agent.perform(content="existing fact")
+    before = agent.memory_file.read_bytes()
+    windows_file_handles(monkeypatch)
+    original = os.fsync
+    stage = 0
+
+    def failed(descriptor):
+        nonlocal stage
+        stage += 1
+        if stage == failed_stage:
+            raise OSError("injected Windows file-flush failure")
+        return original(descriptor)
+
+    monkeypatch.setattr(os, "fsync", failed)
+    with pytest.raises(OSError, match="Windows file-flush failure"):
+        agent.perform(content="not acknowledged")
+    if failed_stage == 1:
+        assert agent.memory_file.read_bytes() == before
+    else:
+        assert any(entry["message"] == "not acknowledged" for entry in json_store._read_memory_file(agent.memory_file).values())
+
+
+def test_windows_published_file_open_failure_is_not_swallowed(tmp_path, monkeypatch):
+    agent = memory_agent(tmp_path)
+    agent.perform(content="existing fact")
+    monkeypatch.setattr(json_store, "sys", SimpleNamespace(platform="win32"), raising=False)
+    original = os.open
+
+    def denied(file, flags, *args, **kwargs):
+        if Path(file) == agent.memory_file and flags == os.O_RDWR:
+            raise PermissionError("published file access denied")
+        return original(file, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", denied)
+    with pytest.raises(PermissionError, match="published file access denied"):
+        agent.perform(content="not acknowledged")
+
+
+def test_posix_directory_open_failure_remains_fatal(tmp_path, monkeypatch):
+    agent = memory_agent(tmp_path)
+    agent.perform(content="existing fact")
+    before = agent.memory_file.read_bytes()
+    monkeypatch.setattr(json_store, "sys", SimpleNamespace(platform="linux"), raising=False)
+    original = os.open
+
+    def denied(file, *args, **kwargs):
+        if Path(file) == tmp_path:
+            raise PermissionError("directory access denied")
+        return original(file, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", denied)
+    with pytest.raises(PermissionError, match="directory access denied"):
+        agent.perform(content="must not commit")
+    assert agent.memory_file.read_bytes() == before

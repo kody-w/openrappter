@@ -76,9 +76,8 @@ public struct OnboardingView: View {
             .buttonStyle(.borderedProminent)
             .tint(.green)
 
-            Button("I already set up via terminal") {
+            Button("Check my existing setup") {
                 viewModel.skipToChat()
-                onComplete()
             }
             .buttonStyle(.plain)
             .font(.caption)
@@ -119,7 +118,7 @@ public struct OnboardingView: View {
                     .font(.callout)
                 }
 
-            case .waitingForCode(let code, _):
+            case .waitingForCode(let code, let url):
                 VStack(spacing: 8) {
                     Text("Enter this code on GitHub:")
                         .font(.callout).foregroundStyle(.secondary)
@@ -129,10 +128,18 @@ public struct OnboardingView: View {
                         .padding(8)
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(8)
+                        .textSelection(.enabled)
+                    if let destination = URL(string: url) {
+                        Link("Open GitHub sign-in", destination: destination)
+                    }
                     ProgressView()
                         .padding(.top, 4)
                     Text("Waiting for authorization...")
                         .font(.caption).foregroundStyle(.secondary)
+                    if let message = viewModel.authService.error {
+                        Text(message).font(.caption).foregroundStyle(.orange)
+                    }
+                    Button("Cancel", role: .cancel) { viewModel.cancelGitHubAuth() }
                 }
 
             case .validating:
@@ -140,6 +147,7 @@ public struct OnboardingView: View {
                     ProgressView()
                     Text("Checking credentials...")
                         .font(.callout).foregroundStyle(.secondary)
+                    Button("Cancel", role: .cancel) { viewModel.cancelGitHubAuth() }
                 }
 
             case .success:
@@ -147,7 +155,7 @@ public struct OnboardingView: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 32))
                         .foregroundStyle(.green)
-                    Text("Connected to GitHub Copilot!")
+                    Text("GitHub credentials are ready")
                         .font(.callout).bold()
 
                     Button(action: { viewModel.advance() }) {
@@ -169,8 +177,8 @@ public struct OnboardingView: View {
 
                     Button("Try Again") { viewModel.startGitHubAuth() }
                         .buttonStyle(.bordered)
-                    Button("Skip for now") { viewModel.advance() }
-                        .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
+                    Button("Check runtime connection") { viewModel.retryRuntimeSetup() }
+                        .buttonStyle(.plain).font(.caption)
                 }
             }
         }
@@ -198,15 +206,18 @@ public struct OnboardingView: View {
                         .font(.system(.body, design: .monospaced))
 
                     Button(action: {
-                        viewModel.connectTelegram()
-                        viewModel.advance()
+                        if viewModel.connectTelegram() { viewModel.advance() }
                     }) {
-                        Text("Connect")
+                        Text("Save token")
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.telegramToken.isEmpty)
+
+                    if let message = viewModel.errorMessage {
+                        Text(message).font(.caption).foregroundStyle(.red)
+                    }
 
                     Button("Skip — I'll add this later") {
                         viewModel.skipTelegram()
@@ -221,7 +232,7 @@ public struct OnboardingView: View {
                     if !viewModel.telegramBotName.isEmpty {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
-                        Text("Connected: \(viewModel.telegramBotName)")
+                        Text(viewModel.telegramBotName)
                     }
 
                     Button(action: { viewModel.advance() }) {
@@ -242,12 +253,13 @@ public struct OnboardingView: View {
         VStack(spacing: 20) {
             dinoAnimation
 
-            Text("Setting everything up...")
+            Text(viewModel.isStarting ? "Verifying your runtime…" : "Runtime setup needs attention")
                 .font(.title3).bold()
 
             VStack(alignment: .leading, spacing: 12) {
-                statusRow(label: "Starting daemon", done: viewModel.daemonStarted)
-                statusRow(label: "Installing auto-start", done: viewModel.autoStartInstalled)
+                statusRow(label: "Compatible gateway and chat methods", done: viewModel.daemonStarted)
+                Text("OpenRappter Desktop remains authoritative when it is running. Otherwise, Bar uses the installed OpenRappter runtime.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             .padding()
             .background(Color.gray.opacity(0.05))
@@ -259,7 +271,15 @@ public struct OnboardingView: View {
                     .foregroundStyle(.red)
             }
 
-            ProgressView()
+            if viewModel.isStarting {
+                ProgressView()
+                Button("Cancel", role: .cancel) { viewModel.cancelRuntimeSetup() }
+            } else {
+                Button("Retry runtime setup") { viewModel.retryRuntimeSetup() }
+                    .buttonStyle(.borderedProminent)
+                Text("No unverified runtime is downloaded. Open the signed Desktop runtime and retry, or finish installing a receipt-verified compatible runtime.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -274,27 +294,26 @@ public struct OnboardingView: View {
                 .font(.title2).bold()
 
             VStack(alignment: .leading, spacing: 8) {
-                checkRow("Copilot", ok: viewModel.authState.isSuccess)
-                checkRow("Daemon", ok: viewModel.daemonStarted)
-                checkRow("Auto-start", ok: viewModel.autoStartInstalled)
-                checkRow("Daily tips at 9am", ok: true)
+                checkRow("GitHub", ok: viewModel.authState.isSuccess)
+                checkRow(viewModel.usingDesktopRuntime ? "Desktop gateway" : "Local gateway", ok: viewModel.daemonStarted)
             }
             .padding()
             .background(Color.gray.opacity(0.05))
             .cornerRadius(10)
 
-            Text("Click the 🦖 in your menu bar anytime to chat with me. I'll send you a tip every morning to help you get the most out of openrappter.")
+            Text("Click the 🦖 in your menu bar to chat. Optional channels, scheduled tasks, and start-at-login preferences are available in Settings.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Button(action: { onComplete() }) {
+            Button(action: { if viewModel.isComplete { onComplete() } }) {
                 Text("Start Chatting")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
             }
             .buttonStyle(.borderedProminent)
             .tint(.green)
+            .disabled(!viewModel.isComplete)
         }
     }
 
@@ -310,9 +329,11 @@ public struct OnboardingView: View {
             if done {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-            } else {
+            } else if viewModel.isStarting {
                 ProgressView()
                     .controlSize(.small)
+            } else {
+                Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
             }
             Text(label)
                 .font(.callout)

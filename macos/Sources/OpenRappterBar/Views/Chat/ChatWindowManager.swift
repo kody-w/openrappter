@@ -33,11 +33,48 @@ public final class ChatWindowManager {
 
     private let viewModel: AppViewModel
     private let settingsViewModel: SettingsViewModel
-    private let onboardingViewModel = OnboardingViewModel()
+    private let onboardingViewModel: OnboardingViewModel
+    private var reauthTask: Task<Void, Never>?
 
     public init(viewModel: AppViewModel, settingsViewModel: SettingsViewModel) {
         self.viewModel = viewModel
         self.settingsViewModel = settingsViewModel
+        let auth = settingsViewModel.accountViewModel.authService
+        let runtime = RuntimePrerequisiteService(dependencies: RuntimePrerequisiteDependencies(
+            desktopIsAuthoritative: {
+                viewModel.usesDesktopGateway || DesktopGatewayDiscovery.current() != nil
+            },
+            localRuntimeAvailable: { RuntimePrerequisiteService.localRuntimeAvailable() },
+            provisionVerifiedRuntime: { throw RuntimePrerequisiteError.unavailable },
+            startLocalRuntime: {
+                await viewModel.restartGatewayAfterAuthentication(
+                    host: settingsViewModel.settingsStore.host,
+                    port: settingsViewModel.settingsStore.port
+                ).value
+                try Task.checkCancellation()
+            },
+            verifyGateway: { desktop in
+                if viewModel.connectionState != .connected || viewModel.usesDesktopGateway != desktop {
+                    if desktop && DesktopGatewayDiscovery.current() == nil {
+                        throw RuntimePrerequisiteError.disconnected
+                    }
+                    await viewModel.connectUsingPreferredGateway(
+                        fallbackHost: settingsViewModel.settingsStore.host,
+                        fallbackPort: settingsViewModel.settingsStore.port
+                    ).value
+                }
+                try Task.checkCancellation()
+                guard viewModel.connectionState == .connected,
+                      viewModel.usesDesktopGateway == desktop,
+                      let rpc = viewModel.rpcClient else { throw RuntimePrerequisiteError.disconnected }
+                _ = try await rpc.ping()
+                try RuntimePrerequisiteService.requireCompatibleMethods(
+                    try await rpc.listMethods(), desktop: desktop
+                )
+                if desktop { auth.configure(rpcClient: rpc) }
+            }
+        ))
+        onboardingViewModel = OnboardingViewModel(authService: auth, runtime: runtime)
 
         // Auto-trigger the device-code flow whenever the gateway reports a
         // Copilot auth failure — no manual button click required.
@@ -49,52 +86,40 @@ public final class ChatWindowManager {
 
     /// Re-auth handler: starts device code flow, shows code in chat, restarts gateway
     private func handleReauth() {
+        guard reauthTask == nil else { return }
         let auth = settingsViewModel.accountViewModel.authService
-
-        // Post the code into the chat so the user can see it
-        auth.login()
-
-        // Watch for the code to appear and post it into chat
-        Task {
-            // Wait for device code to be populated
-            for _ in 0..<30 {
-                try? await Task.sleep(for: .seconds(0.5))
-                if !auth.userCode.isEmpty { break }
-            }
-
-            if !auth.userCode.isEmpty {
-                // Copy the code so the user can paste it after the panel
-                // dismisses on focus loss.
-                let pb = NSPasteboard.general
-                pb.clearContents()
-                pb.setString(auth.userCode, forType: .string)
-
-                viewModel.chatViewModel.addSystemMessage(
-                    "🔑 Code **\(auth.userCode)** copied to clipboard. Paste it at \(auth.verificationURL)"
-                )
-            }
-
-            // Wait for auth to complete
-            while auth.authState == .authenticating {
-                try? await Task.sleep(for: .seconds(1))
-            }
-
-            if auth.authState == .authenticated {
+        let login = auth.login { [weak self] code, url in
+            self?.viewModel.chatViewModel.addSystemMessage("🔑 Enter **\(code)** at \(url)")
+        }
+        reauthTask = Task { [weak self] in
+            guard let self else { return }
+            defer { reauthTask = nil }
+            let succeeded = await login.value
+            guard !Task.isCancelled else { return }
+            if succeeded {
                 let message = auth.usingGatewayAuthentication
                     ? "✅ Authenticated through OpenRappter Desktop."
                     : "✅ Authenticated! Restarting gateway…"
                 viewModel.chatViewModel.addSystemMessage(message)
                 await settingsViewModel.accountViewModel.restartGatewayAfterAuth().value
+                guard !Task.isCancelled else { return }
+                guard viewModel.connectionState == .connected else {
+                    viewModel.chatViewModel.addSystemMessage("GitHub sign-in succeeded, but the runtime is not ready. Reconnect before retrying your message.")
+                    viewModel.chatViewModel.authFlowFinished(succeeded: false)
+                    return
+                }
             } else if let error = auth.error {
                 viewModel.chatViewModel.addSystemMessage("❌ Auth failed: \(error)")
             }
-
-            viewModel.chatViewModel.authFlowFinished(succeeded: auth.authState == .authenticated)
+            viewModel.chatViewModel.authFlowFinished(succeeded: succeeded)
         }
     }
 
     /// Call this before releasing the window manager to clean up monitors.
     public func tearDown() {
+        reauthTask?.cancel()
+        reauthTask = nil
+        onboardingViewModel.cancel()
         removeGlobalMonitor()
         if let observer = panelCloseObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -171,41 +196,7 @@ public final class ChatWindowManager {
         panel.minSize = NSSize(width: 320, height: 360)
         panel.maxSize = NSSize(width: 600, height: AppConstants.panelMaxHeight)
 
-        // SwiftUI content — show onboarding wizard if not set up
-        let contentView: AnyView
-        if onboardingViewModel.needsOnboarding && !onboardingViewModel.isComplete {
-            contentView = AnyView(
-                OnboardingView(viewModel: onboardingViewModel) { [weak self] in
-                    // Onboarding complete — swap to chat
-                    guard let self, let panel = self.chatPanel else { return }
-                    let chatView = ChatContainerView(
-                        viewModel: self.viewModel,
-                        isCompact: true,
-                        onOpenFullWindow: { [weak self] in self?.openFullWindow() },
-                        onReauth: { [weak self] in self?.handleReauth() }
-                    )
-                    panel.contentView = NSHostingView(rootView: chatView)
-                    self.viewModel.connectUsingPreferredGateway(
-                        fallbackHost: self.settingsViewModel.settingsStore.host,
-                        fallbackPort: self.settingsViewModel.settingsStore.port
-                    )
-                }
-            )
-        } else {
-            contentView = AnyView(
-                ChatContainerView(
-                    viewModel: viewModel,
-                    isCompact: true,
-                    onOpenFullWindow: { [weak self] in
-                        self?.openFullWindow()
-                    },
-                    onReauth: { [weak self] in
-                        self?.handleReauth()
-                    }
-                )
-            )
-        }
-        panel.contentView = NSHostingView(rootView: contentView)
+        panel.contentView = NSHostingView(rootView: contentView(compact: true))
 
         // Observe panel close via Escape
         panelCloseObserver = NotificationCenter.default.addObserver(
@@ -241,15 +232,26 @@ public final class ChatWindowManager {
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 480, height: 360)
 
-        let contentView = ChatContainerView(
-            viewModel: viewModel,
-            isCompact: false,
-            onReauth: { [weak self] in self?.handleReauth() }
-        )
-        window.contentView = NSHostingView(rootView: contentView)
+        window.contentView = NSHostingView(rootView: contentView(compact: false))
 
         fullWindow = window
         return window
+    }
+
+    private func contentView(compact: Bool) -> AnyView {
+        if onboardingViewModel.needsOnboarding && !onboardingViewModel.isComplete {
+            return AnyView(OnboardingView(viewModel: onboardingViewModel) { [weak self] in
+                guard let self, onboardingViewModel.isComplete else { return }
+                chatPanel?.contentView = NSHostingView(rootView: contentView(compact: true))
+                fullWindow?.contentView = NSHostingView(rootView: contentView(compact: false))
+            })
+        }
+        return AnyView(ChatContainerView(
+            viewModel: viewModel,
+            isCompact: compact,
+            onOpenFullWindow: compact ? { [weak self] in self?.openFullWindow() } : nil,
+            onReauth: { [weak self] in self?.handleReauth() }
+        ))
     }
 
     // MARK: - Private — Positioning

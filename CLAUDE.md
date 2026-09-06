@@ -58,6 +58,19 @@ Run a single test file:
 cd typescript && npx vitest run src/path/to/file.test.ts
 ```
 
+### Native macOS Bar (`macos/`)
+```bash
+cd macos
+swift build --product OpenRappterBar
+swift run RunTests
+OPENRAPPTER_TEST_SUITES=ChatReliability,ChatRace,ApprovalIntegration swift run RunTests
+```
+
+The native runner uses named suites, not XCTest discovery. Omitting the selector
+runs every registered suite; unknown names fail instead of silently running zero
+tests. The full runner includes GUI/environment-dependent checks. Use an isolated
+`HOME`, `CFFIXED_USER_HOME`, and `TMPDIR` for tests that access local state.
+
 ### OpenClaw (`openclaw/`)
 ```bash
 cd openclaw

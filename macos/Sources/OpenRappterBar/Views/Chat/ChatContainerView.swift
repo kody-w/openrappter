@@ -10,6 +10,7 @@ import SwiftUI
 public struct ChatContainerView: View {
     @Bindable var viewModel: AppViewModel
     @State private var showCronPopover = false
+    @State private var showApprovals = false
     let isCompact: Bool
     var onOpenFullWindow: (() -> Void)?
     var onReauth: (() -> Void)?
@@ -22,10 +23,31 @@ public struct ChatContainerView: View {
     }
 
     public var body: some View {
-        if isCompact {
-            compactLayout
-        } else {
-            fullLayout
+        Group {
+            if isCompact {
+                compactLayout
+            } else {
+                fullLayout
+            }
+        }
+        .onAppear {
+            if viewModel.connectionState == .connected { viewModel.approvalViewModel.loadPending() }
+        }
+        .onChange(of: viewModel.connectionState) { _, state in
+            if state == .connected { viewModel.approvalViewModel.loadPending() }
+        }
+        .sheet(isPresented: $showApprovals) {
+            VStack {
+                HStack {
+                    Spacer()
+                    Button("Done") { showApprovals = false }
+                        .keyboardShortcut(.cancelAction)
+                }
+                .padding()
+                ApprovalDetailView(viewModel: viewModel.approvalViewModel)
+                    .disabled(viewModel.connectionState != .connected)
+            }
+            .frame(width: 520, height: 400)
         }
     }
 
@@ -37,6 +59,7 @@ public struct ChatContainerView: View {
             Divider()
             quickActions
             Divider()
+            approvalBanner
 
             ChatMessageList(
                 messages: viewModel.chatViewModel.messages,
@@ -71,6 +94,7 @@ public struct ChatContainerView: View {
                 quickActions
                     .padding(.vertical, 2)
                 Divider()
+                approvalBanner
 
                 ChatMessageList(
                     messages: viewModel.chatViewModel.messages,
@@ -187,6 +211,25 @@ public struct ChatContainerView: View {
     }
 
     // MARK: - Chat Input
+
+    @ViewBuilder
+    private var approvalBanner: some View {
+        if viewModel.approvalViewModel.hasPending {
+            ApprovalBannerView(
+                approvals: viewModel.approvalViewModel.pendingApprovals,
+                onApprove: { viewModel.approvalViewModel.approve($0) },
+                onDeny: { viewModel.approvalViewModel.deny($0) },
+                onViewAll: { showApprovals = true }
+            )
+            .disabled(viewModel.connectionState != .connected)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        if let error = viewModel.approvalViewModel.error {
+            ErrorBanner(message: error) { viewModel.approvalViewModel.error = nil }
+                .padding(.horizontal, 12)
+        }
+    }
 
     private var chatInput: some View {
         ChatInputView(viewModel: viewModel)

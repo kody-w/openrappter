@@ -1,6 +1,9 @@
 name: Electron Desktop
 
 on:
+  # The candidate gate requires these exact-head checks, not a PR ancestor.
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 

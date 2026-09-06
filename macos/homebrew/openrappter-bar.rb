@@ -1,25 +1,11 @@
 # Homebrew Cask for OpenRappter Bar
 # To use: brew tap kody-w/tap && brew install --cask openrappter-bar
 #
-# This file lives in the repo as a reference. To publish:
-# 1. Create a repo: github.com/kody-w/homebrew-tap
-# 2. Copy this file to Casks/openrappter-bar.rb in that repo
-# 3. Update the version and sha256 after each release
-#
-# Step 3 is manual and was missed for three releases: the published tap served
-# 1.10.4 from 18 July while 1.11.0, 1.12.0 and 1.13.0 shipped DMGs, so
-# `brew install --cask openrappter-bar` handed people a build from three
-# versions back. Every Bar release note tells them to install exactly that way.
-#
-# Deliberately not guarded by a test. The Bar's version comes from the release
-# tag, not from any file in this repository, so an offline check would have
-# nothing trustworthy to compare against — and a tag-derived one is unreliable
-# in the shallow clones CI uses. A guard that cannot actually tell whether this
-# file is current would give assurance it has not earned.
-#
-# The check that would work is the one release-bar.yml should do at publish
-# time: it already builds the DMG and computes the sha256, so it is the only
-# place that knows both values without guessing.
+# Historical reference only; changing this file does not update the public tap.
+# release-bar.yml generates a cask proposal only after the complete receipt gate
+# and a checksum verification of the actual public DMG. The public tap must
+# review that proposal behind its own required Release Constitution check.
+# See macos/SIGNING.md. Never bump this to unbuilt/unreceipted artifact bytes.
 
 cask "openrappter-bar" do
   version "1.13.0"

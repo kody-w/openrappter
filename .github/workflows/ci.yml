@@ -165,6 +165,9 @@ jobs:
       # harness has no discovery: main.swift calls each suite by hand, and
       # SuiteRegistrationTests fails the build if one is ever left out.
       - run: swift build --product RunTests && .build/debug/RunTests
+      - name: Native DMG verification contract (mock signing and mounts)
+        working-directory: ${{ github.workspace }}
+        run: python3 -m unittest tests/test_bar_candidate.py -v
 
   python:
     name: Python (${{ matrix.python-version }})

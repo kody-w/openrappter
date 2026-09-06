@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: beta-release-data
@@ -28,7 +29,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node beta/scripts/harvest-release-data.mjs kody-w/openrappter
-      - name: Commit updated snapshot
+      - name: Propose updated snapshot for review
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name github-actions
@@ -38,5 +41,10 @@ jobs:
             echo "no snapshot changes"
             exit 0
           fi
+          branch="automation/beta-release-data-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git switch -c "$branch"
           git commit -m "beta: refresh release data snapshot"
-          git push origin HEAD:main
+          git push origin "$branch"
+          gh pr create --repo kody-w/openrappter --base main --head "$branch" \
+            --title "Refresh beta release data snapshot" \
+            --body "Generated release metadata only. Requires normal review and passing checks; this workflow does not merge or publish."

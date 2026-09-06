@@ -343,6 +343,30 @@ Skills are `SKILL.md` files stored in `~/.openrappter/skills/`. Skills get wrapp
 - **Config** (`typescript/src/config/`) — YAML/JSON loading, Zod schema validation, file watcher for live reload
 - **Providers** (`typescript/src/providers/`) — Model integrations: Anthropic, OpenAI, Ollama
 
+### Live memory persistence
+
+`MemoryAgent` (including `openrappter memory`) and Python's memory agents keep
+the existing `memory.json` dictionary schema. Mutations share a
+`memory.json.lock.sqlite3` sidecar: SQLite `BEGIN IMMEDIATE` covers the entire
+read–modify–write. Never delete, replace, or age-reclaim this lock database;
+process death releases its OS locks. SQLite acquisition waits at most five seconds
+(without blocking Node's event loop). Python retains its thread-level `RLock`.
+
+Success follows a private staged-file write, file fsync, atomic replacement and
+directory fsync. Newly created directory entries are synced too. Only a missing
+store is empty: corrupt JSON/UTF-8, invalid entry shapes, unreadable files and
+lock failures propagate errors without resetting data. Existing keys and
+unknown entry metadata are preserved. Linked store/lock files are rejected;
+directory aliases share a canonical lock path.
+
+Upgrade **all writers together**, stopping old flock-only Python and unlocked
+TypeScript processes first. Both runtimes must target the same file; the
+pre-existing Python `OPENRAPPTER_HOME` relocation limitation (#330) is unchanged.
+This protocol requires a local filesystem with reliable SQLite locking and
+directory fsync, not an unverified network filesystem. A failure after rename
+but before acknowledgement has an uncertain outcome; an unacknowledged fact
+may exist. Orphan `.pending` files are never read as committed memory.
+
 ## Language Parity
 
 TypeScript and Python implementations are designed to mirror each other. When modifying agent logic, check both:

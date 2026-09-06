@@ -408,11 +408,13 @@ Release builds are signed with Apple Developer ID and notarized by Apple.
 
 ### Release a new menu bar version
 
-```bash
-git tag v1.0.1-bar && git push origin v1.0.1-bar
-```
-
-This separate platform workflow builds a universal binary (Apple Silicon + Intel), packages a DMG, and creates a GitHub Release. npm and PyPI releases use the strict `vX.Y.Z` process documented in [CONTRIBUTING.md](CONTRIBUTING.md#releasing-npm-and-pypi-packages).
+Do not create a Bar tag manually. Build an immutable release candidate with
+`include_macos_bar` enabled; signing, notarization, and stapling happen before its
+digest is promoted through nightly → alpha → canary → beta.
+The **Release macOS Menu Bar** workflow then verifies the complete receipt chain,
+reuses those exact DMG bytes, checks Gatekeeper, and only then creates the native
+tag and release. It re-downloads the public DMG before preparing a separate,
+receipt-bound Homebrew review proposal. See [the delivery procedure](macos/SIGNING.md).
 
 Signing credential setup, health checks, rotation, and compromise response are
 documented in [`macos/SIGNING.md`](macos/SIGNING.md).

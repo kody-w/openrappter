@@ -140,9 +140,14 @@ are published under their explicit npm dist-tag and can never replace
 `latest`.
 
 The local preflight is deterministic and does not require registry access.
-Pushing the tag builds each npm and Python distribution once, reruns the
-cycle-11 CI and install gates against those files, and smoke-installs the exact
-artifacts. The dependency lock, pinned Python builders, and commit-derived
+Do not create distribution tags manually. Build an immutable candidate first,
+then obtain finalized nightly → alpha → canary → beta receipts for the same
+commit, version, and artifact digest. The canonical constitution-gated machinery
+creates the tag; the release workflow materializes those bytes without rebuilding,
+reruns the cycle-11 CI and install gates, and smoke-installs the exact artifacts.
+See [release rings](docs/release-rings.md) and [pinned release tools](RELEASING-PINNED.md).
+A tag alone is not evidence that publication completed.
+The dependency lock, pinned Python builders, and commit-derived
 `SOURCE_DATE_EPOCH` keep rerun artifacts reproducible. Registry publication is
 globally serialized. Before either registry is changed, both remote identities
 are checked; immediately before each publish, the workflow either confirms the

@@ -557,7 +557,7 @@ test('release workflows retain per-tag builds and globally serialize publication
   );
   assert.match(
     macosWorkflow,
-    /group: openrappter-release-macos-\$\{\{ github\.ref_name \}\}/,
+    /group: openrappter-release-macos-\$\{\{ inputs\.version \}\}/,
   );
   assert.match(
     workflow,
@@ -580,36 +580,35 @@ test('Install Smoke runs whenever any shell script changes', () => {
   );
 });
 
-test('macOS workflow validates tag provenance and never injects output into shell', () => {
+test('macOS release validates exact identity and never rebuilds promoted bytes', () => {
   const workflow = readFileSync(
     new URL('../.github/workflows/release-bar.yml', import.meta.url),
     'utf8',
   );
-  const validation = workflow.indexOf('- name: Validate exact macOS release tag');
+  const validation = workflow.indexOf('- name: Validate exact source and version');
   const checkout = workflow.search(/- uses: actions\/checkout@[0-9a-f]{40}/);
-  const provenance = workflow.indexOf('- name: Require release commit on main');
+  const provenance = workflow.indexOf('scripts/bar_candidate.py materialize');
   assert.ok(checkout >= 0 && validation > checkout && provenance > validation);
   assert.match(
     workflow,
-    /git merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/,
+    /git merge-base --is-ancestor "\$SOURCE_COMMIT" origin\/main/,
   );
   assert.ok(workflow.includes(
-    '^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-bar$',
+    '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$',
   ));
   assert.doesNotMatch(workflow, /run:\s*VERSION=\$\{\{/);
-  const versionedBuild =
-    /VERSION="\$RELEASE_VERSION"\s*\\\s*\n[\s\S]*?\bbash scripts\/build-mac-app\.sh/;
-  assert.match(workflow, versionedBuild);
-  // Prove the assertion is about the version wiring and the real build
-  // command, not merely two unrelated strings somewhere in the file.
-  assert.doesNotMatch(
-    workflow.replace('VERSION="$RELEASE_VERSION" \\', 'VERSION="1.2.3" \\'),
-    versionedBuild,
-  );
-  assert.doesNotMatch(
-    workflow.replace('bash scripts/build-mac-app.sh', 'bash scripts/other.sh'),
-    versionedBuild,
-  );
+  assert.match(workflow, /--local-artifacts-dir bar-release\/release-dist/);
+  assert.match(workflow, /--expected-sha "\$DMG_SHA256"/);
+  assert.doesNotMatch(workflow, /swift build|build-mac-app\.sh|notarytool submit|stapler staple|CODESIGN_IDENTITY/);
+  const parsed = parseYaml(workflow);
+  assert.deepEqual(parsed.jobs.publish.needs, ['release-constitution', 'verify-dmg']);
+  assert.equal(parsed.jobs['release-constitution'].name, 'Release Constitution');
+  const gate = parsed.jobs['release-constitution'].steps.map(step => step.run ?? '').join('\n');
+  assert.match(gate, /authority\/scripts\/release_gate.py/);
+  assert.match(gate, /--release bar-release\/release.json --remote/);
+  assert.match(gate, /--local-artifacts-dir bar-release\/release-dist/);
+  assert.match(gate, /validate_chain\(release,chain,load_policy/);
+  assert.equal(parsed.on.push, undefined);
 });
 
 test('registry publication reconciles exact artifacts and selects an explicit npm tag', () => {
@@ -720,7 +719,7 @@ test('macOS Bar release assets are immutable on rerun', () => {
     new URL('../.github/workflows/release-bar.yml', import.meta.url),
     'utf8',
   ));
-  const releaseStep = workflow.jobs['build-and-release'].steps.find(
+  const releaseStep = workflow.jobs.publish.steps.find(
     (step) => step.name === 'Upload DMG as release asset',
   );
   assert.equal(releaseStep.with.overwrite_files, false);
@@ -740,7 +739,7 @@ test('Windows Electron CI runs the complete smoke scope', () => {
 });
 
 test('privileged release actions are pinned to immutable commits', () => {
-  for (const workflowName of ['release.yml', 'release-bar.yml']) {
+  for (const workflowName of ['release.yml', 'release-bar.yml', 'build-bar-candidate.yml']) {
     const workflow = readFileSync(
       new URL(`../.github/workflows/${workflowName}`, import.meta.url),
       'utf8',
@@ -759,11 +758,17 @@ test('privileged release actions are pinned to immutable commits', () => {
   }
 });
 
-test('generated macOS release notes use the live Homebrew tap', () => {
+test('macOS delivery prepares the cask only after verifying the public download', () => {
   const workflow = readFileSync(
     new URL('../.github/workflows/release-bar.yml', import.meta.url),
     'utf8',
   );
-  assert.match(workflow, /brew tap kody-w\/tap/);
-  assert.doesNotMatch(workflow, /brew tap openrappter\/tap/);
+  const upload = workflow.indexOf('- name: Upload DMG as release asset');
+  const download = workflow.indexOf('gh release download');
+  const cask = workflow.indexOf('scripts/bar_candidate.py cask');
+  assert.ok(upload >= 0 && download > upload && cask > download);
+  assert.match(workflow, /downloaded-bar\/OpenRappter-Bar-\$\{RELEASE_VERSION\}\.dmg" \| sha256sum -c/);
+  assert.match(workflow, /--evidence bar-release\/authority-evidence.json/);
+  assert.match(workflow, /name: homebrew-proposal-/);
+  assert.doesNotMatch(workflow, /brew install|git push.*homebrew|gh pr merge/);
 });

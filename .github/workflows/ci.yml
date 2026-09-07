@@ -168,6 +168,14 @@ jobs:
       # harness has no discovery: main.swift calls each suite by hand, and
       # SuiteRegistrationTests fails the build if one is ever left out.
       - run: swift build --product RunTests && .build/debug/RunTests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - name: Install locked runtime schema test dependencies without lifecycle scripts
+        working-directory: ${{ github.workspace }}/typescript
+        run: npm ci --ignore-scripts
       - name: Native runtime and DMG contracts (mock signing and mounts)
         working-directory: ${{ github.workspace }}
         run: python3 -m unittest discover -s tests -p 'test_bar_*.py' -v

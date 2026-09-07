@@ -9,6 +9,8 @@ import re
 import sys
 import tarfile
 import urllib.request
+import bar_runtime
+import bar_runtime_chunks as chunks
 
 REPOSITORY = "kody-w/openrappter"
 AUTHORITY = "kody-w/openrappter-release-train"
@@ -48,10 +50,11 @@ def write_json(file, value):
     file.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
-def record(root, commit, version, notary):
+def record(root, commit, version, notary, parts_root=None):
     identity(commit, version)
     require(notary.get("status") == "Accepted", "notarization must be Accepted")
     require(re.fullmatch(r"[0-9a-fA-F-]{36}", notary.get("id", "")), "missing notarization submission")
+    bar_runtime.verify_bootstrap(root, commit, version, parts_root=parts_root)
     name = f"OpenRappter-Bar-{version}.dmg"
     dmg = regular(root, name)
     require(dmg.stat().st_size > 0, "empty DMG")
@@ -70,7 +73,7 @@ def record(root, commit, version, notary):
     return value
 
 
-def verify(root, commit, version, expected_sha=None):
+def verify(root, commit, version, expected_sha=None, parts_root=None):
     identity(commit, version)
     value = json.loads(regular(root, "macos-bar.json").read_text())
     require(set(value) == {"schema", "source_commit", "version", "release_tag", "architectures", "dmg", "notarization"}, "Bar manifest is not closed")
@@ -88,11 +91,12 @@ def verify(root, commit, version, expected_sha=None):
     require(digest(dmg.read_bytes()) == artifact["sha256"], "DMG checksum mismatch")
     require(expected_sha is None or expected_sha == artifact["sha256"], "DMG differs from constitution-checked artifact")
     require(regular(root, f"{name}.sha256").read_text() == f"{artifact['sha256']}  {name}\n", "DMG checksum sidecar mismatch")
+    bar_runtime.verify_bootstrap(root, commit, version, parts_root=parts_root)
     return value
 
 
-def verify_payload(root, commit, version, expected_sha=None):
-    value = verify(root, commit, version, expected_sha)
+def verify_payload(root, commit, version, expected_sha=None, parts_root=None):
+    value = verify(root, commit, version, expected_sha, parts_root)
     provenance = json.loads(regular(root, "provenance.json").read_text())
     require(provenance.get("schema") == "openrappter-candidate-provenance/v1" and provenance.get("channel") == "candidate" and provenance.get("stable") is False, "wrong candidate provenance")
     require(provenance.get("source_repository") == REPOSITORY and provenance.get("source_commit") == commit and provenance.get("source_tag") is None, "candidate source identity mismatch")
@@ -109,9 +113,16 @@ def verify_payload(root, commit, version, expected_sha=None):
         name = row["path"]
         require(name not in names and name not in {"provenance.json", "SHA256SUMS"}, "duplicate/self-referential candidate file")
         names.add(name)
-        require(digest(regular(root, name).read_bytes()) == row["sha256"], f"candidate bytes changed: {name}")
+        require(bar_runtime.file_sha(regular(root, name)) == row["sha256"], f"candidate bytes changed: {name}")
     require({"macos-bar.json", value["dmg"]["name"], value["dmg"]["name"] + ".sha256", "install.sh", "install.ps1"} <= names, "Bar/installers missing from promoted provenance")
-    require(f"openrappter-{version}.tgz" in names and any(n.endswith(".whl") for n in names) and any(n.endswith(".tar.gz") for n in names), "canonical package candidate bytes are required")
+    require({bar_runtime.METADATA, bar_runtime.HELPER} <= names, "sealed bootstrap resources missing from promoted provenance")
+    for architecture in bar_runtime.ARCHITECTURES:
+        file = bar_runtime.runtime_filename(version, architecture)
+        require(len(names.intersection({file, file + ".parts.json"})) == 1,
+                "both sealed bootstrap resources and runtimes require exactly one direct archive or descriptor in provenance")
+    require(not any(name.endswith(".part") for name in names), "runtime parts must be siblings outside the outer candidate")
+    require(f"openrappter-{version}.tgz" in names and any(n.endswith(".whl") for n in names)
+            and f"openrappter-{versions['pypi']}.tar.gz" in names, "canonical package candidate bytes are required")
     require({p.name for p in root.iterdir()} == names | {"provenance.json", "SHA256SUMS"}, "unlisted candidate files")
     checks = {}
     for line in regular(root, "SHA256SUMS").read_text().splitlines():
@@ -120,7 +131,7 @@ def verify_payload(root, commit, version, expected_sha=None):
         checks[match[2]] = match[1]
     require(set(checks) == names | {"provenance.json"}, "incomplete candidate checksums")
     for name, sha in checks.items():
-        require(digest(regular(root, name).read_bytes()) == sha, f"candidate checksum mismatch: {name}")
+        require(bar_runtime.file_sha(regular(root, name)) == sha, f"candidate checksum mismatch: {name}")
     return value
 
 
@@ -156,7 +167,7 @@ def resolve_identity(commit, version, fetch=fetch_json):
 
 
 def extract(bundle, destination, sha):
-    require(digest(bundle.read_bytes()) == sha, "candidate bundle checksum mismatch")
+    require(bar_runtime.file_sha(bundle) == sha, "candidate bundle checksum mismatch")
     require(not destination.exists(), "candidate destination must not exist")
     with tarfile.open(bundle, "r:gz") as archive:
         members = []
@@ -189,15 +200,25 @@ def materialize(output, commit, version):
             require(total <= MAX_BUNDLE, "candidate download exceeds limit")
             target.write(chunk)
     extract(bundle, output / "release-dist", release["artifact_sha256"])
-    value = verify_payload(output / "release-dist", commit, version)
+    root = output / "release-dist"
+    parts_root = output / "candidate-parts"
+    parts_root.mkdir()
+    metadata = bar_runtime.bootstrap_metadata(root, commit, version)
+    for architecture, variant in metadata["variants"].items():
+        artifact = variant["runtime"]
+        representation = bar_runtime.runtime_representation(root, artifact)
+        if representation.name != artifact["file"]:
+            descriptor = chunks.load_descriptor(representation, artifact, commit, version, architecture)
+            chunks.fetch_parts(descriptor, release["artifact_url"], parts_root)
+    value = verify_payload(root, commit, version, parts_root=parts_root)
     write_json(output / "release.json", release)
     write_json(output / "authority-evidence.json", evidence)
     return value
 
 
-def cask_proposal(root, commit, version, sha, evidence, chain, output):
+def cask_proposal(root, commit, version, sha, evidence, chain, output, parts_root=None):
     require(isinstance(sha, str) and HEX64.fullmatch(sha), "cask requires an exact DMG digest")
-    value = verify_payload(root, commit, version, sha)
+    value = verify_payload(root, commit, version, sha, parts_root)
     receipt = evidence["receipt"]
     require(canonical(receipt) == evidence["head"]["receipt_sha256"] and receipt["source_commit"] == commit and receipt["version"] == version, "cask receipt identity mismatch")
     require(receipt["receipt_kind"] == "promotion" and receipt["artifact_provenance"] == "github-candidate-bundle-sha256", "cask requires a finalized candidate receipt")
@@ -225,7 +246,7 @@ def cask_proposal(root, commit, version, sha, evidence, chain, output):
         '  depends_on macos: :sonoma\n  app "OpenRappter Bar.app"\n'
         '  zap trash: "~/Library/Preferences/com.openrappter.bar.plist"\nend\n'
     )
-    write_json(output / "receipt.json", {
+    proof = {
         "schema": "openrappter-bar-cask-proposal/v1", "source_commit": commit,
         "version": version, "url": url, "sha256": sha,
         "candidate_sha256": receipt["artifact_sha256"],
@@ -233,7 +254,9 @@ def cask_proposal(root, commit, version, sha, evidence, chain, output):
         "authority_receipt_sha256": evidence["head"]["receipt_sha256"],
         "authority_receipts": references,
         "publication": "proposal-only",
-    })
+    }
+    write_json(output / "receipt.json", proof)
+    write_json(output / "runtime-bootstrap-proof.json", proof)
 
 
 def main():
@@ -247,16 +270,17 @@ def main():
     parser.add_argument("--expected-sha")
     parser.add_argument("--evidence", type=Path)
     parser.add_argument("--chain", type=Path)
+    parser.add_argument("--parts-root", type=Path)
     args = parser.parse_args()
     if args.command == "record":
-        value = record(args.root, args.commit, args.version, json.loads(args.notary.read_text()))
+        value = record(args.root, args.commit, args.version, json.loads(args.notary.read_text()), args.parts_root)
     elif args.command == "verify":
-        value = verify_payload(args.root, args.commit, args.version, args.expected_sha)
+        value = verify_payload(args.root, args.commit, args.version, args.expected_sha, args.parts_root)
     elif args.command == "materialize":
         value = materialize(args.output, args.commit, args.version)
     else:
         require(args.expected_sha is not None, "cask requires the constitution-checked DMG digest")
-        cask_proposal(args.root, args.commit, args.version, args.expected_sha, json.loads(args.evidence.read_text()), json.loads(args.chain.read_text()), args.output)
+        cask_proposal(args.root, args.commit, args.version, args.expected_sha, json.loads(args.evidence.read_text()), json.loads(args.chain.read_text()), args.output, args.parts_root)
         return
     print(value["dmg"]["sha256"])
 

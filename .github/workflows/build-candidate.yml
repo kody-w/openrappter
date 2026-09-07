@@ -136,7 +136,21 @@ jobs:
           python -m pip install --disable-pip-version-check "build==1.5.1" "hatchling==1.31.0"
           (cd python && python -m build --no-isolation --outdir ../candidate)
           cp install.sh install.ps1 candidate/
-          if [ "$INCLUDE_BAR" = true ]; then cp bar-inputs/* candidate/; fi
+          : > candidate-part-checksums
+          if [ "$INCLUDE_BAR" = true ]; then
+            cp bar-inputs/* candidate/
+            python3 scripts/bar_runtime.py chunks --root candidate --parts-root candidate-parts \
+              --commit "$SOURCE_COMMIT" --version "$ts_version" > candidate-chunks.json
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          parts=json.load(open("candidate-chunks.json"))["parts"]
+          Path("candidate-part-checksums").write_text("".join(
+              f"{part['sha256']}  {part['file']}\n" for part in sorted(parts,key=lambda part:part["file"])))
+          PY
+          else
+            mkdir candidate-parts
+          fi
           node --input-type=module - "$SOURCE_COMMIT" "$ts_version" "$py_version" "$runtime_version" "$CHANNEL_VERSION" "$INTENDED_RELEASE_TAG" "$CANDIDATE_KIND" "$candidate_id" "$SOURCE_DATE_EPOCH" <<'NODE'
           import fs from 'node:fs';
           import { buildProvenance, verifyProvenance } from './scripts/candidate-bundle.mjs';
@@ -147,9 +161,12 @@ jobs:
           NODE
           (cd candidate && sha256sum $(find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort) > SHA256SUMS)
           if [ "$INCLUDE_BAR" = true ]; then
-            python scripts/bar_candidate.py verify --root candidate --commit "$SOURCE_COMMIT" --version "$ts_version"
+            python scripts/bar_candidate.py verify --root candidate --parts-root candidate-parts \
+              --commit "$SOURCE_COMMIT" --version "$ts_version"
           fi
           tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -czf candidate.tar.gz -C candidate .
+          # Fail before any candidate git push; never silently drop a runtime to fit.
+          python3 scripts/bar_runtime.py check-transport --bundle candidate.tar.gz
           bundle_sha="$(sha256sum candidate.tar.gz | cut -d' ' -f1)"
           echo "BUNDLE_SHA=$bundle_sha" >> "$GITHUB_ENV"
       - name: Commit immutable public candidate bundle
@@ -171,6 +188,17 @@ jobs:
             cp candidate.tar.gz "$target"
             cp candidate/provenance.json "$path/provenance.json"
           fi
+          # Parts, outer tar, provenance and index enter the SAME immutable git commit.
+          while read -r sha name; do
+            test -f "candidate-parts/$name" && test ! -L "candidate-parts/$name"
+            if [ -e "$path/$name" ] || [ -L "$path/$name" ]; then
+              test -f "$path/$name" && test ! -L "$path/$name"
+              cmp "candidate-parts/$name" "$path/$name"
+            else
+              cp "candidate-parts/$name" "$path/$name"
+            fi
+            printf '%s  %s\n' "$sha" "$path/$name" | sha256sum -c -
+          done < candidate-part-checksums
           index="candidates/$SOURCE_COMMIT/index.json"
           node --input-type=module - "$index" "$CANDIDATE_KIND" "$CANDIDATE_ID" "$BUNDLE_SHA" "$path" <<'NODE'
           import fs from 'node:fs';

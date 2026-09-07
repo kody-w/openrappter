@@ -40,12 +40,13 @@ public final class ChatWindowManager {
         self.viewModel = viewModel
         self.settingsViewModel = settingsViewModel
         let auth = settingsViewModel.accountViewModel.authService
+        let installer = VerifiedRuntimeInstaller.live()
         let runtime = RuntimePrerequisiteService(dependencies: RuntimePrerequisiteDependencies(
             desktopIsAuthoritative: {
                 viewModel.usesDesktopGateway || DesktopGatewayDiscovery.current() != nil
             },
             localRuntimeAvailable: { RuntimePrerequisiteService.localRuntimeAvailable() },
-            provisionVerifiedRuntime: { throw RuntimePrerequisiteError.unavailable },
+            provisionVerifiedRuntime: { try await installer.install() },
             startLocalRuntime: {
                 await viewModel.restartGatewayAfterAuthentication(
                     host: settingsViewModel.settingsStore.host,
@@ -72,7 +73,8 @@ public final class ChatWindowManager {
                     try await rpc.listMethods(), desktop: desktop
                 )
                 if desktop { auth.configure(rpcClient: rpc) }
-            }
+            },
+            bootstrapProgress: { installer.progress }
         ))
         onboardingViewModel = OnboardingViewModel(authService: auth, runtime: runtime)
 

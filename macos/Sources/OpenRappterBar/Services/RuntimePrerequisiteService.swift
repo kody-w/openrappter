@@ -9,7 +9,7 @@ public enum RuntimePrerequisiteError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unavailable:
-            return "A compatible OpenRappter runtime is not installed. Open the signed OpenRappter Desktop app, then retry. This Bar build has no receipt-verified runtime installer; setup has not completed."
+            return "The matching approved runtime is not available yet. Retry its verified download, or reconnect an already-authoritative OpenRappter Desktop."
         case .disconnected:
             return "The selected OpenRappter gateway did not become ready. Reopen that runtime and retry."
         case .incompatible:
@@ -27,9 +27,10 @@ struct RuntimePrerequisiteDependencies {
     var provisionVerifiedRuntime: () async throws -> Void
     var startLocalRuntime: () async throws -> Void
     var verifyGateway: (_ desktop: Bool) async throws -> Void
+    var bootstrapProgress: () -> RuntimeBootstrapProgress? = { nil }
 }
 
-/// Resolves prerequisites without downloading or choosing a different product.
+/// Coordinates receipt-verified first-launch provisioning for this Bar release.
 /// Launch and connection stay owned by AppViewModel's lifecycle coordinator.
 @MainActor
 public final class RuntimePrerequisiteService {
@@ -43,6 +44,7 @@ public final class RuntimePrerequisiteService {
     public var hasInstalledRuntime: Bool {
         desktopIsAuthoritative || dependencies.localRuntimeAvailable()
     }
+    public var bootstrapProgress: RuntimeBootstrapProgress? { dependencies.bootstrapProgress() }
 
     func prepare() async throws -> Bool {
         if desktopIsAuthoritative {
@@ -51,7 +53,11 @@ public final class RuntimePrerequisiteService {
             return true
         }
         if !dependencies.localRuntimeAvailable() {
-            try await dependencies.provisionVerifiedRuntime()
+            do {
+                try await dependencies.provisionVerifiedRuntime()
+            } catch {
+                guard desktopIsAuthoritative, !Task.isCancelled else { throw error }
+            }
             try Task.checkCancellation()
         }
         // An authoritative Desktop may appear while setup is in progress.
@@ -74,6 +80,8 @@ public final class RuntimePrerequisiteService {
         nodePath: String? = nil,
         files: FileManager = .default
     ) -> Bool {
+        if projectPath == nil, nodePath == nil,
+           VerifiedRuntimeInstaller.preferredInstallation() != nil { return true }
         guard let nodePath = nodePath ?? ProcessManager.resolveNodeExecutable(),
               files.isExecutableFile(atPath: nodePath) else { return false }
         let root = URL(fileURLWithPath: projectPath ?? ProcessManager.resolveProjectPath())

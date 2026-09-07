@@ -60,7 +60,7 @@ public final class OnboardingViewModel {
         environment = LocalEnvironmentFile(homeDirectory: homeDir)
         configURL = URL(fileURLWithPath: homeDir).appendingPathComponent("config.json")
         files = .live
-        setupTimeout = 60
+        setupTimeout = 20 * 60
         autoStartInstaller = {
             try await LaunchAgentManager(launchAgentsDir: launchAgentsDir).setEnabled(
                 true, nodePath: "", projectPath: "", port: AppConstants.defaultPort
@@ -104,6 +104,7 @@ public final class OnboardingViewModel {
     }
 
     public var isComplete: Bool { currentStep == .done && daemonStarted }
+    public var bootstrapProgress: RuntimeBootstrapProgress? { runtime.bootstrapProgress }
 
     public func advance() {
         switch currentStep {

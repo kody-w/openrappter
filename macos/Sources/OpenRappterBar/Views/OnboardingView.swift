@@ -65,6 +65,10 @@ public struct OnboardingView: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+            Text("If needed, setup downloads the exact approved runtime for this signed Bar release. No Node installation or terminal is required.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
 
             Spacer().frame(height: 8)
 
@@ -257,6 +261,16 @@ public struct OnboardingView: View {
                 .font(.title3).bold()
 
             VStack(alignment: .leading, spacing: 12) {
+                if let progress = viewModel.bootstrapProgress {
+                    Text(progress.message).font(.callout)
+                    if let fraction = progress.fraction {
+                        ProgressView(value: fraction)
+                    }
+                    if let bytes = progress.bytes {
+                        Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) + " downloaded")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 statusRow(label: "Compatible gateway and chat methods", done: viewModel.daemonStarted)
                 Text("OpenRappter Desktop remains authoritative when it is running. Otherwise, Bar uses the installed OpenRappter runtime.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -275,9 +289,9 @@ public struct OnboardingView: View {
                 ProgressView()
                 Button("Cancel", role: .cancel) { viewModel.cancelRuntimeSetup() }
             } else {
-                Button("Retry runtime setup") { viewModel.retryRuntimeSetup() }
+                Button("Retry verified setup") { viewModel.retryRuntimeSetup() }
                     .buttonStyle(.borderedProminent)
-                Text("No unverified runtime is downloaded. Open the signed Desktop runtime and retry, or finish installing a receipt-verified compatible runtime.")
+                Text("Only exact checksum-verified bytes with nightly, alpha, canary, and beta approval may be installed. A pending release stays blocked until its approvals are available.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

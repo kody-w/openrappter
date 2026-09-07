@@ -130,7 +130,7 @@ func runOnboardingRuntimeTests() async {
             try expect(!model.isComplete)
             try expectEqual(backend.provisions, 1)
             try expectEqual(backend.starts, 0)
-            try expect(model.errorMessage?.contains("not installed") == true)
+            try expect(model.errorMessage?.contains("not available") == true)
         }
 
         await test("provisioning success is rechecked rather than trusted") {

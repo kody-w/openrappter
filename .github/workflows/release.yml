@@ -141,6 +141,7 @@ jobs:
     name: Flight Recorder Windows storage gate
     needs: preflight
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -169,7 +170,8 @@ jobs:
 
       - name: Validate TypeScript Windows storage
         working-directory: typescript
-        run: npx vitest run src/flight-recorder/windows-storage.test.ts src/agents/MemoryAgent.persistence.test.ts src/memory/json-store.test.ts src/cli/__tests__/memory.test.ts
+        timeout-minutes: 6
+        run: npx vitest run src/flight-recorder/windows-storage.test.ts src/agents/MemoryAgent.persistence.test.ts src/memory/json-store.test.ts src/cli/__tests__/memory.test.ts --maxWorkers=2 --minWorkers=1 --reporter=verbose --testTimeout=30000 --hookTimeout=30000
 
       - name: Build the Windows TypeScript runtime
         working-directory: typescript

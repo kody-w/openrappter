@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: flight-recorder-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   gate:
     name: Cross-runtime gate
@@ -63,6 +67,7 @@ jobs:
   windows:
     name: Native Windows storage
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -91,7 +96,8 @@ jobs:
 
       - name: Validate TypeScript Windows storage
         working-directory: typescript
-        run: npx vitest run src/flight-recorder/windows-storage.test.ts src/agents/MemoryAgent.persistence.test.ts src/memory/json-store.test.ts src/cli/__tests__/memory.test.ts
+        timeout-minutes: 6
+        run: npx vitest run src/flight-recorder/windows-storage.test.ts src/agents/MemoryAgent.persistence.test.ts src/memory/json-store.test.ts src/cli/__tests__/memory.test.ts --maxWorkers=2 --minWorkers=1 --reporter=verbose --testTimeout=30000 --hookTimeout=30000
 
       - name: Build the Windows TypeScript runtime
         working-directory: typescript

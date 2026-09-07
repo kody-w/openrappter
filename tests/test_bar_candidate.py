@@ -245,9 +245,10 @@ class BarCandidateTests(unittest.TestCase):
             bar.cask_proposal(self.payload, COMMIT, VERSION, self.record["dmg"]["sha256"], evidence, chain[1:], self.work / "bad-proposal")
 
     def test_generated_proof_and_both_archives_pass_the_actual_bootstrap_consumer(self):
+        parts, _ = self.chunked_payload()
         evidence, chain = self.evidence(), self.chain()
         output = self.work / "proposal"
-        bar.cask_proposal(self.payload, COMMIT, VERSION, self.record["dmg"]["sha256"], evidence, chain, output)
+        bar.cask_proposal(self.payload, COMMIT, VERSION, self.record["dmg"]["sha256"], evidence, chain, output, parts_root=parts)
         documents = {}
         for item in chain:
             documents[f"https://raw.githubusercontent.com/{bar.AUTHORITY}/{item['authority_commit']}/{item['receipt_path']}"] = item["receipt"]
@@ -261,8 +262,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-const [bundle, metadataFile, proofFile, documentsFile, helper, work] = process.argv.slice(1);
-const { validateMetadata, verifyApproval, extractCandidate, extractRuntime, fileDigest } = await import(pathToFileURL(helper));
+const [bundle, metadataFile, proofFile, documentsFile, helper, work, partsDirectory] = process.argv.slice(1);
+const { validateMetadata, verifyApproval, extractCandidate, assembleRuntimeParts, extractRuntime, fileDigest } = await import(pathToFileURL(helper));
 const read = async file => JSON.parse(await fs.readFile(file));
 const metadata = await read(metadataFile), proof = await read(proofFile), documents = await read(documentsFile);
 const fetchJSON = async url => {
@@ -275,6 +276,16 @@ for (const arch of ['arm64', 'x86_64']) {
   validateMetadata(metadata, arch, metadata.version, metadata.source_commit);
   const signal = new AbortController().signal;
   const selected = await extractCandidate(bundle, path.join(work, arch), metadata, arch, proof, signal);
+  assert.ok(selected.parts, 'the producer descriptor must be recognized by the real consumer');
+  await assembleRuntimeParts(selected.parts, approval, selected.archive, metadata, arch,
+    async (url, destination, sha, progress, maxBytes) => {
+      const name = path.basename(new URL(url).pathname);
+      assert.equal(url, approval.url.slice(0, approval.url.lastIndexOf('/') + 1) + name);
+      const source = path.join(partsDirectory, name);
+      assert.equal(await fileDigest(source), sha);
+      assert.equal((await fs.stat(source)).size, maxBytes);
+      await fs.copyFile(source, destination);
+    }, signal);
   assert.equal(await fileDigest(selected.archive), metadata.variants[arch].runtime.sha256);
   const runtime = await extractRuntime(selected.archive, path.join(work, `${arch}-runtime`), signal);
   assert.equal((await read(path.join(runtime, 'package.json'))).version, metadata.version);
@@ -289,7 +300,7 @@ await assert.rejects(extractCandidate(bundle, path.join(work, 'tampered-pin'), c
             [os.environ.get("BAR_TEST_NODE", "node"), "--input-type=module", "-e", script,
              str(self.bundle()), str(self.payload / runtime.METADATA),
              str(output / "runtime-bootstrap-proof.json"), str(self.work / "documents.json"),
-             str(ROOT / "macos/Resources" / runtime.HELPER), str(consumer_work)],
+             str(ROOT / "macos/Resources" / runtime.HELPER), str(consumer_work), str(parts)],
             capture_output=True, text=True,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

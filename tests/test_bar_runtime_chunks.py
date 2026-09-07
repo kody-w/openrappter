@@ -3,8 +3,10 @@ import copy
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
 import unittest
 import uuid
 
@@ -62,6 +64,41 @@ class RuntimeChunkTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             chunks.verify_parts(descriptor, parts, output)
         self.assertEqual(runtime.file_sha(output), pin["sha256"], "existing output is never replaced")
+        script = """
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+const [root, descriptorFile, partsRoot, candidateURL, destination] = process.argv.slice(1);
+const { validateRuntimeParts, assembleRuntimeParts, fileDigest } = await import(pathToFileURL(path.join(root, 'macos/Resources/verified-runtime-bootstrap.mjs')));
+const Ajv = createRequire(path.join(root, 'typescript/package.json'))('ajv/dist/2020').default;
+const schema = JSON.parse(await fs.readFile(path.join(root, 'macos/Resources/runtime-chunks.schema.json')));
+const descriptor = JSON.parse(await fs.readFile(descriptorFile));
+const validate = new Ajv({ allErrors: true }).compile(schema);
+assert.ok(validate(descriptor), JSON.stringify(validate.errors));
+const metadata = { source_commit: descriptor.source_commit, version: descriptor.version,
+  variants: { arm64: { runtime: { file: descriptor.file, sha256: descriptor.sha256, size: descriptor.size } } } };
+validateRuntimeParts(descriptor, metadata, 'arm64');
+let requested = 0;
+await assembleRuntimeParts(descriptor, { url: candidateURL, sha256: 'c'.repeat(64) }, destination, metadata, 'arm64',
+  async (url, target, sha, progress, maxBytes) => {
+    const expected = descriptor.parts[requested++];
+    assert.equal(url, candidateURL.slice(0, candidateURL.lastIndexOf('/') + 1) + expected.file);
+    assert.equal(sha, expected.sha256);
+    assert.equal(maxBytes, expected.size);
+    await fs.copyFile(path.join(partsRoot, expected.file), target);
+  }, new AbortController().signal);
+assert.equal(requested, 3);
+assert.equal(await fileDigest(destination), descriptor.sha256);
+assert.equal((await fs.stat(destination)).size, descriptor.size);
+"""
+        result = subprocess.run(
+            [os.environ.get("BAR_TEST_NODE", "node"), "--input-type=module", "-e", script, str(ROOT),
+             str(self.work / "large.parts.json"), str(parts), self.url, str(self.work / "consumer-reassembled.tar.gz")],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_part_order_names_paths_extra_fields_and_invalid_counts_are_refused(self):
         cases = []

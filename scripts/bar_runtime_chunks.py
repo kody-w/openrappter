@@ -11,6 +11,7 @@ import uuid
 
 CHUNK_BYTES = 32 * 1024 * 1024
 MAX_PARTS = 64
+MAX_RUNTIME_BYTES = 512 * 1024 * 1024
 SCHEMA = "openrappter-runtime-chunks/v1"
 HEX40 = re.compile(r"[0-9a-f]{40}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -47,7 +48,7 @@ def validate_descriptor(value, artifact, commit, version, architecture):
     require(value["file"] == artifact["file"] == expected_file
             and value["sha256"] == artifact["sha256"] and value["size"] == artifact["size"], "chunk descriptor differs from sealed runtime")
     require(isinstance(value["sha256"], str) and HEX64.fullmatch(value["sha256"])
-            and type(value["size"]) is int and 0 < value["size"] <= CHUNK_BYTES * MAX_PARTS, "invalid whole-runtime chunk pin")
+            and type(value["size"]) is int and 0 < value["size"] <= MAX_RUNTIME_BYTES, "invalid whole-runtime chunk pin")
     parts = value["parts"]
     require(isinstance(parts, list) and 1 <= len(parts) <= MAX_PARTS, "runtime chunk count must be 1..64")
     total = 0

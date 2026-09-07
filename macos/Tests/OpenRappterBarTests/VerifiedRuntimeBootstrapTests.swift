@@ -143,6 +143,32 @@ private final class BootstrapFixture {
 @MainActor
 func runVerifiedRuntimeBootstrapTests() async {
     await suite("Verified first-launch runtime bootstrap") {
+        await test("native activation is authorized before the helper closes stdout") {
+            let fixture = try BootstrapFixture()
+            defer { fixture.clean() }
+            let lines = AsyncCollector<String>()
+            try await BootstrapProcess().run(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "printf '{\"phase\":\"ready-to-activate\"}\\n'; IFS= read -r answer; test \"$answer\" = '{\"action\":\"commit\"}'"],
+                directory: fixture.root, timeout: 3,
+                onLine: { value in Task { await lines.append(value) } },
+                shouldCommit: { true }
+            )
+            try expectEqual(try await lines.waitForCount(1), [#"{"phase":"ready-to-activate"}"#])
+        }
+
+        await test("a pending activation journal cannot masquerade as a committed preferred runtime") {
+            let fixture = try BootstrapFixture()
+            defer { fixture.clean() }
+            try fixture.writeInstallation()
+            let journal = fixture.home.appendingPathComponent(".openrappter/runtime-bootstrap-transaction.json")
+            try Data("{}".utf8).write(to: journal)
+            try expect(VerifiedRuntimeInstaller.hasPendingActivation(homeDirectory: fixture.home.path))
+            try expectNil(try VerifiedRuntimeInstaller.readInstallation(
+                metadata: fixture.decoded(), architecture: fixture.architecture, home: fixture.home
+            ))
+        }
+
         await test("positive native path verifies archive and binary before running sealed helper") {
             let fixture = try BootstrapFixture()
             defer { fixture.clean() }

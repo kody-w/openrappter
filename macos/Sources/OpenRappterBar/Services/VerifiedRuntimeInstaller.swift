@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import Security
 
@@ -250,6 +251,7 @@ public final class VerifiedRuntimeInstaller {
                             self.lastHelperFailure = (event["message"] as? String).map { String($0.prefix(512)) }
                         }
                         self.update(phase: phase, bytes: (event["bytes"] as? NSNumber)?.int64Value,
+                                    total: (event["totalBytes"] as? NSNumber)?.int64Value,
                                     error: self.lastHelperFailure)
                     }
                 },
@@ -308,6 +310,7 @@ public final class VerifiedRuntimeInstaller {
     }
 
     static func readInstallation(metadata: RuntimeBootstrapMetadata, architecture: String, home: URL) throws -> VerifiedRuntimeLocation? {
+        guard !hasPendingActivation(homeDirectory: home.path) else { return nil }
         let marker = home.appendingPathComponent(".openrappter/runtime-bootstrap-installation.json")
         guard FileManager.default.fileExists(atPath: marker.path) else { return nil }
         let value = try JSONSerialization.jsonObject(with: boundedData(marker, maximum: 64 * 1024)) as? [String: Any]
@@ -339,6 +342,13 @@ public final class VerifiedRuntimeInstaller {
     }
 
     private static let MAX_PACKAGE_BYTES = 1024 * 1024
+
+    public static func hasPendingActivation(homeDirectory: String = NSHomeDirectory()) -> Bool {
+        let path = URL(fileURLWithPath: homeDirectory)
+            .appendingPathComponent(".openrappter/runtime-bootstrap-transaction.json").path
+        var status = stat()
+        return lstat(path, &status) == 0 || errno != ENOENT
+    }
 
     private static func signedContext(bundle: Bundle) throws -> RuntimeBootstrapContext {
         guard let resources = bundle.resourceURL,
@@ -415,7 +425,7 @@ public final class VerifiedRuntimeInstaller {
 
     private func update(phase: String, bytes: Int64? = nil, total: Int64? = nil, error: String? = nil) {
         let order = ["checking-release", "downloading-node", "verifying-node", "checking-approval",
-                     "downloading-runtime", "verifying-runtime", "extracting-runtime", "checking-runtime",
+                     "downloading-runtime", "verifying-runtime", "downloading-runtime-parts", "extracting-runtime", "checking-runtime",
                      "ready-to-activate", "installed", "cancelled", "error"]
         if let previous = progress, let old = order.firstIndex(of: previous.phase),
            let next = order.firstIndex(of: phase), next < old { return }
@@ -426,6 +436,7 @@ public final class VerifiedRuntimeInstaller {
             "checking-approval": "Verifying nightly → alpha → canary → beta receipts…",
             "downloading-runtime": "Downloading the exact approved candidate…",
             "verifying-runtime": "Checking candidate provenance and runtime hashes…",
+            "downloading-runtime-parts": "Downloading the verified runtime parts…",
             "extracting-runtime": "Safely unpacking the matching runtime…",
             "checking-runtime": "Checking the prebuilt runtime without installing dependencies…",
             "ready-to-activate": "Checking Desktop authority before activation…",

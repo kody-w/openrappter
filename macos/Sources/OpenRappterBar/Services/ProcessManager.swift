@@ -297,6 +297,10 @@ public final class ProcessManager: Observable {
         }
 
         guard generation == lifecycleGeneration else { return .superseded }
+        if VerifiedRuntimeInstaller.hasPendingActivation() {
+            state = .stopped
+            throw RuntimeBootstrapError.rejected("Interrupted runtime setup must finish recovery before the gateway can start. Retry setup in the Bar.")
+        }
         guard let nodePath = resolveNodePath() else {
             if generation == lifecycleGeneration { state = .stopped }
             throw ProcessManagerError.nodeNotFound

@@ -104,6 +104,9 @@
         nightly, alpha, canary, and beta receipt chain and the exact runtime
         payload. Missing approvals or altered bytes stop setup; there is no
         fallback to a floating package version or downloaded main-branch script.
+        Large archives use bounded chunks from the same immutable candidate
+        commit. Both each chunk and the reassembled archive must match their
+        recorded SHA-256 digests before extraction or activation.
       </p>
       <p class="mt-4 leading-8 text-zinc-300">
         Setup stages files privately, preserves custom runtime selections, and

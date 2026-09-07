@@ -69,7 +69,7 @@
             "file": {
               "type": "string",
               "pattern": "^openrappter-runtime-[0-9]+\\.[0-9]+\\.[0-9]+-darwin-(arm64|x86_64)\\.tar\\.gz$",
-              "description": "A flat candidate file recorded in provenance.json and SHA256SUMS. Its tar uses one runtime/ root, includes package.json, dist, UI and all production node_modules/native dependencies for the pinned Node architecture/ABI. Use regular files/directories and contained links; no special or sparse members. No npm install/build runs on the customer's machine."
+              "description": "Either a flat archive in the candidate or an openrappter-runtime-chunks/v1 descriptor at this filename plus .parts.json. The descriptor is recorded in provenance.json and SHA256SUMS; each 32-MiB part is a sibling of the candidate bundle in the same immutable commit. Reassembly must match this sealed size and SHA-256. The tar uses one runtime/ root with package.json, dist, UI and every production/native dependency for the pinned Node ABI. No npm install/build runs on the customer's machine."
             },
             "sha256": { "$ref": "#/$defs/sha256" },
             "size": { "type": "integer", "minimum": 1, "maximum": 536870912 }

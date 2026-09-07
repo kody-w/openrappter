@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import { randomBytes } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import {
   bytesDigest, canonical, digest, extractCandidate, extractRuntime, installRuntime,
-  recoverActivation, validateMetadata, verifyApproval,
+  recoverActivation, validateMetadata, validateRuntimeParts, verifyApproval,
 } from '../Resources/verified-runtime-bootstrap.mjs';
 
 const COMMIT = 'a'.repeat(40);
@@ -34,7 +35,7 @@ function tar(entries) {
   return gzipSync(Buffer.concat(chunks));
 }
 
-async function fixture(t, runtimeEntries) {
+async function fixture(t, runtimeEntries, { chunked = false } = {}) {
   const root = path.join(process.cwd(), `.bootstrap-test-${crypto.randomUUID()}`);
   await fs.mkdir(root, { mode: 0o700 });
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -73,6 +74,25 @@ async function fixture(t, runtimeEntries) {
     })),
   };
   const dmg = Buffer.from('fixture notarized DMG');
+  const partPayloads = new Map();
+  const descriptors = new Map();
+  const runtimeFiles = Object.entries(metadata.variants).flatMap(([architecture, variant]) => {
+    if (!chunked) return [[variant.runtime.file, runtime]];
+    const parts = [];
+    for (let offset = 0; offset < runtime.length; offset += 32 * 1024 * 1024) {
+      const bytes = runtime.subarray(offset, offset + 32 * 1024 * 1024);
+      const sha = bytesDigest(bytes);
+      const file = `runtime-${architecture}-${String(parts.length).padStart(4, '0')}-${sha}.part`;
+      parts.push({ file, sha256: sha, size: bytes.length });
+      partPayloads.set(file, bytes);
+    }
+    const descriptor = {
+      schema: 'openrappter-runtime-chunks/v1', source_commit: COMMIT, version: VERSION,
+      architecture, ...variant.runtime, parts,
+    };
+    descriptors.set(architecture, descriptor);
+    return [[`${variant.runtime.file}.parts.json`, Buffer.from(JSON.stringify(descriptor))]];
+  });
   const candidateFiles = new Map([
     [`OpenRappter-Bar-${VERSION}.dmg`, dmg],
     [`OpenRappter-Bar-${VERSION}.dmg.sha256`, Buffer.from(`${bytesDigest(dmg)}  OpenRappter-Bar-${VERSION}.dmg\n`)],
@@ -81,7 +101,7 @@ async function fixture(t, runtimeEntries) {
     [`openrappter-${VERSION}.tar.gz`, Buffer.from('fixture sdist')],
     ['install.sh', Buffer.from('fixture verified installer')],
     ['install.ps1', Buffer.from('fixture verified installer')],
-    ...Object.values(metadata.variants).map(variant => [variant.runtime.file, runtime]),
+    ...runtimeFiles,
   ]);
   const bar = {
     schema: 'openrappter-bar-candidate/v1', source_commit: COMMIT, version: VERSION,
@@ -155,6 +175,11 @@ async function fixture(t, runtimeEntries) {
       return structuredClone(documents.get(url));
     },
     downloadArtifact: async (url, destination, expectedSHA) => {
+      const base = candidateURL.slice(0, candidateURL.lastIndexOf('/') + 1);
+      if (url !== candidateURL && url.startsWith(base) && partPayloads.has(url.slice(base.length))) {
+        await fs.writeFile(destination, partPayloads.get(url.slice(base.length)), { flag: 'wx' });
+        return;
+      }
       assert.equal(url, candidateURL);
       assert.equal(expectedSHA, sha);
       await fs.writeFile(destination, candidate, { flag: 'wx' });
@@ -165,7 +190,7 @@ async function fixture(t, runtimeEntries) {
       assert.equal(JSON.parse(await fs.readFile(path.join(directory, 'package.json'))).version, VERSION);
     },
   };
-  return { root, home, workspace, nodeExecutable, metadata, runtime, candidate, proof, documents, options, events, executions: () => executions };
+  return { root, home, workspace, nodeExecutable, metadata, runtime, candidate, proof, documents, options, events, partPayloads, descriptors, executions: () => executions };
 }
 
 test('canonical receipt hashes match the authority ASCII JSON contract', () => {
@@ -222,6 +247,60 @@ test('positive first launch installs without npm, existing Node, or a runtime in
   assert.deepEqual(stored, marker);
   assert.equal(f.events.at(-1), 'installed');
   assert.equal(await fs.stat(path.join(f.home, '.local/share/openrappter/releases', marker.installation_id, 'node/bin/node')).then(s => s.mode & 0o777), 0o700);
+});
+
+test('chunked first launch reassembles only the selected architecture from the same immutable commit', async t => {
+  const f = await fixture(t, undefined, { chunked: true });
+  const urls = [];
+  const download = f.options.downloadArtifact;
+  f.options.downloadArtifact = async (...args) => { urls.push(args[0]); return download(...args); };
+  const marker = await installRuntime(f.options);
+  assert.equal(marker.runtime_sha256, bytesDigest(f.runtime));
+  assert.equal(f.executions(), 1);
+  assert.equal(urls.length, 2);
+  assert.ok(urls[1].includes(`/runtime-arm64-0000-${bytesDigest(f.runtime)}.part`));
+  assert.equal(urls[0].slice(0, urls[0].lastIndexOf('/')), urls[1].slice(0, urls[1].lastIndexOf('/')));
+  assert.ok(f.events.includes('downloading-runtime-parts'));
+});
+
+test('a tampered runtime chunk never reaches extraction or execution', async t => {
+  const f = await fixture(t, undefined, { chunked: true });
+  const descriptor = f.descriptors.get('arm64');
+  f.partPayloads.set(descriptor.parts[0].file, Buffer.alloc(descriptor.parts[0].size));
+  await assert.rejects(installRuntime(f.options), /part checksum/);
+  assert.equal(f.executions(), 0);
+  await assert.rejects(fs.lstat(path.join(f.home, '.local/share/openrappter/current')), { code: 'ENOENT' });
+});
+
+test('multiple verified chunks preserve a complete archive across the 32-MiB boundary', async t => {
+  const f = await fixture(t, [
+    { name: 'runtime/package.json', data: JSON.stringify({ name: 'openrappter', version: VERSION }) },
+    { name: 'runtime/dist/index.js', data: 'export const ready = true;' },
+    { name: 'runtime/assets/payload.bin', data: randomBytes(33 * 1024 * 1024) },
+  ], { chunked: true });
+  assert.equal(f.descriptors.get('arm64').parts.length, 2);
+  assert.equal(f.descriptors.get('arm64').parts[0].size, 32 * 1024 * 1024);
+  const marker = await installRuntime(f.options);
+  assert.equal(marker.runtime_sha256, bytesDigest(f.runtime));
+  const current = path.join(f.home, '.local/share/openrappter/current');
+  assert.equal((await fs.stat(path.join(current, 'assets/payload.bin'))).size, 33 * 1024 * 1024);
+});
+
+test('chunk descriptors refuse traversal, wrong identity, order, and oversized parts', async t => {
+  const f = await fixture(t, undefined, { chunked: true });
+  for (const mutate of [
+    value => { value.source_commit = 'f'.repeat(40); },
+    value => { value.parts[0].file = '../escape'; },
+    value => { value.parts[0].file = value.parts[0].file.replace('-0000-', '-0001-'); },
+    value => { value.parts[0].size = 33 * 1024 * 1024; },
+    value => { value.parts[0].size -= 1; },
+    value => { value.parts.push(structuredClone(value.parts[0])); },
+    value => { value.parts[0].url = 'https://example.com/part'; },
+  ]) {
+    const value = structuredClone(f.descriptors.get('arm64'));
+    mutate(value);
+    assert.throws(() => validateRuntimeParts(value, f.metadata, 'arm64'));
+  }
 });
 
 test('default offline smoke executes only dependencies carried in the verified archive', async t => {
@@ -325,6 +404,34 @@ test('custom runtime selection is not overwritten', async t => {
   await fs.writeFile(config, previous);
   await assert.rejects(installRuntime(f.options), /custom runtime/);
   assert.equal(await fs.readFile(config, 'utf8'), previous);
+});
+
+test('an absolute pin to an older managed release cannot falsely activate a different runtime', async t => {
+  const f = await fixture(t);
+  const privateData = path.join(f.home, '.openrappter');
+  await fs.mkdir(privateData);
+  const original = JSON.stringify({ projectPath: path.join(f.home, '.local/share/openrappter/releases/older/runtime') });
+  await fs.writeFile(path.join(privateData, 'config.json'), original);
+  await assert.rejects(installRuntime(f.options), /custom runtime/);
+  assert.equal(await fs.readFile(path.join(privateData, 'config.json'), 'utf8'), original);
+  await assert.rejects(fs.lstat(path.join(f.home, '.local/share/openrappter/current')), { code: 'ENOENT' });
+});
+
+test('post-marker recovery finalizes the verified installation without a delayed destructive rollback', async t => {
+  const f = await fixture(t);
+  const marker = await installRuntime(f.options);
+  const privateData = path.join(f.home, '.openrappter');
+  const current = path.join(f.home, '.local/share/openrappter/current');
+  const journal = path.join(privateData, 'runtime-bootstrap-transaction.json');
+  await fs.writeFile(journal, JSON.stringify({
+    schema: 'openrappter-bootstrap-activation/v1', installation_id: marker.installation_id,
+    new_current: await fs.readlink(current), previous_current: null, previous_marker: null,
+  }));
+  f.options.getJSON = async () => { throw new Error('offline after completed activation'); };
+  const recovered = await installRuntime(f.options);
+  assert.deepEqual(recovered, marker);
+  assert.equal(JSON.parse(await fs.readFile(path.join(current, 'package.json'))).version, VERSION);
+  await assert.rejects(fs.lstat(journal), { code: 'ENOENT' });
 });
 
 test('interrupted activation is rolled back from its journal without trusting a partial marker', async t => {

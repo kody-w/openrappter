@@ -270,10 +270,8 @@ export async function resolveCopilotAuth(options?: {
 
     // Also save to .env for backward compatibility
     try {
-      const { loadEnv, saveEnv } = await import('./env.js');
-      const env = await loadEnv();
-      env.GITHUB_TOKEN = token;
-      await saveEnv(env);
+      const { updateEnv } = await import('./env.js');
+      await updateEnv({ GITHUB_TOKEN: token });
     } catch { /* non-fatal */ }
 
     if (!options?.silent) {

@@ -9,10 +9,10 @@ import { openrappterHome, openrappterPath } from '../infra/openrappter-home.js';
  */
 
 import { randomUUID } from 'crypto';
-import fs from 'fs/promises';
 import path from 'path';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata, MemoryEcho } from './types.js';
+import { MemoryStoreError, readMemoryFile, withMemoryTransaction, writeMemoryFile } from '../memory/json-store.js';
 
 
 export const __manifest__ = {
@@ -47,7 +47,6 @@ interface MemoryEntry {
 }
 
 export class MemoryAgent extends BasicAgent {
-  private memoryDir: string;
   private memoryFile: string;
 
   constructor(memoryDir = openrappterHome()) {
@@ -89,8 +88,7 @@ export class MemoryAgent extends BasicAgent {
     };
     super('Memory', metadata);
 
-    this.memoryDir = memoryDir;
-    this.memoryFile = path.join(this.memoryDir, 'memory.json');
+    this.memoryFile = path.join(memoryDir, 'memory.json');
   }
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
@@ -115,13 +113,14 @@ export class MemoryAgent extends BasicAgent {
 
     switch (action) {
       case 'remember':
-        return this.remember(message || query || '', theme, importance, tags);
+        return withMemoryTransaction(this.memoryFile, () =>
+          this.remember(message || query || '', theme, importance, tags));
       case 'recall':
         return this.recall(query || message || '');
       case 'list':
         return this.listMemories();
       case 'forget':
-        return this.forget(query || message || '');
+        return withMemoryTransaction(this.memoryFile, () => this.forget(query || message || ''));
       default:
         // Default to recall if query provided, otherwise list
         if (query || message) {
@@ -141,31 +140,18 @@ export class MemoryAgent extends BasicAgent {
 
   /** Load all memory entries — used by Assistant for context injection */
   static async loadAllMemories(): Promise<Record<string, MemoryEntry>> {
-    const memFile = openrappterPath('memory.json');
-    try {
-      const data = await fs.readFile(memFile, 'utf-8');
-      return JSON.parse(data);
-    } catch {
-      return {};
-    }
+    return readMemoryFile<MemoryEntry>(openrappterPath('memory.json'));
   }
 
-  private async loadMemory(): Promise<Record<string, MemoryEntry>> {
-    try {
-      await fs.mkdir(this.memoryDir, { recursive: true });
-      const data = await fs.readFile(this.memoryFile, 'utf-8');
-      return JSON.parse(data);
-    } catch {
-      return {};
-    }
+  private loadMemory(): Record<string, MemoryEntry> {
+    return readMemoryFile<MemoryEntry>(this.memoryFile);
   }
 
-  private async saveMemory(memory: Record<string, MemoryEntry>): Promise<void> {
-    await fs.mkdir(this.memoryDir, { recursive: true });
-    await fs.writeFile(this.memoryFile, JSON.stringify(memory, null, 2));
+  private saveMemory(memory: Record<string, MemoryEntry>): void {
+    writeMemoryFile(this.memoryFile, memory);
   }
 
-  private async remember(message: string, theme: string, importance?: number, tags?: string[]): Promise<string> {
+  private remember(message: string, theme: string, importance?: number, tags?: string[]): string {
     if (!message) {
       return JSON.stringify({ status: 'error', message: 'No message provided to remember' });
     }
@@ -179,7 +165,7 @@ export class MemoryAgent extends BasicAgent {
       }
     }
 
-    const memory = await this.loadMemory();
+    const memory = this.loadMemory();
 
     // Deduplicate: skip if an identical or very similar message already exists
     const normalised = cleanMessage.toLowerCase().trim();
@@ -194,8 +180,19 @@ export class MemoryAgent extends BasicAgent {
       }
     }
 
-    const id = randomUUID().replace(/-/g, '').slice(0, 12);
-    const key = `mem_${Date.now()}`;
+    const ids = new Set(Object.values(memory).map(entry => entry.id));
+    let id = '';
+    for (let attempt = 0; attempt < 16; attempt++) {
+      const candidate = randomUUID().replace(/-/g, '').slice(0, 12);
+      if (!ids.has(candidate)) {
+        id = candidate;
+        break;
+      }
+    }
+    if (!id) throw new MemoryStoreError('Could not allocate a unique memory id');
+    let sequence = Date.now();
+    while (Object.hasOwn(memory, `mem_${sequence}`)) sequence++;
+    const key = `mem_${sequence}`;
     const now = new Date();
 
     memory[key] = {
@@ -210,7 +207,7 @@ export class MemoryAgent extends BasicAgent {
       accessed: 0,
     };
 
-    await this.saveMemory(memory);
+    this.saveMemory(memory);
 
     return JSON.stringify({
       status: 'success',
@@ -315,12 +312,12 @@ export class MemoryAgent extends BasicAgent {
     });
   }
 
-  private async forget(query: string): Promise<string> {
+  private forget(query: string): string {
     if (!query) {
       return JSON.stringify({ status: 'error', message: 'No query provided to forget' });
     }
 
-    const memory = await this.loadMemory();
+    const memory = this.loadMemory();
     
     // Clean the query
     let searchQuery = query;
@@ -350,7 +347,7 @@ export class MemoryAgent extends BasicAgent {
       delete memory[key];
     }
 
-    await this.saveMemory(memory);
+    this.saveMemory(memory);
 
     return JSON.stringify({
       status: 'success',

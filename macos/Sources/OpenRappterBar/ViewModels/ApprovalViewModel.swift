@@ -9,15 +9,28 @@ public final class ApprovalViewModel {
     public var error: String?
 
     private var rpcClient: RpcClient?
+    private var configurationGeneration: UInt = 0
+    private var loadGeneration: UInt = 0
+    private var revision: UInt = 0
+    private var eventRevisions: [String: UInt] = [:]
+    private var resolvedIds: Set<String> = []
+    private var resolvedOrder: [String] = []
 
     public init() {}
 
     public func configure(rpcClient: RpcClient) {
+        configurationGeneration &+= 1
         self.rpcClient = rpcClient
     }
 
     public func clearConfiguration() {
+        configurationGeneration &+= 1
         rpcClient = nil
+        pendingApprovals = []
+        resolvedIds.removeAll()
+        resolvedOrder.removeAll()
+        eventRevisions.removeAll()
+        error = nil
     }
 
     var isRpcClientConfigured: Bool {
@@ -36,12 +49,30 @@ public final class ApprovalViewModel {
 
     // MARK: - Actions
 
-    public func loadPending() {
-        guard let rpc = rpcClient else { return }
-        Task {
+    @discardableResult
+    public func loadPending() -> Task<Void, Never> {
+        guard let rpc = rpcClient else { return Task {} }
+        loadGeneration &+= 1
+        let load = loadGeneration
+        let generation = configurationGeneration
+        let startingRevision = revision
+        return Task {
             do {
-                pendingApprovals = try await rpc.listPendingApprovals()
+                let response = try await rpc.listPendingApprovals()
+                guard generation == configurationGeneration, load == loadGeneration else { return }
+                var fetched = response.filter { !resolvedIds.contains($0.id) }
+                if startingRevision != revision {
+                    let changed = pendingApprovals.filter { (eventRevisions[$0.id] ?? 0) > startingRevision }
+                    let currentIds = Set(changed.map(\.id))
+                    fetched.removeAll { currentIds.contains($0.id) }
+                    fetched += changed
+                }
+                pendingApprovals = fetched
+                let pendingIds = Set(fetched.map(\.id))
+                eventRevisions = eventRevisions.filter { pendingIds.contains($0.key) }
+                error = nil
             } catch {
+                guard generation == configurationGeneration, load == loadGeneration else { return }
                 self.error = error.localizedDescription
             }
         }
@@ -49,11 +80,14 @@ public final class ApprovalViewModel {
 
     public func approve(_ approval: ExecutionApproval) {
         guard let rpc = rpcClient else { return }
+        let generation = configurationGeneration
         Task {
             do {
                 try await rpc.respondToApproval(approvalId: approval.id, approved: true)
-                pendingApprovals.removeAll { $0.id == approval.id }
+                guard generation == configurationGeneration else { return }
+                resolve(approval.id)
             } catch {
+                guard generation == configurationGeneration else { return }
                 self.error = error.localizedDescription
             }
         }
@@ -61,11 +95,14 @@ public final class ApprovalViewModel {
 
     public func deny(_ approval: ExecutionApproval) {
         guard let rpc = rpcClient else { return }
+        let generation = configurationGeneration
         Task {
             do {
                 try await rpc.respondToApproval(approvalId: approval.id, approved: false)
-                pendingApprovals.removeAll { $0.id == approval.id }
+                guard generation == configurationGeneration else { return }
+                resolve(approval.id)
             } catch {
+                guard generation == configurationGeneration else { return }
                 self.error = error.localizedDescription
             }
         }
@@ -77,6 +114,7 @@ public final class ApprovalViewModel {
     public func handleApprovalEvent(_ payload: [String: Any]) {
         guard let id = payload["id"] as? String,
               let command = payload["command"] as? String else { return }
+        guard !resolvedIds.contains(id) else { return }
 
         let approval = ExecutionApproval(
             id: id,
@@ -85,6 +123,23 @@ public final class ApprovalViewModel {
             requestedBy: payload["requestedBy"] as? String,
             sessionKey: payload["sessionKey"] as? String
         )
-        pendingApprovals.append(approval)
+        if let index = pendingApprovals.firstIndex(where: { $0.id == id }) {
+            pendingApprovals[index] = approval
+        } else {
+            pendingApprovals.append(approval)
+        }
+        revision &+= 1
+        eventRevisions[id] = revision
+    }
+
+    private func resolve(_ id: String) {
+        pendingApprovals.removeAll { $0.id == id }
+        revision &+= 1
+        eventRevisions.removeValue(forKey: id)
+        error = nil
+        if resolvedIds.insert(id).inserted {
+            resolvedOrder.append(id)
+            if resolvedOrder.count > 256 { resolvedIds.remove(resolvedOrder.removeFirst()) }
+        }
     }
 }

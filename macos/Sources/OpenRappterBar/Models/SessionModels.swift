@@ -94,4 +94,17 @@ struct SessionCache: Codable {
         self.sessions = []
         self.messages = [:]
     }
+
+}
+
+func gatewayDate(_ value: Any?) -> Date? {
+    if let milliseconds = value as? Double {
+        return Date(timeIntervalSince1970: milliseconds / 1000)
+    }
+    guard let text = value as? String else { return nil }
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = formatter.date(from: text) { return date }
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.date(from: text)
 }

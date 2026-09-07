@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import SQLite3
 
 @MainActor
 protocol GitHubCredentialStoring {
@@ -7,10 +8,22 @@ protocol GitHubCredentialStoring {
     func saveToken(_ token: String) throws
     func removeToken() throws
     func hasRuntimeToken() throws -> Bool
+    func fallbackToken() throws -> String?
+    func saveToken(_ token: String, authorize: () throws -> Void) throws
+    func removeToken(authorize: () throws -> Void) throws
 }
 
 extension GitHubCredentialStoring {
     func hasRuntimeToken() throws -> Bool { try readToken() != nil }
+    func fallbackToken() throws -> String? { nil }
+    func saveToken(_ token: String, authorize: () throws -> Void) throws {
+        try authorize()
+        try saveToken(token)
+    }
+    func removeToken(authorize: () throws -> Void) throws {
+        try authorize()
+        try removeToken()
+    }
 }
 
 @MainActor
@@ -24,6 +37,7 @@ struct CredentialFileAccess {
     var read: (URL) throws -> Data
     var write: (URL, Data) throws -> Void
     var remove: (URL) throws -> Void
+    var transaction: @MainActor (URL, () throws -> Void) throws -> Void = { _, operation in try operation() }
 
     static let live = CredentialFileAccess(
         exists: { FileManager.default.fileExists(atPath: $0.path) },
@@ -38,8 +52,59 @@ struct CredentialFileAccess {
             try data.write(to: url, options: .atomic)
             try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         },
-        remove: { try FileManager.default.removeItem(at: $0) }
+        remove: { try FileManager.default.removeItem(at: $0) },
+        transaction: { url, operation in try EnvironmentFileTransaction.withLock(url, operation) }
     )
+}
+
+@MainActor
+enum EnvironmentFileTransaction {
+    private static var held: Set<String> = []
+
+    static func withLock(_ url: URL, timeout: Int32 = 5_000, _ operation: () throws -> Void) throws {
+        let directory = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+        )
+        let lock = directory.resolvingSymlinksInPath()
+            .appendingPathComponent(url.lastPathComponent + ".lock.sqlite3")
+        if held.contains(lock.path) { try operation(); return }
+        func requireRegularLock() throws {
+            guard FileManager.default.fileExists(atPath: lock.path) else { return }
+            let attributes = try FileManager.default.attributesOfItem(atPath: lock.path)
+            guard attributes[.type] as? FileAttributeType == .typeRegular,
+                  (attributes[.referenceCount] as? NSNumber)?.intValue == 1 else {
+                throw GitHubAuthError.persistence("The environment lock must be a regular private file.")
+            }
+        }
+        try requireRegularLock()
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(lock.path, &database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK,
+              let database else {
+            if let database { sqlite3_close(database) }
+            throw GitHubAuthError.persistence("The environment transaction lock could not be opened.")
+        }
+        defer { sqlite3_close(database) }
+        try requireRegularLock()
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: lock.path)
+        sqlite3_busy_timeout(database, timeout)
+        guard sqlite3_exec(database, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK else {
+            throw GitHubAuthError.persistence("The environment is being updated elsewhere. Please retry.")
+        }
+        held.insert(lock.path)
+        defer {
+            held.remove(lock.path)
+            sqlite3_exec(database, "ROLLBACK", nil, nil, nil)
+        }
+        // This is the same sidecar/SQLite protocol as the managed TypeScript writers.
+        guard sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS memory_lock (id INTEGER PRIMARY KEY)", nil, nil, nil) == SQLITE_OK else {
+            throw GitHubAuthError.persistence("The environment transaction could not be initialized.")
+        }
+        try operation()
+        guard sqlite3_exec(database, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+            throw GitHubAuthError.persistence("The environment transaction could not be committed.")
+        }
+    }
 }
 
 @MainActor
@@ -74,7 +139,23 @@ final class LocalEnvironmentFile {
         }.first.flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    func set(_ key: String, value: String?) throws {
+    struct Change {
+        let original: Data?
+        let written: Data
+    }
+
+    func transaction(_ operation: () throws -> Void) throws {
+        try files.transaction(url, operation)
+    }
+
+    @discardableResult
+    func set(_ key: String, value: String?) throws -> Change {
+        var result: Change?
+        try transaction { result = try setLocked(key, value: value) }
+        return result!
+    }
+
+    private func setLocked(_ key: String, value: String?) throws -> Change {
         if let value, value.isEmpty || value.contains(where: { $0.isNewline || $0 == "\"" || $0 == "'" }) {
             throw GitHubAuthError.persistence("The credential must be a nonempty, single-line value.")
         }
@@ -86,15 +167,26 @@ final class LocalEnvironmentFile {
         if let value { lines.append("\(key)=\(value)") }
         let updated = Data((lines.joined(separator: "\n") + "\n").utf8)
         do {
-            try restore(updated)
+            try files.write(url, updated)
+            guard try self.value(for: key) == value else {
+                throw GitHubAuthError.persistence("Environment read-back verification failed.")
+            }
         } catch {
-            do { try restore(original) }
+            do { _ = try restoreIfUnchanged(Change(original: original, written: updated)) }
             catch { throw GitHubAuthError.persistence("Saving the environment failed and its original contents could not be restored.") }
             throw GitHubAuthError.persistence("The environment file could not be saved and verified.")
         }
+        return Change(original: original, written: updated)
     }
 
-    func restore(_ data: Data?) throws {
+    @discardableResult
+    func restoreIfUnchanged(_ change: Change) throws -> Bool {
+        guard try snapshot() == change.written else { return false }
+        try restore(change.original)
+        return true
+    }
+
+    private func restore(_ data: Data?) throws {
         if let data {
             try files.write(url, data)
             guard try files.read(url) == data else {
@@ -127,9 +219,12 @@ final class GitHubCredentialStore: GitHubCredentialStoring {
     }
 
     func readToken() throws -> String? {
-        // The daemon consumes .env, so it wins over an older Keychain copy.
-        if let token = try environment.value(for: "GITHUB_TOKEN") { return token }
-        return try keychain.read()
+        if let token = try keychain.read() { return token }
+        return try environment.value(for: "GITHUB_TOKEN")
+    }
+
+    func fallbackToken() throws -> String? {
+        try environment.value(for: "GITHUB_TOKEN")
     }
 
     func hasRuntimeToken() throws -> Bool {
@@ -147,25 +242,58 @@ final class GitHubCredentialStore: GitHubCredentialStoring {
         try replaceToken(nil)
     }
 
+    func saveToken(_ token: String, authorize: () throws -> Void) throws {
+        try environment.transaction {
+            try authorize()
+            try saveToken(token)
+        }
+    }
+
+    func removeToken(authorize: () throws -> Void) throws {
+        try environment.transaction {
+            try authorize()
+            try removeToken()
+        }
+    }
+
     private func replaceToken(_ token: String?) throws {
+        try environment.transaction { try replaceTokenLocked(token) }
+    }
+
+    private func replaceTokenLocked(_ token: String?) throws {
         let originalFile = try environment.snapshot()
         let originalKeychain = try keychain.read()
         if originalKeychain == token, try environment.value(for: "GITHUB_TOKEN") == token { return }
+        var change: LocalEnvironmentFile.Change?
+        var touchedKeychain = false
         do {
             if token != nil || originalFile != nil {
-                try environment.set("GITHUB_TOKEN", value: token)
+                change = try environment.set("GITHUB_TOKEN", value: token)
             }
+            touchedKeychain = true
             try keychain.write(token)
             guard try keychain.read() == token else {
                 throw GitHubAuthError.persistence("Keychain read-back verification failed.")
             }
         } catch {
             var rollbackFailed = false
-            do { try environment.restore(originalFile) } catch { rollbackFailed = true }
-            do { try keychain.write(originalKeychain) } catch { rollbackFailed = true }
+            var interveningChange = false
+            if let change {
+                do { interveningChange = try !environment.restoreIfUnchanged(change) }
+                catch { rollbackFailed = true }
+            }
+            if touchedKeychain {
+                do {
+                    let current = try keychain.read()
+                    if current == token { try keychain.write(originalKeychain) }
+                    else if current != originalKeychain { interveningChange = true }
+                } catch { rollbackFailed = true }
+            }
             throw GitHubAuthError.persistence(
                 rollbackFailed
                     ? "Credential storage failed; some previous settings could not be restored. Sign-in was not completed."
+                    : interveningChange
+                    ? "Credential storage failed. Newer settings were preserved; sign-in was not completed."
                     : "Credential storage failed. Previous credentials and settings were preserved."
             )
         }

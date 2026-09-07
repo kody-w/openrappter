@@ -429,12 +429,24 @@ await assert.rejects(extractCandidate(bundle, path.join(work, 'tampered-pin'), c
         calls = self.work / "calls.jsonl"
         fixture = self.work / "fixture-app"
         app_fixture(fixture, self.payload, COMMIT, VERSION)
+        binary = fixture / "Contents/MacOS/OpenRappterBar"
+        source = self.work / "fixture.c"
+        source.write_text("int main(void) { return 0; }\n")
+        compiled = subprocess.run(
+            ["xcrun", "clang", "-arch", "arm64", "-arch", "x86_64", str(source), "-o", str(binary)],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+        real_lipo = shutil.which("lipo")
+        self.assertIsNotNone(real_lipo, "the macOS contract requires the real Mach-O verifier")
         stub = f"""#!{sys.executable}
-import json,os,shutil,sys
+import json,os,shutil,subprocess,sys
 from pathlib import Path
 name=Path(sys.argv[0]).name
 with open(os.environ["BAR_TEST_CALLS"],"a") as file:
     file.write(json.dumps([name,*sys.argv[1:]])+"\\n")
+if name=="lipo":
+    raise SystemExit(subprocess.run([os.environ["BAR_TEST_REAL_LIPO"],*sys.argv[1:]]).returncode)
 if name=="codesign" and "--display" in sys.argv:
     print(os.environ.get("BAR_TEST_AUTHORITY","Authority=Developer ID Application: Fixture"),file=sys.stderr)
 if name=="hdiutil" and sys.argv[1]=="attach":
@@ -450,6 +462,7 @@ if name=="hdiutil" and sys.argv[1]=="detach":
         env = {
             **os.environ, "PATH": f"{commands}{os.pathsep}{os.environ['PATH']}",
             "BAR_TEST_CALLS": str(calls), "BAR_TEST_APP": str(fixture),
+            "BAR_TEST_REAL_LIPO": real_lipo,
         }
         dmg = self.payload / self.record["dmg"]["name"]
         command = ["bash", str(ROOT / "macos/scripts/verify-dmg.sh"), str(dmg), VERSION, self.record["dmg"]["sha256"], COMMIT]
@@ -458,7 +471,8 @@ if name=="hdiutil" and sys.argv[1]=="detach":
         invoked = [json.loads(line) for line in calls.read_text().splitlines()]
         self.assertIn(["xcrun", "stapler", "validate", str(dmg)], invoked)
         self.assertTrue(any(row[:3] == ["spctl", "--assess", "--type"] and "execute" in row for row in invoked))
-        self.assertTrue(any(row[0] == "lipo" and row[1:4] == ["-verify_arch", "arm64", "x86_64"] for row in invoked))
+        mounted_binary = f"{dmg}.verify-mount/OpenRappter Bar.app/Contents/MacOS/OpenRappterBar"
+        self.assertIn(["lipo", mounted_binary, "-verify_arch", "arm64", "x86_64"], invoked)
         self.assertTrue(any(row[0] == "hdiutil" and "-readonly" in row for row in invoked))
         self.assertFalse(any("staple" in row or "--sign" in row for row in invoked))
         self.assertEqual(bar.digest(dmg.read_bytes()), self.record["dmg"]["sha256"])
@@ -468,10 +482,22 @@ if name=="hdiutil" and sys.argv[1]=="detach":
         self.assertFalse(calls.exists(), "a digest mismatch must stop before any native tool")
         untrusted = subprocess.run(command, env={**env, "BAR_TEST_AUTHORITY": "Authority=Apple Development: Fixture"}, capture_output=True, text=True)
         self.assertNotEqual(untrusted.returncode, 0, "development signing is not Developer ID distribution")
+        universal = self.work / "universal"
+        shutil.copyfile(binary, universal)
+        thin = self.work / "arm64-only"
+        subprocess.run(
+            [real_lipo, str(binary), "-thin", "arm64", "-output", str(thin)],
+            check=True, capture_output=True, text=True,
+        )
+        shutil.copyfile(thin, binary)
+        missing_architecture = subprocess.run(command, env=env, capture_output=True, text=True)
+        self.assertNotEqual(missing_architecture.returncode, 0, "a thin app cannot satisfy the universal Bar contract")
+        shutil.copyfile(universal, binary)
         plist = fixture / "Contents/Info.plist"
         plist.write_text(plist.read_text().replace(VERSION, "999.0.0"))
         wrong_version = subprocess.run(command, env=env, capture_output=True, text=True)
         self.assertNotEqual(wrong_version.returncode, 0, "a different bundled version must be rejected")
+        self.assertIn("DMG bundle version mismatch", wrong_version.stderr)
 
 
 if __name__ == "__main__":

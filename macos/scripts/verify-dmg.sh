@@ -30,7 +30,7 @@ APP="$MOUNT/OpenRappter Bar.app"
 codesign --verify --deep --strict --verbose=2 "$APP"
 codesign --display --verbose=4 "$APP" 2>&1 | grep '^Authority=Developer ID Application:' >/dev/null
 spctl --assess --type execute --verbose=2 "$APP"
-lipo -verify_arch arm64 x86_64 "$APP/Contents/MacOS/OpenRappterBar"
+lipo "$APP/Contents/MacOS/OpenRappterBar" -verify_arch arm64 x86_64
 # macOS Bash 3.2 does not reliably apply errexit to standalone [[ ... ]] checks.
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" == "$VERSION" ]] ||
     { echo "DMG bundle version mismatch" >&2; exit 1; }

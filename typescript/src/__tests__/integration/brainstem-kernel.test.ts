@@ -46,16 +46,15 @@ async function request(
   return { status: response.status, json, text };
 }
 
-function multipart(filename: string, content: string): { body: Buffer; contentType: string } {
+function multipart(filename: string, content: string): { body: string; contentType: string } {
   const boundary = '----openrappter-ts-boundary';
   return {
     contentType: `multipart/form-data; boundary=${boundary}`,
-    body: Buffer.from(
+    body:
       `--${boundary}\r\n`
       + `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n`
       + 'Content-Type: text/typescript\r\n\r\n'
       + `${content}\r\n--${boundary}--\r\n`,
-    ),
   };
 }
 

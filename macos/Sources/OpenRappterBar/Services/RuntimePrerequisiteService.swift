@@ -80,8 +80,7 @@ public final class RuntimePrerequisiteService {
         nodePath: String? = nil,
         files: FileManager = .default
     ) -> Bool {
-        if projectPath == nil, nodePath == nil,
-           VerifiedRuntimeInstaller.preferredInstallation() != nil { return true }
+        if VerifiedRuntimeInstaller.hasPendingActivation() { return false }
         guard let nodePath = nodePath ?? ProcessManager.resolveNodeExecutable(),
               files.isExecutableFile(atPath: nodePath) else { return false }
         let root = URL(fileURLWithPath: projectPath ?? ProcessManager.resolveProjectPath())

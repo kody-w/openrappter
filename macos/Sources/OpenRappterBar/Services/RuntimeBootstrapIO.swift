@@ -266,7 +266,7 @@ final class BootstrapProcess: @unchecked Sendable {
                     var count: Int64 = 0
                     var pending = Data()
                     do {
-                        while let data = try stdout.fileHandleForReading.read(upToCount: 64 * 1024), !data.isEmpty {
+                        while let data = try Self.readPipe(stdout.fileHandleForReading) {
                             count += Int64(data.count)
                             guard count <= maximumOutput else { throw RuntimeBootstrapError.processFailed }
                             if let destination {
@@ -306,7 +306,7 @@ final class BootstrapProcess: @unchecked Sendable {
                 DispatchQueue.global(qos: .utility).async {
                     defer { try? stderr.fileHandleForReading.close(); group.leave() }
                     do {
-                        while let data = try stderr.fileHandleForReading.read(upToCount: 64 * 1024), !data.isEmpty {}
+                        while try Self.readPipe(stderr.fileHandleForReading) != nil {}
                     } catch { self.stop(error) }
                 }
                 let timer = DispatchWorkItem { self.stop(RuntimeBootstrapError.timedOut) }
@@ -348,6 +348,21 @@ final class BootstrapProcess: @unchecked Sendable {
             let stillOwned = !self.complete && self.process.isRunning && self.process.processIdentifier == pid
             self.lock.unlock()
             if stillOwned { Darwin.kill(pid, SIGKILL) }
+        }
+
+    }
+
+    private static func readPipe(_ handle: FileHandle) throws -> Data? {
+        var bytes = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let count = bytes.withUnsafeMutableBytes {
+                Darwin.read(handle.fileDescriptor, $0.baseAddress, $0.count)
+            }
+            if count == 0 { return nil }
+            if count > 0 { return Data(bytes.prefix(count)) }
+            if errno != EINTR {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
         }
     }
 }

@@ -17,6 +17,7 @@ const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$/;
 const MAX_ARCHIVE = 1024 * 1024 * 1024;
+const RUNTIME_PART_SIZE = 32 * 1024 * 1024;
 const MAX_JSON = 1024 * 1024;
 const fatalDecoder = new TextDecoder('utf-8', { fatal: true });
 
@@ -236,7 +237,7 @@ export async function fetchJSON(url, signal) {
   return JSON.parse(fatalDecoder.decode(Buffer.concat(chunks)));
 }
 
-export async function download(url, destination, expectedHash, signal, progress = () => {}) {
+export async function download(url, destination, expectedHash, signal, progress = () => {}, maximumSize = MAX_ARCHIVE) {
   const response = await responseFor(url, signal, 600_000);
   const output = await fsp.open(destination, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
   const hash = createHash('sha256');
@@ -245,7 +246,7 @@ export async function download(url, destination, expectedHash, signal, progress 
     for await (const chunk of Readable.fromWeb(response.body)) {
       signal.throwIfAborted();
       size += chunk.length;
-      requireValue(size <= MAX_ARCHIVE, 'Candidate download exceeds its byte limit');
+      requireValue(size <= maximumSize, 'Candidate download exceeds its byte limit');
       hash.update(chunk);
       await writeAll(output, chunk);
       progress(size);
@@ -466,6 +467,7 @@ export async function extractCandidate(archive, destination, metadata, architect
   const sizes = new Map();
   const documents = new Map();
   const dmgSidecar = `OpenRappter-Bar-${metadata.version}.dmg.sha256`;
+  const partsFile = `${selected.file}.parts.json`;
   await fsp.mkdir(destination, { mode: 0o700 });
   await walkTar(archive, async (entry, consume) => {
     if (['.', './'].includes(entry.name) && entry.type === '5') { await consume(); return; }
@@ -473,7 +475,7 @@ export async function extractCandidate(archive, destination, metadata, architect
     requireValue(entry.type === '0' && FILENAME.test(name) && !hashes.has(name) && hashes.size < 256,
       'Candidate must contain unique flat regular files');
     const hash = createHash('sha256');
-    const capture = ['provenance.json', 'SHA256SUMS', 'macos-bar.json', dmgSidecar].includes(name);
+    const capture = ['provenance.json', 'SHA256SUMS', 'macos-bar.json', dmgSidecar, partsFile].includes(name);
     requireValue(!capture || entry.size <= MAX_JSON, 'Candidate metadata exceeds its limit');
     const chunks = [];
     let output;
@@ -492,9 +494,17 @@ export async function extractCandidate(archive, destination, metadata, architect
     sizes.set(name, entry.size);
     if (capture) documents.set(name, Buffer.concat(chunks));
   }, signal);
-  requireValue(hashes.get(selected.file) === selected.sha256, 'Runtime archive differs from signed Bar pins');
-  requireValue(await fileDigest(path.join(destination, selected.file)) === selected.sha256,
-    'Extracted runtime archive failed read-back verification');
+  const direct = hashes.has(selected.file);
+  requireValue(direct !== hashes.has(partsFile), 'Candidate must contain exactly one runtime archive or parts descriptor');
+  let parts;
+  if (direct) {
+    requireValue(hashes.get(selected.file) === selected.sha256, 'Runtime archive differs from signed Bar pins');
+    requireValue(await fileDigest(path.join(destination, selected.file)) === selected.sha256,
+      'Extracted runtime archive failed read-back verification');
+  } else {
+    parts = JSON.parse(fatalDecoder.decode(documents.get(partsFile)));
+    validateRuntimeParts(parts, metadata, architecture);
+  }
   const provenance = JSON.parse(fatalDecoder.decode(documents.get('provenance.json') ?? Buffer.alloc(0)));
   closed(provenance, [
     'schema', 'channel', 'stable', 'candidate_kind', 'candidate_id', 'source_tag',
@@ -519,7 +529,7 @@ export async function extractCandidate(archive, destination, metadata, architect
       && hashes.get(row.path) === row.sha256, 'Candidate file provenance mismatch');
     rows.set(row.path, row.sha256);
   }
-  requireValue(rows.size + 2 === hashes.size && rows.get(selected.file) === selected.sha256
+  requireValue(rows.size + 2 === hashes.size && (direct ? rows.get(selected.file) === selected.sha256 : rows.has(partsFile))
     && rows.has(`openrappter-${metadata.version}.tgz`)
     && [...rows.keys()].some(name => name.endsWith('.whl'))
     && rows.has(`openrappter-${provenance.versions.pypi}.tar.gz`)
@@ -547,7 +557,71 @@ export async function extractCandidate(archive, destination, metadata, architect
     && rows.has(dmgSidecar)
     && fatalDecoder.decode(documents.get(dmgSidecar) ?? Buffer.alloc(0)) === `${proof.sha256}  ${bar.dmg.name}\n`,
   'Approved Bar does not belong to this candidate');
-  return { archive: path.join(destination, selected.file), provenance };
+  return { archive: path.join(destination, selected.file), parts, provenance };
+}
+
+export function validateRuntimeParts(value, metadata, architecture) {
+  closed(value, ['schema', 'source_commit', 'version', 'architecture', 'file', 'sha256', 'size', 'parts'], 'runtime parts');
+  const expected = metadata.variants[architecture].runtime;
+  requireValue(value.schema === 'openrappter-runtime-chunks/v1'
+    && value.source_commit === metadata.source_commit && value.version === metadata.version
+    && value.architecture === architecture && value.file === expected.file
+    && value.sha256 === expected.sha256 && value.size === expected.size,
+  'Runtime parts differ from signed Bar pins');
+  requireValue(Array.isArray(value.parts) && value.parts.length > 0 && value.parts.length <= 64,
+    'Runtime part count exceeds its bounds');
+  let total = 0;
+  for (const [index, part] of value.parts.entries()) {
+    closed(part, ['file', 'sha256', 'size'], 'runtime part');
+    requireValue(HEX64.test(part.sha256)
+      && part.file === `runtime-${architecture}-${String(index).padStart(4, '0')}-${part.sha256}.part`
+      && Number.isSafeInteger(part.size) && part.size > 0 && part.size <= RUNTIME_PART_SIZE
+      && (index === value.parts.length - 1 || part.size === RUNTIME_PART_SIZE),
+    'Runtime part name, position or size is invalid');
+    total += part.size;
+  }
+  requireValue(total === expected.size, 'Runtime part sizes do not match the signed archive');
+  return value;
+}
+
+export async function assembleRuntimeParts(value, candidate, destination, metadata, architecture, downloadArtifact, signal, progress = () => {}) {
+  validateRuntimeParts(value, metadata, architecture);
+  candidateURL(candidate.url, metadata, candidate.sha256);
+  const base = candidate.url.slice(0, candidate.url.lastIndexOf('/') + 1);
+  const output = await fsp.open(destination, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  const hash = createHash('sha256');
+  let total = 0;
+  try {
+    for (const part of value.parts) {
+      signal.throwIfAborted();
+      const temporary = `${destination}.${randomUUID()}.part`;
+      try {
+        await downloadArtifact(base + part.file, temporary, part.sha256,
+          bytes => progress({ phase: 'downloading-runtime-parts', bytes: total + bytes, totalBytes: value.size }),
+          part.size);
+        const status = await fsp.lstat(temporary);
+        requireValue(status.isFile() && !status.isSymbolicLink() && status.size === part.size,
+          'Downloaded runtime part size is invalid');
+        requireValue(await fileDigest(temporary) === part.sha256, 'Downloaded runtime part checksum mismatch');
+        for await (const bytes of fs.createReadStream(temporary)) {
+          signal.throwIfAborted();
+          total += bytes.length;
+          requireValue(total <= value.size, 'Assembled runtime exceeds the signed size');
+          hash.update(bytes);
+          await writeAll(output, bytes);
+        }
+      } finally { await fsp.rm(temporary, { force: true }); }
+    }
+    requireValue(total === value.size && hash.digest('hex') === value.sha256, 'Assembled runtime checksum mismatch');
+    await output.sync();
+  } catch (error) {
+    await output.close();
+    await fsp.rm(destination, { force: true });
+    throw error;
+  }
+  await output.close();
+  requireValue(await fileDigest(destination) === value.sha256, 'Assembled runtime read-back checksum mismatch');
+  return destination;
 }
 
 export async function fileDigest(file) {
@@ -624,7 +698,7 @@ async function readLink(file) {
   } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 
-export async function recoverActivation(privateData, releases, current) {
+export async function recoverActivation(privateData, releases, current, { rollback = false } = {}) {
   const file = path.join(privateData, 'runtime-bootstrap-transaction.json');
   const bytes = await snapshot(file);
   if (bytes === null) return;
@@ -648,6 +722,26 @@ export async function recoverActivation(privateData, releases, current) {
   if (present !== null && !(original !== null && present.equals(original))) {
     requireValue(JSON.parse(present.toString('utf8')).installation_id === journal.installation_id,
       'Installation marker changed after interrupted setup; it was not overwritten');
+  }
+  if (!rollback && present !== null && selected === journal.new_current) {
+    const completed = JSON.parse(present.toString('utf8'));
+    if (completed.schema === 'openrappter-bar-runtime-installation/v1'
+      && HEX40.test(completed.source_commit) && VERSION.test(completed.version)
+      && ['arm64', 'x86_64'].includes(completed.architecture)
+      && HEX64.test(completed.runtime_sha256) && HEX64.test(completed.node_sha256)
+      && HEX64.test(completed.candidate_sha256)
+      && completed.installation_id === `${completed.source_commit}-${completed.architecture}-${completed.runtime_sha256}`) {
+      const root = path.join(releases, completed.installation_id);
+      requireValue(await fileDigest(path.join(root, 'node/bin/node')) === completed.node_sha256,
+        'Completed activation Node checksum changed; recovery refused');
+      const pkg = JSON.parse((await snapshot(path.join(root, 'runtime/package.json'))).toString('utf8'));
+      requireValue(pkg.name === 'openrappter' && pkg.version === completed.version,
+        'Completed activation package identity changed; recovery refused');
+      requireValue((await fsp.lstat(path.join(root, 'runtime/dist/index.js'))).isFile(),
+        'Completed activation entry point is missing; recovery refused');
+      await fsp.unlink(file);
+      return completed;
+    }
   }
   await replaceLink(current, journal.previous_current);
   await restoreFile(marker, original);
@@ -696,7 +790,7 @@ export async function installRuntime({
   metadata, architecture, home, workspace, nodeExecutable,
   signal = new AbortController().signal, progress = () => {},
   getJSON = url => fetchJSON(url, signal),
-  downloadArtifact = (url, destination, sha, onProgress) => download(url, destination, sha, signal, onProgress),
+  downloadArtifact = (url, destination, sha, onProgress, maximumSize) => download(url, destination, sha, signal, onProgress, maximumSize),
   verifyRuntime = verifyInstalledRuntime,
   authorizeCommit = async () => true,
 }) {
@@ -716,9 +810,17 @@ export async function installRuntime({
   let destinationCreated = false;
   let journalWritten = false;
   try {
-    await recoverActivation(privateData, releases, current);
+    const recovered = await recoverActivation(privateData, releases, current);
     await pruneInterruptedStages(releases);
     signal.throwIfAborted();
+    if (recovered && recovered.source_commit === metadata.source_commit
+      && recovered.version === metadata.version && recovered.architecture === architecture
+      && recovered.runtime_sha256 === selected.runtime.sha256
+      && recovered.node_sha256 === selected.node.binary_sha256) {
+      await verifyRuntime(path.join(destination, 'runtime'), metadata.version);
+      progress({ phase: 'installed', installation_id: installationID });
+      return recovered;
+    }
     progress({ phase: 'checking-approval' });
     const proof = await getJSON(metadata.approval_url);
     const approval = await verifyApproval(proof, metadata, getJSON);
@@ -741,6 +843,10 @@ export async function installRuntime({
     progress({ phase: 'verifying-runtime' });
     const extracted = await extractCandidate(candidate, path.join(stage, 'candidate'), metadata, architecture, proof, signal);
     requireValue(extracted.provenance.versions.channel === approval.channelVersion, 'Candidate channel identity differs from receipts');
+    if (extracted.parts) {
+      progress({ phase: 'downloading-runtime-parts', bytes: 0, totalBytes: selected.runtime.size });
+      await assembleRuntimeParts(extracted.parts, approval, extracted.archive, metadata, architecture, downloadArtifact, signal, progress);
+    }
     progress({ phase: 'extracting-runtime' });
     const runtime = await extractRuntime(extracted.archive, path.join(stage, 'runtime'), signal);
     const nodeDirectory = path.join(stage, 'node', 'bin');
@@ -776,7 +882,7 @@ export async function installRuntime({
     if (config) {
       const settings = JSON.parse(config.toString('utf8'));
       requireValue(!settings.projectPath || path.resolve(settings.projectPath) === current
-        || path.resolve(settings.projectPath).startsWith(`${releases}${path.sep}`),
+        || path.resolve(settings.projectPath) === path.join(destination, 'runtime'),
       'A custom runtime is selected in Settings. Keep it, or select the managed runtime before retrying.');
     }
     progress({ phase: 'ready-to-activate' });
@@ -815,7 +921,7 @@ export async function installRuntime({
     journalWritten = false;
     return marker;
   } catch (error) {
-    if (journalWritten) await recoverActivation(privateData, releases, current);
+    if (journalWritten) await recoverActivation(privateData, releases, current, { rollback: true });
     else if (destinationCreated && !activated) await fsp.rm(destination, { recursive: true, force: true });
     throw error;
   } finally {

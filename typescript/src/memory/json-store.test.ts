@@ -211,6 +211,21 @@ describe('memory transaction process protocol', () => {
 });
 
 describe('memory transaction failures', () => {
+  it('rejects an unrelated mkdir ancestor instead of walking the root forever', async () => {
+    const outside = path.join(home, 'other');
+    fs.mkdirSync(outside);
+    const mkdir = fs.mkdirSync;
+    vi.spyOn(fs, 'mkdirSync').mockImplementationOnce(((directory, options) => {
+      mkdir(directory, options);
+      return path.join(outside, 'not-created');
+    }) as typeof fs.mkdirSync);
+    await expect(new MemoryAgent(path.join(home, 'new', 'nested')).perform({
+      action: 'remember', message: 'must not acknowledge',
+    })).rejects.toMatchObject({
+      cause: { message: 'Memory directory creation returned an unrelated ancestor' },
+    });
+  });
+
   it('rejects async transaction callbacks before they can run outside the lock', async () => {
     let called = false;
     await expect(withMemoryTransaction(file, async () => { called = true; }))
@@ -327,7 +342,9 @@ describe('memory transaction failures', () => {
     });
     const response = JSON.parse(await new MemoryAgent(directory).perform({ action: 'remember', message: 'first fact' }));
     expect(response.status).toBe('success');
-    expect(syncedDirectories).toEqual(nativeWindows ? [] : [directory, path.dirname(directory), home, directory]);
+    expect(syncedDirectories.map(item => fs.realpathSync(item))).toEqual(
+      nativeWindows ? [] : [directory, path.dirname(directory), home, directory].map(item => fs.realpathSync(item)),
+    );
     expect(readMemoryFile(path.join(directory, 'memory.json'))[response.key].message).toBe('first fact');
   });
 

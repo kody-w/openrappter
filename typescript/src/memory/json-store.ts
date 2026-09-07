@@ -31,10 +31,16 @@ function syncDirectory(directory: string): void {
 function ensureDirectory(directory: string): void {
   const created = fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   if (created === undefined) return;
-  const stop = path.dirname(path.resolve(created));
-  for (let current = path.resolve(directory); ; current = path.dirname(current)) {
+  const stop = fs.realpathSync(path.dirname(path.resolve(created)));
+  let current = fs.realpathSync(directory);
+  const relative = path.relative(stop, current);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new MemoryStoreError('Memory directory creation returned an unrelated ancestor');
+  }
+  // A finite depth also handles Windows drive casing and namespace spelling.
+  for (let depth = relative.split(path.sep).filter(Boolean).length; depth >= 0; depth--) {
     syncDirectory(current);
-    if (current === stop) break;
+    current = path.dirname(current);
   }
 }
 

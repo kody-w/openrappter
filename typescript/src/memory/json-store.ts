@@ -31,8 +31,8 @@ function syncDirectory(directory: string): void {
 function ensureDirectory(directory: string): void {
   const created = fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   if (created === undefined) return;
-  const stop = fs.realpathSync(path.dirname(path.resolve(created)));
-  let current = fs.realpathSync(directory);
+  const stop = fs.realpathSync.native(path.dirname(path.resolve(created)));
+  let current = fs.realpathSync.native(directory);
   const relative = path.relative(stop, current);
   if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new MemoryStoreError('Memory directory creation returned an unrelated ancestor');
@@ -98,7 +98,7 @@ export async function withMemoryTransaction<T>(
   let db: ReturnType<typeof Database>;
   try {
     ensureDirectory(path.dirname(file));
-    const lock = path.join(fs.realpathSync(path.dirname(file)), `${path.basename(file)}.lock.sqlite3`);
+    const lock = path.join(fs.realpathSync.native(path.dirname(file)), `${path.basename(file)}.lock.sqlite3`);
     try {
       regularFile(fs.lstatSync(lock));
     } catch (error) {

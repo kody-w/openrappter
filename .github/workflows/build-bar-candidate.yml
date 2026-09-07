@@ -13,9 +13,61 @@ on:
 permissions:
   contents: read
 jobs:
+  runtime:
+    name: Verified Bar runtime (${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { architecture: arm64, runner: macos-14, machine: arm64 }
+          - { architecture: x86_64, runner: macos-15-intel, machine: x86_64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RUNTIME_ARCH: ${{ matrix.architecture }}
+      RUNNER_MACHINE: ${{ matrix.machine }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: { python-version: '3.12' }
+      - name: Verify exact source and the real runner architecture
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = "$RUNNER_MACHINE"
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$SOURCE_COMMIT" origin/main
+          test "$(python3 -c 'import json; print(json.load(open("typescript/package.json"))["version"])')" = "$RELEASE_VERSION"
+      - name: Build dependency-complete runtime using the pinned official Node ABI
+        run: |
+          python3 scripts/bar_runtime.py build --architecture "$RUNTIME_ARCH" \
+            --commit "$SOURCE_COMMIT" --root macos/dist --work ".bar-runtime/$RUNTIME_ARCH"
+      - name: Exercise producer contracts and the actual sealed bootstrap consumer
+        run: |
+          set -euo pipefail
+          export BAR_TEST_NODE="$PWD/.bar-runtime/$RUNTIME_ARCH/node/bin/node"
+          python3 -m unittest discover -s tests -p 'test_bar*.py' -v
+          "$BAR_TEST_NODE" --test macos/Tests/verified-runtime-bootstrap.test.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: macos-bar-runtime-${{ inputs.source_commit }}-${{ matrix.architecture }}
+          path: macos/dist/openrappter-runtime-${{ inputs.version }}-darwin-${{ matrix.architecture }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
   signed-candidate:
+    needs: runtime
     runs-on: macos-14
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       SOURCE_COMMIT: ${{ inputs.source_commit }}
       RELEASE_VERSION: ${{ inputs.version }}
@@ -36,9 +88,26 @@ jobs:
           test "$(python3 -c 'import json; print(json.load(open("typescript/package.json"))["version"])')" = "$RELEASE_VERSION"
       - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a
         with: { swift-version: '6.0' }
-      - name: Run native Bar tests
-        working-directory: macos
-        run: swift build --product RunTests && .build/debug/RunTests
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: { python-version: '3.12' }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: macos-bar-runtime-${{ inputs.source_commit }}-*
+          path: macos/dist
+          merge-multiple: true
+      - name: Bind both tested runtime archives to sealed first-launch resources
+        run: |
+          python3 scripts/bar_runtime.py manifest --root macos/dist \
+            --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION"
+      - name: Run native first-launch and lifecycle tests in an isolated home
+        run: |
+          set -euo pipefail
+          mkdir -p .bar-native-tests/home .bar-native-tests/scratch
+          export HOME="$PWD/.bar-native-tests/home" CFFIXED_USER_HOME="$PWD/.bar-native-tests/home"
+          export TMPDIR="$PWD/.bar-native-tests/scratch"
+          cd macos
+          swift build --product RunTests
+          OPENRAPPTER_TEST_SUITES=VerifiedRuntimeBootstrap,OnboardingRuntime .build/debug/RunTests
       - name: Import the configured CI Developer ID and notarization key
         env:
           CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -65,7 +134,7 @@ jobs:
           identity="$(security find-identity -v -p codesigning "$SIGNING_DIR/signing.keychain-db" | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1)"
           test -n "$identity"
           printf 'CODESIGN_IDENTITY=%s\n' "$identity" >> "$GITHUB_ENV"
-      - name: Build and sign the universal candidate once
+      - name: Seal bootstrap resources, then sign the universal candidate once
         working-directory: macos
         run: REQUIRE_SIGNING=1 VERSION="$RELEASE_VERSION" bash scripts/build-mac-app.sh
       - name: Notarize and staple before hashing candidate bytes
@@ -83,7 +152,7 @@ jobs:
           xcrun stapler staple "$dmg"
           sha="$(python3 scripts/bar_candidate.py record --root macos/dist \
             --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION" --notary "$SIGNING_DIR/notarization.json")"
-          bash macos/scripts/verify-dmg.sh "$dmg" "$RELEASE_VERSION" "$sha"
+          bash macos/scripts/verify-dmg.sh "$dmg" "$RELEASE_VERSION" "$sha" "$SOURCE_COMMIT"
       - name: Remove temporary signing material
         if: always()
         run: |
@@ -97,5 +166,10 @@ jobs:
             macos/dist/OpenRappter-Bar-${{ inputs.version }}.dmg
             macos/dist/OpenRappter-Bar-${{ inputs.version }}.dmg.sha256
             macos/dist/macos-bar.json
+            macos/dist/runtime-bootstrap.json
+            macos/dist/verified-runtime-bootstrap.mjs
+            macos/dist/openrappter-runtime-${{ inputs.version }}-darwin-arm64.tar.gz
+            macos/dist/openrappter-runtime-${{ inputs.version }}-darwin-x86_64.tar.gz
           if-no-files-found: error
+          compression-level: 0
           retention-days: 7

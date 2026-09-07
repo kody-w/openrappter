@@ -4,8 +4,13 @@ set -euo pipefail
 DMG="${1:?DMG path required}"
 VERSION="${2:?Exact version required}"
 EXPECTED_SHA="${3:?Expected SHA-256 required}"
+SOURCE_COMMIT="${4:?Exact source commit required}"
+RUNTIME_INPUTS="${5:-$(dirname "$DMG")}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPOSITORY_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]] || exit 1
+[[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 1
 [[ "$(shasum -a 256 "$DMG" | cut -d' ' -f1)" == "$EXPECTED_SHA" ]] || exit 1
 
 codesign --verify --strict --verbose=2 "$DMG"
@@ -30,6 +35,8 @@ lipo -verify_arch arm64 x86_64 "$APP/Contents/MacOS/OpenRappterBar"
     { echo "DMG bundle version mismatch" >&2; exit 1; }
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" == "com.openrappter.bar" ]] ||
     { echo "DMG bundle identifier mismatch" >&2; exit 1; }
+python3 "$REPOSITORY_DIR/scripts/bar_runtime.py" verify-app --app "$APP" \
+    --root "$RUNTIME_INPUTS" --commit "$SOURCE_COMMIT" --version "$VERSION"
 # Verification must not staple, re-sign, or otherwise change promoted bytes.
 [[ "$(shasum -a 256 "$DMG" | cut -d' ' -f1)" == "$EXPECTED_SHA" ]] ||
     { echo "DMG changed during verification" >&2; exit 1; }

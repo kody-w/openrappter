@@ -28,21 +28,33 @@ No local Keychain extraction is needed to run the health check.
 2. With owner approval, run **Build immutable non-stable candidate** on canonical
    main with the exact source commit, `candidate_kind=release`, its intended
    package tag `vX.Y.Z`, channel version, and `include_macos_bar=true`.
-3. The reusable **Build signed macOS Bar candidate bytes** job runs native tests,
-   builds both architectures, signs using Developer ID, submits to Apple's notary
-   service, and staples the accepted ticket. Only afterward does it hash the DMG.
-   Gatekeeper, bundle version, bundle identifier, and both architectures are checked.
-4. The DMG, checksum, and closed `macos-bar.json` record join the existing
-   npm/wheel/sdist/installer bundle. Each file is included in candidate provenance.
+3. The reusable **Build signed macOS Bar candidate bytes** workflow first builds
+   dependency-complete runtimes on **macos-14 (ARM64)** and **macos-15-intel (x64)**.
+   Each job asserts its actual machine architecture, verifies the official Node
+   archive and binary pins, and executes the real SQLite/Sharp dependencies,
+   packaged Copilot `--version`, dashboard, and an offline mock gateway chat.
+   Neither job uses signing credentials or a real model/account for its smoke.
+   The signing job requires both architecture jobs, seals bootstrap metadata and
+   its helper into the universal app, signs with Developer ID, submits to Apple's
+   notary service, and staples the accepted ticket. Only afterward does it hash
+   the DMG. Gatekeeper, bundle identity/source commit, sealed resources, and both
+   architectures are checked.
+4. The DMG, checksum, closed `macos-bar.json`, `runtime-bootstrap.json`, sealed
+   helper copy, and both `openrappter-runtime-X.Y.Z-darwin-ARCH.tar.gz` files join
+   the existing npm/wheel/sdist/installer bundle. All are **flat regular files**
+   included in `provenance.json` and `SHA256SUMS` before the outer bundle is hashed.
    Promote the same outer bundle digest through finalized immutable receipts in
    order nightly → alpha → canary → beta. No step may rebuild or skip a ring.
 5. With owner approval, run **Release macOS Menu Bar** on main with that exact
    source commit and version. Its named **Release Constitution** job validates
    the full authority chain and local candidate bytes, including the native files.
-   A separate macOS job verifies the unchanged DMG; it does not re-sign or staple.
-   Only then can the publication job create `vX.Y.Z-bar` and immutable assets.
-6. The workflow downloads the published DMG again and compares its SHA-256 with
-   the constitution-checked digest. A mismatch fails the run.
+   Separate ARM64 and Intel macOS jobs verify the unchanged DMG; neither re-signs
+   nor staples. Only then can publication create `vX.Y.Z-bar` and immutable assets.
+   It derives the frozen four-receipt proof using `bar_candidate.py cask` and
+   publishes the same proof bytes as **runtime-bootstrap-proof.json** on that
+   exact Bar release. This post-gate evidence is not embedded in its own candidate.
+6. The workflow downloads the published DMG, both runtime archives, and proof
+   again and compares them with the authorized bytes. A mismatch fails the run.
 
 The package candidate's intended tag remains `vX.Y.Z`; the digest-bound
 `macos-bar.json` additionally records the native tag `vX.Y.Z-bar`. The existing
@@ -51,9 +63,73 @@ A package-only candidate, snapshot, missing native file, or changed DMG is rejec
 An independent Bar-only authority lane would require a separately reviewed central
 contract change; this workflow does not pretend that one exists.
 
-The DMG contains the Swift companion, not Node or a gateway runtime. Fresh-install
-runtime provisioning/readiness is a separate application requirement.
+The DMG contains the Swift companion plus its **sealed first-launch download
+contract**, not Node or the gateway runtime. First launch verifies the exact
+official Node archive/binary, the frozen nightly → alpha → canary → beta chain,
+the candidate bundle, its provenance/checksums, and the selected runtime archive.
+The customer does **not** run `npm`, compile native modules, use a floating
+package tag, or fetch executable bootstrap code from a mutable branch.
+An unavailable proof, stale pin, incomplete archive, or unapproved candidate
+fails closed rather than silently choosing an ambient runtime.
 Local unsigned `build-mac-app.sh` builds remain available for development only.
+
+## Producer pins and local verification
+
+`macos/runtime-node-pins.json` pins the exact official Node release, archive and
+extracted binary SHA-256/size for both architectures, and the Node module ABI.
+The producer verifies those bytes **before executing Node** and compares the
+running `process.versions.modules`, version, architecture, and platform with the
+reviewed pins. Rotate the two pins together, build/test both targets again, and
+produce a new source identity; never repair an already-promoted candidate in place.
+
+`scripts/bar_runtime.py build` derives the Bar version from
+`typescript/package.json`, uses source-controlled locks for `npm ci`, builds the
+packaged UI/server, and installs production dependencies in a fresh isolated
+home/staging directory. Every runtime contains the package, dependency lock,
+licenses, UI, compiled server, production modules, and `runtime-build.json`
+binding the source/locks/pins/native binaries. npm selects only the target
+platform packages. The producer additionally removes only Copilot's five
+explicitly foreign clipboard bindings and any opposite-architecture search-tool
+executables; the matching bindings/tools, loaders, packages, and every license
+remain. The omitted filenames are recorded. It never drops
+Copilot, SQLite, Sharp, or other required dependencies to meet a size budget.
+Before and after compilation, the producer rejects tracked changes or untracked
+release inputs instead of labeling a dirty working tree with an unrelated HEAD.
+Signed app builds apply the same exact-source guard; ordinary unsigned
+development builds remain unaffected.
+
+On a matching Mac (Intel can also be checked using the pinned x64 Node under
+Rosetta), run from the repository root:
+
+```bash
+python3 scripts/bar_runtime.py build --architecture arm64 \
+  --commit "$(git rev-parse HEAD)" --root macos/dist \
+  --work .test-scratch/bar-runtime-arm64
+python3 scripts/bar_runtime.py build --architecture x86_64 \
+  --commit "$(git rev-parse HEAD)" --root macos/dist \
+  --work .test-scratch/bar-runtime-x86_64
+python3 scripts/bar_runtime.py manifest --root macos/dist \
+  --commit "$(git rev-parse HEAD)"
+python3 -m unittest discover -s tests -p 'test_bar*.py' -v
+.test-scratch/bar-runtime-arm64/node/bin/node --test macos/Tests/verified-runtime-bootstrap.test.mjs
+```
+
+Use fresh work/output locations for a new attempt. These commands build/test
+unprivileged candidate inputs; they do not sign, notarize, promote, or publish.
+The producer validates normalized tar paths and native architecture, then the
+actual sealed helper extracts each real archive for an offline package smoke.
+Python fixtures are also checked against the actual bootstrap JSON schema and
+helper, including a generated frozen proof and both candidate runtime variants.
+
+**Transport gate:** the current authority/consumer contract names one immutable
+`raw.githubusercontent.com` candidate tarball stored as a git blob. GitHub's
+100 MiB per-file limit applies to that **outer bundle**, not to each runtime.
+`build-candidate.yml` runs `bar_runtime.py check-transport` before any candidate
+git push. Current dependency-complete runtimes can exceed that budget even
+before adding the DMG; local measurements are not proof of a publishable
+candidate. If the gate fails, coordinate an explicitly reviewed authority and
+consumer transport change. Do not split files, switch hosts, enable a bypass,
+or omit dependencies under the existing contract.
 
 ## Public Homebrew follow-through
 

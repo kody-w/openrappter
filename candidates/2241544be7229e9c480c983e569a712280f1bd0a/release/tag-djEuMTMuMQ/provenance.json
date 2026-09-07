@@ -1,0 +1,68 @@
+{
+  "schema": "openrappter-candidate-provenance/v1",
+  "channel": "candidate",
+  "stable": false,
+  "candidate_kind": "release",
+  "candidate_id": "tag-djEuMTMuMQ",
+  "source_tag": null,
+  "intended_release_tag": "v1.13.1",
+  "source_repository": "kody-w/openrappter",
+  "source_commit": "2241544be7229e9c480c983e569a712280f1bd0a",
+  "source_date_epoch": 1788802686,
+  "versions": {
+    "npm": "1.13.1",
+    "pypi": "1.13.1",
+    "runtime": "1.13.1",
+    "channel": "0.1.0-beta.11"
+  },
+  "files": [
+    {
+      "path": "OpenRappter-Bar-1.13.1.dmg",
+      "sha256": "7caf99c673b0ef9512284091fe28db92a110dcf79a2dfa27e223c3a78478fd34"
+    },
+    {
+      "path": "OpenRappter-Bar-1.13.1.dmg.sha256",
+      "sha256": "854e974d9c1208c1f09adf81a8aafdf2cc1ea894e01da2102bff284ab58f5e61"
+    },
+    {
+      "path": "install.ps1",
+      "sha256": "3a5cce54dfb9f3478821d4d616bb23af004f7866488cf5c6eb6ba8bbb72d6b4e"
+    },
+    {
+      "path": "install.sh",
+      "sha256": "ff71cd77b7bfe4105108dce85fffcb4cc4905715eee31a4d365edd7dad278fe4"
+    },
+    {
+      "path": "macos-bar.json",
+      "sha256": "d24a595478586a05df40aa6a5e89aaf637ede2360af20db1a023227564441a64"
+    },
+    {
+      "path": "openrappter-1.13.1-py3-none-any.whl",
+      "sha256": "2fbe405163b63a68f03a726b3fbf816753d00bd9bd6439afa64de887408846c2"
+    },
+    {
+      "path": "openrappter-1.13.1.tar.gz",
+      "sha256": "80f7043594553804cc95ecf7a8b360d05c6b2e683e80f2ace4e39ab58397d7ae"
+    },
+    {
+      "path": "openrappter-1.13.1.tgz",
+      "sha256": "78ade10efb8ab0508ade10e417e63387080d90e515452b6e53594556f4176f9c"
+    },
+    {
+      "path": "openrappter-runtime-1.13.1-darwin-arm64.tar.gz.parts.json",
+      "sha256": "796caf88f439c518f5fc4aa580cbec880c1beb6638af86e189ce918b4f00a8b5"
+    },
+    {
+      "path": "openrappter-runtime-1.13.1-darwin-x86_64.tar.gz.parts.json",
+      "sha256": "8ffb2c32dabc50713401f2f462e28f446481bc29bfbeeace5ac955b722f62f01"
+    },
+    {
+      "path": "runtime-bootstrap.json",
+      "sha256": "df1a5957d19a0d41e1d8cd0f1eec2ed729122c5dc49ab9e5fd8fea5a4cea60b5"
+    },
+    {
+      "path": "verified-runtime-bootstrap.mjs",
+      "sha256": "c032700e913bc4dd736feb36748888f4c5bd6d7fd6b6c1677365ef4b9122caf9"
+    }
+  ]
+}

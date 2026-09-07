@@ -1,0 +1,14 @@
+{
+  "schema": "openrappter-candidate-index/v1",
+  "source_commit": "2241544be7229e9c480c983e569a712280f1bd0a",
+  "snapshots": [],
+  "releases": [
+    {
+      "id": "tag-djEuMTMuMQ",
+      "bundle_sha256": "e65da0b8faabbb735a7e152876519af31f56b94e9bc30a015f9767828b7c16b8",
+      "path": "candidates/2241544be7229e9c480c983e569a712280f1bd0a/release/tag-djEuMTMuMQ",
+      "provenance_path": "candidates/2241544be7229e9c480c983e569a712280f1bd0a/release/tag-djEuMTMuMQ/provenance.json",
+      "source_date_epoch": 1788802686
+    }
+  ]
+}

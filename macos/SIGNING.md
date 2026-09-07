@@ -39,20 +39,30 @@ No local Keychain extraction is needed to run the health check.
    notary service, and staples the accepted ticket. Only afterward does it hash
    the DMG. Gatekeeper, bundle identity/source commit, sealed resources, and both
    architectures are checked.
-4. The DMG, checksum, closed `macos-bar.json`, `runtime-bootstrap.json`, sealed
-   helper copy, and both `openrappter-runtime-X.Y.Z-darwin-ARCH.tar.gz` files join
-   the existing npm/wheel/sdist/installer bundle. All are **flat regular files**
-   included in `provenance.json` and `SHA256SUMS` before the outer bundle is hashed.
+4. The DMG, checksum, closed `macos-bar.json`, `runtime-bootstrap.json`, and sealed
+   helper copy join the existing npm/wheel/sdist/installer bundle. Oversized
+   runtimes become `<runtime.file>.parts.json` descriptors in that bundle;
+   legacy small direct archives remain supported. Exactly one representation
+   per architecture is allowed. The descriptors and normal **flat regular files**
+   enter `provenance.json` and `SHA256SUMS` before the outer bundle is hashed.
+   Runtime parts live outside the outer tar and are committed as its flat
+   siblings in the **same immutable candidate commit and directory**, together
+   with the outer tar, provenance and index. Parts and streamed reconstructed
+   runtimes are verified before that single candidate-branch publication.
    Promote the same outer bundle digest through finalized immutable receipts in
    order nightly → alpha → canary → beta. No step may rebuild or skip a ring.
 5. With owner approval, run **Release macOS Menu Bar** on main with that exact
    source commit and version. Its named **Release Constitution** job validates
    the full authority chain and local candidate bytes, including the native files.
+   Materialization downloads and verifies every referenced runtime part before
+   it can produce release evidence; unavailable or corrupt parts fail the job.
    Separate ARM64 and Intel macOS jobs verify the unchanged DMG; neither re-signs
    nor staples. Only then can publication create `vX.Y.Z-bar` and immutable assets.
    It derives the frozen four-receipt proof using `bar_candidate.py cask` and
    publishes the same proof bytes as **runtime-bootstrap-proof.json** on that
    exact Bar release. This post-gate evidence is not embedded in its own candidate.
+   Public standalone runtime archives are reconstructed from verified parts,
+   never rebuilt, and checked against the original sealed whole-archive hashes.
 6. The workflow downloads the published DMG, both runtime archives, and proof
    again and compares them with the authorized bytes. A mismatch fails the run.
 
@@ -121,15 +131,35 @@ actual sealed helper extracts each real archive for an offline package smoke.
 Python fixtures are also checked against the actual bootstrap JSON schema and
 helper, including a generated frozen proof and both candidate runtime variants.
 
-**Transport gate:** the current authority/consumer contract names one immutable
-`raw.githubusercontent.com` candidate tarball stored as a git blob. GitHub's
-100 MiB per-file limit applies to that **outer bundle**, not to each runtime.
-`build-candidate.yml` runs `bar_runtime.py check-transport` before any candidate
-git push. Current dependency-complete runtimes can exceed that budget even
-before adding the DMG; local measurements are not proof of a publishable
-candidate. If the gate fails, coordinate an explicitly reviewed authority and
-consumer transport change. Do not split files, switch hosts, enable a bypass,
-or omit dependencies under the existing contract.
+## Approved chunk transport
+
+The outer candidate keeps its existing immutable `raw.githubusercontent.com`
+URL, authority schema, candidate namespace, and four-ring identity. No public
+prerelease lane or policy bypass is introduced. `bar_runtime.py chunks` stages
+oversized archives into a separate `candidate-parts/` directory; the normal
+candidate directory receives only the corresponding descriptors.
+
+The closed `openrappter-runtime-chunks/v1` descriptor contains:
+`schema`, `source_commit`, `version`, `architecture`, `file`, `sha256`, `size`,
+and `parts`. Each part has exactly `file`, `sha256`, and `size`. The whole-file
+identity must equal the app's unchanged sealed `runtime` pin. Parts are indexed
+from zero, numbered in order, and named
+`runtime-ARCH-NNNN-SHA256.part`. There are 1–64 parts; every non-final part is
+exactly 32 MiB, the final part is non-empty and at most 32 MiB, and their sizes
+sum to the whole archive size. No descriptor or part may supply a URL.
+
+The downloader derives each URL from the authorized outer candidate's directory
+and exact part filename, preserving the same immutable candidate ref/path.
+It verifies each part's size/SHA-256 and the streamed reconstructed archive's
+size/SHA-256. Release verification additionally inspects the reconstructed
+archive's source, locks, ABI and native files. Missing, changed, unlisted,
+ambiguous or reordered data is rejected.
+
+`build-candidate.yml` still enforces GitHub's 100 MiB limit on the **outer tar**.
+Every part is below that limit. The approved split removes the large runtime
+archives from the outer tar without dropping any dependency or changing its
+sealed whole-file identity. If the outer tar still exceeds its budget, fail
+rather than splitting unrelated artifacts or weakening the release gate.
 
 ## Public Homebrew follow-through
 

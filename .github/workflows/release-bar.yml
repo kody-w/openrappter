@@ -75,7 +75,7 @@ jobs:
         run: |
           set -euo pipefail
           sha="$(python scripts/bar_candidate.py verify --root bar-release/release-dist \
-            --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION")"
+            --parts-root bar-release/candidate-parts --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION")"
           echo "commit=$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
           echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "dmg_sha256=$sha" >> "$GITHUB_OUTPUT"
@@ -112,6 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/bar_candidate.py verify --root bar-release/release-dist \
+            --parts-root bar-release/candidate-parts \
             --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION" --expected-sha "$DMG_SHA256"
           bash macos/scripts/verify-dmg.sh \
             "bar-release/release-dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg" \
@@ -142,10 +143,17 @@ jobs:
           set -euo pipefail
           echo "$BUNDLE_SHA256  bar-release/candidate.tar.gz" | sha256sum -c -
           python3 scripts/bar_candidate.py verify --root bar-release/release-dist \
+            --parts-root bar-release/candidate-parts \
             --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION" --expected-sha "$DMG_SHA256"
+      - name: Reassemble exact receipted runtime bytes without rebuilding
+        run: |
+          python3 scripts/bar_runtime.py export --root bar-release/release-dist \
+            --parts-root bar-release/candidate-parts --commit "$SOURCE_COMMIT" \
+            --version "$RELEASE_VERSION" --output publish-runtimes
       - name: Produce the frozen first-launch proof only after constitution verification
         run: |
           python3 scripts/bar_candidate.py cask --root bar-release/release-dist \
+            --parts-root bar-release/candidate-parts \
             --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION" --expected-sha "$DMG_SHA256" \
             --evidence bar-release/authority-evidence.json --chain bar-release/chain.json \
             --output homebrew-proposal
@@ -180,8 +188,8 @@ jobs:
             bar-release/release-dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg
             bar-release/release-dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg.sha256
             bar-release/release-dist/macos-bar.json
-            bar-release/release-dist/openrappter-runtime-${{ env.RELEASE_VERSION }}-darwin-arm64.tar.gz
-            bar-release/release-dist/openrappter-runtime-${{ env.RELEASE_VERSION }}-darwin-x86_64.tar.gz
+            publish-runtimes/openrappter-runtime-${{ env.RELEASE_VERSION }}-darwin-arm64.tar.gz
+            publish-runtimes/openrappter-runtime-${{ env.RELEASE_VERSION }}-darwin-x86_64.tar.gz
             homebrew-proposal/runtime-bootstrap-proof.json
           fail_on_unmatched_files: true
           overwrite_files: false
@@ -194,7 +202,7 @@ jobs:
           cmp homebrew-proposal/runtime-bootstrap-proof.json downloaded-bar/runtime-bootstrap-proof.json
           for arch in arm64 x86_64; do
             file="openrappter-runtime-${RELEASE_VERSION}-darwin-${arch}.tar.gz"
-            cmp "bar-release/release-dist/$file" "downloaded-bar/$file"
+            cmp "publish-runtimes/$file" "downloaded-bar/$file"
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

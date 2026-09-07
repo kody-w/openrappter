@@ -9,8 +9,11 @@ import subprocess
 import sys
 import tarfile
 import unittest
+from unittest.mock import patch
 import uuid
+import io
 from bar_runtime_fixtures import app_fixture, runtime, runtime_inputs
+import bar_runtime_chunks as chunks
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("bar_candidate", ROOT / "scripts/bar_candidate.py")
@@ -56,6 +59,27 @@ class BarCandidateTests(unittest.TestCase):
             f"{bar.digest(p.read_bytes())}  {p.name}\n"
             for p in sorted(self.payload.iterdir()) if p.name != "SHA256SUMS"
         ))
+
+    def chunked_payload(self):
+        parts = self.work / "candidate-parts"
+        descriptors = {}
+        metadata = json.loads((self.payload / runtime.METADATA).read_text())
+        for architecture, variant in metadata["variants"].items():
+            artifact = variant["runtime"]
+            archive = self.payload / artifact["file"]
+            descriptors[architecture] = chunks.split_archive(
+                archive, artifact, COMMIT, VERSION, architecture, parts,
+                self.payload / chunks.descriptor_name(artifact))
+            archive.unlink()
+        self.refresh_provenance()
+        return parts, descriptors
+
+    def refresh_provenance(self):
+        self.provenance["files"] = [{"path": file.name, "sha256": runtime.file_sha(file)}
+                                    for file in sorted(self.payload.iterdir())
+                                    if file.name not in ("SHA256SUMS", "provenance.json")]
+        bar.write_json(self.payload / "provenance.json", self.provenance)
+        self.checksums()
 
     def bundle(self):
         file = self.work / "candidate.tar.gz"
@@ -288,6 +312,85 @@ await assert.rejects(extractCandidate(bundle, path.join(work, 'tampered-pin'), c
         self.checksums()
         with self.assertRaisesRegex(ValueError, "canonical package candidate"):
             bar.verify_payload(self.payload, COMMIT, VERSION)
+
+    def test_chunked_candidate_requires_all_parts_and_preserves_the_original_runtime_bytes(self):
+        parts, descriptors = self.chunked_payload()
+        self.assertEqual(bar.verify_payload(self.payload, COMMIT, VERSION, parts_root=parts), self.record)
+        with self.assertRaisesRegex(ValueError, "parts directory is required"):
+            bar.verify_payload(self.payload, COMMIT, VERSION)
+        output = self.work / "runtime-archives"
+        runtime.export_runtime_archives(self.payload, parts, COMMIT, VERSION, output)
+        for descriptor in descriptors.values():
+            self.assertEqual(runtime.file_sha(output / descriptor["file"]), descriptor["sha256"])
+        first = parts / descriptors["arm64"]["parts"][0]["file"]
+        first.unlink()
+        with self.assertRaisesRegex(ValueError, "missing regular runtime part"):
+            bar.verify_payload(self.payload, COMMIT, VERSION, parts_root=parts)
+
+    def test_direct_and_chunked_representations_cannot_both_appear(self):
+        parts, descriptors = self.chunked_payload()
+        descriptor = descriptors["arm64"]
+        chunks.verify_parts(descriptor, parts, self.payload / descriptor["file"])
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            bar.verify_payload(self.payload, COMMIT, VERSION, parts_root=parts)
+
+    def test_parts_cannot_be_smuggled_into_outer_provenance_or_left_unlisted(self):
+        parts, descriptors = self.chunked_payload()
+        part = parts / descriptors["arm64"]["parts"][0]["file"]
+        shutil.copyfile(part, self.payload / part.name)
+        self.refresh_provenance()
+        with self.assertRaisesRegex(ValueError, "siblings outside"):
+            bar.verify_payload(self.payload, COMMIT, VERSION, parts_root=parts)
+        (self.payload / part.name).unlink()
+        self.refresh_provenance()
+        (parts / "unlisted.part").write_bytes(b"unexpected")
+        with self.assertRaisesRegex(ValueError, "unlisted runtime parts"):
+            bar.verify_payload(self.payload, COMMIT, VERSION, parts_root=parts)
+
+    def test_materialization_downloads_frozen_sibling_parts_before_claiming_success(self):
+        parts, _ = self.chunked_payload()
+        evidence = self.evidence()
+        release = {"artifact_url": evidence["receipt"]["artifact_url"],
+                   "artifact_sha256": evidence["receipt"]["artifact_sha256"]}
+        bundle = self.bundle().read_bytes()
+        original_fetch = chunks.fetch_parts
+        requested = []
+        def fetch(descriptor, candidate_url, output):
+            def opener(request, timeout):
+                requested.append(request.full_url)
+                self.assertEqual(request.full_url.rsplit("/", 1)[0], candidate_url.rsplit("/", 1)[0])
+                return io.BytesIO((parts / request.full_url.rsplit("/", 1)[1]).read_bytes())
+            return original_fetch(descriptor, candidate_url, output, opener)
+        output = self.work / "materialized"
+        with patch.object(bar, "resolve_identity", return_value=(release, evidence)), \
+                patch.object(bar.urllib.request, "urlopen", side_effect=lambda *args, **kwargs: io.BytesIO(bundle)), \
+                patch.object(chunks, "fetch_parts", side_effect=fetch):
+            self.assertEqual(bar.materialize(output, COMMIT, VERSION), self.record)
+        self.assertEqual(len(requested), 2)
+        self.assertTrue((output / "release.json").is_file())
+        self.assertEqual(bar.verify_payload(output / "release-dist", COMMIT, VERSION,
+                                           parts_root=output / "candidate-parts"), self.record)
+        failed = self.work / "unavailable"
+        with patch.object(bar, "resolve_identity", return_value=(release, evidence)), \
+                patch.object(bar.urllib.request, "urlopen", side_effect=lambda *args, **kwargs: io.BytesIO(bundle)), \
+                patch.object(chunks, "fetch_parts", side_effect=OSError("immutable part unavailable")):
+            with self.assertRaisesRegex(OSError, "immutable part unavailable"):
+                bar.materialize(failed, COMMIT, VERSION)
+        self.assertFalse((failed / "release.json").exists(), "unavailable parts cannot yield release evidence")
+
+    def test_frozen_proof_publication_also_requires_verified_chunk_bytes(self):
+        parts, descriptors = self.chunked_payload()
+        evidence, chain = self.evidence(), self.chain()
+        output = self.work / "chunk-proof"
+        bar.cask_proposal(self.payload, COMMIT, VERSION, self.record["dmg"]["sha256"],
+                          evidence, chain, output, parts_root=parts)
+        self.assertEqual((output / "runtime-bootstrap-proof.json").read_bytes(), (output / "receipt.json").read_bytes())
+        part = parts / descriptors["x86_64"]["parts"][0]["file"]
+        data = part.read_bytes()
+        part.write_bytes(bytes(len(data)))
+        with self.assertRaisesRegex(ValueError, "runtime part checksum"):
+            bar.cask_proposal(self.payload, COMMIT, VERSION, self.record["dmg"]["sha256"],
+                              evidence, chain, self.work / "bad-proof", parts_root=parts)
 
     @unittest.skipUnless(sys.platform == "darwin", "macOS packaging shell")
     def test_signed_app_build_refuses_missing_bootstrap_before_swift_or_signing(self):

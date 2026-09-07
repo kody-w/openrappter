@@ -15,6 +15,7 @@ import sys
 import tarfile
 import unicodedata
 import urllib.request
+import bar_runtime_chunks as chunks
 
 ROOT = Path(__file__).resolve().parents[1]
 ARCHITECTURES = ("arm64", "x86_64")
@@ -383,7 +384,7 @@ def create_metadata(root, commit, version):
     return value
 
 
-def verify_bootstrap(root, commit, version, inspect_archives=True):
+def bootstrap_metadata(root, commit, version):
     identity(commit, version)
     value = json.loads(regular(root / METADATA).read_text())
     closed(value, ("schema", "source_commit", "version", "approval_url", "helper_sha256", "variants"), "bootstrap metadata")
@@ -400,16 +401,81 @@ def verify_bootstrap(root, commit, version, inspect_archives=True):
         artifact = variant["runtime"]
         closed(artifact, ("file", "sha256", "size"), "runtime archive pin")
         require(artifact["file"] == runtime_filename(version, architecture), "runtime archive name/version mismatch")
-        file = regular(root / artifact["file"])
         require(type(artifact["size"]) is int and 0 < artifact["size"] <= MAX_EXPANDED // 2
-                and file.stat().st_size == artifact["size"] and file_sha(file) == artifact["sha256"], "runtime archive digest/size mismatch")
-        if inspect_archives:
-            verify_runtime_archive(file, commit, version, architecture)
+                and isinstance(artifact["sha256"], str) and HEX64.fullmatch(artifact["sha256"]), "invalid sealed runtime pin")
     return value
 
 
-def verify_app(app, root, commit, version):
-    value = verify_bootstrap(root, commit, version, inspect_archives=False)
+def runtime_representation(root, artifact):
+    direct = root / artifact["file"]
+    descriptor = root / chunks.descriptor_name(artifact)
+    has_direct = direct.exists() or direct.is_symlink()
+    has_descriptor = descriptor.exists() or descriptor.is_symlink()
+    require(has_direct != has_descriptor,
+            "missing regular runtime resource: require exactly one runtime archive or chunk descriptor")
+    return regular(direct if has_direct else descriptor)
+
+
+def verify_bootstrap(root, commit, version, inspect_archives=True, parts_root=None):
+    value = bootstrap_metadata(root, commit, version)
+    expected_parts = set()
+    for architecture, variant in value["variants"].items():
+        artifact = variant["runtime"]
+        file = runtime_representation(root, artifact)
+        if file.name == artifact["file"]:
+            require(file.stat().st_size == artifact["size"] and file_sha(file) == artifact["sha256"], "runtime archive digest/size mismatch")
+            if inspect_archives:
+                verify_runtime_archive(file, commit, version, architecture)
+        else:
+            descriptor = chunks.load_descriptor(file, artifact, commit, version, architecture)
+            expected_parts.update(part["file"] for part in descriptor["parts"])
+            if inspect_archives:
+                with chunks.assembled_archive(descriptor, parts_root) as archive:
+                    verify_runtime_archive(archive, commit, version, architecture)
+            else:
+                chunks.verify_parts(descriptor, parts_root)
+    if parts_root is not None and parts_root.exists():
+        require({file.name for file in parts_root.iterdir()} == expected_parts, "unlisted runtime parts")
+    return value
+
+
+def stage_chunks(root, parts_root, commit, version):
+    require(not parts_root.resolve().is_relative_to(root.resolve()), "parts must stay outside the canonical outer bundle")
+    value = verify_bootstrap(root, commit, version)
+    parts_root.mkdir(parents=True, exist_ok=False)
+    descriptors = []
+    for architecture, variant in value["variants"].items():
+        artifact = variant["runtime"]
+        if artifact["size"] <= chunks.CHUNK_BYTES:
+            continue
+        archive = root / artifact["file"]
+        descriptor = chunks.split_archive(archive, artifact, commit, version, architecture,
+                                          parts_root, root / chunks.descriptor_name(artifact))
+        archive.unlink()
+        descriptors.append(descriptor)
+    verify_bootstrap(root, commit, version, parts_root=parts_root)
+    return {"descriptors": descriptors, "parts": [part for descriptor in descriptors for part in descriptor["parts"]]}
+
+
+def export_runtime_archives(root, parts_root, commit, version, output):
+    value = verify_bootstrap(root, commit, version, parts_root=parts_root)
+    output.mkdir(parents=True, exist_ok=False)
+    for architecture, variant in value["variants"].items():
+        artifact = variant["runtime"]
+        source = runtime_representation(root, artifact)
+        destination = output / artifact["file"]
+        if source.name == artifact["file"]:
+            shutil.copyfile(source, destination)
+        else:
+            descriptor = chunks.load_descriptor(source, artifact, commit, version, architecture)
+            chunks.verify_parts(descriptor, parts_root, destination)
+        require(destination.stat().st_size == artifact["size"] and file_sha(destination) == artifact["sha256"],
+                "exported runtime archive differs from sealed metadata")
+    return value
+
+
+def verify_app(app, root, commit, version, parts_root=None):
+    value = verify_bootstrap(root, commit, version, inspect_archives=False, parts_root=parts_root)
     contents = app / "Contents"
     with regular(contents / "Info.plist").open("rb") as source:
         info = plistlib.load(source)
@@ -425,7 +491,7 @@ def check_transport(bundle):
     size = regular(bundle).stat().st_size
     require(size <= GIT_BLOB_LIMIT,
             f"canonical candidate is {size} bytes; raw candidate git transport is limited to {GIT_BLOB_LIMIT} bytes. "
-            "Do not omit dependencies or split bytes without an approved authority/consumer transport contract.")
+            "Stage approved runtime chunk descriptors/parts before bundling; other artifacts must still fit.")
     return size
 
 
@@ -500,7 +566,7 @@ def build(architecture, commit, output, work, node_archive=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("source", "build", "manifest", "verify", "verify-app", "check-transport"))
+    parser.add_argument("command", choices=("source", "build", "manifest", "chunks", "export", "verify", "verify-app", "check-transport"))
     parser.add_argument("--commit")
     parser.add_argument("--version")
     parser.add_argument("--architecture", choices=ARCHITECTURES)
@@ -509,8 +575,11 @@ def main():
     parser.add_argument("--node-archive", type=Path)
     parser.add_argument("--app", type=Path)
     parser.add_argument("--bundle", type=Path)
+    parser.add_argument("--parts-root", type=Path)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     root = args.root.resolve() if args.root else None
+    parts_root = args.parts_root.resolve() if args.parts_root else None
     if args.command == "source":
         result = {"source_commit": args.commit, "version": verify_source(args.commit)}
     elif args.command == "build":
@@ -519,10 +588,17 @@ def main():
                        args.node_archive.resolve() if args.node_archive else None)
     elif args.command == "manifest":
         result = create_metadata(root, args.commit, args.version or source_version())
+    elif args.command == "chunks":
+        require(parts_root is not None, "chunk staging requires a separate --parts-root")
+        require(not parts_root.is_relative_to(root), "parts must stay outside the canonical outer bundle")
+        result = stage_chunks(root, parts_root, args.commit, args.version or source_version())
     elif args.command == "verify":
-        result = verify_bootstrap(root, args.commit, args.version)
+        result = verify_bootstrap(root, args.commit, args.version, parts_root=parts_root)
+    elif args.command == "export":
+        require(args.output is not None, "runtime export requires --output")
+        result = export_runtime_archives(root, parts_root, args.commit, args.version, args.output.resolve())
     elif args.command == "verify-app":
-        result = verify_app(args.app.resolve(), root, args.commit, args.version)
+        result = verify_app(args.app.resolve(), root, args.commit, args.version, parts_root=parts_root)
     else:
         result = {"bundle_bytes": check_transport(args.bundle)}
     print(json.dumps(result, sort_keys=True))

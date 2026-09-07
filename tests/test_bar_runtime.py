@@ -275,8 +275,15 @@ for (const name of ['runtime-bootstrap.json', 'verified-runtime-bootstrap.mjs', 
 }
 const candidate = load('build-candidate.yml').jobs.candidate.steps.map(step => step.run ?? '').join('\\n');
 assert.ok(candidate.indexOf('cp bar-inputs/*') < candidate.indexOf('buildProvenance'));
+assert.ok(candidate.indexOf('bar_runtime.py chunks') < candidate.indexOf('buildProvenance'));
+assert.ok(candidate.includes('--parts-root candidate-parts'));
 assert.ok(candidate.indexOf('buildProvenance') < candidate.indexOf('tar --sort=name'));
 assert.ok(candidate.indexOf('check-transport') < candidate.indexOf('git push origin candidates'));
+const publishCandidate = load('build-candidate.yml').jobs.candidate.steps.find(step => step.run?.includes('git push origin candidates')).run;
+assert.ok(publishCandidate.includes('cp "candidate-parts/$name" "$path/$name"'));
+assert.ok(publishCandidate.indexOf('done < candidate-part-checksums') < publishCandidate.indexOf('git add "$path" "$index"'));
+assert.ok(publishCandidate.indexOf('git add "$path" "$index"') < publishCandidate.indexOf('git commit -m'));
+assert.equal((publishCandidate.match(/git push origin candidates/g) ?? []).length, 1);
 const release = load('release-bar.yml').jobs;
 assert.equal(release['release-constitution'].name, 'Release Constitution');
 assert.deepEqual(release.publish.needs, ['release-constitution', 'verify-dmg']);
@@ -285,6 +292,15 @@ assert.equal(authority.with.ref, '931dd60f77c1e8b3a5c096fae6a5969061ccf569');
 const publish = release.publish.steps.find(step => step.uses?.startsWith('softprops/action-gh-release@'));
 assert.equal(publish.with.overwrite_files, false);
 assert.ok(publish.with.files.includes('homebrew-proposal/runtime-bootstrap-proof.json'));
+assert.ok(publish.with.files.includes('publish-runtimes/openrappter-runtime-'));
+for (const job of Object.values(release)) {
+  for (const step of job.steps ?? []) {
+    if (step.run?.includes('bar_candidate.py verify') || step.run?.includes('bar_candidate.py cask')) {
+      assert.ok(step.run.includes('--parts-root bar-release/candidate-parts'));
+    }
+  }
+}
+assert.ok(release.publish.steps.some(step => step.run?.includes('bar_runtime.py export')));
 assert.ok(!JSON.stringify(release).includes('build-mac-app.sh'));
 assert.ok(!JSON.stringify(release).includes('notarytool submit'));
 """
@@ -320,7 +336,7 @@ assert.ok(!JSON.stringify(release).includes('notarytool submit'));
         self.assertEqual(runtime.check_transport(bundle), 5)
         with bundle.open("wb") as file:
             file.truncate(runtime.GIT_BLOB_LIMIT + 1)
-        with self.assertRaisesRegex(ValueError, "approved authority/consumer transport contract"):
+        with self.assertRaisesRegex(ValueError, "approved runtime chunk"):
             runtime.check_transport(bundle)
 
 

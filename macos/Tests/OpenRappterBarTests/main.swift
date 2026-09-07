@@ -22,6 +22,8 @@ let suites: [(String, () async throws -> Void)] = [
     ("BonesWindow", { await runBonesWindowTests() }),
     ("ChatTarget", { await runChatTargetTests() }),
     ("OnboardingEnvWrite", { await runOnboardingEnvWriteTests() }),
+    ("GitHubAuthReliability", { await runGitHubAuthReliabilityTests() }),
+    ("OnboardingRuntime", { await runOnboardingRuntimeTests() }),
     ("ChatAbortFailure", { await runChatAbortFailureTests() }),
     ("ChatReliability", { await runChatReliabilityTests() }),
     ("ChatRace", { await runChatRaceTests() }),

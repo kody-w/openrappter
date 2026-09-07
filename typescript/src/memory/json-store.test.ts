@@ -107,17 +107,23 @@ describe('memory transaction process protocol', () => {
     })).toEqual({ Path: 'C:\\tools', SystemRoot: 'C:\\Windows', windir: 'C:\\Windows' });
   });
 
-  it('reads an open snapshot after an atomic replacement unlinks its inode', () => {
+  it('keeps an open snapshot stable during a concurrent replacement attempt', () => {
     const originalStat = fs.fstatSync;
+    const replacement = path.join(home, 'replacement.json');
     vi.spyOn(fs, 'fstatSync').mockImplementationOnce(descriptor => {
-      const replacement = path.join(home, 'replacement.json');
       fs.writeFileSync(replacement, JSON.stringify({ next: { message: 'new fact' } }));
-      fs.renameSync(replacement, file);
+      if (nativeWindows) {
+        // Windows does not allow replacement until this CRT read handle closes.
+        expect(() => fs.renameSync(replacement, file)).toThrow();
+      } else {
+        fs.renameSync(replacement, file);
+      }
       return originalStat(descriptor);
     });
     expect(readMemoryFile(file)).toEqual({
       legacy: { message: 'existing fact', theme: 'fact' },
     });
+    if (nativeWindows) fs.renameSync(replacement, file);
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ next: { message: 'new fact' } });
   });
 

@@ -10,6 +10,7 @@ import { randomUUID, createHash, timingSafeEqual } from 'crypto';
 import { parseSenses } from '../channels/senses.js';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import fs from 'fs';
+import { updateEnv } from '../env.js';
 import path from 'path';
 import type {
   GatewayConfig,
@@ -3598,47 +3599,19 @@ export class GatewayServer {
     if (!mapping) return;
 
     const envFile = path.join(this.dataDir, '.env');
-    const existing: Record<string, string> = {};
-
-    // Read existing env file
-    try {
-      const data = await fs.promises.readFile(envFile, 'utf-8');
-      for (const line of data.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const eqIdx = trimmed.indexOf('=');
-        if (eqIdx > 0) {
-          const key = trimmed.slice(0, eqIdx).trim();
-          let val = trimmed.slice(eqIdx + 1).trim();
-          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-            val = val.slice(1, -1);
-          }
-          existing[key] = val;
-        }
-      }
-    } catch { /* file doesn't exist yet */ }
+    const changes: Record<string, string> = {};
 
     // Update with new values
-    let changed = false;
     for (const [configKey, envKey] of Object.entries(mapping)) {
       const val = config[configKey];
       if (typeof val === 'string' && val) {
-        existing[envKey] = val;
-        process.env[envKey] = val;
-        changed = true;
+        changes[envKey] = val;
       }
     }
 
-    if (!changed) return;
-
-    // Write back
-    await fs.promises.mkdir(path.dirname(envFile), { recursive: true });
-    const lines = ['# openrappter environment — managed by openrappter', ''];
-    for (const [key, val] of Object.entries(existing)) {
-      lines.push(`${key}="${val}"`);
-    }
-    lines.push('');
-    await fs.promises.writeFile(envFile, lines.join('\n'));
+    if (Object.keys(changes).length === 0) return;
+    await updateEnv(changes, envFile);
+    Object.assign(process.env, changes);
   }
 
   private getOrCreateSession(sessionId: string, agentId?: string): ChatSession {

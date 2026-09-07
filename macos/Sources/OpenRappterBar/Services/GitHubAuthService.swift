@@ -111,10 +111,10 @@ public final class GitHubAuthService {
                     authState = profile == nil ? .unauthenticated : .authenticated
                 } else {
                     try requireLocalAuthority()
-                    let token = try dependencies.credentials.readToken()
+                    let identity = try await storedIdentity(generation: current)
                     guard isCurrent(current) else { return }
-                    if let token { try dependencies.credentials.saveToken(token) }
-                    authState = token == nil ? .unauthenticated : .authenticated
+                    username = identity?.login
+                    authState = identity == nil ? .unauthenticated : .authenticated
                 }
             } catch {
                 guard isCurrent(current) else { return }
@@ -196,14 +196,16 @@ public final class GitHubAuthService {
                     username = profile.username ?? profile.id
                 } else {
                     try requireLocalAuthority()
-                    guard let token = try dependencies.credentials.readToken() else {
+                    guard let identity = try await storedIdentity(generation: current) else {
                         throw GitHubAuthError.gatewayFailed("No saved GitHub credential was found. Use GitHub sign-in.")
                     }
-                    let profile = try await githubJSON(url: "https://api.github.com/user", token: token)
                     guard isCurrent(current) else { return false }
-                    guard let login = profile["login"] as? String, !login.isEmpty else { throw GitHubAuthError.invalidResponse }
-                    try dependencies.credentials.saveToken(token)
-                    username = login
+                    try requireLocalAuthority()
+                    try dependencies.credentials.saveToken(identity.token) {
+                        guard isCurrent(current) else { throw CancellationError() }
+                        try requireLocalAuthority()
+                    }
+                    username = identity.login
                 }
                 authState = .authenticated
                 return true
@@ -221,9 +223,13 @@ public final class GitHubAuthService {
     @discardableResult
     public func saveManualToken(_ token: String) -> Bool {
         cancelLogin()
+        let current = generation
         do {
             try requireLocalAuthority()
-            try dependencies.credentials.saveToken(token)
+            try dependencies.credentials.saveToken(token) {
+                guard isCurrent(current) else { throw CancellationError() }
+                try requireLocalAuthority()
+            }
             error = nil
             authState = .authenticated
             return true
@@ -275,7 +281,10 @@ public final class GitHubAuthService {
                     authState = next == nil ? .unauthenticated : .authenticated
                 } else {
                     try requireLocalAuthority()
-                    try dependencies.credentials.removeToken()
+                    try dependencies.credentials.removeToken {
+                        guard isCurrent(current) else { throw CancellationError() }
+                        try requireLocalAuthority()
+                    }
                     username = nil
                     authState = .unauthenticated
                 }
@@ -361,7 +370,10 @@ public final class GitHubAuthService {
             guard isCurrent(current) else { throw CancellationError() }
             if let token = response["access_token"] as? String, !token.isEmpty {
                 try requireLocalAuthority()
-                try dependencies.credentials.saveToken(token)
+                try dependencies.credentials.saveToken(token) {
+                    guard isCurrent(current) else { throw CancellationError() }
+                    try requireLocalAuthority()
+                }
                 return
             }
             switch response["error"] as? String {
@@ -411,6 +423,31 @@ public final class GitHubAuthService {
         guard !usingGatewayAuthentication else {
             throw GitHubAuthError.gatewayFailed("OpenRappter Desktop owns sign-in. Reconnect it before authenticating; no local credential was changed.")
         }
+    }
+
+    private func storedIdentity(generation current: UInt) async throws -> (token: String, login: String)? {
+        guard let primary = try dependencies.credentials.readToken() else { return nil }
+        do {
+            return (primary, try await storedUsername(primary, generation: current))
+        } catch GitHubAuthError.requestFailed(let status) where status == 401 || status == 403 {
+            guard isCurrent(current) else { throw CancellationError() }
+            try requireLocalAuthority()
+            guard let fallback = try dependencies.credentials.fallbackToken(), fallback != primary else {
+                throw GitHubAuthError.requestFailed(status)
+            }
+            return (fallback, try await storedUsername(fallback, generation: current))
+        }
+    }
+
+    private func storedUsername(_ token: String, generation current: UInt) async throws -> String {
+        try requireLocalAuthority()
+        let profile = try await githubJSON(url: "https://api.github.com/user", token: token)
+        guard isCurrent(current) else { throw CancellationError() }
+        try requireLocalAuthority()
+        guard let login = profile["login"] as? String, !login.isEmpty else {
+            throw GitHubAuthError.invalidResponse
+        }
+        return login
     }
 
     private func isCurrent(_ current: UInt) -> Bool {

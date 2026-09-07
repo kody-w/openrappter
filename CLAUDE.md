@@ -376,6 +376,16 @@ guarantee for rename/directory metadata. A failure after rename but before
 acknowledgement has an uncertain outcome; an unacknowledged fact may exist.
 Orphan `.pending` files are never read as committed memory.
 
+### Managed environment updates
+
+Managed `.env` edits use `updateEnv()` in TypeScript and `LocalEnvironmentFile`
+in the Bar. Both hold the same `.env.lock.sqlite3` transaction while patching
+only their own keys; do not save a previously loaded whole-file snapshot for
+a partial update. `saveEnv()` remains an explicit full replacement.
+Credential rollback is conditional on still owning the bytes/token being
+reverted. Upgrade managed writers together; old binaries and external editors
+do not participate in this lock protocol.
+
 ## Language Parity
 
 TypeScript and Python implementations are designed to mirror each other. When modifying agent logic, check both:

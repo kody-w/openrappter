@@ -48,7 +48,13 @@ func onboardingFixture(
         environment: LocalEnvironmentFile(homeDirectory: "/onboarding-fixture", files: files.access),
         keychain: keychain
     )
-    let auth = GitHubAuthService(dependencies: fakeAuthDependencies(credentials: store))
+    let auth = GitHubAuthService(dependencies: fakeAuthDependencies(
+        credentials: store,
+        request: { request in
+            guard request.url?.path == "/user" else { throw GitHubAuthError.invalidResponse }
+            return ["login": "fixture-user"]
+        }
+    ))
     let model = OnboardingViewModel(
         homeDir: "/onboarding-fixture",
         authService: auth,
@@ -71,6 +77,7 @@ func runOnboardingRuntimeTests() async {
             let auth = GitHubAuthService(dependencies: fakeAuthDependencies(
                 credentials: credentials,
                 request: { request in
+                    if request.url?.path == "/user" { return ["login": "fixture-user"] }
                     requests += 1
                     if request.url?.path == "/login/device/code" {
                         return ["device_code": "fake-code", "user_code": "ABCD-EFGH", "verification_uri": "https://github.com/login/device", "expires_in": 900, "interval": 1]
@@ -100,6 +107,61 @@ func runOnboardingRuntimeTests() async {
             try expectEqual(requests, 2)
             try expectEqual(backend.starts, 1)
             try expectEqual(credentials.token, "fake_onboarding_token")
+        }
+
+        await test("standalone setup awaits auth reconfiguration after gateway readiness without restarting") {
+            let files = AuthTestFiles()
+            let credentials = AuthTestCredentials()
+            let userResponse = TestGate()
+            defer { Task { await userResponse.open() } }
+            let requests = AsyncCollector<Int>()
+            var requestCount = 0
+            let auth = GitHubAuthService(dependencies: fakeAuthDependencies(
+                credentials: credentials,
+                request: { request in
+                    guard request.url?.path == "/user" else { throw GitHubAuthError.invalidResponse }
+                    requestCount += 1
+                    await requests.append(requestCount)
+                    await userResponse.wait()
+                    try Task.checkCancellation()
+                    return ["login": "fixture-user"]
+                }
+            ))
+            let account = AccountViewModel(authService: auth)
+            var startups = 0
+            var verifications = 0
+            var gatewayVerified = false
+            let runtime = RuntimePrerequisiteService(dependencies: RuntimePrerequisiteDependencies(
+                desktopIsAuthoritative: { false },
+                localRuntimeAvailable: { true },
+                provisionVerifiedRuntime: { throw RuntimePrerequisiteError.unavailable },
+                startLocalRuntime: { startups += 1 },
+                verifyGateway: { desktop in
+                    try expect(!desktop)
+                    verifications += 1
+                    // AppDelegate's standalone onRpcClientReady callback routes
+                    // through Settings.account.configure(nil) in the same way.
+                    account.configure(rpcClient: nil)
+                    _ = try await requests.waitForCount(1, timeout: .seconds(1))
+                    gatewayVerified = true
+                }
+            ))
+            let model = OnboardingViewModel(
+                homeDir: "/onboarding-fixture", authService: auth, runtime: runtime, files: files.access
+            )
+            model.saveManualToken("fake_token")
+            let setup = model.retryRuntimeSetup()
+            _ = try await requests.waitForCount(2, timeout: .seconds(1))
+            try expect(gatewayVerified, "/user must remain held beyond the completed gateway verification")
+            try expectEqual(model.currentStep, .starting)
+            try expect(model.isStarting)
+            await userResponse.open()
+            await setup.value
+            try expect(model.isComplete)
+            try expectEqual(auth.authState, .authenticated)
+            try expectEqual(auth.username, "fixture-user")
+            try expectEqual(startups, 1)
+            try expectEqual(verifications, 1)
         }
 
         await test("configured Desktop bypasses the local credential wizard") {
@@ -287,7 +349,13 @@ func runOnboardingRuntimeTests() async {
                 let backend = OnboardingTestRuntime()
                 let gate = TestGate()
                 backend.verificationGate = gate
-                let auth = GitHubAuthService(dependencies: fakeAuthDependencies(credentials: AuthTestCredentials()))
+                let auth = GitHubAuthService(dependencies: fakeAuthDependencies(
+                    credentials: AuthTestCredentials(),
+                    request: { request in
+                        guard request.url?.path == "/user" else { throw GitHubAuthError.invalidResponse }
+                        return ["login": "fixture-user"]
+                    }
+                ))
                 let model = OnboardingViewModel(
                     homeDir: "/onboarding-fixture", authService: auth, runtime: backend.service(), files: access
                 )

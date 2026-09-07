@@ -184,10 +184,9 @@ public final class OnboardingViewModel {
                 let desktop = try await runtime.prepare()
                 guard current == generation, !Task.isCancelled else { return }
                 usingDesktopRuntime = desktop
-                if usingDesktopRuntime {
-                    await authService.checkAuthStatus().value
-                    guard current == generation, !Task.isCancelled else { return }
-                }
+                // Either connection mode may have just reconfigured the shared auth service.
+                await authService.checkAuthStatus().value
+                guard current == generation, !Task.isCancelled else { return }
                 guard authService.authState == .authenticated else {
                     currentStep = .github
                     return

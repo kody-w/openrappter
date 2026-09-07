@@ -37,7 +37,6 @@ __manifest__ = {
     "author": "Kody Wildfeuer",
     "ring": "ga",
     "capabilities": [
-        "filesystem-read",
         "process-exec"
     ],
     "tags": [

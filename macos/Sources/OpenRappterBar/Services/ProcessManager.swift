@@ -46,14 +46,20 @@ public final class ProcessManager: Observable {
         nodePathResolver: (() -> String?)? = nil,
         gatewayDetector: (@MainActor () async -> Bool)? = nil,
         processStopper: (@MainActor (Process) async -> Void)? = nil,
-        lifecycleObserver: (@MainActor (LifecycleRequest) -> Void)? = nil
+        lifecycleObserver: (@MainActor (LifecycleRequest) -> Void)? = nil,
+        verifiedNodePathResolver: (() -> String?)? = nil
     ) {
         self.port = port
         self.gatewayDetector = gatewayDetector
         self.processStopper = processStopper
         self.lifecycleObserver = lifecycleObserver
+        let verifiedNode = verifiedNodePathResolver ?? {
+            VerifiedRuntimeInstaller.preferredNodeExecutable(
+                forProjectPath: ProcessManager.resolveProjectPath()
+            )
+        }
         self.nodePathResolver = nodePathResolver ?? {
-            ProcessManager.firstExistingNodePath(
+            verifiedNode() ?? ProcessManager.firstExistingNodePath(
                 candidates: [
                     "/usr/local/bin/node",
                     "/opt/homebrew/bin/node",
@@ -195,6 +201,12 @@ public final class ProcessManager: Observable {
         parentPath: String? = ProcessInfo.processInfo.environment["PATH"],
         fileManager: FileManager = .default
     ) -> String? {
+        if let node = VerifiedRuntimeInstaller.preferredNodeExecutable(
+            forProjectPath: resolveProjectPath(homeDirectory: homeDirectory, fileManager: fileManager),
+            homeDirectory: homeDirectory
+        ) {
+            return node
+        }
         for directory in nodeSearchPath(
             homeDirectory: homeDirectory,
             parentPath: parentPath,

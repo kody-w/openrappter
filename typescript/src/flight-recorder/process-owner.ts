@@ -67,7 +67,12 @@ function readProcessIncarnation(pid: number): string | null {
             "-Command",
             `(Get-Process -Id ${pid}).StartTime.ToUniversalTime().ToFileTimeUtc()`,
           ],
-          { encoding: "utf8", windowsHide: true },
+          {
+            encoding: "utf8",
+            windowsHide: true,
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: 10_000,
+          },
         ).trim()}`;
       }
       const started = execFileSync(
@@ -76,6 +81,8 @@ function readProcessIncarnation(pid: number): string | null {
         {
           encoding: "utf8",
           env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 10_000,
         },
       ).trim();
       return started ? `ps-c-utc:${started}` : null;

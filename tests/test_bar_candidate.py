@@ -403,6 +403,28 @@ await assert.rejects(extractCandidate(bundle, path.join(work, 'tampered-pin'), c
             bar.cask_proposal(self.payload, COMMIT, VERSION, self.record["dmg"]["sha256"],
                               evidence, chain, self.work / "bad-proof", parts_root=parts)
 
+    def test_release_candidate_id_executes_the_actual_workflow_shell(self):
+        workflow = (ROOT / ".github/workflows/build-candidate.yml").read_text()
+        assignments = [
+            line.strip() for line in workflow.splitlines()
+            if line.strip().startswith("candidate_id=\"$(python -c '")
+        ]
+        self.assertEqual(len(assignments), 1, "exercise the release workflow's actual candidate ID command")
+        commands = self.work / "python-bin"
+        commands.mkdir()
+        (commands / "python").symlink_to(sys.executable)
+        for tag in (f"v{VERSION}", "v42.17.123"):
+            with self.subTest(tag=tag):
+                result = subprocess.run(
+                    ["bash", "-c", "set -euo pipefail\n" + assignments[0] + '\nprintf "%s" "$candidate_id"\n'],
+                    env={**os.environ, "PATH": f"{commands}{os.pathsep}{os.environ['PATH']}",
+                         "INTENDED_RELEASE_TAG": tag},
+                    capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected = "tag-" + base64.urlsafe_b64encode(tag.encode()).decode().rstrip("=")
+                self.assertEqual(result.stdout, expected)
+
     @unittest.skipUnless(sys.platform == "darwin", "macOS packaging shell")
     def test_signed_app_build_refuses_missing_bootstrap_before_swift_or_signing(self):
         commands = self.work / "commands"

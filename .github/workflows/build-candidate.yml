@@ -123,7 +123,7 @@ jobs:
           runtime_version="$(PYTHONPATH=python python -c 'from openrappter import __version__; print(__version__)')"
           if [ "$CANDIDATE_KIND" = release ]; then
             test "$INTENDED_RELEASE_TAG" = "v$ts_version"
-            candidate_id="$(python -c 'import base64,os; print(\"tag-\"+base64.urlsafe_b64encode(os.environ[\"INTENDED_RELEASE_TAG\"].encode()).decode().rstrip(\"=\"))')"
+            candidate_id="$(python -c 'import base64,os; print("tag-"+base64.urlsafe_b64encode(os.environ["INTENDED_RELEASE_TAG"].encode()).decode().rstrip("="))')"
           else
             test -z "$INTENDED_RELEASE_TAG"
             candidate_id="${INPUT_CANDIDATE_ID:-snapshot-$SOURCE_DATE_EPOCH}"

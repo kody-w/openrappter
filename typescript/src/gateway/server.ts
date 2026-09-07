@@ -10,7 +10,6 @@ import { randomUUID, createHash, timingSafeEqual } from 'crypto';
 import { parseSenses } from '../channels/senses.js';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import fs from 'fs';
-import { updateEnv } from '../env.js';
 import path from 'path';
 import type {
   GatewayConfig,
@@ -3610,6 +3609,7 @@ export class GatewayServer {
     }
 
     if (Object.keys(changes).length === 0) return;
+    const { updateEnv } = await import('../env.js');
     await updateEnv(changes, envFile);
     Object.assign(process.env, changes);
   }

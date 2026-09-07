@@ -1,6 +1,6 @@
 {
   "name": "openrappter-desktop",
-  "version": "1.13.0",
+  "version": "1.13.1",
   "description": "Electron desktop shell for OpenRappter",
   "author": "Wildhaven Homes LLC",
   "license": "Apache-2.0",

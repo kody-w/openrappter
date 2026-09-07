@@ -187,7 +187,14 @@ def launch_writer(tmp_path):
                 "PATH": os.environ.get("PATH", ""),
                 "HOME": str(home),
                 "USERPROFILE": str(home),
-                **{key: os.environ[key] for key in ("SYSTEMROOT", "WINDIR") if key in os.environ},
+                **{
+                    key: value for key, value in os.environ.items()
+                    if key.upper() in {
+                        "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE",
+                        "USERNAME", "USERDOMAIN", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+                        "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "PSMODULEPATH",
+                    }
+                },
                 "OPENRAPPTER_HOME": str(home),
                 "TMPDIR": str(tmp_path),
                 "TEMP": str(tmp_path),

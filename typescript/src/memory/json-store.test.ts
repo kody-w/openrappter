@@ -19,7 +19,11 @@ let file: string;
 const children: Array<{ child: ChildProcessWithoutNullStreams; exited: Promise<number | null> }> = [];
 
 function runtimeEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const allowed = new Set(['PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'SYSTEMDRIVE']);
+  const allowed = new Set([
+    'PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'SYSTEMDRIVE',
+    'USERNAME', 'USERDOMAIN', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA',
+    'PROGRAMFILES', 'PROGRAMFILES(X86)', 'PROGRAMW6432', 'PSMODULEPATH',
+  ]);
   return Object.fromEntries(Object.entries(environment).filter(([key]) => allowed.has(key.toUpperCase())));
 }
 
@@ -103,8 +107,12 @@ describe('memory transaction process protocol', () => {
   it('retains case-preserved Windows runtime variables without copying credentials', () => {
     expect(runtimeEnvironment({
       Path: 'C:\\tools', SystemRoot: 'C:\\Windows', windir: 'C:\\Windows',
+      USERNAME: 'fixture-owner', PSModulePath: 'C:\\modules',
       GITHUB_TOKEN: 'not-forwarded',
-    })).toEqual({ Path: 'C:\\tools', SystemRoot: 'C:\\Windows', windir: 'C:\\Windows' });
+    })).toEqual({
+      Path: 'C:\\tools', SystemRoot: 'C:\\Windows', windir: 'C:\\Windows',
+      USERNAME: 'fixture-owner', PSModulePath: 'C:\\modules',
+    });
   });
 
   it('keeps an open snapshot stable during a concurrent replacement attempt', () => {

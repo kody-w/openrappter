@@ -110,6 +110,9 @@ public final class LaunchAgentManager {
                 String(port),
             ]
             : [entryPoint, "service", "uninstall"]
+        let childEnvironment = ProcessInfo.processInfo.environment.merging([
+            "PATH": ProcessManager.nodeSearchPath(nodeExecutable: resolvedNodePath),
+        ]) { _, new in new }
         do {
             let terminationStatus = try await Task.detached(priority: .userInitiated) {
                 let process = Process()
@@ -118,6 +121,7 @@ public final class LaunchAgentManager {
                 process.currentDirectoryURL = URL(
                     fileURLWithPath: resolvedProjectPath
                 )
+                process.environment = childEnvironment
                 process.standardInput = FileHandle.nullDevice
                 process.standardOutput = FileHandle.nullDevice
                 process.standardError = FileHandle.nullDevice
@@ -167,7 +171,7 @@ public final class LaunchAgentManager {
             "StandardErrorPath": errorLogPath,
             "Umask": 0o077,
             "EnvironmentVariables": [
-                "PATH": ProcessManager.nodeSearchPath(),
+                "PATH": ProcessManager.nodeSearchPath(nodeExecutable: nodePath),
                 "NODE_ENV": "production",
                 "HOME": NSHomeDirectory(),
                 "OPENRAPPTER_LAUNCHD": "1",

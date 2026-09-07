@@ -18,6 +18,11 @@ let home: string;
 let file: string;
 const children: Array<{ child: ChildProcessWithoutNullStreams; exited: Promise<number | null> }> = [];
 
+function runtimeEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const allowed = new Set(['PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'SYSTEMDRIVE']);
+  return Object.fromEntries(Object.entries(environment).filter(([key]) => allowed.has(key.toUpperCase())));
+}
+
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(process.env.OPENRAPPTER_HOME!, 'memory-process-'));
   file = path.join(home, 'memory.json');
@@ -43,11 +48,9 @@ async function worker(runtime: Runtime, mode: string, prefix = 'child', count = 
   const child = spawn(command, [...args, directory, mode, prefix, String(count)], {
     cwd: root,
     env: {
-      PATH: process.env.PATH,
+      ...runtimeEnvironment(process.env),
       HOME: home,
       USERPROFILE: home,
-      SystemRoot: process.env.SystemRoot ?? process.env.SYSTEMROOT,
-      WINDIR: process.env.WINDIR,
       OPENRAPPTER_HOME: home,
       TMPDIR: home,
       TEMP: home,
@@ -59,22 +62,25 @@ async function worker(runtime: Runtime, mode: string, prefix = 'child', count = 
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let stderr = '';
+  let stopped = false;
   child.stderr.on('data', chunk => { stderr += String(chunk); });
   const exited = new Promise<number | null>(resolve => {
-    child.once('exit', resolve);
-    child.once('error', error => { stderr += String(error); resolve(-1); });
+    child.once('exit', code => { stopped = true; resolve(code); });
+    child.once('error', error => { stopped = true; stderr += String(error); resolve(-1); });
   });
   children.push({ child, exited });
   const lines: string[] = [];
   const input = createInterface({ input: child.stdout });
   input.on('line', line => lines.push(line));
   const line = async () => {
-    await vi.waitFor(() => {
-      if (lines.length === 0 && (child.exitCode !== null || child.signalCode !== null)) {
-        throw new Error(`Worker exited without a result: ${stderr}`);
-      }
-      expect(lines.length).toBeGreaterThan(0);
-    }, { timeout: 10_000, interval: 10 });
+    try {
+      await vi.waitUntil(() => lines.length > 0 || stopped, { timeout: 10_000, interval: 10 });
+    } catch (error) {
+      throw new Error(`Memory ${runtime}/${mode} worker timed out: ${stderr.slice(-4000)}`, { cause: error });
+    }
+    if (lines.length === 0) {
+      throw new Error(`Memory ${runtime}/${mode} worker exited without a result: ${stderr.slice(-4000)}`);
+    }
     return lines.shift()!;
   };
   expect(await line()).toBe('ready');
@@ -94,6 +100,13 @@ function messages(): string[] {
 }
 
 describe('memory transaction process protocol', () => {
+  it('retains case-preserved Windows runtime variables without copying credentials', () => {
+    expect(runtimeEnvironment({
+      Path: 'C:\\tools', SystemRoot: 'C:\\Windows', windir: 'C:\\Windows',
+      GITHUB_TOKEN: 'not-forwarded',
+    })).toEqual({ Path: 'C:\\tools', SystemRoot: 'C:\\Windows', windir: 'C:\\Windows' });
+  });
+
   it('reads an open snapshot after an atomic replacement unlinks its inode', () => {
     const originalStat = fs.fstatSync;
     vi.spyOn(fs, 'fstatSync').mockImplementationOnce(descriptor => {

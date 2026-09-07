@@ -150,6 +150,8 @@ jobs:
             python scripts/bar_candidate.py verify --root candidate --commit "$SOURCE_COMMIT" --version "$ts_version"
           fi
           tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -czf candidate.tar.gz -C candidate .
+          # Fail before any candidate git push; never silently drop a runtime to fit.
+          python3 scripts/bar_runtime.py check-transport --bundle candidate.tar.gz
           bundle_sha="$(sha256sum candidate.tar.gz | cut -d' ' -f1)"
           echo "BUNDLE_SHA=$bundle_sha" >> "$GITHUB_ENV"
       - name: Commit immutable public candidate bundle

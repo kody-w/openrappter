@@ -1,4 +1,6 @@
 import importlib.util
+import base64
+import gzip
 import json
 import os
 from pathlib import Path
@@ -8,35 +10,38 @@ import sys
 import tarfile
 import unittest
 import uuid
+from bar_runtime_fixtures import app_fixture, runtime, runtime_inputs
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("bar_candidate", ROOT / "scripts/bar_candidate.py")
 bar = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bar)
 COMMIT = "a" * 40
-VERSION = "1.14.0"
+VERSION = runtime.source_version()
+CANDIDATE_ID = "tag-" + base64.urlsafe_b64encode(f"v{VERSION}".encode()).decode().rstrip("=")
 NOTARY = {"status": "Accepted", "id": "12345678-1234-1234-1234-123456789abc"}
 
 
 class BarCandidateTests(unittest.TestCase):
     def setUp(self):
-        self.work = ROOT / f".bar-candidate-tests-{uuid.uuid4().hex}"
-        self.work.mkdir()
+        self.work = ROOT / ".test-scratch" / f"bar-candidate-tests-{uuid.uuid4().hex}"
+        self.work.mkdir(parents=True)
         self.payload = self.work / "payload"
         self.payload.mkdir()
         for name in (
-            "OpenRappter-Bar-1.14.0.dmg", "openrappter-1.14.0.tgz",
-            "openrappter-1.14.0-py3-none-any.whl", "openrappter-1.14.0.tar.gz",
+            f"OpenRappter-Bar-{VERSION}.dmg", f"openrappter-{VERSION}.tgz",
+            f"openrappter-{VERSION}-py3-none-any.whl", f"openrappter-{VERSION}.tar.gz",
             "install.sh", "install.ps1",
         ):
             (self.payload / name).write_bytes(f"fixture {name}\n".encode())
+        runtime_inputs(self.work / "stages", self.payload, COMMIT, VERSION)
         self.record = bar.record(self.payload, COMMIT, VERSION, NOTARY)
         self.provenance = {
             "schema": "openrappter-candidate-provenance/v1",
             "source_repository": bar.REPOSITORY, "channel": "candidate",
             "source_commit": COMMIT, "source_tag": None, "stable": False,
-            "candidate_kind": "release", "candidate_id": "tag-djEuMTQuMA",
-            "intended_release_tag": "v1.14.0",
+            "candidate_kind": "release", "candidate_id": CANDIDATE_ID,
+            "intended_release_tag": f"v{VERSION}", "source_date_epoch": 1_700_000_000,
             "versions": {"npm": VERSION, "pypi": VERSION, "runtime": VERSION, "channel": "0.1.0-beta.11"},
             "files": [{"path": p.name, "sha256": bar.digest(p.read_bytes())} for p in sorted(self.payload.iterdir())],
         }
@@ -54,29 +59,58 @@ class BarCandidateTests(unittest.TestCase):
 
     def bundle(self):
         file = self.work / "candidate.tar.gz"
-        with tarfile.open(file, "w:gz") as archive:
-            for p in sorted(self.payload.iterdir()):
-                archive.add(p, arcname=f"./{p.name}")
+        def normalize(info):
+            info.mtime = info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            info.pax_headers = {}
+            return info
+        with file.open("wb") as target, gzip.GzipFile(filename="", mode="wb", fileobj=target, mtime=0) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive:
+                for p in sorted(self.payload.iterdir()):
+                    archive.add(p, arcname=f"./{p.name}", filter=normalize)
         return file
 
-    def evidence(self):
+    def chain(self):
         sha = bar.digest(self.bundle().read_bytes())
-        manifest = {"status": "published"}
-        receipt = {
-            "schema": "openrappter-promotion-receipt/v1", "receipt_kind": "promotion",
-            "source_repository": bar.REPOSITORY, "source_commit": COMMIT,
-            "source_tag": None, "version": VERSION, "intended_release_tag": f"v{VERSION}",
-            "channel_version": "0.1.0-beta.11", "promotion_id": "c" * 64,
-            "target_manifest_commit": "b" * 40, "target_manifest_sha256": bar.canonical(manifest),
-            "artifact_provenance": "github-candidate-bundle-sha256", "artifact_sha256": sha,
-            "artifact_url": f"https://raw.githubusercontent.com/kody-w/openrappter/{'d' * 40}/candidates/{COMMIT}/release/tag-djEuMTQuMA/{sha}.tar.gz",
-        }
-        receipt["install_url"] = receipt["artifact_url"]
+        url = f"https://raw.githubusercontent.com/kody-w/openrappter/{'d' * 40}/candidates/{COMMIT}/release/{CANDIDATE_ID}/{sha}.tar.gz"
+        rows, prior = [], "f" * 64
+        rings = ("nightly", "alpha", "canary", "beta")
+        for index, ring in enumerate(rings):
+            promotion_id = str(index + 1) * 64
+            manifest = {
+                "schema": "openrappter-ring/v1", "ring": ring,
+                "source": {"repository": bar.REPOSITORY, "commit": COMMIT, "tag": None},
+                "version": VERSION, "artifact": {"url": url, "install_url": url, "sha256": sha,
+                                               "provenance": "github-candidate-bundle-sha256"},
+                "promoted_at": "2026-01-01T00:00:00Z", "predecessor": rings[index - 1] if index else None,
+                "status": "published", "reason": None, "receipt": None, "promotion_id": promotion_id,
+                "intended_release_tag": f"v{VERSION}", "channel_version": "0.1.0-beta.11",
+            }
+            receipt = {
+                "schema": "openrappter-promotion-receipt/v1", "receipt_kind": "promotion",
+                "source_repository": bar.REPOSITORY, "source_commit": COMMIT,
+                "source_tag": None, "version": VERSION, "intended_release_tag": f"v{VERSION}",
+                "channel_version": "0.1.0-beta.11", "promotion_id": promotion_id,
+                "target_manifest_commit": str(index + 1) * 40, "target_manifest_sha256": bar.canonical(manifest),
+                "target_repository": f"kody-w/openrappter-{ring}", "target_ring": ring,
+                "predecessor_manifest_sha256": prior, "sequence": index + 1,
+                "emitted_at": f"2026-01-01T00:00:0{index}Z",
+                "artifact_provenance": "github-candidate-bundle-sha256", "artifact_sha256": sha,
+                "artifact_url": url, "install_url": url,
+            }
+            rows.append({"ring": ring, "authority_commit": "e" * 40, "receipt": receipt,
+                         "receipt_path": f"receipts/{ring}/{promotion_id}.json", "manifest": manifest})
+            prior = bar.canonical(manifest)
+        return rows
+
+    def evidence(self):
+        beta = self.chain()[-1]
+        receipt, manifest = beta["receipt"], beta["manifest"]
         head = {
             "schema": "openrappter-ring-head/v1", "ring": "beta",
             "target_repository": "kody-w/openrappter-beta", "authority_commit": "e" * 40,
-            "target_manifest_commit": "b" * 40, "promotion_id": "c" * 64,
-            "receipt_path": f"receipts/beta/{'c' * 64}.json",
+            "target_manifest_commit": receipt["target_manifest_commit"], "promotion_id": receipt["promotion_id"],
+            "receipt_path": beta["receipt_path"],
             "receipt_sha256": bar.canonical(receipt), "target_manifest_sha256": bar.canonical(manifest),
         }
         return {"head": head, "receipt": receipt, "manifest": manifest, "receipt_url": f"https://raw.githubusercontent.com/{bar.AUTHORITY}/{'e' * 40}/{head['receipt_path']}"}
@@ -160,8 +194,8 @@ class BarCandidateTests(unittest.TestCase):
                 return evidence["receipt"]
             return evidence["manifest"]
         release, resolved = bar.resolve_identity(COMMIT, VERSION, fetch)
-        self.assertEqual(release["source_tag"], "v1.14.0-bar")
-        self.assertEqual(release["intended_release_tag"], "v1.14.0")
+        self.assertEqual(release["source_tag"], f"v{VERSION}-bar")
+        self.assertEqual(release["intended_release_tag"], f"v{VERSION}")
         self.assertEqual(resolved["receipt"], evidence["receipt"])
         evidence["receipt"]["source_commit"] = "f" * 40
         with self.assertRaisesRegex(ValueError, "authority digest"):
@@ -169,27 +203,110 @@ class BarCandidateTests(unittest.TestCase):
 
     def test_cask_is_only_a_reviewable_proposal_bound_to_receipt_and_dmg(self):
         evidence = self.evidence()
-        chain = [
-            {"ring": ring, "authority_commit": "e" * 40,
-             "receipt": {**evidence["receipt"], "promotion_id": str(index) * 64},
-             "receipt_path": f"receipts/{ring}/{str(index) * 64}.json"}
-            for index, ring in enumerate(("nightly", "alpha", "canary"), 1)
-        ] + [{"ring": "beta", "authority_commit": "e" * 40,
-              "receipt": evidence["receipt"], "receipt_path": evidence["head"]["receipt_path"]}]
+        chain = self.chain()
         output = self.work / "proposal"
         bar.cask_proposal(self.payload, COMMIT, VERSION, self.record["dmg"]["sha256"], evidence, chain, output)
         cask = (output / "openrappter-bar.rb").read_text()
-        self.assertIn('version "1.14.0"', cask)
+        self.assertIn(f'version "{VERSION}"', cask)
         self.assertIn(self.record["dmg"]["sha256"], cask)
-        self.assertIn("/v1.14.0-bar/OpenRappter-Bar-1.14.0.dmg", cask)
+        self.assertIn(f"/v{VERSION}-bar/OpenRappter-Bar-{VERSION}.dmg", cask)
         proof = json.loads((output / "receipt.json").read_text())
         self.assertEqual(proof["publication"], "proposal-only")
         self.assertEqual(proof["candidate_sha256"], evidence["receipt"]["artifact_sha256"])
         self.assertEqual([row["ring"] for row in proof["authority_receipts"]], ["nightly", "alpha", "canary", "beta"])
+        self.assertEqual((output / "receipt.json").read_bytes(), (output / "runtime-bootstrap-proof.json").read_bytes())
         with self.assertRaisesRegex(ValueError, "constitution-checked"):
             bar.cask_proposal(self.payload, COMMIT, VERSION, "0" * 64, evidence, chain, self.work / "bad-proposal")
         with self.assertRaisesRegex(ValueError, "complete frozen receipt chain"):
             bar.cask_proposal(self.payload, COMMIT, VERSION, self.record["dmg"]["sha256"], evidence, chain[1:], self.work / "bad-proposal")
+
+    def test_generated_proof_and_both_archives_pass_the_actual_bootstrap_consumer(self):
+        evidence, chain = self.evidence(), self.chain()
+        output = self.work / "proposal"
+        bar.cask_proposal(self.payload, COMMIT, VERSION, self.record["dmg"]["sha256"], evidence, chain, output)
+        documents = {}
+        for item in chain:
+            documents[f"https://raw.githubusercontent.com/{bar.AUTHORITY}/{item['authority_commit']}/{item['receipt_path']}"] = item["receipt"]
+            receipt = item["receipt"]
+            documents[f"https://raw.githubusercontent.com/{receipt['target_repository']}/{receipt['target_manifest_commit']}/.ring/manifest.json"] = item["manifest"]
+        bar.write_json(self.work / "documents.json", documents)
+        consumer_work = self.work / "consumer"
+        consumer_work.mkdir()
+        script = """
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [bundle, metadataFile, proofFile, documentsFile, helper, work] = process.argv.slice(1);
+const { validateMetadata, verifyApproval, extractCandidate, extractRuntime, fileDigest } = await import(pathToFileURL(helper));
+const read = async file => JSON.parse(await fs.readFile(file));
+const metadata = await read(metadataFile), proof = await read(proofFile), documents = await read(documentsFile);
+const fetchJSON = async url => {
+  assert.ok(Object.hasOwn(documents, url), `unexpected network request: ${url}`);
+  return structuredClone(documents[url]);
+};
+const approval = await verifyApproval(proof, metadata, fetchJSON);
+assert.equal(approval.sha256, await fileDigest(bundle));
+for (const arch of ['arm64', 'x86_64']) {
+  validateMetadata(metadata, arch, metadata.version, metadata.source_commit);
+  const signal = new AbortController().signal;
+  const selected = await extractCandidate(bundle, path.join(work, arch), metadata, arch, proof, signal);
+  assert.equal(await fileDigest(selected.archive), metadata.variants[arch].runtime.sha256);
+  const runtime = await extractRuntime(selected.archive, path.join(work, `${arch}-runtime`), signal);
+  assert.equal((await read(path.join(runtime, 'package.json'))).version, metadata.version);
+  assert.equal((await read(path.join(runtime, 'runtime-build.json'))).architecture, arch);
+}
+await assert.rejects(verifyApproval({ ...proof, authority_receipts: proof.authority_receipts.slice(1) }, metadata, fetchJSON));
+const changed = structuredClone(metadata);
+changed.variants.arm64.runtime.sha256 = '0'.repeat(64);
+await assert.rejects(extractCandidate(bundle, path.join(work, 'tampered-pin'), changed, 'arm64', proof, new AbortController().signal));
+"""
+        result = subprocess.run(
+            [os.environ.get("BAR_TEST_NODE", "node"), "--input-type=module", "-e", script,
+             str(self.bundle()), str(self.payload / runtime.METADATA),
+             str(output / "runtime-bootstrap-proof.json"), str(self.work / "documents.json"),
+             str(ROOT / "macos/Resources" / runtime.HELPER), str(consumer_work)],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("runtime-bootstrap-proof.json", {row["path"] for row in self.provenance["files"]},
+                         "post-gate proof must not make the candidate identity self-referential")
+
+    def test_both_runtimes_must_be_flat_provenance_files(self):
+        name = runtime.runtime_filename(VERSION, "x86_64")
+        self.provenance["files"] = [row for row in self.provenance["files"] if row["path"] != name]
+        bar.write_json(self.payload / "provenance.json", self.provenance)
+        self.checksums()
+        with self.assertRaisesRegex(ValueError, "both sealed bootstrap resources and runtimes"):
+            bar.verify_payload(self.payload, COMMIT, VERSION)
+
+    def test_runtime_tarballs_cannot_substitute_for_the_python_sdist(self):
+        name = f"openrappter-{VERSION}.tar.gz"
+        (self.payload / name).unlink()
+        self.provenance["files"] = [row for row in self.provenance["files"] if row["path"] != name]
+        bar.write_json(self.payload / "provenance.json", self.provenance)
+        self.checksums()
+        with self.assertRaisesRegex(ValueError, "canonical package candidate"):
+            bar.verify_payload(self.payload, COMMIT, VERSION)
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS packaging shell")
+    def test_signed_app_build_refuses_missing_bootstrap_before_swift_or_signing(self):
+        commands = self.work / "commands"
+        commands.mkdir()
+        called = self.work / "unexpected-build"
+        for name in ("swift", "codesign"):
+            file = commands / name
+            file.write_text(f"#!/bin/bash\nprintf 'unexpected' > '{called}'\nexit 99\n")
+            file.chmod(0o700)
+        env = {**os.environ, "PATH": str(commands) + os.pathsep + os.environ["PATH"],
+               "REQUIRE_SIGNING": "1", "CODESIGN_IDENTITY": "Developer ID Application: fixture",
+               "SOURCE_COMMIT": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+               "VERSION": VERSION, "RUNTIME_INPUTS": str(self.work / "missing")}
+        result = subprocess.run(["bash", str(ROOT / "macos/scripts/build-mac-app.sh")],
+                                env=env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing regular runtime resource", result.stderr)
+        self.assertFalse(called.exists())
 
     @unittest.skipUnless(sys.platform == "darwin", "native packaging shell contract runs in macOS CI")
     def test_native_verifier_checks_trust_and_version_without_mutating_the_dmg(self):
@@ -197,14 +314,7 @@ class BarCandidateTests(unittest.TestCase):
         commands.mkdir()
         calls = self.work / "calls.jsonl"
         fixture = self.work / "fixture-app"
-        (fixture / "Contents/MacOS").mkdir(parents=True)
-        (fixture / "Contents/MacOS/OpenRappterBar").write_bytes(b"mock executable")
-        (fixture / "Contents/Info.plist").write_text(
-            '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>'
-            '<key>CFBundleShortVersionString</key><string>1.14.0</string>'
-            '<key>CFBundleIdentifier</key><string>com.openrappter.bar</string>'
-            '</dict></plist>'
-        )
+        app_fixture(fixture, self.payload, COMMIT, VERSION)
         stub = f"""#!{sys.executable}
 import json,os,shutil,sys
 from pathlib import Path
@@ -228,7 +338,7 @@ if name=="hdiutil" and sys.argv[1]=="detach":
             "BAR_TEST_CALLS": str(calls), "BAR_TEST_APP": str(fixture),
         }
         dmg = self.payload / self.record["dmg"]["name"]
-        command = ["bash", str(ROOT / "macos/scripts/verify-dmg.sh"), str(dmg), VERSION, self.record["dmg"]["sha256"]]
+        command = ["bash", str(ROOT / "macos/scripts/verify-dmg.sh"), str(dmg), VERSION, self.record["dmg"]["sha256"], COMMIT]
         result = subprocess.run(command, env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         invoked = [json.loads(line) for line in calls.read_text().splitlines()]
@@ -239,13 +349,13 @@ if name=="hdiutil" and sys.argv[1]=="detach":
         self.assertFalse(any("staple" in row or "--sign" in row for row in invoked))
         self.assertEqual(bar.digest(dmg.read_bytes()), self.record["dmg"]["sha256"])
         calls.unlink()
-        rejected = subprocess.run([*command[:-1], "0" * 64], env=env, capture_output=True, text=True)
+        rejected = subprocess.run([*command[:4], "0" * 64, COMMIT], env=env, capture_output=True, text=True)
         self.assertNotEqual(rejected.returncode, 0)
         self.assertFalse(calls.exists(), "a digest mismatch must stop before any native tool")
         untrusted = subprocess.run(command, env={**env, "BAR_TEST_AUTHORITY": "Authority=Apple Development: Fixture"}, capture_output=True, text=True)
         self.assertNotEqual(untrusted.returncode, 0, "development signing is not Developer ID distribution")
         plist = fixture / "Contents/Info.plist"
-        plist.write_text(plist.read_text().replace("1.14.0", "1.14.1"))
+        plist.write_text(plist.read_text().replace(VERSION, "999.0.0"))
         wrong_version = subprocess.run(command, env=env, capture_output=True, text=True)
         self.assertNotEqual(wrong_version.returncode, 0, "a different bundled version must be rejected")
 

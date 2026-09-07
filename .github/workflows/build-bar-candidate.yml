@@ -1,0 +1,101 @@
+name: Build signed macOS Bar candidate bytes
+on:
+  workflow_call:
+    inputs:
+      source_commit: { required: true, type: string }
+      version: { required: true, type: string }
+    secrets:
+      MACOS_CERTIFICATE_P12_BASE64: { required: true }
+      MACOS_CERTIFICATE_PASSWORD: { required: true }
+      APPLE_API_KEY_P8_BASE64: { required: true }
+      APPLE_API_KEY_ID: { required: true }
+      APPLE_API_ISSUER_ID: { required: true }
+permissions:
+  contents: read
+jobs:
+  signed-candidate:
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      SIGNING_DIR: ${{ github.workspace }}/.bar-signing
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+      - name: Verify source identity before using signing credentials
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$SOURCE_COMMIT" origin/main
+          test "$(python3 -c 'import json; print(json.load(open("typescript/package.json"))["version"])')" = "$RELEASE_VERSION"
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a
+        with: { swift-version: '6.0' }
+      - name: Run native Bar tests
+        working-directory: macos
+        run: swift build --product RunTests && .build/debug/RunTests
+      - name: Import the configured CI Developer ID and notarization key
+        env:
+          CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$CERTIFICATE_P12_BASE64"
+          test -n "$CERTIFICATE_PASSWORD"
+          test -n "$API_KEY_P8_BASE64"
+          mkdir "$SIGNING_DIR"
+          chmod 700 "$SIGNING_DIR"
+          printf '%s' "$CERTIFICATE_P12_BASE64" | base64 -D > "$SIGNING_DIR/identity.p12"
+          printf '%s' "$API_KEY_P8_BASE64" | base64 -D > "$SIGNING_DIR/notary.p8"
+          chmod 600 "$SIGNING_DIR/"*
+          password="$(openssl rand -hex 32)"
+          security create-keychain -p "$password" "$SIGNING_DIR/signing.keychain-db"
+          security set-keychain-settings -lut 21600 "$SIGNING_DIR/signing.keychain-db"
+          security unlock-keychain -p "$password" "$SIGNING_DIR/signing.keychain-db"
+          security import "$SIGNING_DIR/identity.p12" -P "$CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$SIGNING_DIR/signing.keychain-db"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$SIGNING_DIR/signing.keychain-db"
+          security list-keychain -d user -s "$SIGNING_DIR/signing.keychain-db"
+          identity="$(security find-identity -v -p codesigning "$SIGNING_DIR/signing.keychain-db" | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1)"
+          test -n "$identity"
+          printf 'CODESIGN_IDENTITY=%s\n' "$identity" >> "$GITHUB_ENV"
+      - name: Build and sign the universal candidate once
+        working-directory: macos
+        run: REQUIRE_SIGNING=1 VERSION="$RELEASE_VERSION" bash scripts/build-mac-app.sh
+      - name: Notarize and staple before hashing candidate bytes
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$API_KEY_ID"
+          test -n "$API_ISSUER_ID"
+          dmg="macos/dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg"
+          xcrun notarytool submit "$dmg" --key "$SIGNING_DIR/notary.p8" \
+            --key-id "$API_KEY_ID" --issuer "$API_ISSUER_ID" --wait \
+            --output-format json > "$SIGNING_DIR/notarization.json"
+          xcrun stapler staple "$dmg"
+          sha="$(python3 scripts/bar_candidate.py record --root macos/dist \
+            --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION" --notary "$SIGNING_DIR/notarization.json")"
+          bash macos/scripts/verify-dmg.sh "$dmg" "$RELEASE_VERSION" "$sha"
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          security delete-keychain "$SIGNING_DIR/signing.keychain-db" 2>/dev/null || true
+          rm -rf "$SIGNING_DIR"
+      - name: Retain non-stable candidate inputs only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: macos-bar-candidate-${{ inputs.source_commit }}
+          path: |
+            macos/dist/OpenRappter-Bar-${{ inputs.version }}.dmg
+            macos/dist/OpenRappter-Bar-${{ inputs.version }}.dmg.sha256
+            macos/dist/macos-bar.json
+          if-no-files-found: error
+          retention-days: 7

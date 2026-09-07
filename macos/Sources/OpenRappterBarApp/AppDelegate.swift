@@ -36,7 +36,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let bonesWindow = BonesWindowController()
 
     public let viewModel = AppViewModel()
-    public let settingsViewModel = SettingsViewModel()
+    public private(set) lazy var settingsViewModel = SettingsViewModel(
+        approvalViewModel: viewModel.approvalViewModel
+    )
     private let deepLinkHandler = DeepLinkHandler()
 
     /// Set once the async shutdown path has completed, so a re-entrant

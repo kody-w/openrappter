@@ -58,6 +58,19 @@ Run a single test file:
 cd typescript && npx vitest run src/path/to/file.test.ts
 ```
 
+### Native macOS Bar (`macos/`)
+```bash
+cd macos
+swift build --product OpenRappterBar
+swift run RunTests
+OPENRAPPTER_TEST_SUITES=ChatReliability,ChatRace,ApprovalIntegration swift run RunTests
+```
+
+The native runner uses named suites, not XCTest discovery. Omitting the selector
+runs every registered suite; unknown names fail instead of silently running zero
+tests. The full runner includes GUI/environment-dependent checks. Use an isolated
+`HOME`, `CFFIXED_USER_HOME`, and `TMPDIR` for tests that access local state.
+
 ### OpenClaw (`openclaw/`)
 ```bash
 cd openclaw
@@ -329,6 +342,49 @@ Skills are `SKILL.md` files stored in `~/.openrappter/skills/`. Skills get wrapp
 - **Storage** (`typescript/src/storage/`) — `StorageAdapter` interface with SQLite and in-memory implementations; migration system
 - **Config** (`typescript/src/config/`) — YAML/JSON loading, Zod schema validation, file watcher for live reload
 - **Providers** (`typescript/src/providers/`) — Model integrations: Anthropic, OpenAI, Ollama
+
+### Live memory persistence
+
+`MemoryAgent` (including `openrappter memory`) and Python's memory agents keep
+the existing `memory.json` dictionary schema. Mutations share a
+`memory.json.lock.sqlite3` sidecar: SQLite `BEGIN IMMEDIATE` covers the entire
+read–modify–write. Never delete, replace, or age-reclaim this lock database;
+process death releases its OS locks. SQLite acquisition waits at most five seconds
+(without blocking Node's event loop). Python retains its thread-level `RLock`.
+
+On POSIX, success follows a private staged-file write, file fsync, atomic
+replacement and directory fsync; newly created directory entries are synced
+too. Windows retains the staged-file flush and atomic replacement, then opens
+the published file with write access and flushes it again. It never requires
+unsupported CRT directory handles. File-open, write, replacement and flush
+errors still propagate on both platforms; POSIX directory errors remain fatal.
+
+Only a missing store is empty: corrupt JSON/UTF-8, invalid entry shapes,
+unreadable files and lock failures propagate errors without resetting data.
+Existing keys and unknown entry metadata are preserved. Linked store/lock files
+are rejected; directory aliases share a canonical lock path. POSIX files are
+created with mode 0600; Windows files inherit the containing directory's ACL.
+
+Upgrade **all writers together**, stopping old flock-only Python and unlocked
+TypeScript processes first. Both runtimes must target the same file; the
+pre-existing Python `OPENRAPPTER_HOME` relocation limitation (#330) is unchanged.
+This protocol requires a local filesystem with reliable SQLite locking, not
+an unverified network filesystem. Tests exercise concurrent writers and process
+termination/restart; they do not certify physical-power-loss behavior. In
+particular, Windows file flushing does not establish a POSIX-style durability
+guarantee for rename/directory metadata. A failure after rename but before
+acknowledgement has an uncertain outcome; an unacknowledged fact may exist.
+Orphan `.pending` files are never read as committed memory.
+
+### Managed environment updates
+
+Managed `.env` edits use `updateEnv()` in TypeScript and `LocalEnvironmentFile`
+in the Bar. Both hold the same `.env.lock.sqlite3` transaction while patching
+only their own keys; do not save a previously loaded whole-file snapshot for
+a partial update. `saveEnv()` remains an explicit full replacement.
+Credential rollback is conditional on still owning the bytes/token being
+reverted. Upgrade managed writers together; old binaries and external editors
+do not participate in this lock protocol.
 
 ## Language Parity
 

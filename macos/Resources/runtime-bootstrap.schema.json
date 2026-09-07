@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openrappter-bar-bootstrap/v1",
+  "title": "Sealed OpenRappter Bar first-launch bootstrap pins",
+  "$comment": "The native lifecycle owner must prefer VerifiedRuntimeInstaller.preferredNodeExecutable(forProjectPath: ProcessManager.resolveProjectPath()) before legacy/system Node lookup. It only returns the verified Node when the selected project resolves to the matching installed runtime. Do not mutate global PATH or install floating npm packages.",
+  "description": "Generate runtime-bootstrap.json before signing the Bar. Copy it and verified-runtime-bootstrap.mjs to Contents/Resources and set Info.plist OpenRappterSourceCommit. Build both dependency-complete runtime archives before signing; include their exact bytes in the canonical candidate. After the Release Constitution check, publish the existing openrappter-bar-cask-proposal/v1 frozen receipt proof as runtime-bootstrap-proof.json on this exact Bar release. The proof is data, not executable bootstrap code, and need not be embedded in its own candidate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "source_commit", "version", "approval_url", "helper_sha256", "variants"],
+  "properties": {
+    "schema": { "const": "openrappter-bar-bootstrap/v1" },
+    "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "version": { "$ref": "#/$defs/version" },
+    "approval_url": {
+      "type": "string",
+      "pattern": "^https://github\\.com/kody-w/openrappter/releases/download/v[0-9]+\\.[0-9]+\\.[0-9]+-bar/runtime-bootstrap-proof\\.json$",
+      "description": "Must name this metadata's exact Bar version. The helper validates all four frozen authority receipts and manifests, including predecessor hashes and chronological order; it never follows main or a package dist-tag."
+    },
+    "helper_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "SHA-256 of the sealed verified-runtime-bootstrap.mjs resource. Swift verifies the resource seal and this digest before executing its snapshot."
+    },
+    "variants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arm64", "x86_64"],
+      "properties": {
+        "arm64": { "$ref": "#/$defs/variant" },
+        "x86_64": { "$ref": "#/$defs/variant" }
+      }
+    }
+  },
+  "$defs": {
+    "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "runtime"],
+      "properties": {
+        "node": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "url", "sha256", "size", "binary_path", "binary_sha256", "binary_size"],
+          "properties": {
+            "version": {
+              "$ref": "#/$defs/version",
+              "description": "Node 24 or later, exactly the version/ABI used to assemble this variant. No system Node is required or assumed."
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^https://nodejs\\.org/dist/v[0-9]+\\.[0-9]+\\.[0-9]+/node-v[0-9]+\\.[0-9]+\\.[0-9]+-darwin-(arm64|x64)\\.tar\\.gz$"
+            },
+            "sha256": { "$ref": "#/$defs/sha256" },
+            "size": { "type": "integer", "minimum": 1, "maximum": 268435456 },
+            "binary_path": {
+              "type": "string",
+              "pattern": "^node-v[0-9]+\\.[0-9]+\\.[0-9]+-darwin-(arm64|x64)/bin/node$"
+            },
+            "binary_sha256": { "$ref": "#/$defs/sha256" },
+            "binary_size": { "type": "integer", "minimum": 1, "maximum": 268435456 }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file", "sha256", "size"],
+          "properties": {
+            "file": {
+              "type": "string",
+              "pattern": "^openrappter-runtime-[0-9]+\\.[0-9]+\\.[0-9]+-darwin-(arm64|x86_64)\\.tar\\.gz$",
+              "description": "Either a flat archive in the candidate or an openrappter-runtime-chunks/v1 descriptor at this filename plus .parts.json. The descriptor is recorded in provenance.json and SHA256SUMS; each 32-MiB part is a sibling of the candidate bundle in the same immutable commit. Reassembly must match this sealed size and SHA-256. The tar uses one runtime/ root with package.json, dist, UI and every production/native dependency for the pinned Node ABI. No npm install/build runs on the customer's machine."
+            },
+            "sha256": { "$ref": "#/$defs/sha256" },
+            "size": { "type": "integer", "minimum": 1, "maximum": 536870912 }
+          }
+        }
+      }
+    }
+  }
+}

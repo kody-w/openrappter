@@ -52,6 +52,7 @@ def initial_state():
 
 class JourneyTests(unittest.TestCase):
     def setUp(self):
+        self.release_tag = "v" + json.loads((ROOT / "typescript/package.json").read_text())["version"]
         self.work = ROOT / ".journey-test"
         shutil.rmtree(self.work, ignore_errors=True)
         self.work.mkdir()
@@ -134,7 +135,7 @@ class JourneyTests(unittest.TestCase):
                 },
                 {
                     "databaseId": 4999, "status": "completed", "conclusion": "success",
-                    "event": "push", "headBranch": "v1.13.0",
+                    "event": "push", "headBranch": self.release_tag,
                     "headSha": "0" * 40, "createdAt": 102,
                 },
             ]
@@ -144,7 +145,7 @@ class JourneyTests(unittest.TestCase):
         exact = [
             row for row in state["release_runs"]
             if row["event"] == "push"
-            and row["headBranch"] == "v1.13.0"
+            and row["headBranch"] == self.release_tag
             and row["headSha"] == json.loads(self.checkpoint.read_text())["source_commit"]
         ]
         self.assertEqual(len(exact), 1)
@@ -157,7 +158,7 @@ class JourneyTests(unittest.TestCase):
             source = json.loads(self.checkpoint.read_text())["source_commit"]
             state["release_runs"] = [{
                 "databaseId": 4099, "status": "completed", "conclusion": "success",
-                "event": "push", "headBranch": "v1.13.0", "headSha": source,
+                "event": "push", "headBranch": self.release_tag, "headSha": source,
                 "createdAt": 90,
             }]
         self.prepare_merged_resume(mutate)
@@ -174,7 +175,7 @@ class JourneyTests(unittest.TestCase):
             source = json.loads(self.checkpoint.read_text())["source_commit"]
             state["release_runs"] = [{
                 "databaseId": 4098, "status": "completed", "conclusion": "success",
-                "event": "push", "headBranch": "v1.13.0", "headSha": source,
+                "event": "push", "headBranch": self.release_tag, "headSha": source,
                 "createdAt": 90,
             }]
             state["tag"] = False
@@ -188,7 +189,7 @@ class JourneyTests(unittest.TestCase):
             source = json.loads(self.checkpoint.read_text())["source_commit"]
             state["concurrent_release_runs"] = [{
                 "databaseId": 4997, "status": "completed", "conclusion": "success",
-                "event": "push", "headBranch": "v1.13.0", "headSha": source,
+                "event": "push", "headBranch": self.release_tag, "headSha": source,
                 "createdAt": 101,
             }]
         self.prepare_merged_resume(mutate)

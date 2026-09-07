@@ -65,6 +65,9 @@ jobs:
           RSB_REF="$RSB_SHA" bash "$RUNNER_TEMP/rsb-install.sh"
           test -x "$HOME/.local/bin/rsb"
       - run: npm run lint
+      - name: Verify the native runtime download helper offline
+        working-directory: ${{ github.workspace }}
+        run: node --test macos/Tests/verified-runtime-bootstrap.test.mjs
       # vitest (esbuild) does not type-check — tsc is the only gate for type errors
       - run: npm run build
       - name: Exercise packed candidate artifact and release-ring consumers
@@ -165,6 +168,9 @@ jobs:
       # harness has no discovery: main.swift calls each suite by hand, and
       # SuiteRegistrationTests fails the build if one is ever left out.
       - run: swift build --product RunTests && .build/debug/RunTests
+      - name: Native DMG verification contract (mock signing and mounts)
+        working-directory: ${{ github.workspace }}
+        run: python3 -m unittest tests/test_bar_candidate.py -v
 
   python:
     name: Python (${{ matrix.python-version }})

@@ -59,6 +59,32 @@ func runProcessManagerTests() async {
     // MARK: - Node Path Resolution
 
     await suite("Process Manager — node path resolution") {
+        test("managed startup prefers the verified runtime's matching Node ABI") {
+            let manager = ProcessManager(verifiedNodePathResolver: { "/fixture/verified-node" })
+            try expectEqual(manager.resolveNodePath(), "/fixture/verified-node")
+        }
+
+        test("an explicit process Node resolver retains ownership") {
+            var queriedVerified = false
+            let manager = ProcessManager(
+                nodePathResolver: { "/fixture/custom-node" },
+                verifiedNodePathResolver: { queriedVerified = true; return "/fixture/verified-node" }
+            )
+            try expectEqual(manager.resolveNodePath(), "/fixture/custom-node")
+            try expect(!queriedVerified)
+        }
+
+        test("owned subprocess PATH starts with its selected Node without mutating the global PATH") {
+            let original = ProcessInfo.processInfo.environment["PATH"]
+            let path = ProcessManager.nodeSearchPath(
+                homeDirectory: "/fixture/home", parentPath: "/usr/bin:/bin",
+                nodeExecutable: "/fixture/verified/bin/node"
+            )
+            try expectEqual(path.split(separator: ":").first.map(String.init), "/fixture/verified/bin")
+            try expect(path.split(separator: ":").contains("/usr/bin"))
+            try expectEqual(ProcessInfo.processInfo.environment["PATH"], original)
+        }
+
         test("firstExistingNodePath never returns /usr/bin/env when nothing is found") {
             let resolved = ProcessManager.firstExistingNodePath(
                 candidates: ["/definitely/not/here/node", "/also/missing/node"],

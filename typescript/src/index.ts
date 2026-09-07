@@ -9,7 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
 import type { AgentInfo } from './agents/types.js';
-import { ensureHomeDir, loadEnv, saveEnv, hydrateManagedEnv, loadConfig, saveConfig, resolvedConfigSources, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
+import { ensureHomeDir, loadEnv, updateEnv, hydrateManagedEnv, loadConfig, saveConfig, resolvedConfigSources, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
 import { hasAuthProfileAuthority, hasCopilotAvailable, autoAuthIfNeeded, resolveCopilotAuth, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
 import type { CopilotAuthOutcome } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
@@ -945,10 +945,10 @@ async function startGatewayInProcess(opts?: {
     process.env.OPENRAPPTER_MODEL = params.model;
 
     // Persist to .env so it survives restarts
+    let persisted = false;
     try {
-      const env = await loadEnv();
-      env.OPENRAPPTER_MODEL = params.model;
-      await saveEnv(env);
+      await updateEnv({ OPENRAPPTER_MODEL: params.model });
+      persisted = true;
     } catch { /* non-fatal — runtime switch still works */ }
 
     log(`${EMOJI} Model switched: ${oldModel} → ${params.model}`);
@@ -956,7 +956,7 @@ async function startGatewayInProcess(opts?: {
     return {
       model: params.model,
       previous: oldModel,
-      persisted: true,
+      persisted,
     };
   });
 
@@ -1531,6 +1531,7 @@ program
     log.info("Let's get you connected. This takes about 2 minutes.");
 
     const env = await loadEnv();
+    const originalEnv = { ...env };
     const config = await loadConfig();
 
     const isMac = process.platform === 'darwin';
@@ -1798,7 +1799,9 @@ program
     // Bug 2 fix: wrap saves in try/catch with specific error messages
     const savedKeys = Object.keys(env);
     try {
-      await saveEnv(env);
+      await updateEnv(Object.fromEntries(
+        Object.entries(env).filter(([key, value]) => originalEnv[key] !== value),
+      ));
       log.success(`Saved ${ENV_FILE} (${savedKeys.join(', ')})`);
     } catch (err) {
       log.error(`Failed to save env file: ${(err as Error).message}`);

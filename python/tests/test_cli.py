@@ -1,6 +1,7 @@
 """Tests for CLI argument parsing and agent discovery."""
 
 import json
+import re
 import sys
 import pytest
 from pathlib import Path
@@ -12,7 +13,10 @@ from unittest.mock import patch, MagicMock
 class TestVersion:
     def test_package_version(self):
         from openrappter import __version__
-        assert __version__ == "1.13.0"
+        project = (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+        declared = re.search(r'^version\s*=\s*"([^"]+)"$', project, re.MULTILINE)
+        assert declared is not None
+        assert __version__ == declared.group(1)
 
     def test_cli_version_matches(self):
         """Verify cli.py version matches package version."""

@@ -1,6 +1,15 @@
 name: Create constitution-gated release tag
 on:
   workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: Optional exact identity requested by pinned-release
+        required: false
+        type: string
+      expected_tag:
+        description: Optional intended tag requested by pinned-release
+        required: false
+        type: string
 permissions: { contents: read }
 concurrency: { group: create-release-tag, cancel-in-progress: false }
 jobs:
@@ -11,7 +20,15 @@ jobs:
       tag: ${{ steps.verify.outputs.tag }}
       commit: ${{ steps.verify.outputs.commit }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: kody-w/openrappter-release-train
+          ref: 931dd60f77c1e8b3a5c096fae6a5969061ccf569
+          path: authority
       - id: verify
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_TAG: ${{ inputs.expected_tag }}
         run: |
           set -euo pipefail
           curl -fsSL --proto '=https' \
@@ -25,7 +42,7 @@ jobs:
           curl -fsSL --proto '=https' \
             "https://raw.githubusercontent.com/kody-w/openrappter/$target_commit/.ring/manifest.json" -o manifest.json
           python - <<'PY'
-          import hashlib,json
+          import hashlib,json,os
           h=json.load(open("head.json"));r=json.load(open("receipt.json"));m=json.load(open("manifest.json"))
           digest=lambda v:hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":")).encode()).hexdigest()
           assert h["ring"]=="stable" and h["target_repository"]=="kody-w/openrappter"
@@ -36,7 +53,15 @@ jobs:
           assert m["channel_version"]==r["channel_version"]
           assert r["artifact_provenance"]=="github-candidate-bundle-sha256"
           assert r["intended_release_tag"]==f"v{r['version']}"
+          assert not os.environ["EXPECTED_COMMIT"] or os.environ["EXPECTED_COMMIT"]==r["source_commit"]
+          assert not os.environ["EXPECTED_TAG"] or os.environ["EXPECTED_TAG"]==r["intended_release_tag"]
+          release={key:r[key] for key in ("source_commit","version","artifact_url","install_url","artifact_sha256","artifact_provenance","intended_release_tag","channel_version")}
+          release.update(schema="openrappter-release/v1",mode="normal",source_tag=r["intended_release_tag"],rollback_receipt=None)
+          json.dump(release,open("release.json","w"))
           PY
+          python authority/scripts/release_gate.py \
+            --policy authority/contracts/release-constitution-v1.json \
+            --release release.json --remote
           tag="$(python -c 'import json; print(json.load(open("receipt.json"))["intended_release_tag"])')"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"; echo "commit=$commit" >> "$GITHUB_OUTPUT"
   create:

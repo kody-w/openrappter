@@ -46,14 +46,20 @@ public final class ProcessManager: Observable {
         nodePathResolver: (() -> String?)? = nil,
         gatewayDetector: (@MainActor () async -> Bool)? = nil,
         processStopper: (@MainActor (Process) async -> Void)? = nil,
-        lifecycleObserver: (@MainActor (LifecycleRequest) -> Void)? = nil
+        lifecycleObserver: (@MainActor (LifecycleRequest) -> Void)? = nil,
+        verifiedNodePathResolver: (() -> String?)? = nil
     ) {
         self.port = port
         self.gatewayDetector = gatewayDetector
         self.processStopper = processStopper
         self.lifecycleObserver = lifecycleObserver
+        let verifiedNode = verifiedNodePathResolver ?? {
+            VerifiedRuntimeInstaller.preferredNodeExecutable(
+                forProjectPath: ProcessManager.resolveProjectPath()
+            )
+        }
         self.nodePathResolver = nodePathResolver ?? {
-            ProcessManager.firstExistingNodePath(
+            verifiedNode() ?? ProcessManager.firstExistingNodePath(
                 candidates: [
                     "/usr/local/bin/node",
                     "/opt/homebrew/bin/node",
@@ -148,9 +154,13 @@ public final class ProcessManager: Observable {
     public static func nodeSearchPath(
         homeDirectory: String = NSHomeDirectory(),
         parentPath: String? = ProcessInfo.processInfo.environment["PATH"],
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        nodeExecutable: String? = nil
     ) -> String {
         var candidates: [String] = []
+        if let nodeExecutable, !nodeExecutable.isEmpty {
+            candidates.append(URL(fileURLWithPath: nodeExecutable).deletingLastPathComponent().path)
+        }
 
         func appendVersionedBins(root: String, prefix: String? = nil) {
             guard let entries = try? fileManager.contentsOfDirectory(atPath: root)
@@ -195,6 +205,12 @@ public final class ProcessManager: Observable {
         parentPath: String? = ProcessInfo.processInfo.environment["PATH"],
         fileManager: FileManager = .default
     ) -> String? {
+        if let node = VerifiedRuntimeInstaller.preferredNodeExecutable(
+            forProjectPath: resolveProjectPath(homeDirectory: homeDirectory, fileManager: fileManager),
+            homeDirectory: homeDirectory
+        ) {
+            return node
+        }
         for directory in nodeSearchPath(
             homeDirectory: homeDirectory,
             parentPath: parentPath,
@@ -281,6 +297,10 @@ public final class ProcessManager: Observable {
         }
 
         guard generation == lifecycleGeneration else { return .superseded }
+        if VerifiedRuntimeInstaller.hasPendingActivation() {
+            state = .stopped
+            throw RuntimeBootstrapError.rejected("Interrupted runtime setup must finish recovery before the gateway can start. Retry setup in the Bar.")
+        }
         guard let nodePath = resolveNodePath() else {
             if generation == lifecycleGeneration { state = .stopped }
             throw ProcessManagerError.nodeNotFound
@@ -301,7 +321,7 @@ public final class ProcessManager: Observable {
         // operator as "Copilot CLI failed" with no hint that PATH is the cause.
         // `LaunchAgentManager` already sets this correctly; this path did not.
         var childEnv = ProcessInfo.processInfo.environment
-        childEnv["PATH"] = ProcessManager.nodeSearchPath()
+        childEnv["PATH"] = ProcessManager.nodeSearchPath(nodeExecutable: nodePath)
         proc.environment = childEnv
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice

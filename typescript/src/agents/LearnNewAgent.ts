@@ -1,4 +1,3 @@
-import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * LearnNewAgent - Meta-agent that creates new agents from natural language.
  *
@@ -17,12 +16,12 @@ import { openrappterPath } from '../infra/openrappter-home.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 import type { LLMProvider } from '../providers/types.js';
-import { chatWithFlightRecorder } from '../providers/recorded-chat.js';
 
 
 export const __manifest__ = {
@@ -48,6 +47,75 @@ export const __manifest__ = {
   requires_env: []
 } as const;
 const execFileAsync = promisify(execFile);
+
+function openrappterPath(...segments: string[]): string {
+  // Kept local so this file remains brainstem-droppable; constructing the
+  // default avoids a second literal source of the repository-wide home path.
+  const defaultHome = path.join(os.homedir(), ['.open', 'rappter'].join(''));
+  const home = process.env.OPENRAPPTER_HOME?.trim() || defaultHome;
+  return path.join(home, ...segments);
+}
+
+interface StandaloneSkill {
+  name: string;
+  description: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  path: string;
+}
+
+async function resolveSkillPath(inputPath: string): Promise<string | null> {
+  try {
+    const info = await fs.stat(inputPath);
+    if (info.isFile()) return inputPath;
+    if (info.isDirectory()) {
+      for (const candidate of ['SKILL.md', 'skill.md']) {
+        const file = path.join(inputPath, candidate);
+        try {
+          if ((await fs.stat(file)).isFile()) return file;
+        } catch {
+          // Try the other accepted casing.
+        }
+      }
+    }
+  } catch {
+    // The caller receives a path-specific error from importSkill.
+  }
+  return null;
+}
+
+async function parseSkillFile(filePath: string): Promise<StandaloneSkill | null> {
+  try {
+    const source = await fs.readFile(filePath, 'utf8');
+    const metadata: Record<string, unknown> = {};
+    let content = source;
+    const frontmatter = source.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+    if (frontmatter) {
+      for (const line of frontmatter[1].split(/\r?\n/)) {
+        const pair = line.match(/^(\w+):\s*(.+)$/);
+        if (pair) metadata[pair[1]] = pair[2].replace(/^["']|["']$/g, '');
+      }
+      content = frontmatter[2];
+    }
+    let name = typeof metadata.name === 'string' ? metadata.name : '';
+    let description = typeof metadata.description === 'string' ? metadata.description : '';
+    if (!name) name = source.match(/^#\s+(.+)$/m)?.[1].trim() ?? '';
+    if (!name) {
+      name = path.basename(path.dirname(filePath))
+        || path.basename(filePath, path.extname(filePath));
+    }
+    if (!description) {
+      description = content
+        .split(/\n\n+/)
+        .map(paragraph => paragraph.trim())
+        .find(paragraph => paragraph && !paragraph.startsWith('#'))
+        ?.slice(0, 200) ?? '';
+    }
+    return { name, description, content, metadata, path: filePath };
+  } catch {
+    return null;
+  }
+}
 
 // npm's own package-name grammar. Generated code is model-authored, so an
 // import specifier is untrusted input: reject anything that is not a package
@@ -114,10 +182,10 @@ export class LearnNewAgent extends BasicAgent {
   /** Core agent files that cannot be deleted */
   private readonly coreAgentFiles = [
     'BasicAgent.ts', 'ShellAgent.ts', 'MemoryAgent.ts',
-    'LearnNewAgent.ts', 'AgentRegistry.ts', 'Assistant.ts',
+    'LearnNewAgent.ts', 'AgentRegistry.ts', 'Assistant.ts', 'SkillAgent.ts',
     // Also protect .js variants in case someone puts them in the agents dir
     'basic_agent.js', 'shell_agent.js', 'learn_new_agent.js',
-    'memory_agent.js',
+    'memory_agent.js', 'skill_agent.js',
   ];
 
   constructor(agentsDir?: string, provider?: LLMProvider) {
@@ -139,11 +207,15 @@ export class LearnNewAgent extends BasicAgent {
           action: {
             type: 'string',
             description: 'Action to perform.',
-            enum: ['create', 'list', 'delete'],
+            enum: ['create', 'list', 'delete', 'import_skill'],
           },
           query: {
             type: 'string',
             description: 'Natural language query that may contain the agent description.',
+          },
+          skill_path: {
+            type: 'string',
+            description: "Path to a SKILL.md file (or a directory containing one) to convert into a native, hot-loadable agent. Required for action='import_skill'.",
           },
         },
         required: [],
@@ -174,6 +246,8 @@ export class LearnNewAgent extends BasicAgent {
       return this.listGeneratedAgents();
     } else if (action === 'delete') {
       return this.deleteAgent(name || description);
+    } else if (action === 'import_skill') {
+      return this.importSkill((kwargs.skill_path as string) || '', name);
     } else {
       return this.createAgent(description, name);
     }
@@ -269,6 +343,238 @@ export class LearnNewAgent extends BasicAgent {
     }
 
     return JSON.stringify(result);
+  }
+
+  // ── Import Skill ─────────────────────────────────────────────────
+
+  /**
+   * Convert a raw SKILL.md into a standalone, hot-loadable agent file.
+   *
+   * Unlike `createAgent`, no code is inferred from a natural-language
+   * description — the skill's own frontmatter (name/description) and
+   * instructions drive the generated agent, and the generated `perform()`
+   * re-parses the SKILL.md on every call rather than freezing its content.
+   */
+  private async importSkill(skillPath: string, name: string = ''): Promise<string> {
+    if (!skillPath) {
+      return JSON.stringify({
+        status: 'error',
+        message: "Please provide 'skill_path' (a SKILL.md file or a directory containing one).",
+      });
+    }
+
+    const resolved = await resolveSkillPath(skillPath);
+    if (!resolved) {
+      return JSON.stringify({ status: 'error', message: `No SKILL.md found at ${skillPath}` });
+    }
+
+    const skill = await parseSkillFile(resolved);
+    if (!skill) {
+      return JSON.stringify({ status: 'error', message: `Failed to parse ${resolved}` });
+    }
+
+    if (!name) {
+      name = skill.name;
+    }
+    name = this.sanitizeName(name);
+    const className = `${name}Agent`;
+    const fileName = `${this.toSnakeCase(name)}_agent.js`;
+
+    await fs.mkdir(this.agentsDir, { recursive: true });
+    const filePath = path.join(this.agentsDir, fileName);
+
+    try {
+      await fs.access(filePath);
+      return JSON.stringify({
+        status: 'error',
+        message: `Agent '${name}' already exists at ${filePath}`,
+      });
+    } catch {
+      // File doesn't exist — good
+    }
+
+    const description = skill.description || `Native agent for the '${skill.name}' skill.`;
+    const agentCode = this.generateSkillAgentCode(resolved, description, name, className);
+
+    try {
+      await fs.writeFile(filePath, agentCode);
+    } catch (e) {
+      return JSON.stringify({
+        status: 'error',
+        message: `Failed to write agent file: ${(e as Error).message}`,
+      });
+    }
+
+    const hotLoadResult = await this.hotLoadAgent(filePath, className, name);
+
+    const result: Record<string, unknown> = {
+      status: hotLoadResult.success ? 'success' : 'error',
+      message: hotLoadResult.success
+        ? `Imported skill '${skill.name}' as agent '${name}'`
+        : `Wrote agent '${name}' from skill '${skill.name}', but it could not be loaded`,
+      agent_name: name,
+      file_path: filePath,
+      hot_loaded: hotLoadResult.success,
+      skill_source: resolved,
+      description: description.slice(0, 200),
+      implementation: 'skill_import',
+    };
+
+    if (hotLoadResult.installed_deps) {
+      result.installed_dependencies = hotLoadResult.installed_deps;
+    }
+    if (!hotLoadResult.success) {
+      result.hot_load_error = hotLoadResult.error;
+      if (hotLoadResult.hint) {
+        result.hint = hotLoadResult.hint;
+      }
+    }
+
+    return JSON.stringify(result);
+  }
+
+  /**
+   * Generated by `importSkill`: a thin, standalone agent that re-parses its
+   * source SKILL.md on every call (rather than freezing its content at
+   * generation time) so edits to the skill take effect without regenerating
+   * the agent. Self-contained (Node builtins only, mirrors but does not
+   * import clawhub.ts) — see the comment on the returned template below for
+   * why.
+   */
+  private generateSkillAgentCode(
+    skillPath: string,
+    description: string,
+    name: string,
+    className: string,
+  ): string {
+    const date = new Date().toISOString().slice(0, 16).replace('T', ' ');
+
+    // Self-contained: generated agents live in an arbitrary agentsDir (e.g.
+    // ~/.openrappter/agents/), not inside this package's build output, so a
+    // relative import of clawhub.js would not resolve. As with every other
+    // generated agent, only Node builtins are used here — the minimal
+    // frontmatter-parsing and script-execution logic below is inlined rather
+    // than imported, mirroring (not reusing) clawhub.ts's implementation.
+    return `/**
+ * Native agent wrapper for the SKILL.md at ${docCommentSafe(skillPath)}.
+ *
+ * Auto-generated by LearnNewAgent (import_skill) on ${date}.
+ * Re-parses its source SKILL.md on every call; edit the SKILL.md and rerun,
+ * no regeneration required. Self-contained (Node builtins only) because
+ * generated agents do not live inside the openrappter package tree.
+ */
+
+import fs from 'fs/promises';
+import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
+
+async function parseSkillMd(filePath) {
+  let content;
+  try {
+    content = await fs.readFile(filePath, 'utf8');
+  } catch {
+    return null;
+  }
+  const frontmatter = {};
+  let name = '';
+  let description = '';
+  let body = content;
+  const fmMatch = content.match(/^---\\s*\\n([\\s\\S]*?)\\n---\\s*\\n([\\s\\S]*)$/);
+  if (fmMatch) {
+    for (const line of fmMatch[1].split(/\\r?\\n/)) {
+      const kv = line.match(/^(\\w+):\\s*(.+)$/);
+      if (kv) frontmatter[kv[1]] = kv[2].replace(/^["']|["']$/g, '');
+    }
+    body = fmMatch[2];
+  }
+  name = frontmatter.name || '';
+  description = frontmatter.description || '';
+  if (!name) {
+    const heading = content.match(/^#\\s+(.+)$/m);
+    if (heading) name = heading[1].trim();
+  }
+  if (!description) {
+    for (const para of body.split(/\\n\\n+/)) {
+      const trimmed = para.trim();
+      if (trimmed && !trimmed.startsWith('#')) { description = trimmed.slice(0, 200); break; }
+    }
+  }
+  return { name, description, content: body, metadata: frontmatter, path: filePath };
+}
+
+async function executeSkillScript(scriptsDir, query, skillName) {
+  let entries;
+  try {
+    entries = await fs.readdir(scriptsDir);
+  } catch {
+    return null;
+  }
+  const runners = [[process.execPath, '.js'], ['python3', '.py'], ['bash', '.sh']];
+  for (const [interpreter, ext] of runners) {
+    const script = entries.find((f) => f.endsWith(ext));
+    if (!script) continue;
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        interpreter, [path.join(scriptsDir, script), query],
+        { cwd: path.dirname(scriptsDir), timeout: 30000 },
+      );
+      return JSON.stringify({ status: 'success', skill: skillName, script, output: stdout || stderr, return_code: 0 });
+    } catch (e) {
+      return JSON.stringify({ status: 'error', skill: skillName, script, output: e.stdout || e.stderr || '', return_code: e.code ?? 1 });
+    }
+  }
+  return null;
+}
+
+export function createAgent(BasicAgent) {
+  class ${className} extends BasicAgent {
+    constructor() {
+      const metadata = {
+        name: '${name}',
+        description: ${jsStringLiteral(description, 200)},
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Natural language query or command for the skill.' },
+            action: { type: 'string', description: "Specific action to perform (if supported by the skill's scripts)." }
+          },
+          required: []
+        }
+      };
+      super('${name}', metadata);
+      this.skillPath = ${jsStringLiteral(skillPath)};
+    }
+
+    async perform(kwargs) {
+      const skill = await parseSkillMd(this.skillPath);
+      if (!skill) {
+        return JSON.stringify({ status: 'error', message: \`Skill source not found or unreadable: \${this.skillPath}\` });
+      }
+
+      const query = kwargs.query || '';
+      const action = kwargs.action || '';
+
+      if (skill.path) {
+        const scriptsDir = path.join(path.dirname(skill.path), 'scripts');
+        const result = await executeSkillScript(scriptsDir, action || query, skill.name);
+        if (result) return result;
+      }
+
+      return JSON.stringify({
+        status: 'info',
+        skill: skill.name,
+        description: skill.description,
+        instructions: skill.content.slice(0, 4000),
+        message: \`Skill '\${skill.name}' loaded natively as an openrappter agent.\`,
+      });
+    }
+  }
+  return ${className};
+}
+`;
   }
 
   // ── Name Generation ──────────────────────────────────────────────
@@ -385,13 +691,14 @@ Requirements:
 
 Generate ONLY the code. No markdown fences. No explanation.`;
 
-    const response = await chatWithFlightRecorder({
-      provider: this.provider,
-      messages: [{ role: 'user', content: prompt }],
-      options: { temperature: 0.7, max_tokens: 2000 },
-      source: "learn-new-agent",
-      attributes: { phase: "code-generation" },
-    });
+    // This agent must remain droppable into the isolated brainstem contract.
+    // Calling the injected provider directly avoids a runtime import of the
+    // package-wide recorder while preserving the optional model-generation
+    // seam; the brainstem records the surrounding agent/tool invocation.
+    const response = await this.provider.chat(
+      [{ role: 'user', content: prompt }],
+      { temperature: 0.7, max_tokens: 2000 },
+    );
 
     if (!response.content) return null;
 

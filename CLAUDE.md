@@ -235,6 +235,25 @@ Agent metadata maps to MCP tools: `name` → tool name, `description` → tool d
 
 **Files**: `typescript/src/mcp/server.ts`, `typescript/src/__tests__/parity/mcp-server.test.ts` (18 tests)
 
+## Architecture: Brainstem Kernel (TypeScript)
+
+`typescript/src/brainstem.ts` is the Node implementation of the local RAPP
+brainstem wire. It serves `POST /chat`, `GET /health`, `/version`, `/agents`,
+`/agents/export/<file>`, `/models`, `POST /agents/import`, and
+`DELETE /agents/<file>`, with the same `rapp-chat/1.0` envelopes, Copilot auth
+chain, three-round tool loop, `soul.md` prompt, and disk-hot agent discovery as
+`python/openrappter/brainstem.py`.
+
+Dropped `.js`/`.ts` agents are loaded through an isolated shim: they may use
+the kernel `BasicAgent`, the local `AzureFileStorageManager` compatibility
+surface, sibling drop files, and Node builtins, but not hidden package
+internals. Every packaged `*Agent.ts` is zero-argument-instantiated in a fresh
+subprocess by
+`typescript/src/__tests__/integration/brainstem-compliance.test.ts`; strict
+standalone loading and a deliberately bad import prove the shim fails closed.
+The Python mirror and `python/tests/test_brainstem_compliance.py` remain the
+cross-language specification of record.
+
 ## Architecture: Dashboard REST API
 
 HTTP endpoints for the web dashboard UI. Designed as a mountable handler on the existing gateway HTTP server.

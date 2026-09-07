@@ -24,7 +24,7 @@ class TestLearnNewMetadata:
     def test_actions_enum(self):
         agent = LearnNewAgent()
         actions = agent.metadata["parameters"]["properties"]["action"]["enum"]
-        assert set(actions) == {"create", "list", "delete"}
+        assert set(actions) == {"create", "list", "delete", "import_skill"}
 
 
 # --- Name generation & sanitization ---

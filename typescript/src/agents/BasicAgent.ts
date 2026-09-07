@@ -97,6 +97,31 @@ export abstract class BasicAgent {
   }
 
   /**
+   * OpenAI function-calling projection used by both MCP and the brainstem.
+   *
+   * Python's kernel BasicAgent has always owned this conversion. Keeping it on
+   * the base class here gives isolated agent loaders one contract to verify
+   * instead of teaching each host how to reconstruct metadata.
+   */
+  toTool(): {
+    type: "function";
+    function: {
+      name: string;
+      description: string;
+      parameters: AgentMetadata["parameters"];
+    };
+  } {
+    return {
+      type: "function",
+      function: {
+        name: this.name,
+        description: this.metadata.description ?? "",
+        parameters: this.metadata.parameters,
+      },
+    };
+  }
+
+  /**
    * Main entry point - sloshes context then calls perform().
    * Called by the orchestrator instead of perform() directly.
    *

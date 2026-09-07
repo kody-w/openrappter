@@ -1,12 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { MemoryAgent } from '../../MemoryAgent.js';
-import { withMemoryTransaction } from '../../../memory/json-store.js';
+process.stderr.write('memory fixture: importing runtime\n');
+const importWatchdog = setTimeout(() => {
+  process.stderr.write(`memory fixture: import still pending; node=${process.version}; platform=${process.platform}\n`);
+}, 3000);
+const { MemoryAgent } = await import('../../MemoryAgent.js');
+const { withMemoryTransaction } = await import('../../../memory/json-store.js');
 
 const [directory, mode, prefix = 'child', count = '1'] = process.argv.slice(2);
 const report = (value: unknown) => fs.writeSync(1, `${typeof value === 'string' ? value : JSON.stringify(value)}\n`);
 const pause = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+process.stderr.write('memory fixture: constructing agent\n');
 const agent = new MemoryAgent(directory);
+process.stderr.write('memory fixture: awaiting start\n');
+clearTimeout(importWatchdog);
 report('ready');
 await new Promise<void>(resolve => {
   process.stdin.once('data', () => resolve());

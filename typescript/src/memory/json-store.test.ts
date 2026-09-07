@@ -18,6 +18,15 @@ let home: string;
 let file: string;
 const children: Array<{ child: ChildProcessWithoutNullStreams; exited: Promise<number | null> }> = [];
 
+function runtimeEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const allowed = new Set([
+    'PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'SYSTEMDRIVE',
+    'USERNAME', 'USERDOMAIN', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA',
+    'PROGRAMFILES', 'PROGRAMFILES(X86)', 'PROGRAMW6432', 'PSMODULEPATH',
+  ]);
+  return Object.fromEntries(Object.entries(environment).filter(([key]) => allowed.has(key.toUpperCase())));
+}
+
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(process.env.OPENRAPPTER_HOME!, 'memory-process-'));
   file = path.join(home, 'memory.json');
@@ -43,11 +52,9 @@ async function worker(runtime: Runtime, mode: string, prefix = 'child', count = 
   const child = spawn(command, [...args, directory, mode, prefix, String(count)], {
     cwd: root,
     env: {
-      PATH: process.env.PATH,
+      ...runtimeEnvironment(process.env),
       HOME: home,
       USERPROFILE: home,
-      SystemRoot: process.env.SystemRoot ?? process.env.SYSTEMROOT,
-      WINDIR: process.env.WINDIR,
       OPENRAPPTER_HOME: home,
       TMPDIR: home,
       TEMP: home,
@@ -59,22 +66,25 @@ async function worker(runtime: Runtime, mode: string, prefix = 'child', count = 
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let stderr = '';
+  let stopped = false;
   child.stderr.on('data', chunk => { stderr += String(chunk); });
   const exited = new Promise<number | null>(resolve => {
-    child.once('exit', resolve);
-    child.once('error', error => { stderr += String(error); resolve(-1); });
+    child.once('exit', code => { stopped = true; resolve(code); });
+    child.once('error', error => { stopped = true; stderr += String(error); resolve(-1); });
   });
   children.push({ child, exited });
   const lines: string[] = [];
   const input = createInterface({ input: child.stdout });
   input.on('line', line => lines.push(line));
   const line = async () => {
-    await vi.waitFor(() => {
-      if (lines.length === 0 && (child.exitCode !== null || child.signalCode !== null)) {
-        throw new Error(`Worker exited without a result: ${stderr}`);
-      }
-      expect(lines.length).toBeGreaterThan(0);
-    }, { timeout: 10_000, interval: 10 });
+    try {
+      await vi.waitUntil(() => lines.length > 0 || stopped, { timeout: 10_000, interval: 10 });
+    } catch (error) {
+      throw new Error(`Memory ${runtime}/${mode} worker timed out: ${stderr.slice(-4000)}`, { cause: error });
+    }
+    if (lines.length === 0) {
+      throw new Error(`Memory ${runtime}/${mode} worker exited without a result: ${stderr.slice(-4000)}`);
+    }
     return lines.shift()!;
   };
   expect(await line()).toBe('ready');
@@ -94,17 +104,34 @@ function messages(): string[] {
 }
 
 describe('memory transaction process protocol', () => {
-  it('reads an open snapshot after an atomic replacement unlinks its inode', () => {
+  it('retains case-preserved Windows runtime variables without copying credentials', () => {
+    expect(runtimeEnvironment({
+      Path: 'C:\\tools', SystemRoot: 'C:\\Windows', windir: 'C:\\Windows',
+      USERNAME: 'fixture-owner', PSModulePath: 'C:\\modules',
+      GITHUB_TOKEN: 'not-forwarded',
+    })).toEqual({
+      Path: 'C:\\tools', SystemRoot: 'C:\\Windows', windir: 'C:\\Windows',
+      USERNAME: 'fixture-owner', PSModulePath: 'C:\\modules',
+    });
+  });
+
+  it('keeps an open snapshot stable during a concurrent replacement attempt', () => {
     const originalStat = fs.fstatSync;
+    const replacement = path.join(home, 'replacement.json');
     vi.spyOn(fs, 'fstatSync').mockImplementationOnce(descriptor => {
-      const replacement = path.join(home, 'replacement.json');
       fs.writeFileSync(replacement, JSON.stringify({ next: { message: 'new fact' } }));
-      fs.renameSync(replacement, file);
+      if (nativeWindows) {
+        // Windows does not allow replacement until this CRT read handle closes.
+        expect(() => fs.renameSync(replacement, file)).toThrow();
+      } else {
+        fs.renameSync(replacement, file);
+      }
       return originalStat(descriptor);
     });
     expect(readMemoryFile(file)).toEqual({
       legacy: { message: 'existing fact', theme: 'fact' },
     });
+    if (nativeWindows) fs.renameSync(replacement, file);
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ next: { message: 'new fact' } });
   });
 
@@ -211,6 +238,21 @@ describe('memory transaction process protocol', () => {
 });
 
 describe('memory transaction failures', () => {
+  it('rejects an unrelated mkdir ancestor instead of walking the root forever', async () => {
+    const outside = path.join(home, 'other');
+    fs.mkdirSync(outside);
+    const mkdir = fs.mkdirSync;
+    vi.spyOn(fs, 'mkdirSync').mockImplementationOnce(((directory, options) => {
+      mkdir(directory, options);
+      return path.join(outside, 'not-created');
+    }) as typeof fs.mkdirSync);
+    await expect(new MemoryAgent(path.join(home, 'new', 'nested')).perform({
+      action: 'remember', message: 'must not acknowledge',
+    })).rejects.toMatchObject({
+      cause: { message: 'Memory directory creation returned an unrelated ancestor' },
+    });
+  });
+
   it('rejects async transaction callbacks before they can run outside the lock', async () => {
     let called = false;
     await expect(withMemoryTransaction(file, async () => { called = true; }))
@@ -327,7 +369,9 @@ describe('memory transaction failures', () => {
     });
     const response = JSON.parse(await new MemoryAgent(directory).perform({ action: 'remember', message: 'first fact' }));
     expect(response.status).toBe('success');
-    expect(syncedDirectories).toEqual(nativeWindows ? [] : [directory, path.dirname(directory), home, directory]);
+    expect(syncedDirectories.map(item => fs.realpathSync(item))).toEqual(
+      nativeWindows ? [] : [directory, path.dirname(directory), home, directory].map(item => fs.realpathSync(item)),
+    );
     expect(readMemoryFile(path.join(directory, 'memory.json'))[response.key].message).toBe('first fact');
   });
 

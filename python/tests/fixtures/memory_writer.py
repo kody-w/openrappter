@@ -1,11 +1,14 @@
 """Inert subprocess fixture; HOME and memory paths are supplied by its test."""
 
 import json
+import faulthandler
 from pathlib import Path
 import sys
 import threading
 import time
 
+print("memory fixture: importing runtime", file=sys.stderr, flush=True)
+faulthandler.dump_traceback_later(3)
 from openrappter.agents.manage_memory_agent import ManageMemoryAgent
 from openrappter.agents import manage_memory_agent as json_store
 
@@ -24,10 +27,13 @@ class Writer(ManageMemoryAgent):
         return result
 
 
+print("memory fixture: constructing agent", file=sys.stderr, flush=True)
 agent = Writer()
 agent.home = Path(directory)
 agent.memory_file = agent.home / "memory.json"
 report("ready")
+print("memory fixture: awaiting start", file=sys.stderr, flush=True)
+faulthandler.cancel_dump_traceback_later()
 sys.stdin.readline()
 report("attempting")
 if mode == "hold":

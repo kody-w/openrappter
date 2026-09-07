@@ -2610,11 +2610,15 @@ def _read_process_incarnation(pid: int) -> Optional[str]:
                     ),
                 ],
                 text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=10,
             ).strip()
         started = subprocess.check_output(
             ["ps", "-o", "lstart=", "-p", str(pid)],
             text=True,
             env={**os.environ, "LC_ALL": "C", "TZ": "UTC"},
+            stdin=subprocess.DEVNULL,
+            timeout=10,
         ).strip()
         return f"ps-c-utc:{started}" if started else None
     except (OSError, subprocess.SubprocessError, IndexError):

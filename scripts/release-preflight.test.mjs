@@ -719,10 +719,13 @@ test('macOS Bar release assets are immutable on rerun', () => {
     new URL('../.github/workflows/release-bar.yml', import.meta.url),
     'utf8',
   ));
-  const releaseStep = workflow.jobs.publish.steps.find(
-    (step) => step.name === 'Upload DMG as release asset',
+  const releaseSteps = workflow.jobs.publish.steps.filter(
+    (step) => String(step.uses).startsWith('softprops/action-gh-release@'),
   );
+  assert.equal(releaseSteps.length, 1);
+  const [releaseStep] = releaseSteps;
   assert.equal(releaseStep.with.overwrite_files, false);
+  assert.equal(releaseStep.with.fail_on_unmatched_files, true);
 });
 
 test('Windows Electron CI runs the complete smoke scope', () => {
@@ -758,17 +761,43 @@ test('privileged release actions are pinned to immutable commits', () => {
   }
 });
 
-test('macOS delivery prepares the cask only after verifying the public download', () => {
-  const workflow = readFileSync(
+test('macOS delivery freezes the first-launch proof and withholds the cask proposal until public verification', () => {
+  const source = readFileSync(
     new URL('../.github/workflows/release-bar.yml', import.meta.url),
     'utf8',
   );
-  const upload = workflow.indexOf('- name: Upload DMG as release asset');
-  const download = workflow.indexOf('gh release download');
-  const cask = workflow.indexOf('scripts/bar_candidate.py cask');
-  assert.ok(upload >= 0 && download > upload && cask > download);
-  assert.match(workflow, /downloaded-bar\/OpenRappter-Bar-\$\{RELEASE_VERSION\}\.dmg" \| sha256sum -c/);
-  assert.match(workflow, /--evidence bar-release\/authority-evidence.json/);
-  assert.match(workflow, /name: homebrew-proposal-/);
-  assert.doesNotMatch(workflow, /brew install|git push.*homebrew|gh pr merge/);
+  const workflow = parseYaml(source);
+  const { publish } = workflow.jobs;
+  assert.deepEqual(publish.needs, ['release-constitution', 'verify-dmg']);
+  const { steps } = publish;
+  const proof = steps.findIndex(
+    (step) => String(step.run).includes('scripts/bar_candidate.py cask'),
+  );
+  const upload = steps.findIndex(
+    (step) => String(step.uses).startsWith('softprops/action-gh-release@'),
+  );
+  const download = steps.findIndex(
+    (step) => String(step.run).includes('gh release download'),
+  );
+  const proposal = steps.findIndex(
+    (step) => String(step.uses).startsWith('actions/upload-artifact@')
+      && String(step.with?.name).startsWith('homebrew-proposal-'),
+  );
+  assert.ok(proof >= 0 && upload > proof && download > upload && proposal > download);
+  assert.match(steps[proof].run, /--evidence bar-release\/authority-evidence.json/);
+  assert.match(steps[proof].run, /--chain bar-release\/chain.json/);
+  assert.match(steps[upload].with.files, /homebrew-proposal\/runtime-bootstrap-proof.json/);
+  assert.match(steps[download].run, /downloaded-bar\/OpenRappter-Bar-\$\{RELEASE_VERSION\}\.dmg" \| sha256sum -c/);
+  assert.match(
+    steps[download].run,
+    /cmp homebrew-proposal\/runtime-bootstrap-proof.json downloaded-bar\/runtime-bootstrap-proof.json/,
+  );
+  assert.equal(steps[proposal].with.path, 'homebrew-proposal/');
+  assert.equal(steps[proposal].with['if-no-files-found'], 'error');
+  assert.notEqual(publish['continue-on-error'], true);
+  for (const index of [proof, upload, download, proposal]) {
+    assert.equal(steps[index].if, undefined);
+    assert.notEqual(steps[index]['continue-on-error'], true);
+  }
+  assert.doesNotMatch(source, /brew install|git push.*homebrew|gh pr merge/);
 });

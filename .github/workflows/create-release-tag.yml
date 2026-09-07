@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: kody-w/openrappter-release-train
-          ref: ce7fffe31d8cff3c66db1a0749596ec22fe064eb
+          ref: 931dd60f77c1e8b3a5c096fae6a5969061ccf569
           path: authority
       - id: verify
         env:

@@ -85,3 +85,17 @@ test('candidate check discovery is paginated and existing platform gates run on 
   assert.match(workflow('build-candidate.yml'), /"macOS Menu Bar App","macos-14","ubuntu-latest","windows-latest"/);
   assert.match(workflow('desktop.yml'), /push:\s*\n\s*branches: \[main\]/);
 });
+
+test('distribution callers share an immutable authority pin that supports the current candidate URL contract', () => {
+  const references = [
+    'create-release-tag.yml', 'release-constitution.yml', 'pages.yml', 'release-bar.yml',
+  ].map(name => {
+    const text = workflow(name);
+    const match = text.match(/repository: kody-w\/openrappter-release-train\s+ref: ([0-9a-f]{40})/);
+    assert.ok(match, `${name} must pin the canonical authority`);
+    return match[1];
+  });
+  assert.equal(new Set(references).size, 1);
+  // That older validator accepts only flat paths, not snapshot/release/id paths.
+  assert.notEqual(references[0], 'ce7fffe31d8cff3c66db1a0749596ec22fe064eb');
+});

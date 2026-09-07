@@ -1,7 +1,11 @@
 import { openrappterHome } from './infra/openrappter-home.js';
 import fs from 'fs/promises';
+import syncFs from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { TextDecoder } from 'node:util';
 import path from 'path';
 import JSON5 from 'json5';
+import { withMemoryTransaction as withFileTransaction } from './memory/json-store.js';
 
 export const HOME_DIR = openrappterHome();
 export const CONFIG_FILE = path.join(HOME_DIR, 'config.json');
@@ -24,7 +28,7 @@ export async function loadEnv(filePath: string = ENV_FILE): Promise<Record<strin
     const data = await fs.readFile(filePath, 'utf-8');
     const env: Record<string, string> = {};
     for (const line of data.split(/\r?\n/)) {
-      const trimmed = line.trim();
+      const trimmed = line.trim().replace(/^export\s+/, '');
       if (!trimmed || trimmed.startsWith('#')) continue;
       const eqIdx = trimmed.indexOf('=');
       if (eqIdx > 0) {
@@ -68,20 +72,92 @@ export async function hydrateManagedEnv(filePath: string = ENV_FILE): Promise<st
 }
 
 export async function saveEnv(env: Record<string, string>, filePath: string = ENV_FILE): Promise<void> {
-  const dir = path.dirname(filePath);
-  await fs.mkdir(dir, { recursive: true });
-  const lines = ['# openrappter environment — managed by `openrappter onboard`', ''];
-  for (const [key, val] of Object.entries(env)) {
-    lines.push(`${key}="${val}"`);
-  }
-  lines.push('');
-  const content = lines.join('\n');
-  await fs.writeFile(filePath, content);
+  await withFileTransaction(filePath, () => {
+    const lines = ['# openrappter environment — managed by `openrappter onboard`', ''];
+    for (const [key, value] of Object.entries(env)) {
+      validateEnvChange(key, value);
+      lines.push(`${key}="${value}"`);
+    }
+    const content = lines.join('\n') + '\n';
+    writeEnvSnapshot(filePath, content);
+    if (readEnvSnapshot(filePath) !== content) {
+      throw new Error(`Env file verification failed at ${filePath}`);
+    }
+  });
+}
 
-  // Read-back verification
-  const readBack = await fs.readFile(filePath, 'utf-8');
-  if (readBack !== content) {
-    throw new Error(`Env file verification failed: written content does not match read-back at ${filePath}`);
+/** Managed writers patch only their keys under the Bar's shared SQLite sidecar lock. */
+export async function updateEnv(
+  changes: Record<string, string | null>,
+  filePath: string = ENV_FILE,
+): Promise<void> {
+  for (const [key, value] of Object.entries(changes)) validateEnvChange(key, value);
+  if (Object.keys(changes).length === 0) return;
+  await withFileTransaction(filePath, () => {
+    const original = readEnvSnapshot(filePath);
+    const lines = original.split(/\r?\n/).filter(line => {
+      const key = environmentKey(line);
+      return key === undefined || !Object.hasOwn(changes, key);
+    });
+    if (lines.at(-1) === '') lines.pop();
+    if (!original) lines.push('# openrappter environment — managed by openrappter', '');
+    for (const [key, value] of Object.entries(changes)) {
+      if (value !== null) lines.push(`${key}="${value}"`);
+    }
+    const content = lines.join('\n') + '\n';
+    writeEnvSnapshot(filePath, content);
+    if (readEnvSnapshot(filePath) !== content) {
+      // Never compensate by restoring an old snapshot over an intervening edit.
+      throw new Error(`Env file changed during verification at ${filePath}`);
+    }
+  });
+}
+
+function environmentKey(line: string): string | undefined {
+  const trimmed = line.trim().replace(/^export\s+/, '');
+  if (!trimmed || trimmed.startsWith('#')) return undefined;
+  const separator = trimmed.indexOf('=');
+  return separator > 0 ? trimmed.slice(0, separator).trim() : undefined;
+}
+
+function validateEnvChange(key: string, value: string | null): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ||
+      (value !== null && (typeof value !== 'string' || /[\0\r\n"']/.test(value)))) {
+    throw new Error('Environment changes require a valid key and a single-line value without quotes');
+  }
+}
+
+function readEnvSnapshot(file: string): string {
+  try {
+    const status = syncFs.lstatSync(file);
+    if (!status.isFile() || status.nlink !== 1) throw new Error('Environment must be a regular file');
+    return new TextDecoder('utf-8', { fatal: true }).decode(syncFs.readFileSync(file));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw error;
+  }
+}
+
+function writeEnvSnapshot(file: string, content: string): void {
+  if (syncFs.existsSync(file)) {
+    const status = syncFs.lstatSync(file);
+    if (!status.isFile() || status.nlink !== 1) throw new Error('Environment must be a regular file');
+  }
+  const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID()}.pending`);
+  try {
+    const descriptor = syncFs.openSync(temporary, 'wx', 0o600);
+    try {
+      syncFs.writeFileSync(descriptor, content, 'utf8');
+      syncFs.fsyncSync(descriptor);
+    } finally {
+      syncFs.closeSync(descriptor);
+    }
+    syncFs.renameSync(temporary, file);
+  } finally {
+    try { syncFs.unlinkSync(temporary); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
   }
 }
 

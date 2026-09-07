@@ -40,9 +40,7 @@ public final class OnboardingViewModel {
     public private(set) var errorMessage: String?
 
     private let environment: LocalEnvironmentFile
-    private let configURL: URL
     private let runtime: RuntimePrerequisiteService
-    private let files: CredentialFileAccess
     private let autoStartInstaller: () async throws -> Void
     private let setupTimeout: TimeInterval
     private var setupTask: Task<Void, Never>?
@@ -58,8 +56,6 @@ public final class OnboardingViewModel {
         self.authService = authService ?? GitHubAuthService(homeDirectory: homeDir)
         self.runtime = runtime ?? .unconfigured()
         environment = LocalEnvironmentFile(homeDirectory: homeDir)
-        configURL = URL(fileURLWithPath: homeDir).appendingPathComponent("config.json")
-        files = .live
         setupTimeout = 20 * 60
         autoStartInstaller = {
             try await LaunchAgentManager(launchAgentsDir: launchAgentsDir).setEnabled(
@@ -78,11 +74,9 @@ public final class OnboardingViewModel {
     ) {
         self.authService = authService
         self.runtime = runtime
-        self.files = files
         self.setupTimeout = setupTimeout
         self.autoStartInstaller = autoStartInstaller
         environment = LocalEnvironmentFile(homeDirectory: homeDir, files: files)
-        configURL = URL(fileURLWithPath: homeDir).appendingPathComponent("config.json")
     }
 
     public var authState: AuthState {
@@ -204,7 +198,7 @@ public final class OnboardingViewModel {
                     guard current == generation, !Task.isCancelled else { return }
                     autoStartInstalled = true
                 }
-                if !usingDesktopRuntime { try saveConfig() }
+                // Completion is live readiness, not a flag in the shared CLI configuration.
                 currentStep = .done
             } catch {
                 guard current == generation else { return }
@@ -232,32 +226,4 @@ public final class OnboardingViewModel {
         authService.cancelLogin()
     }
 
-    private func saveConfig() throws {
-        let original = files.exists(configURL) ? try files.read(configURL) : nil
-        var config: [String: Any] = [:]
-        if let original {
-            guard let existing = try JSONSerialization.jsonObject(with: original) as? [String: Any] else {
-                throw GitHubAuthError.persistence("Existing runtime settings are unreadable and were not replaced.")
-            }
-            config = existing
-        }
-        config["setupComplete"] = true
-        config["gatewayVerified"] = true
-        config["onboardedAt"] = ISO8601DateFormatter().string(from: Date())
-        let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
-        do {
-            try files.write(configURL, data)
-            guard try files.read(configURL) == data else {
-                throw GitHubAuthError.persistence("Setup settings could not be verified.")
-            }
-        } catch {
-            do {
-                if let original { try files.write(configURL, original) }
-                else if files.exists(configURL) { try files.remove(configURL) }
-            } catch {
-                throw GitHubAuthError.persistence("Setup settings failed and their previous contents could not be restored.")
-            }
-            throw GitHubAuthError.persistence("Setup settings could not be saved. Setup has not completed.")
-        }
-    }
 }

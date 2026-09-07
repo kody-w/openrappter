@@ -206,42 +206,104 @@ func runOnboardingRuntimeTests() async {
             try expectEqual(backend.verifications, [true])
         }
 
-        await test("completion preserves existing runtime configuration and does not claim optional setup") {
+        await test("completion leaves shared runtime configuration byte-exact and does not claim optional setup") {
             let files = AuthTestFiles()
-            files.contents["/onboarding-fixture/config.json"] = Data(#"{"projectPath":"/kept-runtime","custom":"kept"}"#.utf8)
+            let original = Data(#"{"projectPath":"/kept-runtime","custom":"kept"}"#.utf8)
+            files.contents["/onboarding-fixture/config.json"] = original
             var installs = 0
             let (model, _, _) = onboardingFixture(files: files, autoStart: { installs += 1 })
             model.saveManualToken("fake_token")
             await model.retryRuntimeSetup().value
-            let config = try JSONSerialization.jsonObject(with: files.contents["/onboarding-fixture/config.json"]!) as! [String: Any]
             try expect(model.isComplete)
-            try expectEqual(config["projectPath"] as? String, "/kept-runtime")
-            try expectEqual(config["custom"] as? String, "kept")
-            try expectEqual(config["gatewayVerified"] as? Bool, true)
-            try expectNil(config["copilotAvailable"])
+            try expectEqual(files.contents["/onboarding-fixture/config.json"], original)
             try expectEqual(installs, 0)
             try expect(!model.autoStartInstalled)
         }
 
-        await test("unreadable configuration is preserved and blocks completion") {
+        await test("verified readiness does not require rewriting unreadable shared configuration") {
             let files = AuthTestFiles()
             let original = Data("not JSON".utf8)
             files.contents["/onboarding-fixture/config.json"] = original
             let (model, _, _) = onboardingFixture(files: files)
             model.saveManualToken("fake_token")
             await model.retryRuntimeSetup().value
-            try expect(!model.isComplete)
+            try expect(model.isComplete)
+            try expectNil(model.errorMessage)
             try expectEqual(files.contents["/onboarding-fixture/config.json"], original)
         }
 
-        await test("failed configuration persistence cannot report Done") {
+        await test("shared configuration writability is not a prerequisite for verified readiness") {
             let files = AuthTestFiles()
             files.refusedWrites.insert("/onboarding-fixture/config.json")
             let (model, _, _) = onboardingFixture(files: files)
             model.saveManualToken("fake_token")
+            let writes = files.writes
             await model.retryRuntimeSetup().value
-            try expect(!model.isComplete)
-            try expectNotNil(model.errorMessage)
+            try expect(model.isComplete)
+            try expectNil(model.errorMessage)
+            try expectEqual(files.writes, writes)
+            try expectNil(files.contents["/onboarding-fixture/config.json"])
+        }
+
+        for initiallyExists in [true, false] {
+            await test(initiallyExists
+                ? "setup never overwrites a concurrent CLI config update"
+                : "setup never deletes a concurrently created CLI config") {
+                let files = AuthTestFiles()
+                let configPath = "/onboarding-fixture/config.json"
+                let original = Data(#"{"projectPath":"/original","owner":"cli"}"#.utf8)
+                let concurrent = Data(#"{"projectPath":"/newer","owner":"cli","generation":2}"#.utf8)
+                let intervening = Data(#"{"projectPath":"/newest","owner":"cli","generation":3}"#.utf8)
+                var expectedLatest: Data? = initiallyExists ? original : nil
+                if initiallyExists { files.contents[configPath] = original }
+                let baseAccess = files.access
+                var reads = 0
+                var writes = 0
+                var removals = 0
+                let access = CredentialFileAccess(
+                    exists: baseAccess.exists,
+                    read: { url in
+                        if url.path == configPath { reads += 1 }
+                        return try baseAccess.read(url)
+                    },
+                    write: { url, data in
+                        if url.path == configPath {
+                            writes += 1
+                            if writes == 1 {
+                                // Another writer commits after our snapshot, and
+                                // our attempted write fails before taking ownership.
+                                files.contents[configPath] = intervening
+                                expectedLatest = intervening
+                                throw CocoaError(.fileWriteNoPermission)
+                            }
+                        }
+                        try baseAccess.write(url, data)
+                    },
+                    remove: { url in
+                        if url.path == configPath { removals += 1 }
+                        try baseAccess.remove(url)
+                    }
+                )
+                let backend = OnboardingTestRuntime()
+                let gate = TestGate()
+                backend.verificationGate = gate
+                let auth = GitHubAuthService(dependencies: fakeAuthDependencies(credentials: AuthTestCredentials()))
+                let model = OnboardingViewModel(
+                    homeDir: "/onboarding-fixture", authService: auth, runtime: backend.service(), files: access
+                )
+                model.saveManualToken("fake_token")
+                let setup = model.retryRuntimeSetup()
+                await gate.waitUntilEntered()
+                if initiallyExists {
+                    files.contents[configPath] = concurrent
+                    expectedLatest = concurrent
+                }
+                await gate.open()
+                await setup.value
+                try expectEqual(files.contents[configPath], expectedLatest, "the most recent CLI-owned value must survive")
+                try expectEqual(reads + writes + removals, 0, "setup completion must not transact against shared config")
+                try expect(model.isComplete, "verified readiness does not need shared setup flags")
+            }
         }
 
         await test("cancelled readiness cannot later set Done") {

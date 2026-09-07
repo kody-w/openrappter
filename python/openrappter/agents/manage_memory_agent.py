@@ -24,6 +24,26 @@ from typing import Any, Mapping
 
 from openrappter.agents.basic_agent import BasicAgent
 
+try:
+    from openrappter.flight_recorder import private_mkdir
+except ModuleNotFoundError:
+    # Single-file cartridge loaders supply BasicAgent without the kernel helpers.
+    def private_mkdir(directory: Path) -> Path:
+        directory = Path(directory)
+        missing = []
+        candidate = directory
+        while not os.path.lexists(candidate):
+            missing.append(candidate)
+            if candidate.parent == candidate:
+                break
+            candidate = candidate.parent
+        for item in reversed(missing):
+            item.mkdir(mode=0o700, exist_ok=True)
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)  # private-mkdir-canonical
+        if not directory.is_symlink():
+            os.chmod(directory, 0o700)
+        return directory
+
 
 MEMORY_LOCK_TIMEOUT_MS = 5_000
 
@@ -39,7 +59,7 @@ def _ensure_memory_directory(directory):
     while not current.exists():
         missing.append(current)
         current = current.parent
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_mkdir(directory)
     # Windows CRT cannot open directory descriptors. Do not turn that platform
     # limitation into a constructor failure or swallow unrelated filesystem errors.
     if missing and sys.platform != "win32":

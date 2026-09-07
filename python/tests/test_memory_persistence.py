@@ -26,6 +26,32 @@ def memory_agent(directory):
     return agent
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_memory_directories_keep_all_new_ancestors_private(tmp_path):
+    directory = tmp_path / "new-home" / ".openrappter" / "memory"
+    previous = os.umask(0o022)
+    try:
+        json_store._ensure_memory_directory(directory)
+    finally:
+        os.umask(previous)
+    assert [
+        stat.S_IMODE(item.stat().st_mode)
+        for item in (directory, directory.parent, directory.parent.parent)
+    ] == [0o700, 0o700, 0o700]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_memory_directory_creation_leaves_existing_ancestors_unchanged(tmp_path):
+    existing = tmp_path / "shared"
+    existing.mkdir()
+    existing.chmod(0o755)
+    directory = existing / "private" / "memory"
+    json_store._ensure_memory_directory(directory)
+    assert stat.S_IMODE(existing.stat().st_mode) == 0o755
+    assert stat.S_IMODE(directory.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+
+
 @pytest.mark.parametrize("reader", ["storage", "context"])
 def test_open_reader_survives_replacement_of_its_snapshot(tmp_path, monkeypatch, reader):
     file = tmp_path / "memory.json"

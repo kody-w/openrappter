@@ -93,6 +93,10 @@ explicitly foreign clipboard bindings and any opposite-architecture search-tool
 executables; the matching bindings/tools, loaders, packages, and every license
 remain. The omitted filenames are recorded. It never drops
 Copilot, SQLite, Sharp, or other required dependencies to meet a size budget.
+Before and after compilation, the producer rejects tracked changes or untracked
+release inputs instead of labeling a dirty working tree with an unrelated HEAD.
+Signed app builds apply the same exact-source guard; ordinary unsigned
+development builds remain unaffected.
 
 On a matching Mac (Intel can also be checked using the pinned x64 Node under
 Rosetta), run from the repository root:

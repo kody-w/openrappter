@@ -234,6 +234,22 @@ assert.equal(validate(metadata), false);
             with self.assertRaisesRegex(ValueError, "must be X.Y.Z"):
                 runtime.source_version()
 
+    def test_source_identity_rejects_dirty_or_untracked_inputs_before_and_after_build(self):
+        with patch.object(runtime.subprocess, "check_output", side_effect=[COMMIT, ""]), \
+                patch.object(runtime.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+            self.assertEqual(runtime.verify_source(COMMIT), VERSION)
+        with patch.object(runtime.subprocess, "check_output", return_value="b" * 40):
+            with self.assertRaisesRegex(ValueError, "exact commit"):
+                runtime.verify_source(COMMIT)
+        with patch.object(runtime.subprocess, "check_output", return_value=COMMIT), \
+                patch.object(runtime.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)):
+            with self.assertRaisesRegex(ValueError, "tracked changes"):
+                runtime.verify_source(COMMIT)
+        with patch.object(runtime.subprocess, "check_output", side_effect=[COMMIT, "typescript/src/uncommitted.ts\n"]), \
+                patch.object(runtime.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+            with self.assertRaisesRegex(ValueError, "untracked build inputs"):
+                runtime.verify_source(COMMIT)
+
     def test_workflows_preserve_two_tested_architectures_sealing_order_and_the_publish_gate(self):
         script = """
 import assert from 'node:assert/strict';

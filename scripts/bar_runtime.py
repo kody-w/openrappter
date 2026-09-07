@@ -69,6 +69,21 @@ def identity(commit, version):
     require(isinstance(version, str) and VERSION.fullmatch(version), "Bar version must be X.Y.Z")
 
 
+def verify_source(commit):
+    version = source_version()
+    identity(commit, version)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    require(head == commit, "source checkout does not match the exact commit")
+    changes = subprocess.run(["git", "diff", "--quiet", "HEAD", "--"], cwd=ROOT, check=False)
+    require(changes.returncode == 0, "release source has tracked changes; commit them before packaging")
+    untracked = subprocess.check_output(
+        ["git", "ls-files", "--others", "--exclude-standard", "--", "typescript", "macos", "scripts"],
+        cwd=ROOT, text=True,
+    )
+    require(not untracked.strip(), "release source contains untracked build inputs; commit them before packaging")
+    return version
+
+
 def pins_path():
     return ROOT / "macos/runtime-node-pins.json"
 
@@ -415,11 +430,8 @@ def check_transport(bundle):
 
 
 def build(architecture, commit, output, work, node_archive=None):
-    identity(commit, source_version())
     require(architecture in ARCHITECTURES and sys.platform == "darwin", "runtime producer requires its macOS architecture")
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    require(head == commit, "runtime build is not checked out at the exact source commit")
-    version = source_version()
+    version = verify_source(commit)
     epoch = int(subprocess.check_output(["git", "show", "-s", "--format=%ct", commit], cwd=ROOT, text=True).strip())
     before = build_record_keys(commit, version, architecture)
     work.mkdir(parents=True, exist_ok=False)
@@ -468,6 +480,7 @@ def build(architecture, commit, output, work, node_archive=None):
     omitted = prune_platform_extras(stage, architecture)
     verify_node(node, architecture)
     require(before == build_record_keys(commit, version, architecture), "source locks/pins changed while building")
+    verify_source(commit)
     write_json(stage / BUILD_RECORD, build_record(stage, commit, version, architecture, omitted))
     destination = work / runtime_filename(version, architecture)
     pack_runtime(stage, destination, epoch)
@@ -487,7 +500,7 @@ def build(architecture, commit, output, work, node_archive=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("build", "manifest", "verify", "verify-app", "check-transport"))
+    parser.add_argument("command", choices=("source", "build", "manifest", "verify", "verify-app", "check-transport"))
     parser.add_argument("--commit")
     parser.add_argument("--version")
     parser.add_argument("--architecture", choices=ARCHITECTURES)
@@ -498,7 +511,9 @@ def main():
     parser.add_argument("--bundle", type=Path)
     args = parser.parse_args()
     root = args.root.resolve() if args.root else None
-    if args.command == "build":
+    if args.command == "source":
+        result = {"source_commit": args.commit, "version": verify_source(args.commit)}
+    elif args.command == "build":
         require(root is not None and args.work is not None, "build requires --root and --work")
         result = build(args.architecture, args.commit, root, args.work.resolve(),
                        args.node_archive.resolve() if args.node_archive else None)

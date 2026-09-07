@@ -26,6 +26,7 @@ if [ "${REQUIRE_SIGNING:-0}" = "1" ] || [ -n "${CODESIGN_IDENTITY:-}" ] || [ "$B
         { echo "Signed Bar source checkout differs from its identity." >&2; exit 1; }
     python3 "$REPOSITORY_DIR/scripts/bar_runtime.py" verify --root "$RUNTIME_INPUTS" \
         --commit "$SOURCE_COMMIT" --version "$VERSION"
+    python3 "$REPOSITORY_DIR/scripts/bar_runtime.py" source --commit "$SOURCE_COMMIT"
     BOOTSTRAP=1
 fi
 
@@ -100,6 +101,7 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
 PLIST
 
 if [ "$BOOTSTRAP" = "1" ]; then
+    python3 "$REPOSITORY_DIR/scripts/bar_runtime.py" source --commit "$SOURCE_COMMIT"
     cp "$RUNTIME_INPUTS/runtime-bootstrap.json" "$APP_DIR/Contents/Resources/"
     cp "$RUNTIME_INPUTS/verified-runtime-bootstrap.mjs" "$APP_DIR/Contents/Resources/"
     chmod 644 "$APP_DIR/Contents/Resources/runtime-bootstrap.json" \

@@ -18,7 +18,7 @@ test('release data refresh proposes a reviewed PR instead of writing main', () =
 
 test('pinned publication only requests the canonical gate with exact identity', () => {
   const commit = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
-  const version = JSON.parse(fs.readFileSync(path.join(root, 'typescript/package.json'))).version;
+  const version = JSON.parse(spawnSync('git', ['show', `${commit}:typescript/package.json`], { cwd: root, encoding: 'utf8' }).stdout).version;
   const result = spawnSync(process.execPath, [
     'scripts/pinned-release.mjs', 'publish', '--dry-run',
     '--commit', commit, '--version', `v${version}`,
@@ -95,7 +95,24 @@ test('distribution callers share an immutable authority pin that supports the cu
     assert.ok(match, `${name} must pin the canonical authority`);
     return match[1];
   });
+
   assert.equal(new Set(references).size, 1);
   // That older validator accepts only flat paths, not snapshot/release/id paths.
   assert.notEqual(references[0], 'ce7fffe31d8cff3c66db1a0749596ec22fe064eb');
+});
+
+test('native Windows gates run memory processes without masking test exit codes', () => {
+  for (const name of ['flight-recorder.yml', 'release.yml']) {
+    const text = workflow(name);
+    assert.match(text, /prepare-windows-storage-tests\.ps1/);
+    assert.match(text, /src\/agents\/MemoryAgent\.persistence\.test\.ts/);
+    assert.match(text, /src\/memory\/json-store\.test\.ts/);
+    assert.match(text, /tests\/test_memory_persistence\.py/);
+    assert.match(text, /test_agent_is_brainstem_compliant\[context_memory_agent\.py\]/);
+    assert.doesNotMatch(text, /npx vitest run src\/flight-recorder\/windows-storage\.test\.ts[^\n]*\n\s+npm run build/);
+  }
+  const script = fs.readFileSync(path.join(root, 'scripts/prepare-windows-storage-tests.ps1'), 'utf8');
+  assert.match(script, /if \(-not \$IsWindows\)/);
+  assert.match(script, /USERPROFILE = \$testHome/);
+  assert.match(script, /sys\.platform=='win32'/);
 });

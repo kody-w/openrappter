@@ -61,7 +61,7 @@ describe('LearnNewAgent', () => {
     it('action parameter should have enum: create, list, delete', () => {
       const agent = new LearnNewAgentClass();
       const actionParam = agent.metadata.parameters.properties.action;
-      expect(actionParam.enum).toEqual(['create', 'list', 'delete']);
+      expect(actionParam.enum).toEqual(['create', 'list', 'delete', 'import_skill']);
     });
   });
 
@@ -582,7 +582,7 @@ describe('LearnNewAgent', () => {
     it('both runtimes should support same actions: create, list, delete', () => {
       const agent = new LearnNewAgentClass();
       const actionParam = agent.metadata.parameters.properties.action;
-      expect(actionParam.enum).toEqual(['create', 'list', 'delete']);
+      expect(actionParam.enum).toEqual(['create', 'list', 'delete', 'import_skill']);
     });
 
     it('both runtimes should use same parameter names', () => {

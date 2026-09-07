@@ -26,6 +26,33 @@ def memory_agent(directory):
     return agent
 
 
+@pytest.mark.parametrize("reader", ["storage", "context"])
+def test_open_reader_survives_replacement_of_its_snapshot(tmp_path, monkeypatch, reader):
+    file = tmp_path / "memory.json"
+    file.write_text(json.dumps({"old": {"message": "existing fact"}}))
+    original_stat = os.fstat
+
+    def replace_before_stat(descriptor):
+        if sys.platform == "win32":
+            # Windows CRT sharing differs; model the unlinked-descriptor state.
+            values = list(original_stat(descriptor))
+            values[stat.ST_NLINK] = 0
+            return os.stat_result(values)
+        replacement = tmp_path / "replacement.json"
+        replacement.write_text(json.dumps({"new": {"message": "new fact"}}))
+        os.replace(replacement, file)
+        return original_stat(descriptor)
+
+    monkeypatch.setattr(os, "fstat", replace_before_stat)
+    if reader == "storage":
+        actual = json_store._read_memory_file(file)
+    else:
+        agent = ContextMemoryAgent()
+        agent.memory_file = file
+        actual = agent._load_memories()
+    assert actual == {"old": {"message": "existing fact"}}
+
+
 @pytest.mark.parametrize("separate", [False, True])
 def test_concurrent_writers_preserve_every_acknowledged_fact(tmp_path, separate):
     shared = memory_agent(tmp_path)

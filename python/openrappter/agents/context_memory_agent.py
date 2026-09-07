@@ -113,7 +113,7 @@ class ContextMemoryAgent(BasicAgent):
             raise RuntimeError("Memory store could not be read") from error
         with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
             status = os.fstat(stream.fileno())
-            if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1:
+            if not stat.S_ISREG(status.st_mode) or status.st_nlink not in (0, 1):
                 raise RuntimeError("Memory store paths must be regular files, not links")
 
             def invalid_constant(_value):

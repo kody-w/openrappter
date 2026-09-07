@@ -10,8 +10,8 @@ export const MEMORY_LOCK_TIMEOUT_MS = 5_000;
 
 export class MemoryStoreError extends Error {}
 
-function regularFile(status: fs.Stats): void {
-  if (!status.isFile() || status.nlink !== 1) {
+function regularFile(status: fs.Stats, allowUnlinked = false): void {
+  if (!status.isFile() || (status.nlink !== 1 && !(allowUnlinked && status.nlink === 0))) {
     throw new MemoryStoreError('Memory store paths must be regular files, not links');
   }
 }
@@ -61,7 +61,8 @@ export function readMemoryFile<T extends { message: string }>(file: string): Rec
   }
   let content: Buffer;
   try {
-    regularFile(fs.fstatSync(descriptor));
+    // Replacement can unlink an already-open inode without invalidating its snapshot.
+    regularFile(fs.fstatSync(descriptor), true);
     content = fs.readFileSync(descriptor);
   } finally {
     fs.closeSync(descriptor);

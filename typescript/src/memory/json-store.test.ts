@@ -94,6 +94,20 @@ function messages(): string[] {
 }
 
 describe('memory transaction process protocol', () => {
+  it('reads an open snapshot after an atomic replacement unlinks its inode', () => {
+    const originalStat = fs.fstatSync;
+    vi.spyOn(fs, 'fstatSync').mockImplementationOnce(descriptor => {
+      const replacement = path.join(home, 'replacement.json');
+      fs.writeFileSync(replacement, JSON.stringify({ next: { message: 'new fact' } }));
+      fs.renameSync(replacement, file);
+      return originalStat(descriptor);
+    });
+    expect(readMemoryFile(file)).toEqual({
+      legacy: { message: 'existing fact', theme: 'fact' },
+    });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ next: { message: 'new fact' } });
+  });
+
   it('uses one lock identity through directory aliases', async () => {
     const alias = path.join(home, 'alias');
     fs.symlinkSync(home, alias, nativeWindows ? 'junction' : 'dir');

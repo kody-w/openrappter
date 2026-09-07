@@ -51,8 +51,10 @@ def _ensure_memory_directory(directory):
                 os.close(descriptor)
 
 
-def _regular_memory_file(status):
-    if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1:
+def _regular_memory_file(status, allow_unlinked=False):
+    if not stat.S_ISREG(status.st_mode) or (
+        status.st_nlink != 1 and not (allow_unlinked and status.st_nlink == 0)
+    ):
         raise MemoryStoreError("Memory store paths must be regular files, not links")
 
 
@@ -79,7 +81,8 @@ def _read_memory_file(file):
     except OSError as error:
         raise MemoryStoreError("Memory store could not be read") from error
     with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
-        _regular_memory_file(os.fstat(stream.fileno()))
+        # Atomic replacement can unlink a reader's still-valid open snapshot.
+        _regular_memory_file(os.fstat(stream.fileno()), allow_unlinked=True)
         try:
             value = json.load(stream, parse_constant=_invalid_memory_constant)
         except (ValueError, UnicodeError) as error:

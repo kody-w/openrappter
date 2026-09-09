@@ -30,6 +30,7 @@ function fixture(t, { url = "https://teams.microsoft.com/v2/", options, blockedA
   const timers = new Map();
   const posts = [];
   const contexts = [];
+  const resumes = [];
   const nodes = [];
   const canvases = [];
   const videos = [];
@@ -116,7 +117,7 @@ function fixture(t, { url = "https://teams.microsoft.com/v2/", options, blockedA
       this.destination = new AudioNode(this);
       contexts.push(this);
     }
-    resume() { return blockedAudio ? new Promise(() => {}) : Promise.resolve(); }
+    resume() { return blockedAudio ? new Promise((resolve) => resumes.push(resolve)) : Promise.resolve(); }
     close() { this.state = "closed"; return Promise.resolve(); }
     createGain() { return new AudioNode(this); }
     createAnalyser() {
@@ -248,6 +249,7 @@ function fixture(t, { url = "https://teams.microsoft.com/v2/", options, blockedA
   return {
     sandbox, api: sandbox.__rappTeamsMedia, source, realm, Track, Peer, Stream,
     posts, contexts, nodes, timers, canvases, videos, decoders, allTracks, originalQuery,
+    resumeAudio: () => resumes.splice(0).forEach((resolve) => resolve()),
     advance, feed, packets: (type) => posts.filter(({ packet }) => packet.type === type).map(({ packet }) => packet.payload),
   };
 }
@@ -278,7 +280,7 @@ test("installation is limited to the two canonical HTTPS Teams origins", async (
 
 test("virtual inputs, permission facade, idempotence and physical non-use", async (t) => {
   const f = fixture(t, { options: { identity: "<r1>" } });
-  assert.deepEqual(Object.keys(f.api).sort(), ["playAudio", "setCaptureEnabled", "snapshotRemoteVideo", "status", "stop"]);
+  assert.deepEqual(Object.keys(f.api).sort(), ["playAudio", "setCaptureEnabled", "snapshotRemoteVideo", "status", "stop", "stopSpeaking"]);
   const beforeTimers = f.timers.size;
   vm.runInContext(f.source, f.realm);
   assert.equal(f.sandbox.__rappTeamsMedia, f.api);
@@ -432,6 +434,99 @@ test("playAudio validates PCM, is exclusive, completes and cancels without speak
   f.api.stop();
   await rejected;
   assert.equal(f.api.status().counters.completedClips, 1);
+});
+
+test("stopSpeaking cancels only the clip, preserves capture and camera, and does not count completion", async (t) => {
+  const f = fixture(t, { options: { captureAudio: true, captureVideo: true } });
+  const stream = await f.sandbox.navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+  const pc = new f.sandbox.RTCPeerConnection();
+  pc.receive(new f.Track("audio"));
+  pc.receive(new f.Track("video"));
+  await settled();
+  assert.deepEqual(plain(f.api.stopSpeaking()), { stopped: false });
+  const baselineTimers = f.timers.size;
+  const playing = f.api.playAudio({ base64: wav({ durationMs: 2000 }).toString("base64") });
+  const rejected = assert.rejects(playing, { name: "AbortError" });
+  await settled();
+  const source = f.nodes.findLast((node) => node.buffer);
+  const lateEnded = source.onended;
+  assert.deepEqual(plain(f.api.stopSpeaking()), { stopped: true });
+  assert.equal(source.stopped, true);
+  assert.equal(source.connections.size, 0);
+  assert.equal(source.buffer, null);
+  assert.equal(f.api.status().microphone.busy, false);
+  assert.equal(f.timers.size, baselineTimers);
+  await rejected;
+  lateEnded();
+  assert.equal(f.api.status().counters.completedClips, 0);
+  assert.equal(f.api.status().counters.errors, 0);
+  assert.equal(f.api.status().state, "ready");
+  assert.equal(f.contexts[0].state, "running");
+  assert.equal(stream.getTracks().every((track) => track.readyState === "live"), true);
+  assert.deepEqual(plain(f.api.status().capture), { audio: true, video: true });
+  assert.equal(f.api.status().incoming.capturingAudioTracks, 1);
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 1);
+  f.feed(1000, 0.2);
+  f.feed(1000);
+  assert.equal(f.packets("audio").length, 1);
+  assert.ok(f.api.snapshotRemoteVideo());
+  assert.deepEqual(plain(f.api.stopSpeaking()), { stopped: false });
+  const next = f.api.playAudio({ base64: wav({ durationMs: 500 }).toString("base64") });
+  await settled();
+  f.nodes.findLast((node) => node.buffer).onended();
+  assert.deepEqual(plain(await next), { durationMs: 500 });
+  assert.equal(f.api.status().counters.completedClips, 1);
+  f.api.stop();
+  assert.deepEqual(plain(f.api.stopSpeaking()), { stopped: false });
+});
+
+test("stopSpeaking rejects immediately during shared resume without cancelling other capture or a replacement clip", async (t) => {
+  const f = fixture(t, { blockedAudio: true, options: { captureAudio: true, captureVideo: true } });
+  const pc = new f.sandbox.RTCPeerConnection();
+  pc.receive(new f.Track("video"));
+  await f.sandbox.navigator.mediaDevices.getUserMedia({ video: true });
+  const playing = f.api.playAudio({ base64: wav().toString("base64") });
+  const ctx = f.contexts[0];
+  const getStream = f.sandbox.navigator.mediaDevices.getUserMedia({ audio: true });
+  pc.receive(new f.Track("audio"));
+  const rejected = assert.rejects(playing, { name: "AbortError" });
+  assert.deepEqual(plain(f.api.stopSpeaking()), { stopped: true });
+  const replacement = f.api.playAudio({ base64: wav({ durationMs: 500 }).toString("base64") });
+  await rejected;
+  assert.equal(f.api.status().microphone.busy, true, "old cancellation must not clear the replacement job");
+  assert.equal(f.api.status().counters.audioClips, 0);
+  assert.equal(f.api.status().counters.errors, 0);
+  assert.equal(ctx.state, "suspended", "shared resume must not be closed or suspended by cancellation");
+  ctx.state = "running";
+  f.resumeAudio();
+  const stream = await getStream;
+  await settled();
+  assert.equal(stream.getAudioTracks()[0].readyState, "live");
+  assert.equal(f.api.status().incoming.capturingAudioTracks, 1);
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 1);
+  assert.equal(f.api.status().counters.audioClips, 1, "only the replacement may start");
+  f.nodes.findLast((node) => node.buffer).onended();
+  assert.deepEqual(plain(await replacement), { durationMs: 500 });
+  assert.equal(f.api.status().counters.completedClips, 1);
+});
+
+test("cancellation consistently reports AbortError across microphone-setup microtask races", async (t) => {
+  for (const fullStop of [false, true]) {
+    for (let turns = 0; turns < 8; turns++) {
+      const f = fixture(t);
+      const playing = f.api.playAudio({ base64: wav().toString("base64") });
+      const rejected = assert.rejects(playing, { name: "AbortError" });
+      for (let turn = 0; turn < turns; turn++) await Promise.resolve();
+      if (fullStop) f.api.stop();
+      else assert.deepEqual(plain(f.api.stopSpeaking()), { stopped: true });
+      await rejected;
+      await settled();
+      assert.equal(f.api.status().microphone.busy, false);
+      assert.equal(f.api.status().counters.completedClips, 0);
+      assert.equal(f.api.status().counters.errors, 0);
+      assert.equal(f.nodes.some((node) => node.buffer), false);
+    }
+  }
 });
 
 test("invalid, compressed, over-duration and oversized clips fail explicitly", async (t) => {

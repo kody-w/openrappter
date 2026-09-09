@@ -420,6 +420,41 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
     assert.equal(snapshot.same, true);
     assert.ok(snapshot.pixel[2] > 150 && snapshot.pixel[0] < 80, "the snapshot is the foreign blue fixture, not our own slate");
 
+    const beforeInterrupt = await page.evaluate(() => __rappTeamsMedia.status());
+    await page.evaluate((base64) => {
+      window.__interruptedClip = null;
+      void __rappTeamsMedia.playAudio({ base64 }).then(
+        (result) => { __interruptedClip = { completed: result }; },
+        (error) => { __interruptedClip = { error: error.name }; },
+      );
+    }, createToneWav(10000));
+    await Promise.all([
+      page.waitForFunction(() => __rappTeamsMedia.status().microphone.rms > 0.08, null, { timeout: 5000 }),
+      remote.waitForFunction(() => __receivedLevel() > 0.04, null, { timeout: 5000 }),
+    ]);
+    const interrupted = await page.evaluate(() => ({
+      result: __rappTeamsMedia.stopSpeaking(),
+      status: __rappTeamsMedia.status(),
+      tracksLive: __virtualStream.getTracks().every((track) => track.readyState === "live"),
+    }));
+    assert.deepEqual(interrupted.result, { stopped: true });
+    assert.equal(interrupted.status.state, "ready");
+    assert.equal(interrupted.status.microphone.busy, false);
+    assert.equal(interrupted.status.camera.active, true);
+    assert.equal(interrupted.status.audioContextState, "running");
+    assert.deepEqual(interrupted.status.capture, { audio: true, video: true });
+    assert.equal(interrupted.status.incoming.capturingAudioTracks, 1);
+    assert.equal(interrupted.status.incoming.capturingVideoTracks, 1);
+    assert.equal(interrupted.status.counters.completedClips, beforeInterrupt.counters.completedClips);
+    assert.equal(interrupted.tracksLive, true);
+    await Promise.all([
+      page.waitForFunction(() => __interruptedClip?.error === "AbortError"
+        && __rappTeamsMedia.status().microphone.rms < 0.005, null, { timeout: 1500 }),
+      remote.waitForFunction(() => __receivedLevel() < 0.005, null, { timeout: 1500 }),
+    ]);
+    assert.deepEqual(await page.evaluate(() => __rappTeamsMedia.stopSpeaking()), { stopped: false });
+    assert.equal(await page.evaluate(() => __fixture.packets.filter((packet) => packet.type === "audio").length), 0);
+
     await remote.evaluate(() => __remoteSource.gain.gain.setValueAtTime(0.2, __remoteSource.context.currentTime));
     await page.waitForFunction(() => __rappTeamsMedia.status().incoming.rms > 0.08);
     await delay(1200);
@@ -440,6 +475,8 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
     assert.equal(pcm.readUInt32LE(24), 16000);
     assert.equal(pcm.readUInt16LE(34), 16);
     assert.equal(pcm.length, 44 + speech.durationMs * 32);
+    await page.waitForFunction((frames) => __rappTeamsMedia.status().counters.videoFrames > frames, beforeInterrupt.counters.videoFrames);
+    assert.equal(await page.evaluate(() => __rappTeamsMedia.status().counters.completedClips), beforeInterrupt.counters.completedClips);
 
     await remote.evaluate(() => __remoteSource.gain.gain.setValueAtTime(0.2, __remoteSource.context.currentTime));
     await page.waitForFunction(() => __fixture.packets.some((packet) => packet.type === "audio" && packet.payload.forced), null, { timeout: 12000 });
@@ -524,6 +561,7 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
     t.diagnostic(JSON.stringify({
       physicalPermissions: deniedPermissions,
       actualStreamsAndClones: true, localWebRTC: true, ignoredOwnLoopbackTracks: selfEcho.ignored, syntheticCameraPixels: idleCamera.bright,
+      clipOnlyCancellation: "AbortError", cameraAndCaptureSurviveCancellation: true,
       speechDurationMs: speech.durationMs, forcedDurationMs: forced.durationMs,
       maxPacketBytes: cleanup.maxPacketBytes,
       hardwareCalls: 0, speakerConnections: 0, remainingAdapterTimers: 0, remainingAdapterConnections: 0,

@@ -10,7 +10,13 @@
  *   status() -> JSON-safe health, levels, counters and limits
  *   playAudio({ base64, mimeType = "audio/wav" }) -> Promise<{ durationMs }>
  *     Accepts uncompressed PCM16 WAV (1–2 channels, 8–48 kHz, <=30 s / 2 MiB).
- *     Resolves on completion, rejects concurrent clips and aborts on stop.
+ *     Resolves ONLY on full completion. stopSpeaking()/stop() reject it with
+ *     AbortError (interrupted, not completed); concurrent clips still reject.
+ *   stopSpeaking() -> { stopped: boolean }
+ *     Immediately cancels the active/pending clip only; no-op when idle.
+ *     Camera, incoming capture, virtual tracks and shared audio context remain
+ *     alive. Already-sent WebRTC audio cannot be recalled.
+ *     The host must gate future clips while speaking is disabled.
  *   setCaptureEnabled({ audio?, video? }) -> status (unspecified flags unchanged)
  *   snapshotRemoteVideo() -> null | { jpegBase64, width, height, at }
  *   stop() -> status
@@ -571,13 +577,25 @@ function installTeamsVirtualMedia(options) {
       report("audio-busy", "InvalidStateError", "The virtual microphone is already playing a clip.");
       throw fault("InvalidStateError", "The virtual microphone is already playing a clip.");
     }
-    const job = { source: null, cancel: null };
+    const job = { source: null, cancel: null, finish: null, cancelled: false, cancellation: null };
+    const interrupted = new Promise((_, reject) => {
+      job.cancel = (error) => {
+        if (job.cancelled) return;
+        job.cancelled = true;
+        job.cancellation = error;
+        if (playing === job) playing = null;
+        job.finish?.(error);
+        reject(error);
+      };
+    });
     playing = job;
     try {
       const clip = decodeClip(base64, mimeType);
-      const mic = await ensureMicrophone();
-      active();
+      // Cancelling a pending clip must not cancel a context resume shared with
+      // getUserMedia or incoming capture, nor let that clip start later.
+      const mic = await Promise.race([ensureMicrophone(), interrupted]);
       if (playing !== job) throw fault("AbortError", "Virtual microphone playback was cancelled.");
+      active();
       const buffer = context.createBuffer(clip.channels, clip.frames, clip.rate);
       for (let channel = 0; channel < clip.channels; channel++) {
         const output = buffer.getChannelData(channel);
@@ -600,6 +618,7 @@ function installTeamsVirtualMedia(options) {
           if (started) source.stop();
           source.disconnect();
           source.buffer = null;
+          job.finish = null;
           if (playing === job) playing = null;
           if (error) reject(error);
           else {
@@ -610,7 +629,7 @@ function installTeamsVirtualMedia(options) {
         };
         const timeout = setTimeout(() => finish(fault("NotReadableError", "Virtual microphone playback stalled.")), clip.durationMs + 2500);
         timers.add(timeout);
-        job.cancel = finish;
+        job.finish = finish;
         source.onended = () => finish();
         try {
           source.start();
@@ -628,9 +647,17 @@ function installTeamsVirtualMedia(options) {
         job.source.disconnect();
         job.source.buffer = null;
       }
+      if (job.cancelled) throw job.cancellation;
       if (!stopped) report("play-audio", error.name, "The synthesized WAV clip could not be played.");
       throw error;
     }
+  }
+  function stopSpeaking() {
+    if (!playing) return { stopped: false };
+    playing.cancel(fault("AbortError", "Virtual microphone playback was cancelled."));
+    drawSlate();
+    publishStatus();
+    return { stopped: true };
   }
 
   function wavBase64(samples) {
@@ -997,7 +1024,7 @@ function installTeamsVirtualMedia(options) {
   }
 
   Object.defineProperty(window, "__rappTeamsMedia", {
-    value: Object.freeze({ status, playAudio, setCaptureEnabled, snapshotRemoteVideo, stop }),
+    value: Object.freeze({ status, playAudio, stopSpeaking, setCaptureEnabled, snapshotRemoteVideo, stop }),
   });
   try {
     const devices = navigator.mediaDevices;

@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { TeamsMeeting } from "../electron/teams-meeting.mjs";
 
-function fixture(t, { prepare, transcribe, synthesize, loadError } = {}) {
+function fixture(t, { prepare, transcribe, synthesize, loadError, pageStage = "joined" } = {}) {
   const home = mkdtempSync(path.join(tmpdir(), "rapp-teams-controller-"));
   const events = [];
   const windows = [];
@@ -20,11 +20,13 @@ function fixture(t, { prepare, transcribe, synthesize, loadError } = {}) {
       this.destroyed = false;
       this.webContents = new EventEmitter();
       this.webContents.mainFrame = { url: "https://teams.microsoft.com/v2/" };
+      this.webContents.getUserAgent = () => "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) OpenRappter/0.1 Chrome/150.0.0.0 Electron/43.2.0 Safari/537.36";
+      this.webContents.setUserAgent = (value) => { this.userAgent = value; };
       this.webContents.setAudioMuted = (value) => { this.audioMuted = value; };
       this.webContents.setWindowOpenHandler = (handler) => { this.openHandler = handler; };
       this.webContents.isLoadingMainFrame = () => false;
       this.webContents.executeJavaScript = async () => ({
-        stage: "joined", chatOpen: true, messages: [], media: { synthetic: true },
+        stage: pageStage, chatOpen: true, messages: [], media: { synthetic: true },
       });
       this.webContents.debugger = {
         attach: (version) => events.push(["attach", version]),
@@ -57,12 +59,15 @@ function fixture(t, { prepare, transcribe, synthesize, loadError } = {}) {
     ipcMain,
     safeStorage: { isEncryptionAvailable: () => false },
     runtime: { start: async () => ({ authenticated: true }) },
-    createMediaSource: () => "test-virtual-media-installation",
+    createMediaSource: (settings) => {
+      events.push(["media-options", settings]);
+      return "test-virtual-media-installation";
+    },
     createSpeech: () => {
       const index = speeches.length;
       const speech = {
         prepare: async () => prepare?.(index),
-        status: () => ({ phase: "ready" }),
+        status: () => ({ phase: "ready", ready: true }),
         transcribe: async (...args) => transcribe ? transcribe(...args) : { text: "r1, hello" },
         synthesize: async (...args) => {
           if (synthesize) return synthesize(...args);
@@ -103,6 +108,8 @@ test("joining owns a nonpersistent, sandboxed window and never grants native cap
   assert.equal(window.options.webPreferences.autoplayPolicy, "no-user-gesture-required");
   assert.ok(window.options.webPreferences.partition.startsWith("rapp-teams-"));
   assert.equal(window.audioMuted, true);
+  assert.match(window.userAgent, /Chrome\/150\.0\.0\.0/);
+  assert.doesNotMatch(window.userAgent, /Electron|OpenRappter/);
   assert.deepEqual(window.openHandler({ url: "https://example.com" }), { action: "deny" });
   let granted;
   sessions[0].request({}, "media", (value) => { granted = value; });
@@ -114,6 +121,9 @@ test("joining owns a nonpersistent, sandboxed window and never grants native cap
   const installed = events.findIndex(([name]) => name === "Page.addScriptToEvaluateOnNewDocument");
   const loaded = events.findIndex(([name, url]) => name === "loadURL" && url.startsWith("https://"));
   assert.ok(installed >= 0 && installed < loaded);
+  assert.deepEqual(events.find(([name]) => name === "media-options")[1], {
+    identity: "r1", captureAudio: false, captureVideo: false,
+  });
   assert.equal(JSON.stringify(manager.status()).includes("not-a-real-passcode"), false);
   await assert.rejects(manager.join(options), /Stop the current meeting/);
   await assert.rejects(manager.speak("Do not broadcast this."), /muted/);
@@ -241,4 +251,38 @@ test("mute is committed before a playing clip rejects with AbortError", async (t
   assert.equal(result.completedChunks, 0);
   assert.equal(manager.status().speaking, false);
   assert.equal(manager.status().phase, "joined");
+});
+
+test("incoming media is not consumed while waiting for admission", async (t) => {
+  let transcriptions = 0;
+  const { manager, windows } = fixture(t, {
+    pageStage: "lobby",
+    transcribe: async () => { transcriptions += 1; return { text: "not admitted" }; },
+  });
+  await manager.join(options);
+  const contents = windows[0].webContents;
+  await manager.handleMedia(
+    { sender: contents, senderFrame: contents.mainFrame },
+    { type: "audio", payload: {
+      wavBase64: Buffer.from("fixture wav").toString("base64"),
+      mimeType: "audio/wav", sampleRate: 16000, durationMs: 1000,
+    } },
+  );
+  assert.equal(manager.status().phase, "lobby");
+  assert.equal(manager.captureStarted, false);
+  assert.equal(transcriptions, 0);
+});
+
+test("audio and automatic replies can be prepared explicitly after a manual join", async (t) => {
+  const { manager, speeches } = fixture(t);
+  await manager.join({ ...options, listen: false, speak: false });
+  assert.equal(speeches.length, 0);
+  assert.equal(manager.conversation, null);
+  await manager.configure({ listen: true });
+  assert.equal(speeches.length, 1);
+  assert.equal(manager.status().phase, "joined");
+  await manager.configure({ autonomous: true });
+  assert.ok(manager.conversation);
+  assert.equal(speeches.length, 1, "enabling replies must not replace the prepared speech service");
+  assert.equal(manager.status().options.autonomous, true);
 });

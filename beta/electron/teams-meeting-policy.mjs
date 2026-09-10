@@ -14,6 +14,17 @@ const optionNames = new Set([
   "autonomous", "headless", "remember",
 ]);
 
+export function meetingBrowserUserAgent(value) {
+  if (typeof value !== "string") throw new Error("The meeting renderer has no browser identity.");
+  const prefix = value.match(/^Mozilla\/5\.0 \([^)]+\) AppleWebKit\/[\d.]+ \(KHTML, like Gecko\)/);
+  const chromium = value.match(/\bChrome\/[\d.]+/);
+  const safari = value.match(/\bSafari\/[\d.]+/);
+  if (!prefix || !chromium || !safari) {
+    throw new Error("The meeting renderer must identify its actual Chromium web engine.");
+  }
+  return `${prefix[0]} ${chromium[0]} ${safari[0]}`;
+}
+
 export function validateTeamsMeetingUrl(value) {
   if (typeof value !== "string" || value.length > 4096) {
     throw new Error("A Teams meeting link of at most 4096 characters is required.");

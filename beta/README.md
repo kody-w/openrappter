@@ -87,6 +87,7 @@ Teams session is not taken over.
 
 Incoming speech uses local recognition; selected incoming video frames and
 meeting text can be understood through the existing Frontier AI connection.
+Incoming capture starts only after admission, not while waiting in the lobby.
 The meeting conversation cannot discover or invoke local file, shell, MCP,
 device-control, or scheduling tools. It uses bounded context and one current
 frame, and it can remain quiet rather than start an acknowledgement loop.

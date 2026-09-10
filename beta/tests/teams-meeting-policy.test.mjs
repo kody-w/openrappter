@@ -6,6 +6,7 @@ import {
   isMeetingNavigationAllowed,
   isTeamsPage,
   meetingMentionsIdentity,
+  meetingBrowserUserAgent,
   normalizeMeetingOptions,
   runBoundedMeetingRequest,
   splitMeetingSpeech,
@@ -39,6 +40,12 @@ test("meeting settings default to silent synthetic output and reject malformed v
   assert.throws(() => normalizeMeetingOptions({ shell: "anything" }));
   assert.equal(meetingMentionsIdentity("R1 can you help?", "r1"), true);
   assert.equal(meetingMentionsIdentity("r11 can you help?", "r1"), false);
+});
+
+test("Teams uses the real Chromium identity instead of the retired Electron-client path", () => {
+  const original = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) OpenRappter/0.1 Chrome/150.0.0.0 Electron/43.2.0 Safari/537.36";
+  assert.equal(meetingBrowserUserAgent(original), "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36");
+  assert.throws(() => meetingBrowserUserAgent("unknown browser"));
 });
 
 test("binary media cannot exceed its budget or exploit permissive base64 decoding", () => {

@@ -39,6 +39,9 @@ async function runTeamsPageCommand(command) {
       return { stage: "joined", media: media(), messages, chatOpen: Boolean(editor()) };
     }
     const text = document.body?.innerText || "";
+    if (/Classic Teams is no longer available/i.test(text)) {
+      return { stage: "attention", notice: "Teams selected its retired Classic client instead of the Chromium web flow." };
+    }
     const blocked = text.match(/(?:this|the) meeting (?:has ended|is locked)[^\n]*|you (?:were|have been)[^\n]*removed[^\n]*|you(?:'|\u2019)ve been removed[^\n]*|no one responded[^\n]*|you left the meeting[^\n]*/i);
     if (blocked) return { stage: "ended", notice: blocked[0].slice(0, 300) };
     const lobby = text.match(/someone (?:in the meeting )?(?:will|should)[^\n]*let you in[^\n]*|you(?:'|\u2019)re in the lobby[^\n]*|we(?:'|\u2019)ve let[^\n]*waiting[^\n]*/i);
@@ -51,7 +54,17 @@ async function runTeamsPageCommand(command) {
     if ([...document.querySelectorAll('input[placeholder="Type your name"]')].some(visible)) {
       return { stage: "prejoin", media: media() };
     }
-    return { stage: "loading", media: media() };
+    return {
+      stage: "loading",
+      media: media(),
+      diagnostic: {
+        title: document.title.slice(0, 160),
+        headings: [...document.querySelectorAll("h1,h2,h3")].filter(visible)
+          .slice(0, 5).map((element) => element.textContent.trim().slice(0, 160)),
+        controls: labels.slice(0, 15).map((value) => value.slice(0, 120)),
+        text: text.slice(0, 1000),
+      },
+    };
   };
 
   if (command.action === "snapshot") return describe();

@@ -10,6 +10,7 @@ import {
   MAX_MEETING_AUDIO_BYTES,
   MAX_MEETING_IMAGE_BYTES,
   meetingMentionsIdentity,
+  meetingBrowserUserAgent,
   normalizeMeetingOptions,
   splitMeetingSpeech,
 } from "./teams-meeting-policy.mjs";
@@ -70,6 +71,7 @@ export class TeamsMeeting {
     this.stopping = null;
     this.ignoreEnvironmentMeeting = false;
     this.forgetOnStop = false;
+    this.captureStarted = false;
     this.state = {
       phase: "idle",
       message: "Join a Teams meeting with isolated virtual media.",
@@ -143,13 +145,13 @@ export class TeamsMeeting {
     return this.status();
   }
 
-  async prepare(options, generation, signal) {
-    this.state.phase = "preparing";
+  async prepare(options, generation, signal, { preservePhase = false } = {}) {
+    if (!preservePhase) this.state.phase = "preparing";
     this.state.message = "Preparing local speech and the existing Frontier connection.";
     this.state.error = null;
     this.emit();
-    if (options.listen || options.speak) {
-      this.speech = this.createSpeech({
+    if ((options.listen || options.speak) && (!this.speech || this.speech.status().ready !== true)) {
+      if (!this.speech) this.speech = this.createSpeech({
         directory: this.env.RAPP_TEAMS_SPEECH_DIRECTORY || path.join(this.home, "speech"),
         env: this.env,
         onState: (value) => {
@@ -164,7 +166,7 @@ export class TeamsMeeting {
       signal.throwIfAborted();
       this.state.speech = speech.status();
     }
-    if (options.autonomous) {
+    if (options.autonomous && !this.conversation) {
       this.conversation = new TeamsConversation({
         runtime: this.runtime,
         identity: options.identity,
@@ -193,6 +195,7 @@ export class TeamsMeeting {
     delete this.state.options.url;
     if (!options.vision) this.lastFrame = null;
     if (!options.listen) this.state.lastTranscript = "";
+    this.state.message = "Meeting capabilities updated. Physical capture remains blocked.";
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
     const generation = ++this.generation;
@@ -201,6 +204,7 @@ export class TeamsMeeting {
     this.ownMessages.clear();
     this.pending = [];
     this.lastFrame = null;
+    this.captureStarted = false;
     this.lastReplyAt = 0;
     this.state.receivedAudioSegments = 0;
     this.state.receivedVideoFrames = 0;
@@ -234,6 +238,8 @@ export class TeamsMeeting {
         },
       });
       this.window = window;
+      // Teams mistakes Electron product tokens for its retired Classic desktop client.
+      window.webContents.setUserAgent(meetingBrowserUserAgent(window.webContents.getUserAgent()));
       window.webContents.setAudioMuted(true);
       this.state.phase = "opening";
       this.state.message = "Starting the private meeting renderer.";
@@ -257,8 +263,8 @@ export class TeamsMeeting {
       await debuggerApi.sendCommand("Page.addScriptToEvaluateOnNewDocument", {
         source: this.createMediaSource({
           identity: options.identity,
-          captureAudio: options.listen,
-          captureVideo: options.vision,
+          captureAudio: false,
+          captureVideo: false,
         }),
       });
       await debuggerApi.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
@@ -345,6 +351,15 @@ export class TeamsMeeting {
         joining: "Requesting admission to the meeting.",
         prejoin: "Configuring the synthetic camera and microphone.",
       }[page.stage] || "Loading the Teams meeting.");
+      if (page.stage === "loading" && page.diagnostic) {
+        const detail = [
+          page.diagnostic.title,
+          ...(page.diagnostic.headings || []),
+          ...(page.diagnostic.controls || []),
+          page.diagnostic.text,
+        ].filter(Boolean).join(" | ").slice(0, 1000);
+        if (detail) this.state.message = `Waiting for Teams: ${detail}`;
+      }
       this.emit(false);
       if (page.stage === "ended") {
         await this.stop();
@@ -353,6 +368,13 @@ export class TeamsMeeting {
         return;
       }
       if (page.stage === "joined") {
+        if (!this.captureStarted) {
+          await this.runPage(`window.__rappTeamsMedia.setCaptureEnabled(${JSON.stringify({
+            audio: this.options.listen, video: this.options.vision,
+          })})`);
+          if (generation !== this.generation) return;
+          this.captureStarted = true;
+        }
         if (this.options.autonomous && !page.chatOpen) {
           await this.pageCommand({ action: "open-chat" });
           return;
@@ -422,6 +444,7 @@ export class TeamsMeeting {
       return;
     }
     if (packet.type === "error") throw new Error(String(payload.message || "Virtual media failed.").slice(0, 300));
+    if (this.state.phase !== "joined" || !this.captureStarted) return;
     if (packet.type === "video") {
       if (!this.options.vision) return;
       const bytes = decodeMeetingMedia(payload.jpegBase64, MAX_MEETING_IMAGE_BYTES, "Meeting video");
@@ -523,18 +546,20 @@ export class TeamsMeeting {
     if (!this.options || !this.window) throw new Error("There is no active meeting to configure.");
     const previous = this.options;
     const options = normalizeMeetingOptions({ ...previous, ...value });
+    const generation = this.generation;
+    const signal = this.abortController.signal;
     if (options.url !== previous.url || options.identity !== previous.identity) {
       throw new Error("Stop the meeting before changing its link or identity.");
     }
-    if ((options.listen || options.speak) && !this.speech) {
-      throw new Error("Local speech must be prepared before enabling audio.");
+    if (((options.listen || options.speak) && (!this.speech || this.speech.status().ready !== true))
+        || (options.autonomous && !this.conversation)) {
+      await this.prepare(options, generation, signal, { preservePhase: true });
     }
-    if (options.autonomous && !this.conversation) {
-      throw new Error("The meeting conversation must be prepared before enabling automatic replies.");
-    }
+    signal.throwIfAborted();
     if (!options.speak) await this.muteSpeech();
     await this.runPage(`window.__rappTeamsMedia.setCaptureEnabled(${JSON.stringify({
-      audio: options.listen, video: options.vision,
+      audio: this.state.phase === "joined" && options.listen,
+      video: this.state.phase === "joined" && options.vision,
     })})`);
     if (this.state.phase === "joined") {
       await this.pageCommand({ action: "set-controls", camera: options.camera, speak: options.speak });
@@ -630,6 +655,7 @@ export class TeamsMeeting {
     this.speech = null;
     this.conversation = null;
     this.lastFrame = null;
+    this.captureStarted = false;
     this.pending = [];
     this.pollTask = null;
     this.audioTask = null;

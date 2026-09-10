@@ -43,6 +43,22 @@
  *     videoPacketBytes, videoIntervalMs, issuedTracks, remoteAudioTracks,
  *     remoteVideoTracks, peerConnections }, lastError: null | error payload.
  *
+ * enumerateDevices also advertises "r1 Virtual Speaker (Silent)" (identity
+ * varies), deviceId "rapp-teams-virtual-speaker", kind "audiooutput". This is
+ * an app-local decode/discard route, NOT an OS speaker or an audible device.
+ * selectAudioOutput and HTMLMediaElement/AudioContext.setSinkId accept only
+ * that ID or the virtual default aliases "", "default", "communications".
+ * Media elements are muted and rerouted through Web Audio to a zero-gain
+ * MediaStreamDestination, never AudioContext.destination or the microphone.
+ * AudioContext sink selection uses only the native no-device {type:"none"}
+ * sink; new AudioContexts in this owned window also default to no-device
+ * output, with normal prototypes/instanceof preserved. Unknown IDs and
+ * unavailable silent sinks reject explicitly. Native enumerateDevices,
+ * selectAudioOutput and HTMLMediaElement.setSinkId are never invoked.
+ * At most 64 media elements can bind per document; stop() releases
+ * their graphs. The host must STILL mute Teams' other playback and deny native
+ * permissions. Incoming transcription remains separately opt-in.
+ *
  * Complete event envelopes are capped at 350 KiB audio, 128 KiB video and
  * 8 KiB status/error. Default devices and ideal constraints select virtual
  * inputs; unknown required device IDs/constraints fail rather than select
@@ -82,6 +98,7 @@ function installTeamsVirtualMedia(options) {
   const RATE = 16000;
   const AUDIO_ID = "rapp-teams-virtual-microphone";
   const VIDEO_ID = "rapp-teams-virtual-camera";
+  const OUTPUT_ID = "rapp-teams-virtual-speaker";
   const GROUP_ID = "rapp-teams-virtual";
   const LIMITS = Object.freeze({
     clipBytes: 2 * 1024 * 1024,
@@ -110,6 +127,19 @@ function installTeamsVirtualMedia(options) {
   const timers = new Set();
   const waits = new Set();
   const constructors = [];
+  const outputElements = new Map();
+  const outputContexts = new WeakSet();
+  const NativeMediaElement = window.HTMLMediaElement;
+  const NativeAudioContext = window.AudioContext;
+  const audioPrototype = NativeAudioContext?.prototype;
+  const nativeContextSink = audioPrototype && Object.getOwnPropertyDescriptor(audioPrototype, "sinkId");
+  const nativeSetContextSink = audioPrototype?.setSinkId;
+  const outputAvailable = Boolean(
+    typeof NativeMediaElement === "function"
+    && typeof audioPrototype?.createMediaElementSource === "function"
+    && typeof nativeContextSink?.get === "function" && nativeContextSink.configurable
+    && typeof nativeSetContextSink === "function",
+  );
   let stopped = false;
   let installationFailed = false;
   let lastError = null;
@@ -119,6 +149,7 @@ function installTeamsVirtualMedia(options) {
   let camera = null;
   let intake = null;
   let playing = null;
+  let outputDrain = null;
   let incomingRms = 0;
   let lastLevelAt = 0;
   let lastAudioAt = null;
@@ -507,10 +538,119 @@ function installTeamsVirtualMedia(options) {
   }
   async function enumerateDevices() {
     if (stopped || installationFailed) return [];
-    return [["audioinput", AUDIO_ID, "Microphone"], ["videoinput", VIDEO_ID, "Camera"]].map(([kind, deviceId, name]) => {
-      const fields = { kind, deviceId, groupId: GROUP_ID, label: `${options.identity} Virtual ${name}` };
-      return Object.freeze({ ...fields, toJSON: () => ({ ...fields }) });
-    });
+    const devices = [["audioinput", AUDIO_ID, "Microphone"], ["videoinput", VIDEO_ID, "Camera"]];
+    if (outputAvailable) devices.push(["audiooutput", OUTPUT_ID, "Speaker (Silent)"]);
+    return devices.map(([kind, deviceId, name]) => deviceInfo(kind, deviceId, name));
+  }
+  function deviceInfo(kind, deviceId, name) {
+    const fields = { kind, deviceId, groupId: GROUP_ID, label: `${options.identity} Virtual ${name}` };
+    return Object.freeze({ ...fields, toJSON: () => ({ ...fields }) });
+  }
+  function checkOutputId(id) {
+    if (typeof id !== "string") throw fault("TypeError", "The virtual speaker ID must be a string.");
+    if (![OUTPUT_ID, "", "default", "communications"].includes(id)) {
+      throw fault("NotFoundError", "The requested virtual speaker does not exist.");
+    }
+    if (!outputAvailable) throw fault("NotSupportedError", "No-device virtual audio output is unavailable.");
+  }
+  function requireSilentContext(ctx) {
+    active();
+    if (!outputAvailable || nativeContextSink.get.call(ctx)?.type !== "none") {
+      throw fault("NotSupportedError", "Virtual output requires a verified no-device audio sink.");
+    }
+  }
+  async function selectAudioOutput(selection = {}) {
+    try {
+      active();
+      if (!selection || typeof selection !== "object" || Array.isArray(selection)) {
+        throw fault("TypeError", "Virtual speaker selection must be a dictionary.");
+      }
+      checkOutputId(selection.deviceId ?? "");
+      requireSilentContext(await audioContext());
+      return deviceInfo("audiooutput", OUTPUT_ID, "Speaker (Silent)");
+    } catch (error) {
+      if (!stopped) report("select-audio-output", error.name, "The virtual silent speaker could not be selected.");
+      throw error;
+    }
+  }
+  function silentOutputDrain(ctx) {
+    if (outputDrain) return outputDrain;
+    const input = ctx.createGain();
+    input.gain.value = 0;
+    let destination;
+    try {
+      destination = ctx.createMediaStreamDestination();
+      destination.channelCount = 1;
+      input.connect(destination);
+      outputDrain = { input, destination };
+      return outputDrain;
+    } catch (error) {
+      input.disconnect();
+      destination?.disconnect();
+      destination?.stream.getTracks().forEach((track) => track.stop());
+      throw error;
+    }
+  }
+  async function setElementSinkId(id = "") {
+    let record;
+    let pending;
+    try {
+      active();
+      checkOutputId(id);
+      if (!(this instanceof NativeMediaElement)) throw fault("TypeError", "Expected a media element.");
+      this.muted = true;
+      this.defaultMuted = true;
+      this.volume = 0;
+      record = outputElements.get(this);
+      if (!record) {
+        if (outputElements.size >= 64) throw fault("QuotaExceededError", "Too many virtual speaker bindings.");
+        record = { source: null, selected: false, pending: null };
+        outputElements.set(this, record);
+      }
+      if (!record.pending) {
+        record.pending = (async () => {
+          const ctx = await audioContext();
+          requireSilentContext(ctx);
+          if (record.selected) return;
+          const drain = silentOutputDrain(ctx);
+          // Creating a MediaElementAudioSourceNode replaces this element's
+          // direct playback path; its controls still work on the silent route.
+          record.source ??= ctx.createMediaElementSource(this);
+          record.source.connect(drain.input);
+          record.selected = true;
+        })();
+      }
+      pending = record.pending;
+      await pending;
+      active();
+    } catch (error) {
+      record?.source?.disconnect();
+      if (record) {
+        record.selected = false;
+        if (!record.source && outputElements.get(this) === record) outputElements.delete(this);
+      }
+      if (!stopped) report("set-output-sink", error.name, "The media element could not use the virtual silent speaker.");
+      throw error;
+    } finally {
+      if (record && record.pending === pending) record.pending = null;
+    }
+  }
+  async function setContextSinkId(id = "") {
+    try {
+      active();
+      const silentOptions = id && typeof id === "object" && id.type === "none";
+      checkOutputId(silentOptions ? OUTPUT_ID : id);
+      if (!(this instanceof NativeAudioContext)) throw fault("TypeError", "Expected an audio context.");
+      // Never pass a hardware ID, including the native default "", downstream.
+      await nativeSetContextSink.call(this, { type: "none" });
+      active();
+      requireSilentContext(this);
+      if (silentOptions) outputContexts.delete(this);
+      else outputContexts.add(this);
+    } catch (error) {
+      if (!stopped) report("set-output-sink", error.name, "The audio context could not use the virtual no-device sink.");
+      throw error;
+    }
   }
   function denyCapture() {
     const error = fault("NotAllowedError", "Only the browser-local virtual camera and microphone are available.");
@@ -995,6 +1135,19 @@ function installTeamsVirtualMedia(options) {
     for (const pc of peers.keys()) forgetPeer(pc);
     for (const track of remote.keys()) forgetTrack(track, false);
     releaseIntake();
+    for (const [element, record] of outputElements) {
+      element.muted = true;
+      element.volume = 0;
+      element.pause();
+      record.source?.disconnect();
+    }
+    outputElements.clear();
+    if (outputDrain) {
+      outputDrain.input.disconnect();
+      outputDrain.destination.disconnect();
+      outputDrain.destination.stream.getTracks().forEach((track) => track.stop());
+      outputDrain = null;
+    }
     for (const track of issued) track.stop();
     issued.clear();
     localIds.clear();
@@ -1033,7 +1186,44 @@ function installTeamsVirtualMedia(options) {
     install(devices, "getUserMedia", getUserMedia);
     install(devices, "enumerateDevices", enumerateDevices);
     install(devices, "getDisplayMedia", denyCapture);
-    if ("selectAudioOutput" in devices) install(devices, "selectAudioOutput", denyCapture);
+    install(devices, "selectAudioOutput", selectAudioOutput);
+    if (NativeMediaElement) {
+      install(NativeMediaElement.prototype, "setSinkId", setElementSinkId);
+      Object.defineProperty(NativeMediaElement.prototype, "sinkId", {
+        configurable: true, enumerable: true,
+        get() {
+          if (!(this instanceof NativeMediaElement)) throw fault("TypeError", "Expected a media element.");
+          return outputElements.get(this)?.selected ? OUTPUT_ID : "";
+        },
+      });
+    }
+    if (audioPrototype) install(audioPrototype, "setSinkId", setContextSinkId);
+    if (outputAvailable) {
+      Object.defineProperty(audioPrototype, "sinkId", {
+        ...nativeContextSink,
+        get() { return outputContexts.has(this) ? OUTPUT_ID : nativeContextSink.get.call(this); },
+      });
+      const WrappedAudioContext = new Proxy(NativeAudioContext, {
+        construct(target, args, newTarget) {
+          active();
+          const settings = args[0] ?? {};
+          if (typeof settings !== "object" || Array.isArray(settings)) throw fault("TypeError", "Expected audio context options.");
+          const id = settings.sinkId ?? "";
+          const silentOptions = id && typeof id === "object" && id.type === "none";
+          checkOutputId(silentOptions ? OUTPUT_ID : id);
+          const ctx = Reflect.construct(target, [{ ...settings, sinkId: { type: "none" } }], newTarget);
+          try { requireSilentContext(ctx); }
+          catch (error) {
+            void ctx.close();
+            throw error;
+          }
+          if (!silentOptions) outputContexts.add(ctx);
+          return ctx;
+        },
+      });
+      window.AudioContext = WrappedAudioContext;
+      if (window.webkitAudioContext === NativeAudioContext) window.webkitAudioContext = WrappedAudioContext;
+    }
     for (const alias of ["getUserMedia", "webkitGetUserMedia", "mozGetUserMedia"]) {
       install(navigator, alias, (constraints, success, failure) => {
         if (typeof success !== "function" || typeof failure !== "function") throw fault("TypeError", "Legacy capture requires success and failure callbacks.");
@@ -1045,7 +1235,10 @@ function installTeamsVirtualMedia(options) {
       class VirtualPermissionStatus extends EventTarget {
         constructor(name) { super(); this.permissionName = name; this.handler = null; }
         get name() { return this.permissionName; }
-        get state() { return stopped || installationFailed ? "denied" : "granted"; }
+        get state() {
+          return stopped || installationFailed || (this.permissionName === "speaker-selection" && !outputAvailable)
+            ? "denied" : "granted";
+        }
         get [Symbol.toStringTag]() { return "PermissionStatus"; }
         get onchange() { return this.handler; }
         set onchange(value) {
@@ -1055,7 +1248,7 @@ function installTeamsVirtualMedia(options) {
         }
       }
       install(navigator.permissions, "query", async (descriptor) => {
-        if (!["camera", "microphone"].includes(descriptor?.name)) return originalQuery(descriptor);
+        if (!["camera", "microphone", "speaker-selection"].includes(descriptor?.name)) return originalQuery(descriptor);
         if (!permissions.has(descriptor.name)) permissions.set(descriptor.name, new VirtualPermissionStatus(descriptor.name));
         return permissions.get(descriptor.name);
       });

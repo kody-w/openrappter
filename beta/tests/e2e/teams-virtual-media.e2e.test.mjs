@@ -23,6 +23,7 @@ const otherUrl = `https://example.test${fixturePath}`;
 function guardSource() {
   const evidence = {
     hardwareCalls: [], speakerConnections: 0, contexts: [], connections: new Map(),
+    noDeviceSelections: 0,
     timers: new Set(), packets: [], maxPacketBytes: { status: 0, audio: 0, video: 0, error: 0 },
     NativePeer: window.RTCPeerConnection,
     nativePermissionQuery: navigator.permissions.query.bind(navigator.permissions),
@@ -39,8 +40,19 @@ function guardSource() {
     Object.defineProperty(navigator, name, { configurable: true, writable: true, value: denied(name) });
   }
   const NativeAudio = window.AudioContext;
+  evidence.NativeAudio = NativeAudio;
+  const contextSink = Object.getOwnPropertyDescriptor(NativeAudio.prototype, "sinkId").get;
+  evidence.nativeContextSink = (context) => contextSink.call(context);
+  const nativeSetContextSink = NativeAudio.prototype.setSinkId;
+  NativeAudio.prototype.setSinkId = function (id) {
+    if (id?.type !== "none") return denied("AudioContext.setSinkId")();
+    evidence.noDeviceSelections++;
+    return nativeSetContextSink.call(this, id);
+  };
+  HTMLMediaElement.prototype.setSinkId = denied("HTMLMediaElement.setSinkId");
   window.AudioContext = new Proxy(NativeAudio, {
     construct(target, args, newTarget) {
+      if (args[0]?.sinkId?.type !== "none") return denied("AudioContext output constructor")();
       const context = Reflect.construct(target, args, newTarget);
       evidence.contexts.push(context);
       return context;
@@ -181,9 +193,15 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
     const deniedPermissions = await page.evaluate(async () => ({
       camera: (await __fixture.nativePermissionQuery({ name: "camera" })).state,
       microphone: (await __fixture.nativePermissionQuery({ name: "microphone" })).state,
+      speaker: await __fixture.nativePermissionQuery({ name: "speaker-selection" }).then((permission) => permission.state, () => "unsupported"),
       virtual: (await navigator.permissions.query({ name: "microphone" })).state,
+      virtualSpeaker: (await navigator.permissions.query({ name: "speaker-selection" })).state,
     }));
-    assert.deepEqual(deniedPermissions, { camera: "denied", microphone: "denied", virtual: "granted" });
+    assert.equal(deniedPermissions.camera, "denied");
+    assert.equal(deniedPermissions.microphone, "denied");
+    assert.ok(["denied", "unsupported"].includes(deniedPermissions.speaker));
+    assert.equal(deniedPermissions.virtual, "granted");
+    assert.equal(deniedPermissions.virtualSpeaker, "granted");
 
     const prejoin = await page.evaluate(async () => {
       const first = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -222,9 +240,66 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
     assert.equal(prejoin.video.width, 640);
     assert.equal(prejoin.video.height, 360);
     assert.equal(prejoin.video.frameRate, 15);
-    assert.deepEqual(prejoin.devices.map(({ kind }) => kind).sort(), ["audioinput", "videoinput"]);
+    assert.deepEqual(prejoin.devices.map(({ kind }) => kind).sort(), ["audioinput", "audiooutput", "videoinput"]);
     assert.deepEqual(prejoin.unknown, { name: "OverconstrainedError", constraint: "deviceId" });
     assert.equal(prejoin.display, "NotAllowedError");
+
+    const virtualOutput = await page.evaluate(async () => {
+      const speaker = await navigator.mediaDevices.selectAudioOutput();
+      window.__speaker = speaker;
+      const element = document.createElement("audio");
+      window.__meetingAudio = element;
+      await Promise.all([element.setSinkId(speaker.deviceId), element.setSinkId("default")]);
+      const [source, connected] = [...__fixture.connections].find(([node]) =>
+        node instanceof MediaElementAudioSourceNode && node.mediaElement === element);
+      const [gain] = connected;
+      const [destination] = __fixture.connections.get(gain);
+      window.__speakerDrainStream = destination.stream;
+      let rejected;
+      try { await element.setSinkId("physical-output-forbidden"); }
+      catch (error) { rejected = error.name; }
+      class AppAudio extends AudioContext {}
+      const appAudio = new AppAudio({ sampleRate: 24000, sinkId: speaker.deviceId });
+      await appAudio.setSinkId("communications");
+      const contextDetails = {
+        nativeInstance: appAudio instanceof __fixture.NativeAudio && appAudio instanceof AudioContext && appAudio instanceof AppAudio,
+        sampleRate: appAudio.sampleRate, sinkId: appAudio.sinkId,
+        nativeSinkType: __fixture.nativeContextSink(appAudio).type,
+      };
+      let contextRejected;
+      try { await appAudio.setSinkId("physical-output-forbidden"); }
+      catch (error) { contextRejected = error.name; }
+      let constructorRejected;
+      try { new AudioContext({ sinkId: "physical-output-forbidden" }); }
+      catch (error) { constructorRejected = error.name; }
+      const defaults = new AudioContext();
+      const defaultSink = { id: defaults.sinkId, type: __fixture.nativeContextSink(defaults).type };
+      await appAudio.close();
+      await defaults.close();
+      return {
+        speaker: speaker.toJSON(), sinkId: element.sinkId, rejected, contextRejected, constructorRejected,
+        mediaSource: source instanceof MediaElementAudioSourceNode,
+        muted: element.muted && element.defaultMuted && element.volume === 0,
+        zeroGain: gain.gain.value === 0,
+        streamSink: destination instanceof MediaStreamAudioDestinationNode && destination.stream instanceof MediaStream,
+        nativeSinkType: __fixture.nativeContextSink(source.context).type,
+        contextDetails, defaultSink,
+      };
+    });
+    assert.deepEqual(virtualOutput.speaker, {
+      kind: "audiooutput", deviceId: "rapp-teams-virtual-speaker",
+      groupId: "rapp-teams-virtual", label: "r1 Virtual Speaker (Silent)",
+    });
+    assert.equal(virtualOutput.sinkId, virtualOutput.speaker.deviceId);
+    assert.equal(virtualOutput.rejected, "NotFoundError");
+    assert.equal(virtualOutput.contextRejected, "NotFoundError");
+    assert.equal(virtualOutput.constructorRejected, "NotFoundError");
+    assert.equal(virtualOutput.mediaSource && virtualOutput.muted && virtualOutput.zeroGain && virtualOutput.streamSink, true);
+    assert.equal(virtualOutput.nativeSinkType, "none");
+    assert.deepEqual(virtualOutput.contextDetails, {
+      nativeInstance: true, sampleRate: 24000, sinkId: virtualOutput.speaker.deviceId, nativeSinkType: "none",
+    });
+    assert.deepEqual(virtualOutput.defaultSink, { id: virtualOutput.speaker.deviceId, type: "none" });
 
     const selfEcho = await page.evaluate(async () => {
       const sender = new RTCPeerConnection({ iceServers: [] });
@@ -264,7 +339,17 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
       const pc = new LocalPeer({ iceServers: [] });
       window.__call = pc;
       window.__nativeRemoteTracks = [];
-      pc.ontrack = (event) => window.__nativeRemoteTracks.push(event.track);
+      pc.ontrack = async (event) => {
+        window.__nativeRemoteTracks.push(event.track);
+        if (event.track.kind === "audio") {
+          __meetingAudio.srcObject = new MediaStream([event.track]);
+          await __meetingAudio.setSinkId(__speaker.deviceId);
+          await __meetingAudio.play();
+          // Even normal application volume controls cannot escape this route.
+          __meetingAudio.muted = false;
+          __meetingAudio.volume = 1;
+        }
+      };
       __virtualStream.getTracks().forEach((track) => pc.addTrack(track, __virtualStream));
       return {
         native: pc instanceof __fixture.NativePeer,
@@ -357,6 +442,7 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
     assert.equal(disabled.status.incoming.capturingAudioTracks, 0);
     assert.equal(disabled.status.incoming.capturingVideoTracks, 0);
     assert.equal(disabled.snapshot, null);
+    await page.waitForFunction(() => !__meetingAudio.paused && __meetingAudio.sinkId === __speaker.deviceId);
     await remote.waitForFunction(() => __receivedLevel() < 0.005);
     const idleCamera = await remote.evaluate(() => {
       const canvas = document.createElement("canvas");
@@ -475,6 +561,7 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
     assert.equal(pcm.readUInt32LE(24), 16000);
     assert.equal(pcm.readUInt16LE(34), 16);
     assert.equal(pcm.length, 44 + speech.durationMs * 32);
+    assert.ok(await page.evaluate(() => __rappTeamsMedia.status().microphone.rms < 0.005), "the virtual speaker never feeds incoming audio into the microphone");
     await page.waitForFunction((frames) => __rappTeamsMedia.status().counters.videoFrames > frames, beforeInterrupt.counters.videoFrames);
     assert.equal(await page.evaluate(() => __rappTeamsMedia.status().counters.completedClips), beforeInterrupt.counters.completedClips);
 
@@ -515,6 +602,9 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
         connections: __fixture.connections.size,
         hardwareCalls: __fixture.hardwareCalls,
         speakerConnections: __fixture.speakerConnections,
+        speakerPaused: __meetingAudio.paused && __meetingAudio.muted && __meetingAudio.volume === 0,
+        speakerDrainStopped: __speakerDrainStream.getTracks().every((track) => track.readyState === "ended"),
+        noDeviceSelections: __fixture.noDeviceSelections,
         maxPacketBytes: __fixture.maxPacketBytes,
         packetCount: __fixture.packets.length,
         videoTimes: __fixture.packets.filter((packet) => packet.type === "video").map((packet) => packet.payload.at),
@@ -531,6 +621,12 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
     assert.equal(cleanup.connections, 0);
     assert.deepEqual(cleanup.hardwareCalls, []);
     assert.equal(cleanup.speakerConnections, 0);
+    assert.equal(cleanup.speakerPaused && cleanup.speakerDrainStopped, true);
+    assert.ok(cleanup.noDeviceSelections > 0);
+    assert.equal(await page.evaluate(async () => {
+      try { await __meetingAudio.setSinkId("default"); }
+      catch (error) { return error.name; }
+    }), "InvalidStateError");
     for (let index = 1; index < cleanup.videoTimes.length; index++) assert.ok(cleanup.videoTimes[index] - cleanup.videoTimes[index - 1] >= 1000);
     await delay(1100);
     assert.equal(await page.evaluate(() => __fixture.packets.length), cleanup.packetCount);
@@ -561,6 +657,7 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
     t.diagnostic(JSON.stringify({
       physicalPermissions: deniedPermissions,
       actualStreamsAndClones: true, localWebRTC: true, ignoredOwnLoopbackTracks: selfEcho.ignored, syntheticCameraPixels: idleCamera.bright,
+      virtualSpeaker: virtualOutput.speaker.label, verifiedNoDeviceSink: virtualOutput.nativeSinkType,
       clipOnlyCancellation: "AbortError", cameraAndCaptureSurviveCancellation: true,
       speechDurationMs: speech.durationMs, forcedDurationMs: forced.durationMs,
       maxPacketBytes: cleanup.maxPacketBytes,

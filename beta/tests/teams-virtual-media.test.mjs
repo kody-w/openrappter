@@ -23,7 +23,10 @@ function wav({ durationMs = 1000, rate = 16000, channels = 1, amplitude = 0.2 } 
   return bytes;
 }
 
-function fixture(t, { url = "https://teams.microsoft.com/v2/", options, blockedAudio = false, webRTC = true, jpeg } = {}) {
+function fixture(t, {
+  url = "https://teams.microsoft.com/v2/", options, blockedAudio = false, webRTC = true,
+  virtualOutput = true, silentSinkWorks = true, jpeg,
+} = {}) {
   let milliseconds = 10000;
   let nextTimer = 0;
   let nextTrack = 0;
@@ -36,6 +39,7 @@ function fixture(t, { url = "https://teams.microsoft.com/v2/", options, blockedA
   const videos = [];
   const decoders = [];
   const allTracks = [];
+  const silentSelections = [];
   const hardwareCalls = [];
   const speakerConnections = [];
   const native = (name) => () => { hardwareCalls.push(name); throw new Error("Physical capture must never be used"); };
@@ -110,16 +114,24 @@ function fixture(t, { url = "https://teams.microsoft.com/v2/", options, blockedA
     disconnect() { this.connections.clear(); }
   }
   class AudioContext {
-    constructor(settings) {
+    constructor(settings = {}) {
       this.options = settings;
-      this.sampleRate = settings.sampleRate;
+      this.sampleRate = settings.sampleRate ?? 48000;
+      this.selectedSink = silentSinkWorks ? (settings.sinkId ?? "") : "";
       this.state = blockedAudio ? "suspended" : "running";
       this.destination = new AudioNode(this);
       contexts.push(this);
     }
+    get sinkId() { return this.selectedSink; }
+    async setSinkId(id) {
+      if (id?.type !== "none") hardwareCalls.push("AudioContext.setSinkId");
+      if (!silentSinkWorks) throw new DOMException("No-device sinks unsupported.", "NotSupportedError");
+      silentSelections.push(id);
+      this.selectedSink = id;
+    }
     resume() { return blockedAudio ? new Promise((resolve) => resumes.push(resolve)) : Promise.resolve(); }
     close() { this.state = "closed"; return Promise.resolve(); }
-    createGain() { return new AudioNode(this); }
+    createGain() { return Object.assign(new AudioNode(this), { gain: { value: 1 } }); }
     createAnalyser() {
       return Object.assign(new AudioNode(this), { getFloatTimeDomainData: (array) => array.fill(0) });
     }
@@ -140,7 +152,35 @@ function fixture(t, { url = "https://teams.microsoft.com/v2/", options, blockedA
       });
     }
     createMediaStreamSource(stream) { return Object.assign(new AudioNode(this), { stream }); }
+    createMediaElementSource(element) {
+      if (element.boundSource) throw new DOMException("Element is already bound.", "InvalidStateError");
+      const source = Object.assign(new AudioNode(this), { mediaElement: element });
+      element.boundSource = source;
+      return source;
+    }
     createScriptProcessor() { return Object.assign(new AudioNode(this), { onaudioprocess: null }); }
+  }
+  if (!virtualOutput) {
+    delete AudioContext.prototype.sinkId;
+    delete AudioContext.prototype.setSinkId;
+    delete AudioContext.prototype.createMediaElementSource;
+  }
+  class MediaElement extends EventTarget {
+    constructor() {
+      super();
+      this.readyState = 2;
+      this.videoWidth = 640;
+      this.videoHeight = 360;
+      this.muted = false;
+      this.defaultMuted = false;
+      this.volume = 1;
+      this.srcObject = null;
+    }
+    get sinkId() { return "unselected-native-output"; }
+    async setSinkId() { hardwareCalls.push("HTMLMediaElement.setSinkId"); }
+    async play() { this.paused = false; }
+    pause() { this.paused = true; }
+    remove() { this.removed = true; }
   }
   class Peer extends EventTarget {
     constructor(configuration) {
@@ -188,12 +228,7 @@ function fixture(t, { url = "https://teams.microsoft.com/v2/", options, blockedA
       createElement(name) {
         if (name === "canvas") return canvas();
         if (!["audio", "video"].includes(name)) throw new Error(`Unexpected DOM element: ${name}`);
-        const video = {
-          readyState: 2, videoWidth: 640, videoHeight: 360,
-          play: async () => {},
-          pause() { this.paused = true; },
-          remove() { this.removed = true; },
-        };
+        const video = new MediaElement();
         (name === "video" ? videos : decoders).push(video);
         return video;
       },
@@ -211,7 +246,8 @@ function fixture(t, { url = "https://teams.microsoft.com/v2/", options, blockedA
     },
     Date: class extends Date { static now() { return milliseconds; } },
     AudioContext, RTCPeerConnection: webRTC ? Peer : undefined, webkitRTCPeerConnection: webRTC ? Peer : undefined,
-    MediaStream: Stream, EventTarget, Event, DOMException, TextEncoder, structuredClone,
+    MediaStream: Stream, HTMLMediaElement: MediaElement,
+    EventTarget, Event, DOMException, TextEncoder, structuredClone,
     atob, btoa,
     setInterval: (fn, delay) => schedule(fn, delay, true),
     setTimeout: (fn, delay) => schedule(fn, delay, false),
@@ -248,7 +284,8 @@ function fixture(t, { url = "https://teams.microsoft.com/v2/", options, blockedA
   }
   return {
     sandbox, api: sandbox.__rappTeamsMedia, source, realm, Track, Peer, Stream,
-    posts, contexts, nodes, timers, canvases, videos, decoders, allTracks, originalQuery,
+    posts, contexts, nodes, timers, canvases, videos, decoders, allTracks, originalQuery, silentSelections,
+    NativeAudioContext: AudioContext,
     resumeAudio: () => resumes.splice(0).forEach((resolve) => resolve()),
     advance, feed, packets: (type) => posts.filter(({ packet }) => packet.type === type).map(({ packet }) => packet.payload),
   };
@@ -289,6 +326,7 @@ test("virtual inputs, permission facade, idempotence and physical non-use", asyn
   assert.deepEqual(devices.map(({ kind, label }) => ({ kind, label })), [
     { kind: "audioinput", label: "<r1> Virtual Microphone" },
     { kind: "videoinput", label: "<r1> Virtual Camera" },
+    { kind: "audiooutput", label: "<r1> Virtual Speaker (Silent)" },
   ]);
   assert.deepEqual(plain(f.api.status().capture), { audio: false, video: false });
   const permission = await f.sandbox.navigator.permissions.query({ name: "microphone" });
@@ -299,12 +337,140 @@ test("virtual inputs, permission facade, idempotence and physical non-use", asyn
   permission.onchange = () => changes++;
   permission.addEventListener("change", () => changes++);
   await assert.rejects(f.sandbox.navigator.mediaDevices.getDisplayMedia({ video: true }), { name: "NotAllowedError" });
-  await assert.rejects(f.sandbox.navigator.mediaDevices.selectAudioOutput(), { name: "NotAllowedError" });
+  await assert.rejects(f.sandbox.navigator.mediaDevices.selectAudioOutput({ deviceId: "physical-speaker" }), { name: "NotFoundError" });
   f.api.stop();
   assert.equal(permission.state, "denied");
   assert.equal(changes, 2);
   assert.deepEqual(plain(await f.sandbox.navigator.mediaDevices.enumerateDevices()), []);
   await assert.rejects(f.sandbox.navigator.mediaDevices.getUserMedia({ audio: true }), { name: "InvalidStateError" });
+});
+
+test("virtual speaker selection creates a real silent media-element route, not a hardware alias", async (t) => {
+  const f = fixture(t);
+  const devices = await f.sandbox.navigator.mediaDevices.enumerateDevices();
+  const speaker = devices.find((device) => device.kind === "audiooutput");
+  assert.equal(speaker.deviceId, "rapp-teams-virtual-speaker");
+  assert.equal(speaker.label, "r1 Virtual Speaker (Silent)");
+  const permission = await f.sandbox.navigator.permissions.query({ name: "speaker-selection" });
+  assert.equal(permission.state, "granted");
+  assert.equal((await f.originalQuery({ name: "speaker-selection" })).state, "denied");
+  assert.deepEqual(plain(await f.sandbox.navigator.mediaDevices.selectAudioOutput()), plain(speaker));
+  const element = f.sandbox.document.createElement("audio");
+  assert.equal(element.sinkId, "");
+  await Promise.all([element.setSinkId(speaker.deviceId), element.setSinkId("default")]);
+  assert.equal(element.sinkId, speaker.deviceId);
+  assert.equal(element.muted && element.defaultMuted, true);
+  assert.equal(element.volume, 0);
+  assert.ok(element.boundSource, "a real MediaElementAudioSource is required for success");
+  const [discardGain] = element.boundSource.connections;
+  assert.equal(discardGain.gain.value, 0);
+  const [destination] = discardGain.connections;
+  assert.equal(destination.stream.getTracks()[0].readyState, "live");
+  assert.equal(f.api.status().microphone.active, false, "speaker routing must not create or feed the microphone");
+  for (const id of ["", "communications", speaker.deviceId]) {
+    await element.setSinkId(id);
+    assert.equal(element.sinkId, speaker.deviceId);
+  }
+  assert.equal(f.nodes.filter((node) => node.mediaElement === element).length, 1);
+  await assert.rejects(element.setSinkId("physical-speaker"), { name: "NotFoundError" });
+  assert.equal(element.sinkId, speaker.deviceId, "an invalid selection must not tear down the existing route");
+  assert.equal(element.boundSource.connections.size, 1);
+  f.api.stop();
+  assert.equal(permission.state, "denied");
+  assert.equal(element.paused, true);
+  assert.equal(element.boundSource.connections.size, 0);
+  assert.equal(destination.stream.getTracks()[0].readyState, "ended");
+  assert.equal(f.contexts[0].state, "closed");
+  await assert.rejects(element.setSinkId(speaker.deviceId), { name: "InvalidStateError" });
+  await assert.rejects(f.sandbox.navigator.mediaDevices.selectAudioOutput(), { name: "InvalidStateError" });
+});
+
+test("audio-context defaults and sink selection use only native no-device sinks with native instances", async (t) => {
+  const f = fixture(t);
+  const speaker = (await f.sandbox.navigator.mediaDevices.selectAudioOutput()).deviceId;
+  class AppAudio extends f.sandbox.AudioContext {}
+  const ctx = new AppAudio({ sampleRate: 24000, sinkId: speaker });
+  assert.ok(ctx instanceof f.NativeAudioContext && ctx instanceof f.sandbox.AudioContext && ctx instanceof AppAudio);
+  assert.equal(ctx.sampleRate, 24000);
+  assert.equal(ctx.sinkId, speaker);
+  assert.deepEqual(plain(ctx.options.sinkId), { type: "none" });
+  for (const id of ["", "default", "communications", speaker]) {
+    await ctx.setSinkId(id);
+    assert.equal(ctx.sinkId, speaker);
+  }
+  await ctx.setSinkId({ type: "none" });
+  assert.deepEqual(plain(ctx.sinkId), { type: "none" });
+  assert.ok(f.silentSelections.every((selection) => selection.type === "none"));
+  await assert.rejects(ctx.setSinkId("physical-speaker"), { name: "NotFoundError" });
+  assert.throws(() => new f.sandbox.AudioContext({ sinkId: "physical-speaker" }), { name: "NotFoundError" });
+  const defaults = new f.sandbox.AudioContext();
+  assert.equal(defaults.sinkId, speaker);
+  assert.deepEqual(plain(defaults.options.sinkId), { type: "none" });
+  await defaults.close();
+  f.api.stop();
+  assert.equal(ctx.state, "running", "application contexts remain application-owned, but still have no output device");
+  await assert.rejects(ctx.setSinkId(speaker), { name: "InvalidStateError" });
+  assert.throws(() => new f.sandbox.AudioContext(), { name: "InvalidStateError" });
+  await ctx.close();
+});
+
+test("unavailable or unverified silent sinks fail explicitly without a physical fallback", async (t) => {
+  const unsupported = fixture(t, { virtualOutput: false });
+  assert.equal((await unsupported.sandbox.navigator.mediaDevices.enumerateDevices()).some((device) => device.kind === "audiooutput"), false);
+  assert.equal((await unsupported.sandbox.navigator.permissions.query({ name: "speaker-selection" })).state, "denied");
+  await assert.rejects(unsupported.sandbox.navigator.mediaDevices.selectAudioOutput(), { name: "NotSupportedError" });
+  await assert.rejects(unsupported.sandbox.document.createElement("audio").setSinkId("default"), { name: "NotSupportedError" });
+  assert.equal(unsupported.packets("error").at(-1).code, "set-output-sink");
+  assert.equal(unsupported.contexts.length, 0);
+  const rejectedSink = fixture(t, { silentSinkWorks: false });
+  await assert.rejects(rejectedSink.sandbox.navigator.mediaDevices.selectAudioOutput(), { name: "NotSupportedError" });
+  assert.equal(rejectedSink.packets("error").at(-1).code, "select-audio-output");
+  assert.equal(rejectedSink.contexts[0].state, "closed");
+});
+
+test("virtual output bindings are bounded and failed setup never reports a selected sink", async (t) => {
+  const f = fixture(t);
+  const conflicted = f.sandbox.document.createElement("audio");
+  conflicted.boundSource = {};
+  await assert.rejects(conflicted.setSinkId("default"), { name: "InvalidStateError" });
+  assert.equal(conflicted.sinkId, "");
+  assert.equal(conflicted.muted, true);
+  for (let index = 0; index < 64; index++) await f.sandbox.document.createElement("audio").setSinkId("default");
+  const overflow = f.sandbox.document.createElement("audio");
+  await assert.rejects(overflow.setSinkId("default"), { name: "QuotaExceededError" });
+  assert.equal(overflow.sinkId, "");
+  assert.equal(f.packets("error").at(-1).code, "set-output-sink");
+  f.api.stop();
+  assert.ok(f.nodes.every((node) => node.connections.size === 0));
+  assert.ok(f.allTracks.every((track) => track.readyState === "ended"));
+});
+
+test("stopping during virtual speaker startup never connects late nodes or leaves live sink tracks", async (t) => {
+  for (let turns = 0; turns < 8; turns++) {
+    const f = fixture(t);
+    const element = f.sandbox.document.createElement("audio");
+    const selection = element.setSinkId("default").catch((error) => error.name);
+    for (let turn = 0; turn < turns; turn++) await Promise.resolve();
+    f.api.stop();
+    await selection;
+    await settled();
+    assert.equal(element.sinkId, "");
+    assert.equal(f.timers.size, 0);
+    assert.ok(f.nodes.every((node) => node.connections.size === 0));
+    assert.ok(f.allTracks.every((track) => track.readyState === "ended"));
+    assert.equal(f.api.status().state, "stopped");
+  }
+  const suspended = fixture(t, { blockedAudio: true });
+  const element = suspended.sandbox.document.createElement("audio");
+  const selected = element.setSinkId("default");
+  const rejected = assert.rejects(selected, { name: "AbortError" });
+  suspended.api.stop();
+  await rejected;
+  suspended.resumeAudio();
+  await settled();
+  assert.equal(suspended.contexts[0].state, "closed");
+  assert.equal(element.boundSource, undefined);
+  assert.equal(suspended.nodes.some((node) => node.stream), false);
 });
 
 test("source tracks survive prejoin probes and recursively cloned streams", async (t) => {

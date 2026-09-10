@@ -399,7 +399,7 @@ test("plain-text validation bounds input and rejects say directives without laun
 test("oversized or malformed synthesized output is rejected and its WAV is removed", async (t) => {
   const { service, runtime } = await fixture(t);
   await service.prepare();
-  runtime.behavior.output = wav({ pcmBytes: 256_002 });
+  runtime.behavior.output = wav({ pcmBytes: 960_002 });
   await assert.rejects(service.synthesize("Bounded output."), { code: "SPEECH_AUDIO_TOO_LARGE" });
   assert.deepEqual(await readdir(path.dirname(runtime.outputs.at(-1).output)), []);
   assert.equal(service.status().ready, false);
@@ -410,10 +410,79 @@ test("oversized or malformed synthesized output is rejected and its WAV is remov
   assert.deepEqual(await readdir(path.dirname(runtime.outputs.at(-1).output)), []);
 });
 
+test("synthesis independently accepts 30 seconds and a 2000000-byte container, inclusively", async (t) => {
+  const { service, runtime } = await fixture(t);
+  await service.prepare();
+  const pcmBytes = 960_000;
+  const metadata = chunk("JUNK", Buffer.alloc(2_000_000 - pcmBytes - 44 - 8));
+  for (const extra of [[], [metadata]]) {
+    runtime.behavior.output = wav({ pcmBytes, extra });
+    assert.equal(runtime.behavior.output.length, extra.length ? 2_000_000 : 960_044);
+    const result = await service.synthesize("A bounded longer reply.");
+    assert.equal(result.mimeType, "audio/wav");
+    assert.equal(result.wav.length, 960_044);
+    assert.equal(result.wav.readUInt32LE(40), pcmBytes);
+    assert.ok(result.wav.equals(wav({ pcmBytes })), "Synthesis strips only metadata, not PCM.");
+    await assert.rejects(service.transcribe(result.wav), { code: "SPEECH_AUDIO_TOO_LARGE" });
+    assert.deepEqual(await readdir(path.dirname(runtime.outputs.at(-1).output)), []);
+  }
+  assert.equal(runtime.requests.filter((request) => request.type === "transcribe").length, 0);
+});
+
+test("completed synthesis is rejected above its byte ceiling even before WAV parsing", async (t) => {
+  const { service, runtime } = await fixture(t);
+  await service.prepare();
+  runtime.behavior.output = Buffer.alloc(2_000_001);
+  await assert.rejects(service.synthesize("Too many output bytes."), { code: "SPEECH_AUDIO_TOO_LARGE" });
+  assert.deepEqual(runtime.outputs.at(-1).child.signals, []);
+  assert.deepEqual(await readdir(path.dirname(runtime.outputs.at(-1).output)), []);
+});
+
+test("separate output caps do not change ASR or text bounds exposed by status", async (t) => {
+  const { service, runtime } = await fixture(t);
+  await service.prepare();
+  const { limits } = service.status();
+  assert.equal(limits.maxSeconds, 8);
+  assert.equal(limits.maxPcmBytes, 256_000);
+  assert.equal(limits.maxWavBytes, 260_096);
+  assert.equal(limits.maxSynthesisSeconds, 30);
+  assert.equal(limits.maxSynthesisPcmBytes, 960_000);
+  assert.equal(limits.maxSynthesisPcmBytes, limits.maxSynthesisSeconds * limits.sampleRate * 2);
+  assert.equal(limits.maxSynthesisWavBytes, 2_000_000);
+  assert.equal(limits.maxTextCharacters, 240);
+  assert.equal(limits.maxTextBytes, 960);
+  await service.synthesize("a".repeat(240));
+  const calls = runtime.calls.length;
+  await assert.rejects(service.synthesize("a".repeat(241)), { code: "SPEECH_INVALID_TEXT" });
+  assert.equal(runtime.calls.length, calls);
+});
+
+test("longer synthesized replies coexist with short ASR without relaxing its 8-second input limit", async (t) => {
+  const { service, runtime } = await fixture(t);
+  await service.prepare();
+  runtime.behavior.output = wav({ pcmBytes: 9 * 32_000 });
+  const duplex = beginDuplex(service, runtime);
+  const { request, output } = await duplex.started;
+  assert.equal(service.status().phase, "synthesize+transcribe");
+  output.child.finish(0);
+  const result = await duplex.synthesis;
+  assert.equal(result.wav.length, 9 * 32_000 + 44);
+  assert.equal(service.status().phase, "transcribe");
+  assert.equal(service.status().busy, true);
+  assert.deepEqual(await readdir(path.dirname(output.output)), []);
+  assert.deepEqual(request.child.signals, []);
+  request.child.emit("message", { id: request.message.id, type: "result", result: { text: "Still recognizing short clips." } });
+  assert.deepEqual(await duplex.transcription, { text: "Still recognizing short clips." });
+  await assert.rejects(service.transcribe(result.wav), { code: "SPEECH_AUDIO_TOO_LARGE" });
+  assert.equal(runtime.requests.filter((message) => message.type === "transcribe").length, 1);
+  assert.equal(service.status().ready, true);
+  assert.equal(service.status().busy, false);
+});
+
 test("growing output is killed at the byte limit instead of waiting for an unbounded child", async (t) => {
   const { service, runtime } = await fixture(t);
   await service.prepare();
-  runtime.behavior.output = Buffer.alloc(260_097);
+  runtime.behavior.output = Buffer.alloc(2_000_001);
   runtime.behavior.holdSynthesis = true;
   await assert.rejects(service.synthesize("File limit."), { code: "SPEECH_AUDIO_TOO_LARGE" });
   assert.deepEqual(runtime.outputs.at(-1).child.signals, ["SIGTERM"]);
@@ -900,7 +969,7 @@ test("a worker exiting alongside its ready acknowledgement cannot produce a fals
 test("repairing synthesis readiness reuses the already-loaded recognition model", async (t) => {
   const { service, runtime } = await fixture(t);
   await service.prepare();
-  runtime.behavior.output = wav({ pcmBytes: 256_002 });
+  runtime.behavior.output = wav({ pcmBytes: 960_002 });
   await assert.rejects(service.synthesize("Too long."), { code: "SPEECH_AUDIO_TOO_LARGE" });
   runtime.behavior.output = wav();
   await service.prepare();
@@ -967,7 +1036,7 @@ test("a stopping recognizer neither cancels concurrent synthesis nor delays its 
 test("synthesis failure does not stop current or subsequent incoming recognition", async (t) => {
   const { service, runtime } = await fixture(t);
   await service.prepare();
-  runtime.behavior.output = wav({ pcmBytes: 256_002 });
+  runtime.behavior.output = wav({ pcmBytes: 960_002 });
   const duplex = beginDuplex(service, runtime);
   const failed = assert.rejects(duplex.synthesis, { code: "SPEECH_AUDIO_TOO_LARGE" });
   const { request, output } = await duplex.started;

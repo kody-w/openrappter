@@ -50,9 +50,17 @@ ready means both capabilities are available; a healthy kind remains usable if
 the other fails. Preparation is exclusive, including capability recovery.
 After cancelled/timed-out inference, explicitly prepare() again.
 Text: at most 240 characters/960 UTF-8 bytes, no say directives.
-WAV: PCM16 RIFF, mono 16000 Hz, at most 8 seconds/256000 PCM bytes plus
-4096 metadata bytes; synthesis returns a canonical 44-byte header.
+WAV: PCM16 RIFF, mono 16000 Hz.
+ASR input: at most 8 seconds/256000 PCM bytes plus 4096 metadata bytes
+(260096 total WAV bytes). Existing limits.maxSeconds/maxPcmBytes/maxWavBytes
+continue to describe ASR input only.
+Synthesis: at most 30 seconds/960000 PCM bytes and 2000000 total WAV bytes.
+limits.maxSynthesisSeconds/maxSynthesisPcmBytes/maxSynthesisWavBytes expose
+those output caps. Metadata is stripped to a canonical 44-byte header, so the
+largest returned 16-kHz mono PCM16 WAV is 960044 bytes. A synthesized clip longer
+than 8 seconds cannot be passed directly to transcribe(); ASR input stays bounded.
 Timeouts: prepare 15 minutes, synthesize 20 seconds, transcribe 90 seconds.
+The synthesis timeout bounds generation wall time, not the resulting clip duration.
 ASR is English, quantized CPU Whisper-small (two native compute threads).
 This is chunked speech, not streaming conversation, diarization, or echo control.
 Packaged Electron and virtual mic/camera integration are separate validation.

@@ -33,11 +33,20 @@ export const MEETING_SPEECH_LIMITS = Object.freeze({
   maxSeconds: 8,
   maxPcmBytes: 256_000,
   maxWavBytes: 260_096,
+  maxSynthesisSeconds: 30,
+  maxSynthesisPcmBytes: 960_000,
+  maxSynthesisWavBytes: 2_000_000,
   maxTextCharacters: 240,
   maxTextBytes: 960,
   maxTranscriptCharacters: 4_096,
   maxConcurrentOperations: 2,
   maxQueuedOperations: 0,
+});
+
+const SYNTHESIS_WAV_LIMITS = Object.freeze({
+  maxPcmBytes: MEETING_SPEECH_LIMITS.maxSynthesisPcmBytes,
+  maxWavBytes: MEETING_SPEECH_LIMITS.maxSynthesisWavBytes,
+  maxMetadataBytes: MEETING_SPEECH_LIMITS.maxSynthesisWavBytes,
 });
 
 const VOICE = "Samantha";
@@ -63,7 +72,7 @@ const ERRORS = Object.freeze({
   SPEECH_TIMEOUT: "The local speech operation exceeded its time limit.",
   SPEECH_INVALID_TEXT: "Speech text must contain 1–240 plain-text characters, at most 960 UTF-8 bytes, and no control characters or say directives.",
   SPEECH_INVALID_WAV: "Audio must be a complete RIFF WAVE with one PCM16, 16-kHz, mono fmt/data pair and consistent lengths.",
-  SPEECH_AUDIO_TOO_LARGE: "Audio exceeds 8 seconds, 256000 PCM bytes, or the 4096-byte WAV metadata allowance.",
+  SPEECH_AUDIO_TOO_LARGE: "Audio exceeds its limit: transcription allows 8 seconds/256000 PCM bytes plus 4096 metadata bytes; synthesis allows 30 seconds/960000 PCM bytes and at most 2000000 WAV bytes.",
   SPEECH_SYNTHESIS_MISSING: "The local /usr/bin/say executable is unavailable.",
   SPEECH_VOICE_MISSING: "The installed Samantha en_US voice is required; no other voice or cloud fallback is used.",
   SPEECH_SYNTHESIS_FAILED: "Local file-only speech synthesis failed; no playback or alternate speech service was attempted.",
@@ -122,9 +131,13 @@ function plainText(text) {
   return normalized;
 }
 
-function parseWav(wav) {
+function parseWav(wav, {
+  maxPcmBytes = MEETING_SPEECH_LIMITS.maxPcmBytes,
+  maxWavBytes = MEETING_SPEECH_LIMITS.maxWavBytes,
+  maxMetadataBytes = 4_096,
+} = {}) {
   if (!Buffer.isBuffer(wav) || wav.length < 44) throw failure("SPEECH_INVALID_WAV");
-  if (wav.length > MEETING_SPEECH_LIMITS.maxWavBytes) {
+  if (wav.length > maxWavBytes) {
     throw failure("SPEECH_AUDIO_TOO_LARGE");
   }
   if (wav.toString("latin1", 0, 4) !== "RIFF" ||
@@ -156,7 +169,7 @@ function parseWav(wav) {
       format = true;
     } else if (id === "data") {
       if (!format || pcm !== null || size % 2) throw failure("SPEECH_INVALID_WAV");
-      if (size > MEETING_SPEECH_LIMITS.maxPcmBytes) {
+      if (size > maxPcmBytes) {
         throw failure("SPEECH_AUDIO_TOO_LARGE");
       }
       pcm = wav.subarray(start, end);
@@ -164,7 +177,7 @@ function parseWav(wav) {
     offset = paddedEnd;
   }
   if (!format || pcm === null) throw failure("SPEECH_INVALID_WAV");
-  if (wav.length - pcm.length > 4_096) throw failure("SPEECH_AUDIO_TOO_LARGE");
+  if (wav.length - pcm.length > maxMetadataBytes) throw failure("SPEECH_AUDIO_TOO_LARGE");
   return pcm;
 }
 
@@ -497,7 +510,7 @@ export function createMeetingSpeech({
         if (monitoring || settled) return;
         monitoring = true;
         try {
-          if ((await stat(output)).size > MEETING_SPEECH_LIMITS.maxWavBytes) {
+          if ((await stat(output)).size > MEETING_SPEECH_LIMITS.maxSynthesisWavBytes) {
             await fail(failure("SPEECH_AUDIO_TOO_LARGE"));
           }
         } catch { if (!settled) await fail(failure("SPEECH_FILE_IO")); }
@@ -531,10 +544,10 @@ export function createMeetingSpeech({
       try {
         const info = await file.stat();
         if (!info.isFile()) throw failure("SPEECH_FILE_IO");
-        if (info.size > MEETING_SPEECH_LIMITS.maxWavBytes) throw failure("SPEECH_AUDIO_TOO_LARGE");
+        if (info.size > MEETING_SPEECH_LIMITS.maxSynthesisWavBytes) throw failure("SPEECH_AUDIO_TOO_LARGE");
         const wav = await file.readFile();
         checkCancelled(signal);
-        return { wav: canonicalWav(parseWav(wav)), mimeType: "audio/wav" };
+        return { wav: canonicalWav(parseWav(wav, SYNTHESIS_WAV_LIMITS)), mimeType: "audio/wav" };
       } finally { await file.close(); }
     } catch (error) {
       throw safeError(error, "SPEECH_FILE_IO");

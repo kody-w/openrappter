@@ -23,12 +23,25 @@ const otherUrl = `https://example.test${fixturePath}`;
 function guardSource() {
   const evidence = {
     hardwareCalls: [], speakerConnections: 0, contexts: [], connections: new Map(),
+    clones: [], mediaElements: [],
     noDeviceSelections: 0,
     timers: new Set(), packets: [], maxPacketBytes: { status: 0, audio: 0, video: 0, error: 0 },
     NativePeer: window.RTCPeerConnection,
     nativePermissionQuery: navigator.permissions.query.bind(navigator.permissions),
   };
   window.__fixture = evidence;
+  const nativeClone = MediaStreamTrack.prototype.clone;
+  MediaStreamTrack.prototype.clone = function () {
+    const track = nativeClone.call(this);
+    evidence.clones.push({ source: this, track });
+    return track;
+  };
+  const createElement = document.createElement.bind(document);
+  document.createElement = (...args) => {
+    const element = createElement(...args);
+    if (element instanceof HTMLMediaElement) evidence.mediaElements.push(element);
+    return element;
+  };
   const denied = (name) => () => {
     evidence.hardwareCalls.push(name);
     throw new DOMException("Local proof forbids physical capture.", "NotAllowedError");
@@ -137,6 +150,183 @@ async function localDescription(page, kind) {
   }, kind);
 }
 
+async function proveDormantReceivers(receiver, producer) {
+  await receiver.evaluate(() => {
+    window.__call = new RTCPeerConnection({ iceServers: [], bundlePolicy: "max-bundle" });
+    window.__activeVideoTracks = async () => {
+      const received = new Set([...(await __call.getStats()).values()]
+        .filter((entry) => entry.type === "inbound-rtp" && entry.kind === "video" && entry.bytesReceived > 0)
+        .map((entry) => entry.trackIdentifier));
+      return __call.getReceivers().map(({ track }) => track)
+        .filter((track) => track.kind === "video" && !track.muted && received.has(track.id));
+    };
+  });
+  await producer.evaluate(() => {
+    window.__call = new RTCPeerConnection({ iceServers: [], bundlePolicy: "max-bundle" });
+    window.__slots = {
+      video: Array.from({ length: 32 }, () => __call.addTransceiver("video", { direction: "sendonly" })),
+      audio: Array.from({ length: 24 }, () => __call.addTransceiver("audio", { direction: "sendonly" })),
+    };
+  });
+  const negotiate = async () => {
+    await receiver.evaluate((offer) => __call.setRemoteDescription(offer), await localDescription(producer, "offer"));
+    await producer.evaluate((answer) => __call.setRemoteDescription(answer), await localDescription(receiver, "answer"));
+  };
+  await negotiate();
+  await Promise.all([
+    receiver.waitForFunction(() => __call.connectionState === "connected" && __call.getReceivers().length === 56, null, { timeout: 15000 }),
+    producer.waitForFunction(() => __call.connectionState === "connected", null, { timeout: 15000 }),
+  ]);
+  const dormant = await receiver.evaluate(() => ({
+    status: __rappTeamsMedia.status(),
+    allMuted: __call.getReceivers().every(({ track }) => track.muted),
+    clones: __fixture.clones.length, elements: __fixture.mediaElements.length, contexts: __fixture.contexts.length,
+  }));
+  assert.equal(dormant.allMuted, true, "the fixture must reproduce real pre-negotiated muted receivers");
+  assert.equal(dormant.status.incoming.videoTracks, 32);
+  assert.equal(dormant.status.incoming.audioTracks, 24);
+  assert.equal(dormant.status.counters.errors, 0);
+  assert.equal(dormant.clones + dormant.elements + dormant.contexts, 0);
+  await receiver.evaluate(() => __rappTeamsMedia.setCaptureEnabled({ audio: true, video: true }));
+  await delay(1100);
+  const armed = await receiver.evaluate(() => ({
+    status: __rappTeamsMedia.status(),
+    clones: __fixture.clones.length, elements: __fixture.mediaElements.length, contexts: __fixture.contexts.length,
+    snapshot: __rappTeamsMedia.snapshotRemoteVideo(),
+  }));
+  assert.equal(armed.status.incoming.capturingVideoTracks, 0);
+  assert.equal(armed.status.incoming.capturingAudioTracks, 0);
+  assert.equal(armed.status.counters.errors, 0);
+  assert.equal(armed.clones + armed.elements + armed.contexts, 0);
+  assert.equal(armed.snapshot, null);
+
+  await producer.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 320; canvas.height = 180;
+    const paint = canvas.getContext("2d");
+    let frame = 0;
+    const draw = () => {
+      paint.fillStyle = "#214dbb";
+      paint.fillRect(0, 0, 320, 180);
+      paint.fillStyle = "#ffffff";
+      paint.fillText(`LOCAL PLACEHOLDER ACTIVATION ${frame++}`, 10, 90);
+    };
+    draw();
+    const video = canvas.captureStream(5).getVideoTracks()[0];
+    const timer = setInterval(draw, 200);
+    const ctx = new AudioContext({ sampleRate: 16000, sinkId: { type: "none" } });
+    await ctx.resume();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.15;
+    const destination = ctx.createMediaStreamDestination();
+    destination.channelCount = 1;
+    oscillator.connect(gain);
+    gain.connect(destination);
+    oscillator.start();
+    const audio = destination.stream.getAudioTracks()[0];
+    window.__sources = { video, audio, ctx, oscillator, gain, destination, timer, tracks: [] };
+    window.__activate = async (kind, indexes) => {
+      for (const index of indexes) {
+        const track = __sources[kind].clone();
+        __sources.tracks.push(track);
+        await __slots[kind][index].sender.replaceTrack(track);
+      }
+    };
+    await __activate("video", [0, 1, 2]);
+    await __activate("audio", [0]);
+  });
+  await receiver.waitForFunction(() => {
+    const status = __rappTeamsMedia.status();
+    return status.incoming.capturingVideoTracks === 3 && status.incoming.capturingAudioTracks === 1
+      && status.incoming.rms > 0.04 && status.counters.videoFrames > 0;
+  }, null, { timeout: 15000 });
+  const active = await receiver.evaluate(() => ({
+    status: __rappTeamsMedia.status(),
+    liveClones: __fixture.clones.filter(({ track }) => track.readyState === "live").length,
+    elements: __fixture.mediaElements.length,
+  }));
+  assert.equal(active.status.incoming.videoTracks, 32);
+  assert.equal(active.status.incoming.audioTracks, 24);
+  assert.equal(active.status.counters.errors, 0);
+  assert.equal(active.liveClones, 4);
+  assert.equal(active.elements, 4);
+
+  await producer.evaluate(() => {
+    __slots.video[0].direction = "inactive";
+    __slots.video[1].direction = "inactive";
+    __slots.audio[0].direction = "inactive";
+  });
+  await negotiate();
+  await receiver.waitForFunction(() => __rappTeamsMedia.status().incoming.capturingVideoTracks === 1
+    && __rappTeamsMedia.status().incoming.capturingAudioTracks === 0);
+  assert.equal(await receiver.evaluate(() => __fixture.clones.filter(({ track }) => track.readyState === "live").length), 1);
+  await producer.evaluate(() => {
+    __slots.video[0].stop();
+    __slots.audio[0].stop();
+  });
+  await negotiate();
+  await receiver.waitForFunction(() => __rappTeamsMedia.status().incoming.videoTracks === 31
+    && __rappTeamsMedia.status().incoming.audioTracks === 23);
+
+  await producer.evaluate(() => __activate("video", [3, 4, 5, 6, 7, 8, 9, 10]));
+  await receiver.waitForFunction(() => __rappTeamsMedia.status().incoming.capturingVideoTracks === 8
+    && __fixture.packets.some(({ type, payload }) => type === "error" && payload.code === "remote-track-overflow"),
+  null, { timeout: 15000, polling: 100 });
+  const overflow = await receiver.evaluate(async () => {
+    const captured = __fixture.clones.filter(({ track }) => track.kind === "video" && track.readyState === "live");
+    const activeTracks = await __activeVideoTracks();
+    window.__waitingTrack = activeTracks.find((track) => !captured.some(({ source }) => source === track));
+    const retire = __call.getTransceivers().find(({ receiver }) => receiver.track === captured[0].source);
+    return {
+      captured: captured.length, active: activeTracks.length, retireMid: retire.mid,
+      errors: __fixture.packets.filter(({ type, payload }) => type === "error" && payload.code === "remote-track-overflow").length,
+    };
+  });
+  assert.equal(overflow.active, 9);
+  assert.equal(overflow.captured, 8);
+  assert.equal(overflow.errors, 1);
+  await delay(1100);
+  assert.equal(await receiver.evaluate(() => __fixture.packets.filter(({ type, payload }) =>
+    type === "error" && payload.code === "remote-track-overflow").length), 1, "active overflow is not repeated every tick");
+  await producer.evaluate((mid) => { __call.getTransceivers().find((slot) => slot.mid === mid).direction = "inactive"; }, overflow.retireMid);
+  await negotiate();
+  await receiver.waitForFunction(() => __rappTeamsMedia.status().incoming.capturingVideoTracks === 8
+    && __fixture.clones.some(({ source, track }) => source === __waitingTrack && track.readyState === "live"));
+  assert.equal(await receiver.evaluate(() => __rappTeamsMedia.status().counters.errors), 1);
+
+  await receiver.evaluate(() => __rappTeamsMedia.stop());
+  const cleanup = await receiver.evaluate(() => ({
+    status: __rappTeamsMedia.status(),
+    clonesStopped: __fixture.clones.every(({ track }) => track.readyState === "ended"),
+    elementsReleased: __fixture.mediaElements.every((element) => element.paused && element.srcObject === null),
+    contextsClosed: __fixture.contexts.every((ctx) => ctx.state === "closed"),
+    timers: __fixture.timers.size, connections: __fixture.connections.size,
+    hardware: __fixture.hardwareCalls, speakers: __fixture.speakerConnections,
+  }));
+  assert.equal(cleanup.status.incoming.videoTracks + cleanup.status.incoming.audioTracks, 0);
+  assert.equal(cleanup.clonesStopped && cleanup.elementsReleased && cleanup.contextsClosed, true);
+  assert.equal(cleanup.timers + cleanup.connections, 0);
+  assert.deepEqual(cleanup.hardware, []);
+  assert.equal(cleanup.speakers, 0);
+  await receiver.evaluate(() => __call.close());
+  const producerCleanup = await producer.evaluate(async () => {
+    clearInterval(__sources.timer);
+    __sources.oscillator.stop();
+    __sources.oscillator.disconnect();
+    __sources.gain.disconnect();
+    __sources.destination.disconnect();
+    [__sources.video, __sources.audio, ...__sources.tracks].forEach((track) => track.stop());
+    await __sources.ctx.close();
+    __call.close();
+    return { hardware: __fixture.hardwareCalls, speakers: __fixture.speakerConnections };
+  });
+  assert.deepEqual(producerCleanup, { hardware: [], speakers: 0 });
+  await receiver.close();
+  await producer.close();
+  return { dormantReceivers: 56, dormantAllocations: 0, activeAudio: 1, activeVideo: 3, activeVideoLimit: 8, activeOverflowErrors: 1, cleanup: true };
+}
+
 test("real Chromium proves virtual media with denied hardware and local-only WebRTC", {
   skip: !enabled,
   timeout: 90000,
@@ -188,6 +378,7 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
       assert.equal(await page.evaluate(() => typeof window.__fixture), "object", pageErrors.join("; "));
       return page;
     }
+    const dormantProof = await proveDormantReceivers(await newFixture(true), await newFixture(false));
     const page = await newFixture(true);
     const remote = await newFixture(false);
     const deniedPermissions = await page.evaluate(async () => ({
@@ -655,6 +846,7 @@ test("real Chromium proves virtual media with denied hardware and local-only Web
     assert.deepEqual(pageErrors, []);
     assert.ok(requested.every((url) => [teamsUrl, liveUrl, otherUrl].includes(url)), "no request escaped the in-memory fixtures");
     t.diagnostic(JSON.stringify({
+      dormantProof,
       physicalPermissions: deniedPermissions,
       actualStreamsAndClones: true, localWebRTC: true, ignoredOwnLoopbackTracks: selfEcho.ignored, syntheticCameraPixels: idleCamera.bright,
       virtualSpeaker: virtualOutput.speaker.label, verifiedNoDeviceSink: virtualOutput.nativeSinkType,

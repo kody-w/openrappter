@@ -69,6 +69,7 @@ function fixture(t, {
       this.readyState = "live";
       this.muted = false;
       this.enabled = true;
+      this.receivedBytes = 1024;
       this.settings = kind === "audio" ? { sampleRate: 16000, channelCount: 1 } : { width: 1280, height: 720, frameRate: 30 };
       allTracks.push(this);
     }
@@ -78,6 +79,9 @@ function fixture(t, {
       const clone = new Track(this.kind);
       clone.settings = { ...this.settings };
       clone.readyState = this.readyState;
+      clone.muted = this.muted;
+      clone.enabled = this.enabled;
+      clone.clonedFrom = this;
       return clone;
     }
     getSettings() { return { ...this.settings }; }
@@ -94,6 +98,11 @@ function fixture(t, {
           this.settings[key] = required;
         }
       }
+    }
+    setMuted(value) {
+      if (this.muted === value) return;
+      this.muted = value;
+      this.dispatchEvent(new Event(value ? "mute" : "unmute"));
     }
     end() { this.readyState = "ended"; this.dispatchEvent(new Event("ended")); }
   }
@@ -195,13 +204,19 @@ function fixture(t, {
     addTrack(track) { const sender = { track }; this.senders.push(sender); return sender; }
     getSenders() { return [...this.senders]; }
     getReceivers() { return [...this.receivers]; }
-    receive(track) {
-      const receiver = { track };
-      this.receivers.push(receiver);
+    async getStats() {
+      return new Map(this.receivers.map(({ track }) => [track.id, {
+        type: "inbound-rtp", kind: track.kind, trackIdentifier: track.id, bytesReceived: track.receivedBytes,
+      }]));
+    }
+    receive(track, receiver = { track }) {
+      receiver.track = track;
+      if (!this.receivers.includes(receiver)) this.receivers.push(receiver);
       const event = new Event("track");
       Object.assign(event, { track, receiver, streams: [] });
       this.dispatchEvent(event);
       this.ontrack?.(event);
+      return receiver;
     }
     close() { this.connectionState = "closed"; this.signalingState = "closed"; }
   }
@@ -744,6 +759,254 @@ test("native peer construction, subclassing, handlers and close behavior are pre
   assert.equal(incoming.readyState, "live", "the adapter does not stop native remote tracks");
 });
 
+test("many dormant receiver descriptors allocate no capture resources until a small subset unmutes", async (t) => {
+  const f = fixture(t);
+  const pc = new f.sandbox.RTCPeerConnection();
+  const videos = Array.from({ length: 80 }, () => new f.Track("video"));
+  const audios = Array.from({ length: 24 }, () => new f.Track("audio"));
+  for (const track of [...videos, ...audios]) {
+    track.muted = true;
+    pc.receive(track);
+  }
+  assert.equal(f.api.status().incoming.videoTracks, 80);
+  assert.equal(f.api.status().incoming.audioTracks, 24);
+  f.api.setCaptureEnabled({ audio: true, video: true });
+  await settled();
+  f.advance(2000);
+  assert.equal(f.api.status().counters.errors, 0);
+  assert.equal(f.contexts.length, 0);
+  assert.equal(f.videos.length, 0);
+  assert.equal(f.decoders.length, 0);
+  assert.equal(f.allTracks.filter((track) => track.clonedFrom).length, 0);
+  assert.equal(f.api.snapshotRemoteVideo(), null);
+  videos.slice(0, 3).forEach((track) => track.setMuted(false));
+  audios.slice(0, 2).forEach((track) => track.setMuted(false));
+  await settled();
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 3);
+  assert.equal(f.api.status().incoming.capturingAudioTracks, 2);
+  assert.equal(f.contexts.length, 1);
+  assert.equal(f.videos.length, 3);
+  assert.equal(f.decoders.length, 2);
+  assert.equal(f.allTracks.filter((track) => track.clonedFrom && track.readyState === "live").length, 5);
+  assert.equal(f.api.status().counters.errors, 0);
+  assert.ok(f.api.snapshotRemoteVideo());
+  videos[0].setMuted(true);
+  audios[0].setMuted(true);
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 2);
+  assert.equal(f.api.status().incoming.capturingAudioTracks, 1);
+  assert.equal(f.videos[0].srcObject, null);
+  assert.equal(f.decoders[0].srcObject, null);
+  videos[3].enabled = false;
+  videos[3].setMuted(false);
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 2, "application-disabled tracks stay dormant");
+  videos[3].enabled = true;
+  f.advance(1000);
+  await settled();
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 3);
+  f.api.stop();
+  const posts = f.posts.length;
+  for (const track of [...videos, ...audios]) {
+    track.setMuted(true);
+    track.setMuted(false);
+  }
+  await settled();
+  assert.equal(f.posts.length, posts, "stop removes dormant and active track listeners");
+  assert.ok(f.allTracks.filter((track) => track.clonedFrom).every((track) => track.readyState === "ended"));
+  assert.ok([...videos, ...audios].every((track) => track.readyState === "live"));
+  assert.equal(f.timers.size, 0);
+});
+
+test("only enabled active capture consumes limits; real overflow is reported once and waiting tracks can acquire released slots", async (t) => {
+  const f = fixture(t);
+  const pc = new f.sandbox.RTCPeerConnection();
+  const tracks = Array.from({ length: 10 }, () => new f.Track("video"));
+  tracks.forEach((track) => pc.receive(track));
+  assert.equal(f.api.status().counters.errors, 0, "capture-disabled discovery does not enforce active slots");
+  assert.equal(f.videos.length, 0);
+  f.api.setCaptureEnabled({ video: true });
+  await settled();
+  assert.equal(f.api.status().incoming.videoTracks, 10);
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 8);
+  assert.equal(f.videos.length, 8);
+  assert.equal(f.packets("error").filter((packet) => packet.code === "remote-track-overflow").length, 2);
+  assert.ok(f.packets("error").every((packet) => packet.message.includes("active incoming video")));
+  for (let tick = 0; tick < 3; tick++) {
+    f.advance(1000);
+    await settled();
+  }
+  assert.equal(f.packets("error").filter((packet) => packet.code === "remote-track-overflow").length, 2);
+  tracks[0].setMuted(true);
+  await settled();
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 8);
+  assert.ok(f.allTracks.some((track) => track.clonedFrom === tracks[8] && track.readyState === "live"));
+  tracks[1].end();
+  await settled();
+  assert.equal(f.api.status().incoming.videoTracks, 9);
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 8);
+  assert.ok(f.allTracks.some((track) => track.clonedFrom === tracks[9] && track.readyState === "live"));
+  assert.equal(f.api.status().counters.errors, 2);
+});
+
+test("padding-only unmute events remain metadata-only until RTP payload is received", async (t) => {
+  const f = fixture(t, { options: { captureAudio: true, captureVideo: true } });
+  const pc = new f.sandbox.RTCPeerConnection();
+  const videos = Array.from({ length: 20 }, () => new f.Track("video"));
+  const audios = Array.from({ length: 20 }, () => new f.Track("audio"));
+  for (const track of [...videos, ...audios]) {
+    track.receivedBytes = 0;
+    pc.receive(track);
+  }
+  await settled();
+  assert.equal(f.api.status().incoming.videoTracks, 20);
+  assert.equal(f.api.status().incoming.audioTracks, 20);
+  assert.equal(f.api.status().counters.errors, 0);
+  assert.equal(f.contexts.length + f.videos.length + f.decoders.length, 0);
+  assert.equal(f.allTracks.filter((track) => track.clonedFrom).length, 0);
+  videos.slice(0, 3).forEach((track) => { track.receivedBytes = 1500; });
+  audios[0].receivedBytes = 1200;
+  f.advance(250);
+  await settled();
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 3);
+  assert.equal(f.api.status().incoming.capturingAudioTracks, 1);
+  assert.equal(f.api.status().counters.errors, 0);
+});
+
+test("failed RTP statistics report an explicit fault instead of allocating unverified media", async (t) => {
+  const f = fixture(t);
+  let reads = 0;
+  f.Peer.prototype.getStats = async () => {
+    reads++;
+    throw new DOMException("Statistics failed", "OperationError");
+  };
+  const pc = new f.sandbox.RTCPeerConnection();
+  pc.receive(new f.Track("video"));
+  await settled();
+  assert.equal(reads, 0, "capture-disabled discovery does not need activity probes");
+  f.api.setCaptureEnabled({ video: true });
+  await settled();
+  assert.equal(reads, 1);
+  assert.equal(f.packets("error").at(-1).code, "remote-media-stats");
+  f.advance(1000);
+  await settled();
+  assert.equal(reads, 2);
+  assert.equal(f.api.status().counters.errors, 1);
+  assert.equal(f.videos.length, 0);
+});
+
+test("hung RTP statistics remain single-flight, time out explicitly, and cannot activate media after stop", async (t) => {
+  const f = fixture(t, { options: { captureVideo: true } });
+  let reads = 0;
+  let resolve;
+  f.Peer.prototype.getStats = () => {
+    reads++;
+    return new Promise((done) => { resolve = done; });
+  };
+  const pc = new f.sandbox.RTCPeerConnection();
+  const track = new f.Track("video");
+  pc.receive(track);
+  await settled();
+  f.api.setCaptureEnabled({ video: false });
+  f.advance(2100);
+  assert.equal(reads, 1);
+  assert.equal(f.api.status().counters.errors, 0);
+  f.api.setCaptureEnabled({ video: true });
+  assert.equal(f.packets("error").at(-1).code, "remote-media-stats");
+  f.advance(5000);
+  assert.equal(reads, 1);
+  assert.equal(f.api.status().counters.errors, 1);
+  f.api.stop();
+  resolve(new Map([[track.id, { type: "inbound-rtp", kind: "video", trackIdentifier: track.id, bytesReceived: 1500 }]]));
+  await settled();
+  assert.equal(f.videos.length, 0);
+  assert.equal(f.timers.size, 0);
+  assert.equal(f.allTracks.some((entry) => entry.clonedFrom), false);
+});
+
+test("pending audio startup reserves bounded slots and mute cancels a reservation before cloning", async (t) => {
+  const f = fixture(t, { blockedAudio: true, options: { captureAudio: true } });
+  const pc = new f.sandbox.RTCPeerConnection();
+  const tracks = Array.from({ length: 17 }, () => new f.Track("audio"));
+  tracks.forEach((track) => pc.receive(track));
+  await settled();
+  assert.equal(f.api.status().incoming.audioTracks, 17);
+  assert.equal(f.api.status().incoming.capturingAudioTracks, 0);
+  assert.equal(f.allTracks.filter((track) => track.clonedFrom).length, 0);
+  assert.equal(f.packets("error").filter((packet) => packet.code === "remote-track-overflow").length, 1);
+  tracks[0].setMuted(true);
+  f.contexts[0].state = "running";
+  f.resumeAudio();
+  await settled();
+  assert.equal(f.api.status().incoming.capturingAudioTracks, 16);
+  assert.equal(f.allTracks.filter((track) => track.clonedFrom).length, 16);
+  assert.equal(f.allTracks.some((track) => track.clonedFrom === tracks[0]), false);
+  assert.ok(f.allTracks.some((track) => track.clonedFrom === tracks[16]));
+  assert.equal(f.api.status().counters.errors, 1);
+  f.api.setCaptureEnabled({ audio: false });
+  assert.equal(f.api.status().incoming.capturingAudioTracks, 0);
+  assert.ok(f.allTracks.filter((track) => track.clonedFrom).every((track) => track.readyState === "ended"));
+});
+
+test("ended, removed and replaced receivers free bounded discovery without capturing placeholders", async (t) => {
+  const f = fixture(t, { options: { captureVideo: true } });
+  const pc = new f.sandbox.RTCPeerConnection();
+  const tracks = Array.from({ length: 256 }, () => new f.Track("video"));
+  const receivers = tracks.map((track) => {
+    track.muted = true;
+    return pc.receive(track);
+  });
+  const overflow = new f.Track("video");
+  overflow.muted = true;
+  pc.receive(overflow);
+  assert.equal(f.api.status().incoming.videoTracks, 256);
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 0);
+  assert.equal(f.packets("error").at(-1).code, "remote-discovery-overflow");
+  assert.equal(f.videos.length, 0);
+  tracks[0].end();
+  assert.equal(f.api.status().incoming.videoTracks, 255);
+  const replacement = new f.Track("video");
+  replacement.muted = true;
+  pc.receive(replacement, receivers[1]);
+  assert.equal(f.api.status().incoming.videoTracks, 255);
+  assert.equal(tracks[1].readyState, "live", "pruning must not stop a native track");
+  tracks[1].setMuted(false);
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 0, "replaced track listeners are removed");
+  pc.receivers = pc.receivers.filter((receiver) => receiver !== receivers[2]);
+  f.advance(1000);
+  assert.equal(f.api.status().incoming.videoTracks, 254);
+  const next = new f.Track("video");
+  next.muted = true;
+  pc.receive(next);
+  assert.equal(f.api.status().incoming.videoTracks, 255);
+  assert.equal(f.api.status().counters.errors, 1);
+  pc.close();
+  assert.equal(f.api.status().incoming.videoTracks, 0);
+});
+
+test("replacing an active receiver retires its clone and decoder while preserving native tracks", async (t) => {
+  const f = fixture(t, { options: { captureVideo: true } });
+  const pc = new f.sandbox.RTCPeerConnection();
+  const original = new f.Track("video");
+  const receiver = pc.receive(original);
+  await settled();
+  const oldClone = f.allTracks.find((track) => track.clonedFrom === original);
+  const replacement = new f.Track("video");
+  pc.receive(replacement, receiver);
+  await settled();
+  assert.equal(f.api.status().incoming.videoTracks, 1);
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 1);
+  assert.equal(oldClone.readyState, "ended");
+  assert.equal(original.readyState, "live");
+  assert.equal(f.videos[0].srcObject, null);
+  original.setMuted(true);
+  original.setMuted(false);
+  assert.equal(f.videos.length, 2);
+  pc.receivers = [];
+  assert.equal(f.api.snapshotRemoteVideo(), null);
+  assert.equal(f.api.status().incoming.videoTracks, 0);
+  assert.equal(f.videos[1].srcObject, null);
+  assert.equal(replacement.readyState, "live");
+});
+
 test("incoming audio gates silence and emits bounded 16 kHz mono PCM16 segments", async (t) => {
   const f = fixture(t);
   const pc = new f.sandbox.RTCPeerConnection();
@@ -843,7 +1106,9 @@ test("JPEG overflow and track/peer resource overflow emit errors, not fake packe
   assert.equal(f.packets("video").length, 0);
   assert.equal(f.packets("error").at(-1).code, "incoming-video");
   for (let index = 0; index < 16; index++) pc.receive(new f.Track("video"));
-  assert.equal(f.api.status().incoming.videoTracks, 8);
+  await settled();
+  assert.equal(f.api.status().incoming.videoTracks, 17);
+  assert.equal(f.api.status().incoming.capturingVideoTracks, 8);
   assert.equal(f.packets("error").at(-1).code, "remote-track-overflow");
   for (let index = 0; index < 64; index++) new f.sandbox.RTCPeerConnection();
   assert.equal(f.api.status().peerConnections, 64);

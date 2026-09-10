@@ -68,6 +68,15 @@
  * Remote audio is mixed to mono for local transcription, never to the virtual
  * microphone or speakers. Capture is off by default, and disabling it discards
  * buffered media. RMS gating is not speaker identification or semantic VAD.
+ * Discovery retains at most 256 live receiver descriptors (including dormant
+ * pre-negotiated tracks), with no clones/decoders for muted, disabled or
+ * zero-payload tracks. Bounded, single-flight native RTP statistics confirm
+ * received media; padding-only unmute events do not consume capture slots.
+ * incoming.audioTracks/videoTracks count these discovered descriptors; the
+ * existing remoteAudioTracks/remoteVideoTracks limits bound ACTIVE capture,
+ * including pending startup. Mute releases its slot; unmute can acquire one.
+ * Ended, removed and replaced receiver tracks are pruned. Excess active media
+ * and excess discovery each fail explicitly, with distinct error codes.
  */
 export function createTeamsVirtualMediaSource({
   identity = "r1",
@@ -100,6 +109,7 @@ function installTeamsVirtualMedia(options) {
   const VIDEO_ID = "rapp-teams-virtual-camera";
   const OUTPUT_ID = "rapp-teams-virtual-speaker";
   const GROUP_ID = "rapp-teams-virtual";
+  const DISCOVERY_LIMIT = 256;
   const LIMITS = Object.freeze({
     clipBytes: 2 * 1024 * 1024,
     clipMs: 30000,
@@ -159,6 +169,7 @@ function installTeamsVirtualMedia(options) {
   let lastStatusAt = -Infinity;
   let frameCanvas = null;
   let sequence = 0;
+  let reconcilingRemote = false;
 
   const now = () => Date.now();
   const rounded = (value) => Math.round(Math.min(1, Math.max(0, value || 0)) * 10000) / 10000;
@@ -898,7 +909,7 @@ function installTeamsVirtualMedia(options) {
     intake = { input, processor, sink, segments };
     processor.onaudioprocess = (event) => {
       event.outputBuffer.getChannelData(0).fill(0);
-      if (stopped || !capture.audio) return;
+      if (stopped || !capture.audio || intake?.processor !== processor) return;
       try {
         if (event.inputBuffer.sampleRate !== RATE) throw fault("NotSupportedError", "Incoming PCM must be 16 kHz.");
         const input = event.inputBuffer.getChannelData(0);
@@ -927,6 +938,7 @@ function installTeamsVirtualMedia(options) {
   }
   function releaseCapture(record) {
     record.generation++;
+    record.reserved = false;
     record.node?.disconnect();
     record.node = null;
     for (const key of ["video", "decoder"]) {
@@ -948,15 +960,131 @@ function installTeamsVirtualMedia(options) {
     const record = remote.get(track);
     if (!record) return;
     track.removeEventListener("ended", record.ended);
+    track.removeEventListener("mute", record.changed);
+    track.removeEventListener("unmute", record.changed);
     releaseCapture(record);
     remote.delete(track);
     if (![...remote.values()].some((entry) => entry.node)) releaseIntake(flush);
+  }
+  function captureEligible(record) {
+    return capture[record.track.kind] && record.track.readyState === "live"
+      && !record.track.muted && record.track.enabled !== false && record.mediaReady;
+  }
+  function sampleRemoteActivity(pc, force = false) {
+    const peer = peers.get(pc);
+    if (stopped || !peer || (!capture.audio && !capture.video)) return;
+    const failed = (error) => {
+      if (stopped || peers.get(pc) !== peer || (!capture.audio && !capture.video)) return;
+      if (!peer.statsFailed) report("remote-media-stats", error.name, "Incoming RTP media activity could not be verified.");
+      peer.statsFailed = true;
+    };
+    if (peer.statsPending) {
+      if (now() - peer.statsAt >= 2000) failed(fault("NotReadableError", "Incoming RTP statistics timed out."));
+      return;
+    }
+    if (!force && now() - peer.statsAt < 250) return;
+    const records = [...remote.values()].filter((record) => record.pc === pc);
+    if (!records.some((record) => capture[record.track.kind] && record.track.readyState === "live"
+      && !record.track.muted && record.track.enabled !== false)) return;
+    peer.statsAt = now();
+    const timeout = setTimeout(() => failed(fault("NotReadableError", "Incoming RTP statistics timed out.")), 2000);
+    peer.statsTimer = timeout;
+    timers.add(timeout);
+    // A timeout reports a fault but retains the single-flight lock until the
+    // native request settles, so a hung statistics API cannot queue more work.
+    peer.statsPending = Promise.resolve().then(() => peer.readStats()).then((stats) => {
+      if (stopped || peers.get(pc) !== peer) return;
+      const received = new Set();
+      const currentRecords = [...remote.values()].filter((record) => record.pc === pc);
+      if (!currentRecords.length) return;
+      const known = new Set(currentRecords.map((record) => `${record.track.kind}:${record.track.id}`));
+      for (const entry of stats.values()) {
+        if (entry.type !== "inbound-rtp" || !(entry.bytesReceived > 0)) continue;
+        if (typeof entry.trackIdentifier !== "string") {
+          throw fault("NotSupportedError", "Incoming RTP statistics lack receiver identifiers.");
+        }
+        const key = `${entry.kind ?? entry.mediaType}:${entry.trackIdentifier}`;
+        if (known.has(key)) received.add(key);
+      }
+      for (const record of currentRecords) {
+        if (remote.get(record.track) !== record) continue;
+        record.mediaReady = capture[record.track.kind] && !record.track.muted && record.track.enabled !== false
+          && received.has(`${record.track.kind}:${record.track.id}`);
+      }
+      peer.statsAt = now();
+      peer.statsFailed = false;
+      reconcileRemoteTracks();
+    }).catch(failed).finally(() => {
+      clearTimer(timeout);
+      peer.statsTimer = null;
+      peer.statsPending = null;
+    });
+  }
+  function pruneRemoteTracks() {
+    const receivers = new Map();
+    for (const [track, record] of remote) {
+      if (track.readyState === "ended" || record.pc.signalingState === "closed") {
+        forgetTrack(track, !stopped && capture.audio);
+        continue;
+      }
+      if (!receivers.has(record.pc)) receivers.set(record.pc, new Set(record.pc.getReceivers()));
+      if (!receivers.get(record.pc).has(record.receiver) || record.receiver.track !== track) {
+        forgetTrack(track, !stopped && capture.audio);
+      }
+    }
+  }
+  function reconcileRemoteTracks() {
+    if (stopped || reconcilingRemote) return;
+    reconcilingRemote = true;
+    try {
+      pruneRemoteTracks();
+      const used = { audio: 0, video: 0 };
+      for (const record of remote.values()) {
+        if (!captureEligible(record)) {
+          if (record.reserved) releaseCapture(record);
+          if (!capture[record.track.kind] || record.track.muted || record.track.enabled === false) {
+            record.failed = false;
+            record.mediaReady = false;
+          }
+          record.overflowReported = false;
+        }
+        if (record.reserved) used[record.track.kind]++;
+      }
+      if (![...remote.values()].some((record) => record.node)) releaseIntake(capture.audio);
+      for (const record of remote.values()) {
+        if (!captureEligible(record) || record.reserved || record.failed) continue;
+        const kind = record.track.kind;
+        const limit = kind === "audio" ? LIMITS.remoteAudioTracks : LIMITS.remoteVideoTracks;
+        if (used[kind] >= limit) {
+          if (!record.overflowReported) {
+            report("remote-track-overflow", "QuotaExceededError", `Too many active incoming ${kind} streams for local capture.`);
+            record.overflowReported = true;
+          }
+          continue;
+        }
+        // Reserve before async context startup so simultaneous unmute events
+        // cannot allocate beyond the active limit.
+        used[kind]++;
+        record.reserved = true;
+        record.overflowReported = false;
+        void startCapture(record);
+      }
+      for (const pc of new Set([...remote.values()].map((record) => record.pc))) sampleRemoteActivity(pc);
+    } finally {
+      reconcilingRemote = false;
+    }
   }
   async function startCapture(record) {
     const generation = ++record.generation;
     try {
       if (record.track.kind === "audio") await audioContext();
-      if (stopped || !capture[record.track.kind] || !remote.has(record.track) || generation !== record.generation) return;
+      if (stopped || remote.get(record.track) !== record || generation !== record.generation) return;
+      if (!captureEligible(record) || record.receiver.track !== record.track
+          || !record.pc.getReceivers().includes(record.receiver)) {
+        releaseCapture(record);
+        reconcileRemoteTracks();
+        return;
+      }
       record.clone = record.track.clone();
       const stream = new MediaStream([record.clone]);
       if (record.track.kind === "audio") {
@@ -986,33 +1114,51 @@ function installTeamsVirtualMedia(options) {
     } catch (error) {
       if (generation !== record.generation || stopped || !capture[record.track.kind]) return;
       releaseCapture(record);
+      if (!captureEligible(record)) {
+        reconcileRemoteTracks();
+        return;
+      }
+      record.failed = true;
       if (![...remote.values()].some((entry) => entry.node)) releaseIntake();
       report(`incoming-${record.track.kind}`, error.name, "A remote track could not be captured locally.");
+      reconcileRemoteTracks();
     }
   }
   function receiveTrack(pc, event) {
     const track = event.track;
     if (stopped || !track || !["audio", "video"].includes(track.kind) || track.readyState !== "live") return;
+    pruneRemoteTracks();
     if (localTracks.has(track) || localIds.has(track.id)
         || [...issued].some((issuedTrack) => issuedTrack.id === track.id)
         || pc.getSenders().some((sender) => sender.track === track)) {
       counters.ignoredLocalTracks++;
       return;
     }
-    if (!pc.getReceivers().some((receiver) => receiver.track === track)) return;
+    const receiver = pc.getReceivers().find((entry) => entry.track === track);
+    if (!receiver) return;
     if (remote.has(track)) return;
-    const limit = track.kind === "audio" ? LIMITS.remoteAudioTracks : LIMITS.remoteVideoTracks;
-    if ([...remote.keys()].filter((entry) => entry.kind === track.kind).length >= limit) {
-      report("remote-track-overflow", "QuotaExceededError", "Too many incoming tracks for local capture.");
+    if (remote.size >= DISCOVERY_LIMIT) {
+      report("remote-discovery-overflow", "QuotaExceededError", "Too many live receiver descriptors for bounded media discovery.");
       return;
     }
     const record = {
-      track, pc, generation: 0, sequence: ++sequence,
-      clone: null, node: null, video: null, decoder: null, ended: () => forgetTrack(track),
+      track, pc, receiver, generation: 0, sequence: ++sequence,
+      reserved: false, failed: false, overflowReported: false, mediaReady: false,
+      clone: null, node: null, video: null, decoder: null,
+      ended: () => { forgetTrack(track); reconcileRemoteTracks(); },
+      changed: () => {
+        record.failed = false;
+        record.mediaReady = false;
+        reconcileRemoteTracks();
+        sampleRemoteActivity(pc, true);
+      },
     };
     remote.set(track, record);
     track.addEventListener("ended", record.ended, { once: true });
-    if (capture[track.kind]) void startCapture(record);
+    track.addEventListener("mute", record.changed);
+    track.addEventListener("unmute", record.changed);
+    reconcileRemoteTracks();
+    if (capture[track.kind] && !track.muted && track.enabled !== false) sampleRemoteActivity(pc, true);
   }
   function forgetPeer(pc) {
     const record = peers.get(pc);
@@ -1020,12 +1166,14 @@ function installTeamsVirtualMedia(options) {
     pc.removeEventListener("track", record.track);
     pc.removeEventListener("connectionstatechange", record.changed);
     pc.removeEventListener("signalingstatechange", record.changed);
+    clearTimer(record.statsTimer);
     if (pc.close === record.close) {
       if (record.closeDescriptor) Object.defineProperty(pc, "close", record.closeDescriptor);
       else delete pc.close;
     }
     peers.delete(pc);
     for (const [track, entry] of remote) if (entry.pc === pc) forgetTrack(track, !stopped && capture.audio);
+    reconcileRemoteTracks();
   }
   function observePeer(pc) {
     if (stopped) return;
@@ -1035,9 +1183,11 @@ function installTeamsVirtualMedia(options) {
     }
     const close = pc.close;
     const record = {
+      readStats: pc.getStats.bind(pc), statsPending: null, statsTimer: null, statsAt: -Infinity, statsFailed: false,
       track: (event) => receiveTrack(pc, event),
       changed: () => {
         if (pc.connectionState === "closed" || pc.signalingState === "closed") forgetPeer(pc);
+        else reconcileRemoteTracks();
       },
       closeDescriptor: Object.getOwnPropertyDescriptor(pc, "close"),
       close: function (...args) {
@@ -1054,8 +1204,9 @@ function installTeamsVirtualMedia(options) {
 
   function snapshotRemoteVideo() {
     if (stopped || !capture.video) return null;
+    reconcileRemoteTracks();
     const available = [...remote.values()].filter((entry) => entry.video
-      && entry.track.readyState === "live" && !entry.track.muted
+      && captureEligible(entry)
       && entry.video.readyState >= 2 && entry.video.videoWidth && entry.video.videoHeight)
       .sort((a, b) => b.sequence - a.sequence);
     if (!available.length) {
@@ -1110,8 +1261,9 @@ function installTeamsVirtualMedia(options) {
       capture[kind] = next[kind];
       for (const record of remote.values()) {
         if (record.track.kind !== kind) continue;
-        if (capture[kind]) void startCapture(record);
-        else releaseCapture(record);
+        record.failed = false;
+        record.overflowReported = false;
+        record.mediaReady = false;
       }
       if (kind === "audio" && !capture.audio) releaseIntake();
       if (kind === "video" && !capture.video) {
@@ -1120,6 +1272,8 @@ function installTeamsVirtualMedia(options) {
         frameCanvas = null;
       }
     }
+    reconcileRemoteTracks();
+    for (const pc of peers.keys()) sampleRemoteActivity(pc, true);
     publishStatus();
     return status();
   }
@@ -1273,12 +1427,10 @@ function installTeamsVirtualMedia(options) {
     if (!constructors.length) throw fault("NotSupportedError", "WebRTC is unavailable.");
     window.addEventListener("pagehide", stop, { once: true });
     interval(() => {
-      for (const [track, record] of remote) {
-        if (track.readyState === "ended" || record.pc.signalingState === "closed") forgetTrack(track);
-      }
+      reconcileRemoteTracks();
       snapshotRemoteVideo();
       publishStatus();
-    }, 1000);
+    }, 250);
     publishStatus(true);
   } catch (error) {
     installationFailed = true;

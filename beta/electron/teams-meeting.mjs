@@ -363,7 +363,7 @@ export class TeamsMeeting {
       this.emit(false);
       if (page.stage === "ended") {
         await this.stop();
-        this.state.message = "The Teams meeting has ended.";
+        this.state.message = page.notice || "The Teams session has ended.";
         this.emit();
         return;
       }

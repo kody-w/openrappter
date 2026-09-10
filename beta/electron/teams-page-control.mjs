@@ -42,7 +42,7 @@ async function runTeamsPageCommand(command) {
     if (/Classic Teams is no longer available/i.test(text)) {
       return { stage: "attention", notice: "Teams selected its retired Classic client instead of the Chromium web flow." };
     }
-    const blocked = text.match(/(?:this|the) meeting (?:has ended|is locked)[^\n]*|you (?:were|have been)[^\n]*removed[^\n]*|you(?:'|\u2019)ve been removed[^\n]*|no one responded[^\n]*|you left the meeting[^\n]*/i);
+    const blocked = text.match(/(?:this|the) meeting (?:has ended|is locked)[^\n]*|you (?:were|have been)[^\n]*removed[^\n]*|you(?:'|\u2019)ve been removed[^\n]*|no one (?:has )?responded[^\n]*|you left the meeting[^\n]*/i);
     if (blocked) return { stage: "ended", notice: blocked[0].slice(0, 300) };
     const lobby = text.match(/someone (?:in the meeting )?(?:will|should)[^\n]*let you in[^\n]*|you(?:'|\u2019)re in the lobby[^\n]*|we(?:'|\u2019)ve let[^\n]*waiting[^\n]*/i);
     if (lobby) return { stage: "lobby", notice: lobby[0].slice(0, 300), media: media() };

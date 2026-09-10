@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { TeamsMeeting } from "../electron/teams-meeting.mjs";
 
-function fixture(t, { prepare, transcribe, synthesize, loadError, pageStage = "joined" } = {}) {
+function fixture(t, { prepare, transcribe, synthesize, loadError, pageStage = "joined", pageNotice } = {}) {
   const home = mkdtempSync(path.join(tmpdir(), "rapp-teams-controller-"));
   const events = [];
   const windows = [];
@@ -26,7 +26,7 @@ function fixture(t, { prepare, transcribe, synthesize, loadError, pageStage = "j
       this.webContents.setWindowOpenHandler = (handler) => { this.openHandler = handler; };
       this.webContents.isLoadingMainFrame = () => false;
       this.webContents.executeJavaScript = async () => ({
-        stage: pageStage, chatOpen: true, messages: [], media: { synthetic: true },
+        stage: pageStage, notice: pageNotice, chatOpen: true, messages: [], media: { synthetic: true },
       });
       this.webContents.debugger = {
         attach: (version) => events.push(["attach", version]),
@@ -285,4 +285,13 @@ test("audio and automatic replies can be prepared explicitly after a manual join
   assert.ok(manager.conversation);
   assert.equal(speeches.length, 1, "enabling replies must not replace the prepared speech service");
   assert.equal(manager.status().options.autonomous, true);
+});
+
+test("an unanswered admission request closes only this session and preserves the actual notice", async (t) => {
+  const notice = "Sorry, no one has responded to your request to join. Please try again.";
+  const { manager, windows } = fixture(t, { pageStage: "ended", pageNotice: notice });
+  await manager.join(options);
+  assert.equal(manager.status().phase, "idle");
+  assert.equal(manager.status().message, notice);
+  assert.equal(windows[0].destroyed, true);
 });

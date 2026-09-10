@@ -1,5 +1,17 @@
 [
   {
+    "h": "@shell.teamsOpen",
+    "name": "Join Teams using only this assistant's virtual media",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "@shell.teamsSettings",
+    "name": "Edit or forget the configured Teams invitation",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
     "h": "@shell.explorerRefresh",
     "name": "Refresh agents",
     "role": "button",

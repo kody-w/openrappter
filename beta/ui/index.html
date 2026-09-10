@@ -10,6 +10,7 @@
   <title>OpenRappter</title>
   <link rel="icon" href="../build/icon.svg">
   <meta name="theme-color" content="#07111f">
+  <link rel="stylesheet" href="teams-meeting.css">
   <style>
     :root {
       color-scheme: dark;
@@ -772,6 +773,67 @@
   </style>
 </head>
 <body>
+  <div id="teams-shell-bar" aria-hidden="true"></div>
+  <div id="teams-launcher" role="group" aria-label="Teams meeting controls">
+    <button id="teams-open" data-drive="shell.teamsOpen" type="button"
+      title="Join Teams using only this assistant's virtual media">Meet now in Teams</button>
+    <button id="teams-settings-open" data-drive="shell.teamsSettings" type="button"
+      title="Edit or forget the configured Teams invitation">Settings</button>
+  </div>
+  <dialog id="teams-dialog" aria-labelledby="teams-title" data-drive="shell.teamsDialog">
+    <header>
+      <h2 id="teams-title">Meet now in Teams</h2>
+      <button id="teams-close" data-drive="shell.teamsClose" type="button" aria-label="Close Teams controls">Close</button>
+    </header>
+    <p class="teams-explanation">
+      Use a Teams invitation with this assistant's synthetic camera and microphone.
+      Physical capture is blocked. Computer speakers stay muted; speech output starts off.
+    </p>
+    <form id="teams-form">
+      <label>Meeting invitation
+        <input id="teams-url" data-drive="shell.teamsUrl" type="url" maxlength="4096"
+          placeholder="https://teams.microsoft.com/meet/..." autocomplete="off" required>
+      </label>
+      <label>Assistant identity
+        <input id="teams-identity" data-drive="shell.teamsIdentity" maxlength="30" value="RAPP" required>
+      </label>
+      <fieldset id="teams-options">
+        <legend>Virtual meeting capabilities</legend>
+        <label><input id="teams-camera" data-drive="shell.teamsCamera" type="checkbox" checked> Synthetic AI camera</label>
+        <label><input id="teams-vision" data-drive="shell.teamsVision" type="checkbox" checked> See incoming meeting video</label>
+        <label><input id="teams-listen" data-drive="shell.teamsListen" type="checkbox" checked> Listen with local speech recognition</label>
+        <label><input id="teams-speak" data-drive="shell.teamsSpeak" type="checkbox"> Allow speaking through the virtual mic</label>
+        <label><input id="teams-autonomous" data-drive="shell.teamsAutonomous" type="checkbox" checked> Respond when addressed</label>
+        <label><input id="teams-headless" data-drive="shell.teamsHeadless" type="checkbox" checked> Run the Teams window in the background</label>
+        <label><input id="teams-remember" data-drive="shell.teamsRemember" type="checkbox"> Remember this invitation in secure storage</label>
+      </fieldset>
+      <p class="teams-explanation">
+        First use prepares the local speech model. Meeting text and selected video frames
+        use the existing Frontier AI connection without file, shell, or device-control tools.
+        These virtual devices exist in this app's Teams window, not system-wide.
+      </p>
+      <div class="teams-actions">
+        <button id="teams-join" data-drive="shell.teamsJoin" class="primary" type="submit">Join with virtual devices</button>
+        <button id="teams-show" data-drive="shell.teamsShow" type="button" disabled>Show Teams window</button>
+        <button id="teams-stop" data-drive="shell.teamsStop" type="button" disabled>Disconnect</button>
+        <button id="teams-forget" data-drive="shell.teamsForget" type="button">Forget saved invitation</button>
+      </div>
+    </form>
+    <p id="teams-status" data-drive="shell.teamsStatus" role="status" aria-live="polite">Not connected.</p>
+    <p id="teams-error" data-drive="shell.teamsError" role="alert" hidden></p>
+    <dl id="teams-health">
+      <dt>Local speech</dt><dd id="teams-speech-health">Not prepared</dd>
+      <dt>Incoming media</dt><dd id="teams-media-health">No meeting media received</dd>
+      <dt>Latest transcript</dt><dd id="teams-transcript">None</dd>
+      <dt>Latest reply</dt><dd id="teams-reply">None</dd>
+    </dl>
+    <div class="teams-manual-speech">
+      <label>Speak a short message
+        <input id="teams-speech-text" data-drive="shell.teamsSpeechText" maxlength="240" autocomplete="off">
+      </label>
+      <button id="teams-say" data-drive="shell.teamsSay" type="button" disabled>Speak through virtual mic</button>
+    </div>
+  </dialog>
   <div id="neighborhood-identity" data-drive="shell.neighborhood" aria-live="polite">
     <span class="creature" aria-hidden="true"></span>
     <strong>OpenRappter</strong>
@@ -1022,6 +1084,7 @@
   <script src="chat-look.js"></script>
   <script src="typing-delivery.js"></script>
   <script src="renderer.js"></script>
+  <script src="teams-meeting.js"></script>
   <script src="show-mode-tour.js"></script>
 </body>
 </html>

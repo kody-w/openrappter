@@ -69,6 +69,64 @@ Standalone Brainstem may keep serving `http://localhost:7071`. OpenRappter
 allocates owned loopback ports for its workers, so starting or stopping either
 product never adopts or kills the other.
 
+## Teams virtual media (experimental)
+
+**Meet now in Teams** opens a guest meeting using a private, app-owned Teams
+window. Paste an invitation the first time. With **Remember** enabled, the
+next click joins that configured invitation. **Settings** edits the connection
+without joining, and **Forget saved invitation** removes the stored link
+without ending an active call. This does not create a new
+calendar meeting or bypass the organizer's lobby.
+
+The meeting window exposes browser-local **Virtual Camera** and **Virtual
+Microphone** inputs. The camera is a clearly labelled synthetic AI slate, and
+the microphone carries only generated speech. Physical camera, microphone,
+and display capture remain denied. These devices are scoped to this Teams
+window: no system-wide driver is installed, and Safari or another signed-in
+Teams session is not taken over.
+
+Incoming speech uses local recognition; selected incoming video frames and
+meeting text can be understood through the existing Frontier AI connection.
+The meeting conversation cannot discover or invoke local file, shell, MCP,
+device-control, or scheduling tools. It uses bounded context and one current
+frame, and it can remain quiet rather than start an acknowledgement loop.
+
+Speech output starts muted, including when an invitation is remembered.
+Enable it explicitly only when the meeting permits audio. **Disconnect**
+remains available during preparation and speech. **Show Teams window** exposes
+the owned window when human sign-in, admission, or another Teams interaction
+is necessary. Authentication requirements and guest-chat restrictions remain
+controlled by Microsoft and the meeting organizer.
+
+First use prepares the local speech capabilities before joining. Their
+readiness and any failures appear in the meeting panel; missing prerequisites
+do not silently become cloud speech or physical-device capture. Raw media is
+not added to the app's ledger or exports. The private invitation is encrypted
+with OS secure storage under `desktop/teams/private/meeting.secret`, outside
+the portable tile's managed-file allowlist.
+
+For an already configured, isolated app instance,
+`RAPP_TEAMS_AUTOSTART=1` starts the same flow without a click, and
+`BRAINSTEM_BETA_HEADLESS=1` hides the app shell.
+`RAPP_TEAMS_IDENTITY` selects the assistant label.
+`RAPP_TEAMS_MEETING_URL` can supply an operator-owned invitation for one run;
+keep that value out of source control and logs. These development controls do
+not create a distribution or release-policy bypass.
+
+The local native proof runs the real Electron renderer and preload, local-only
+WebRTC, speech recognition/synthesis, immediate mute, and a synthetic visual
+challenge through the existing AI connection:
+
+```bash
+npm run proof:teams-native -- --directory /absolute/path/to/private/speech-cache
+```
+
+Prepare that cache explicitly with
+`node scripts/teams-local-speech-proof.mjs --prepare --directory ...` first.
+The native proof creates a private fixture instead of entering a real meeting,
+forbids hardware capture and speaker connections, and leaves the model cache
+intact. A successful local proof is not a production-release receipt.
+
 ## Data sloshing
 
 OpenRappter keeps a private real-time ledger of completed Brainstem, twin, and

@@ -1,0 +1,94 @@
+:root { --teams-shell-chrome-height: 46px; }
+#teams-shell-bar {
+  position: fixed;
+  z-index: 12;
+  inset: 0 0 auto;
+  height: var(--teams-shell-chrome-height);
+  border-bottom: 1px solid #24323b;
+  background: #0b141c;
+  pointer-events: none;
+}
+body > main {
+  top: var(--teams-shell-chrome-height);
+  height: calc(100% - var(--teams-shell-chrome-height));
+}
+body > #explorer,
+body > #surgeon,
+body > #surgeon-herd {
+  top: var(--teams-shell-chrome-height);
+  height: calc(100dvh - var(--teams-shell-chrome-height));
+}
+#teams-launcher {
+  position: fixed;
+  z-index: 30;
+  top: 10px;
+  right: 14px;
+  display: flex;
+  gap: 8px;
+}
+#teams-open {
+  border-color: #2b8d80;
+  background: #113c38;
+  font-weight: 650;
+}
+#teams-dialog {
+  width: min(740px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid #345b61;
+  border-radius: 14px;
+  background: #0d1820;
+  color: #e6edf3;
+  box-shadow: 0 24px 90px #0009;
+}
+#teams-dialog::backdrop { background: #010409b8; }
+#teams-dialog header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+}
+#teams-dialog h2 { margin: 0; font-size: 21px; }
+#teams-dialog label { display: grid; gap: 6px; font-size: 13px; }
+#teams-form { display: grid; gap: 14px; }
+#teams-dialog input:not([type="checkbox"]) {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid #36515b;
+  border-radius: 6px;
+  background: #07111a;
+  color: #e6edf3;
+  font: inherit;
+}
+#teams-dialog input:focus-visible,
+#teams-dialog button:focus-visible { outline: 2px solid #58dacb; outline-offset: 3px; }
+#teams-dialog fieldset {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px 18px;
+  border: 1px solid #2c454e;
+  border-radius: 8px;
+  padding: 14px;
+}
+#teams-dialog legend { padding: 0 7px; color: #b3d8d3; font-size: 13px; }
+#teams-dialog fieldset label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.4;
+}
+#teams-dialog input[type="checkbox"] { accent-color: #41bfad; }
+#teams-dialog .teams-explanation { color: #a3b9c3; font-size: 12px; line-height: 1.55; }
+#teams-dialog .teams-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+#teams-dialog button:disabled { opacity: .48; cursor: not-allowed; }
+#teams-status { padding: 10px 12px; background: #102b31; border-radius: 7px; font-size: 13px; }
+#teams-error { color: #ffb1a8; white-space: pre-wrap; font-size: 13px; }
+#teams-health { display: grid; grid-template-columns: 120px 1fr; gap: 8px; font-size: 12px; }
+#teams-health dt { color: #a3b9c3; }
+#teams-health dd { margin: 0; overflow-wrap: anywhere; }
+#teams-dialog .teams-manual-speech { display: grid; gap: 10px; margin-top: 18px; }
+@media (max-width: 600px) {
+  #teams-dialog fieldset { grid-template-columns: 1fr; }
+  #teams-health { grid-template-columns: 1fr; }
+}

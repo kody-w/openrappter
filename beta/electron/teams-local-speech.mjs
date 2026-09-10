@@ -36,7 +36,7 @@ export const MEETING_SPEECH_LIMITS = Object.freeze({
   maxTextCharacters: 240,
   maxTextBytes: 960,
   maxTranscriptCharacters: 4_096,
-  maxConcurrentOperations: 1,
+  maxConcurrentOperations: 2,
   maxQueuedOperations: 0,
 });
 
@@ -57,7 +57,7 @@ const ERRORS = Object.freeze({
   SPEECH_DIRECTORY_IO: "Cannot create or access the private local speech directory.",
   SPEECH_NOT_READY: "Local speech is not ready. Explicitly call prepare() before using speech.",
   SPEECH_CLOSED: "The local speech service is closed.",
-  SPEECH_BUSY: "Local speech is busy. Retry after the current operation; audio is not queued.",
+  SPEECH_BUSY: "This speech operation's slot is busy, or exclusive preparation is running. Retry when its slot is free; audio is not queued.",
   SPEECH_INVALID_SIGNAL: "signal must be an AbortSignal.",
   SPEECH_ABORTED: "The local speech operation was cancelled.",
   SPEECH_TIMEOUT: "The local speech operation exceeded its time limit.",
@@ -303,7 +303,8 @@ async function prepareModelFiles(directory, files, { allowDownload, download, pr
 /**
  * No work, downloads, or capture occurs at construction. prepare() is the only
  * download opt-in; TEAMS_LOCAL_SPEECH_OFFLINE=1 also makes preparation cache-only.
- * Supply a dedicated 0700 directory. There is one operation slot and no queue.
+ * Supply a dedicated 0700 directory. Synthesis and transcription each have one
+ * slot, with no queue; preparation is exclusive.
  * forkImpl/spawnImpl/platform/timeouts/transformersModule/modelFiles are
  * test/proof seams, not renderer-controlled configuration.
  */
@@ -329,12 +330,12 @@ export function createMeetingSpeech({
   const allowDownload = env.TEAMS_LOCAL_SPEECH_OFFLINE !== "1";
   const children = new Set();
   const artifacts = new Set();
+  const active = new Map();
   let mediaDirectory = null;
   let modelsDirectory = null;
   let recognition = null;
   let synthesisReady = false;
   let recognitionReady = false;
-  let active = null;
   let closed = false;
   let closing = null;
   let cleanupFailed = false;
@@ -356,6 +357,18 @@ export function createMeetingSpeech({
   function update(patch) {
     current = { ...current, ...patch };
     try { onState?.(status()); } catch { /* An observer cannot break media cleanup. */ }
+  }
+  function activityPhase() {
+    if (active.has("prepare")) return current.phase === "preparing-model" ? current.phase : "checking-synthesis";
+    return ["synthesize", "transcribe"].filter((kind) => active.has(kind)).join("+") || "idle";
+  }
+  function readiness() {
+    const ready = synthesisReady && recognitionReady && !cleanupFailed;
+    return {
+      ready,
+      state: ready ? "ready" : current.state === "missing-prerequisite" ? "missing-prerequisite" : "error",
+      error: ready ? null : current.error || describeError(failure("SPEECH_CHILD_FAILED")),
+    };
   }
   function childEnv() {
     return {
@@ -439,6 +452,7 @@ export function createMeetingSpeech({
         windowsHide: true,
         stdio: [text === undefined ? "ignore" : "pipe", output ? "ignore" : "pipe", "ignore"],
       }));
+      record.output = output;
     } catch (error) {
       throw failure(error.code === "ENOENT" ? "SPEECH_SYNTHESIS_MISSING" : "SPEECH_SYNTHESIS_FAILED");
     }
@@ -526,7 +540,7 @@ export function createMeetingSpeech({
       throw safeError(error, "SPEECH_FILE_IO");
     } finally {
       // Never unlink an output that a child failed to stop writing.
-      if (![...children].some((record) => record.stopping && !record.exited)) {
+      if (![...children].some((record) => record.output === output && !record.exited)) {
         await removeArtifact(output);
       }
     }
@@ -609,26 +623,24 @@ export function createMeetingSpeech({
     if (closed) throw failure("SPEECH_CLOSED");
     if (initialError) throw initialError;
     if (cleanupFailed) throw failure("SPEECH_CLEANUP_FAILED");
-    if (active) throw failure("SPEECH_BUSY");
-    if (kind !== "prepare" && !current.ready) throw failure("SPEECH_NOT_READY");
+    if (active.has("prepare") || active.has(kind) || (kind === "prepare" && active.size)) {
+      throw failure("SPEECH_BUSY");
+    }
+    if ((kind === "synthesize" && !synthesisReady) || (kind === "transcribe" && !recognitionReady)) {
+      throw failure("SPEECH_NOT_READY");
+    }
     const controller = new AbortController();
     const abort = () => controller.abort(failure("SPEECH_ABORTED"));
     signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => controller.abort(failure("SPEECH_TIMEOUT")), limits[`${kind}Ms`]);
     const operation = { controller, done: null };
-    active = operation;
+    active.set(kind, operation);
     operation.done = Promise.resolve().then(async () => {
       try {
         checkCancelled(controller.signal);
         const result = await action(controller.signal);
         checkCancelled(controller.signal);
-        if (!closed) {
-          const ready = synthesisReady && recognitionReady;
-          update({
-            state: ready ? "ready" : "error", ready,
-            error: ready ? null : current.error || describeError(failure("SPEECH_CHILD_FAILED")),
-          });
-        }
+        if (!closed) update(readiness());
         return result;
       } catch (caught) {
         let error = safeError(caught, kind === "transcribe"
@@ -652,17 +664,15 @@ export function createMeetingSpeech({
       } finally {
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
-        active = null;
-        if (!closed) update({ busy: false, phase: "idle" });
+        active.delete(kind);
+        if (!closed) update({ busy: active.size > 0, phase: activityPhase() });
       }
     });
     update({
-      state: kind === "prepare" ? "preparing" : "ready",
-      ready: kind !== "prepare",
+      ...(kind === "prepare" ? { state: "preparing", ready: false, error: null } : readiness()),
       busy: true,
-      phase: kind === "prepare" ? "checking-synthesis" : kind,
+      phase: activityPhase(),
       progress: null,
-      error: null,
     });
     return operation.done;
   }
@@ -717,12 +727,13 @@ export function createMeetingSpeech({
   function close() {
     if (closing) return closing;
     closed = true;
-    active?.controller.abort(failure("SPEECH_ABORTED"));
-    const pending = active?.done;
+    const operations = [...active.values()];
+    const pending = Promise.allSettled(operations.map((operation) => operation.done));
+    for (const operation of operations) operation.controller.abort(failure("SPEECH_ABORTED"));
     closing = (async () => {
       try {
         await Promise.all([...children].map(terminate));
-        await pending?.catch(() => {});
+        await pending;
         await Promise.all([...children].map(terminate));
         for (const file of [...artifacts]) await removeArtifact(file);
         if (mediaDirectory) {

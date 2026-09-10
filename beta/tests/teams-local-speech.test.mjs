@@ -67,6 +67,7 @@ class FakeChild extends EventEmitter {
   }
   kill(signal) {
     this.signals.push(signal);
+    this.emit("kill", signal);
     if (this.behavior.ignoreTerm && signal === "SIGTERM") return true;
     if (this.behavior.ignoreKill && signal === "SIGKILL") return true;
     queueMicrotask(() => this.finish(null, signal));
@@ -236,6 +237,22 @@ async function modelFixture(t, { payload = "{}", httpStatus = 200, offline = fal
       };
     },
   });
+}
+
+function beginDuplex(service, runtime, { synthesisSignal, transcriptionSignal } = {}) {
+  runtime.behavior.holdRequest = "transcribe";
+  runtime.behavior.holdSynthesis = true;
+  const requested = once(runtime.events, "request");
+  const created = once(runtime.events, "output");
+  const transcription = service.transcribe(wav(), { signal: transcriptionSignal });
+  const synthesis = service.synthesize("A silent local reply.", { signal: synthesisSignal });
+  void transcription.catch(() => {});
+  void synthesis.catch(() => {});
+  return {
+    transcription,
+    synthesis,
+    started: Promise.all([requested, created]).then(([[request], [output]]) => ({ request, output })),
+  };
 }
 
 test("construction is inert, readiness is explicit, and no operation downloads implicitly", async (t) => {
@@ -468,22 +485,46 @@ test("throwing state observers cannot interrupt readiness or media cleanup", asy
   assert.deepEqual(await readdir(path.dirname(runtime.outputs.at(-1).output)), []);
 });
 
-test("one operation slot applies across preparation, synthesis and recognition with no hidden queue", async (t) => {
+test("one slot per kind allows continuing recognition during synthesis without a hidden queue", async (t) => {
   const { service, runtime } = await fixture(t);
   await service.prepare();
   runtime.behavior.holdRequest = "transcribe";
+  runtime.behavior.holdSynthesis = true;
   const started = once(runtime.events, "request");
   const first = service.transcribe(wav());
   const [{ child, message }] = await started;
+  const created = once(runtime.events, "output");
+  const synthesis = service.synthesize("Continue listening.");
+  const [output] = await created;
   await assert.rejects(service.transcribe(wav()), { code: "SPEECH_BUSY" });
   await assert.rejects(service.synthesize("No queue."), { code: "SPEECH_BUSY" });
   await assert.rejects(service.prepare(), { code: "SPEECH_BUSY" });
   assert.equal(service.status().busy, true);
+  assert.equal(service.status().phase, "synthesize+transcribe");
+  assert.equal(service.status().limits.maxConcurrentOperations, 2);
+  assert.equal(service.status().limits.maxQueuedOperations, 0);
   assert.equal(runtime.requests.filter((request) => request.type === "transcribe").length, 1);
   child.emit("message", { id: message.id, type: "result", result: { text: "First only." } });
   assert.deepEqual(await first, { text: "First only." });
+  assert.equal(service.status().busy, true);
+  assert.equal(service.status().phase, "synthesize");
+  const nextStarted = once(runtime.events, "request");
+  const next = service.transcribe(wav());
+  const [{ message: nextMessage }] = await nextStarted;
+  assert.equal(service.status().phase, "synthesize+transcribe");
+  assert.equal(runtime.requests.filter((request) => request.type === "transcribe").length, 2);
+  assert.equal(runtime.outputs.length, 2, "Only preparation and one synthesis wrote audio.");
+  output.child.finish(0);
+  assert.equal((await synthesis).mimeType, "audio/wav");
+  assert.equal(service.status().busy, true);
+  assert.equal(service.status().phase, "transcribe");
+  runtime.behavior.holdSynthesis = false;
+  await service.synthesize("The other slot is free.");
+  assert.equal(service.status().phase, "transcribe");
+  child.emit("message", { id: nextMessage.id, type: "result", result: { text: "Next incoming speech." } });
+  assert.deepEqual(await next, { text: "Next incoming speech." });
   assert.equal(service.status().busy, false);
-  await service.synthesize("Slot released.");
+  assert.equal(service.status().phase, "idle");
 });
 
 test("pre-aborted and invalid signals do not start work or expose abort reasons", async (t) => {
@@ -787,7 +828,7 @@ test("PCM fmt with an empty extension is accepted but nonempty extensions are re
   await assert.rejects(service.transcribe(riff([chunk("fmt ", format), wav().subarray(36)])), { code: "SPEECH_INVALID_WAV" });
 });
 
-test("preparation also owns the single slot and immediate close cannot start late media work", async (t) => {
+test("preparation is exclusive and immediate close cannot start late media work", async (t) => {
   const first = await fixture(t, { runtimeOptions: { holdRequest: "prepare" } });
   const started = once(first.runtime.events, "request");
   const pending = first.service.prepare();
@@ -865,4 +906,144 @@ test("repairing synthesis readiness reuses the already-loaded recognition model"
   await service.prepare();
   assert.equal(runtime.requests.filter((request) => request.type === "prepare").length, 1);
   assert.equal(service.status().ready, true);
+});
+
+test("cancelling synthesis leaves concurrent recognition running and removes only the synthesis WAV", async (t) => {
+  const { service, runtime } = await fixture(t);
+  await service.prepare();
+  const controller = new AbortController();
+  const duplex = beginDuplex(service, runtime, { synthesisSignal: controller.signal });
+  const cancelled = assert.rejects(duplex.synthesis, { code: "SPEECH_ABORTED" });
+  const { request, output } = await duplex.started;
+  controller.abort();
+  await cancelled;
+  assert.deepEqual(output.child.signals, ["SIGTERM"]);
+  assert.deepEqual(request.child.signals, []);
+  assert.equal(request.child.done, false);
+  assert.equal(service.status().busy, true);
+  assert.equal(service.status().phase, "transcribe");
+  assert.equal(service.status().ready, true);
+  assert.deepEqual(await readdir(path.dirname(output.output)), []);
+  request.child.emit("message", { id: request.message.id, type: "result", result: { text: "Still listening." } });
+  assert.deepEqual(await duplex.transcription, { text: "Still listening." });
+  assert.equal(service.status().busy, false);
+});
+
+test("a stopping recognizer neither cancels concurrent synthesis nor delays its WAV cleanup", async (t) => {
+  const { service, runtime } = await fixture(t, {
+    timeouts: { killGraceMs: 2_000, killWaitMs: 1_000 },
+  });
+  await service.prepare();
+  const controller = new AbortController();
+  const duplex = beginDuplex(service, runtime, { transcriptionSignal: controller.signal });
+  const cancelled = assert.rejects(duplex.transcription, { code: "SPEECH_ABORTED" });
+  const { request, output } = await duplex.started;
+  request.child.behavior = { ...runtime.behavior, ignoreTerm: true };
+  const stopping = once(request.child, "kill");
+  controller.abort();
+  await stopping;
+  assert.equal(request.child.done, false);
+  assert.deepEqual(output.child.signals, []);
+  output.child.finish(0);
+  assert.deepEqual((await duplex.synthesis).wav, wav());
+  assert.deepEqual(await readdir(path.dirname(output.output)), []);
+  assert.equal(request.child.done, false, "The recognizer is still terminating during WAV cleanup.");
+  assert.equal(service.status().busy, true);
+  assert.equal(service.status().phase, "transcribe");
+  await assert.rejects(service.prepare(), { code: "SPEECH_BUSY" });
+  request.child.finish(null, "SIGTERM");
+  await cancelled;
+  assert.equal(service.status().busy, false);
+  assert.equal(service.status().ready, false);
+  assert.equal(service.status().synthesis.state, "ready");
+  runtime.behavior.holdSynthesis = false;
+  await service.synthesize("Synthesis remains available.");
+  await assert.rejects(service.transcribe(wav()), { code: "SPEECH_NOT_READY" });
+  runtime.behavior.holdRequest = null;
+  await service.prepare();
+  assert.equal(service.status().ready, true);
+});
+
+test("synthesis failure does not stop current or subsequent incoming recognition", async (t) => {
+  const { service, runtime } = await fixture(t);
+  await service.prepare();
+  runtime.behavior.output = wav({ pcmBytes: 256_002 });
+  const duplex = beginDuplex(service, runtime);
+  const failed = assert.rejects(duplex.synthesis, { code: "SPEECH_AUDIO_TOO_LARGE" });
+  const { request, output } = await duplex.started;
+  output.child.finish(0);
+  await failed;
+  assert.deepEqual(request.child.signals, []);
+  assert.equal(service.status().phase, "transcribe");
+  assert.equal(service.status().ready, false);
+  assert.equal(service.status().recognition.state, "ready");
+  request.child.emit("message", { id: request.message.id, type: "result", result: { text: "Incoming speech continues." } });
+  assert.deepEqual(await duplex.transcription, { text: "Incoming speech continues." });
+  runtime.behavior.holdRequest = null;
+  assert.deepEqual(await service.transcribe(wav()), { text: "The virtual audio bridge is ready." });
+  assert.equal(service.status().ready, false);
+  assert.equal(service.status().error.code, "SPEECH_AUDIO_TOO_LARGE");
+  await assert.rejects(service.synthesize("Prepare this kind again."), { code: "SPEECH_NOT_READY" });
+  assert.deepEqual(await readdir(path.dirname(output.output)), []);
+});
+
+for (const kind of ["synthesize", "transcribe"]) {
+  test(`${kind} timeout leaves the other concurrent operation running`, async (t) => {
+    const { service, runtime } = await fixture(t, {
+      timeouts: { [`${kind}Ms`]: 100, killGraceMs: 10, killWaitMs: 100 },
+    });
+    await service.prepare();
+    const duplex = beginDuplex(service, runtime);
+    const timedOut = assert.rejects(kind === "synthesize" ? duplex.synthesis : duplex.transcription, {
+      code: "SPEECH_TIMEOUT", name: "TimeoutError",
+    });
+    const { request, output } = await duplex.started;
+    await timedOut;
+    assert.equal(service.status().busy, true);
+    if (kind === "synthesize") {
+      assert.deepEqual(output.child.signals, ["SIGTERM"]);
+      assert.deepEqual(request.child.signals, []);
+      assert.equal(service.status().phase, "transcribe");
+      request.child.emit("message", { id: request.message.id, type: "result", result: { text: "No lost incoming speech." } });
+      assert.deepEqual(await duplex.transcription, { text: "No lost incoming speech." });
+    } else {
+      assert.deepEqual(request.child.signals, ["SIGTERM"]);
+      assert.deepEqual(output.child.signals, []);
+      assert.equal(service.status().phase, "synthesize");
+      output.child.finish(0);
+      assert.equal((await duplex.synthesis).mimeType, "audio/wav");
+    }
+    assert.equal(service.status().busy, false);
+    assert.equal(service.status().phase, "idle");
+    assert.equal(service.status().ready, false);
+    assert.equal(service.status().error.code, "SPEECH_TIMEOUT");
+    assert.deepEqual(await readdir(path.dirname(output.output)), []);
+  });
+}
+
+test("close cancels both occupied slots, waits for both children, and preserves unrelated files", async (t) => {
+  const { service, directory, runtime, states } = await fixture(t);
+  await service.prepare();
+  await writeFile(path.join(directory, "unrelated.txt"), "keep me");
+  const duplex = beginDuplex(service, runtime);
+  const stopped = Promise.all([
+    assert.rejects(duplex.synthesis, { code: "SPEECH_ABORTED" }),
+    assert.rejects(duplex.transcription, { code: "SPEECH_ABORTED" }),
+  ]);
+  const { request, output } = await duplex.started;
+  request.child.behavior = { ...runtime.behavior, ignoreTerm: true };
+  const closing = service.close();
+  assert.strictEqual(service.close(), closing);
+  await closing;
+  await stopped;
+  assert.deepEqual(request.child.signals, ["SIGTERM", "SIGKILL"]);
+  assert.deepEqual(output.child.signals, ["SIGTERM"]);
+  assert.equal(request.child.done, true);
+  assert.equal(output.child.done, true);
+  assert.deepEqual((await readdir(directory)).sort(), ["models", "unrelated.txt"]);
+  assert.equal(await readFile(path.join(directory, "unrelated.txt"), "utf8"), "keep me");
+  assert.equal(service.status().state, "closed");
+  assert.equal(service.status().busy, false);
+  assert.equal(service.status().phase, "idle");
+  assert.equal(states.at(-1).state, "closed");
 });

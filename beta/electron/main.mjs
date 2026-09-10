@@ -18,6 +18,7 @@ import {
   nativeImage,
   net,
   Notification,
+  safeStorage,
   session,
   shell,
 } from "electron";
@@ -87,6 +88,9 @@ import { BetaRouteManager } from "./route-manager.mjs";
 import { isAllowedStoreSourceUrl, RappStoreClient, STORE_SOURCES } from "./rapp-store.mjs";
 import { createTwinLedgerBridgeSource } from "./twin-ledger-bridge.mjs";
 import { TwinManager } from "./twin-manager.mjs";
+import { TeamsMeeting } from "./teams-meeting.mjs";
+import { createTeamsVirtualMediaSource } from "./teams-virtual-media.mjs";
+import { createMeetingSpeech } from "./teams-local-speech.mjs";
 import {
   allowsUiDriverMediaPermission,
   startUiDriverServer,
@@ -1671,6 +1675,7 @@ let updateMenuItem = null;
 let availableUpdate = null;
 let uiDriver = null;
 let openRappterChatEndpoint = null;
+let teamsMeeting = null;
 let e2eStopTimer = null;
 // One GitHub Copilot Rappter Surgeon SDK session per chat tab, keyed by the id the
 // renderer assigns. All share one runtime, one route manager, and one visible
@@ -1702,6 +1707,7 @@ const state = {
     message: "Preparing GitHub Copilot Agent mode...",
   },
   uiDriver: { phase: "starting", message: "Preparing visible AI controls..." },
+  teams: { phase: "idle", message: "Teams virtual media has not started." },
   update: {
     phase: "idle",
     message: "Check GitHub for the latest OpenRappter.",
@@ -2930,6 +2936,27 @@ function loadPendingUpdateResult() {
 }
 
 function registerIpc() {
+  ipcMain.handle("beta:teams-preferences", (event) => {
+    assertTrustedIpc(event);
+    if (!teamsMeeting) throw new Error("The Teams bridge is not ready.");
+    return teamsMeeting.preferences();
+  });
+  ipcMain.handle("beta:teams-command", async (event, command) => {
+    assertTrustedIpc(event);
+    if (!teamsMeeting) throw new Error("The Teams bridge is not ready.");
+    if (!command || typeof command !== "object" || Array.isArray(command)) {
+      throw new Error("A Teams command is required.");
+    }
+    switch (command.action) {
+      case "join": return teamsMeeting.join(command.options);
+      case "configure": return teamsMeeting.configure(command.options);
+      case "speak": return teamsMeeting.speak(command.text);
+      case "show": return teamsMeeting.show();
+      case "forget": return teamsMeeting.forget();
+      case "stop": return teamsMeeting.stop();
+      default: throw new Error("Unsupported Teams operation.");
+    }
+  });
   ipcMain.handle("beta:get-state", (event) => {
     assertTrustedIpc(event);
     return structuredClone(state);
@@ -3384,6 +3411,22 @@ if (!hasLock) {
   });
 
   app.whenReady().then(() => {
+    teamsMeeting = new TeamsMeeting({
+      BrowserWindow,
+      createBrowserSession: (partition) => session.fromPartition(partition, { cache: false }),
+      ipcMain,
+      safeStorage,
+      runtime: copilot,
+      createMediaSource: createTeamsVirtualMediaSource,
+      createSpeech: createMeetingSpeech,
+      home: path.join(betaHome, "teams"),
+      preloadPath: path.join(dirname, "teams-media-preload.cjs"),
+      onState: (value) => {
+        state.teams = value;
+        emitState();
+      },
+    });
+    state.teams = teamsMeeting.status();
     if (
       drivenRun
       && process.env.OPENRAPPTER_DOCK_VISIBLE !== "1"
@@ -3425,6 +3468,11 @@ if (!hasLock) {
     installApplicationMenu();
     loadPendingUpdateResult();
     mainWindow = createWindow();
+    if (process.env.RAPP_TEAMS_AUTOSTART === "1") {
+      void teamsMeeting.join().catch((error) => {
+        console.error(`Teams startup failed: ${state.teams.error || error.message}`);
+      });
+    }
     const chatEndpointTask = startOpenRappterChatEndpoint({
       appIdentity: neighborhood,
       betaHome,
@@ -3544,6 +3592,7 @@ if (!hasLock) {
       e2eStopTimer = null;
     }
     Promise.allSettled([
+      teamsMeeting?.dispose(),
       ...Array.from(rappterSurgeons.values(), (surgeon) => surgeon.stop()),
       twinManager.stopAll(),
       copilot.stop(),

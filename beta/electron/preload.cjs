@@ -35,6 +35,8 @@ try {
 const chatTypingEnabled = chatStreamMode === "hold";
 
 contextBridge.exposeInMainWorld("brainstemBeta", {
+  teamsPreferences: () => ipcRenderer.invoke("beta:teams-preferences"),
+  teamsCommand: (command) => ipcRenderer.invoke("beta:teams-command", command),
   viewMode,
   chatLook,
   chatStreamMode,

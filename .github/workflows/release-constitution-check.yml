@@ -1,0 +1,66 @@
+name: Release Constitution
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-constitution:
+    name: Release Constitution
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            typescript/package-lock.json
+            typescript/ui/package-lock.json
+            typescript/desktop/package-lock.json
+
+      - name: Install locked runtime and UI dependencies
+        working-directory: typescript
+        run: |
+          npm ci
+          cd ui
+          npm ci
+
+      - name: Verify canonical RAPP Work contracts
+        working-directory: typescript
+        run: |
+          npx vitest run \
+            src/rapp/frame.test.ts \
+            src/rapp/evidence.test.ts \
+            src/rapp/work-verification.test.ts \
+            src/rapp/work-contract.test.ts \
+            src/workspaces/workspaces.test.ts \
+            src/workspaces/persistence.test.ts \
+            src/vm/__tests__/rapp-evidence.test.ts \
+            src/gateway/__tests__/workspace-rpc.test.ts \
+            src/gateway/__tests__/vm-gateway.test.ts \
+            src/gateway/__tests__/work-rapp-gateway.test.ts
+
+      - name: Build runtime and Work UI
+        working-directory: typescript
+        run: |
+          npm run lint
+          npm run build
+          cd ui
+          npm test
+
+      - name: Verify desktop release provenance and audits
+        working-directory: typescript/desktop
+        run: |
+          npm ci
+          npm run build
+          npm test
+          npm audit --audit-level=high
+          cd ..
+          npm audit --omit=dev --audit-level=high

@@ -10,7 +10,7 @@ public final class SettingsViewModel {
     public let channelsViewModel = ChannelsViewModel()
     public let cronViewModel = CronViewModel()
     public let skillsViewModel = SkillsViewModel()
-    public let approvalViewModel: ApprovalViewModel
+    public let approvalViewModel = ApprovalViewModel()
     private var rpcClient: RpcClient?
 
     // Config editor
@@ -18,14 +18,13 @@ public final class SettingsViewModel {
     public var configError: String?
     public var isLoadingConfig: Bool = false
 
-    public init(settingsStore: SettingsStore, approvalViewModel: ApprovalViewModel? = nil) {
+    public init(settingsStore: SettingsStore) {
         self.settingsStore = settingsStore
-        self.approvalViewModel = approvalViewModel ?? ApprovalViewModel()
     }
 
     /// Convenience init that creates a default SettingsStore. Must be called from @MainActor.
-    public convenience init(approvalViewModel: ApprovalViewModel? = nil) {
-        self.init(settingsStore: SettingsStore(), approvalViewModel: approvalViewModel)
+    public convenience init() {
+        self.init(settingsStore: SettingsStore())
     }
 
     public func configure(

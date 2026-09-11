@@ -1,9 +1,10 @@
 /**
- * OpenRappter UI Entry Point
+ * RAPP Work UI entry point. Legacy element names remain compatible.
  */
 
 import './components/app.js';
 import './components/sidebar.js';
+import './components/work.js';
 import './components/surgeon.js';
 import './components/rappids.js';
 import './components/chat.js';
@@ -24,4 +25,4 @@ import './components/debug.js';
 import { installDesktopCommandHandler } from './services/desktop-control.js';
 
 installDesktopCommandHandler();
-console.log('OpenRappter UI initialized');
+console.log('RAPP Work UI initialized');

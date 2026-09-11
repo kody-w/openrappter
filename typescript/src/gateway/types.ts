@@ -265,6 +265,8 @@ export const GatewayEvents = {
   CRON_RUN: 'cron.run',
   CRON_COMPLETE: 'cron.complete',
   APPROVAL: 'approval',
+  WORKSPACE: 'workspace',
+  VM: 'vm',
   PRESENCE: 'presence',
   HEARTBEAT: 'heartbeat',
   RAPPTER: 'rappter',

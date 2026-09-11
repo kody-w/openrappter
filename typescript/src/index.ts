@@ -9,7 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
 import type { AgentInfo } from './agents/types.js';
-import { ensureHomeDir, loadEnv, updateEnv, hydrateManagedEnv, loadConfig, saveConfig, resolvedConfigSources, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
+import { ensureHomeDir, loadEnv, saveEnv, hydrateManagedEnv, loadConfig, saveConfig, resolvedConfigSources, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
 import { hasAuthProfileAuthority, hasCopilotAvailable, autoAuthIfNeeded, resolveCopilotAuth, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
 import type { CopilotAuthOutcome } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
@@ -29,13 +29,11 @@ import { registerDoctorCommand } from './cli/doctor.js';
 import { registerRappterCommand } from './cli/rappters.js';
 import { registerFlightRecorderCommand } from './cli/flight-recorder.js';
 import { registerShowAndTellCommand } from './cli/show-and-tell.js';
-import { registerCleverGirlCommand } from './cli/clever-girl.js';
 import { registerSkillsCommand } from './cli/skills.js';
 import { registerAgentsCommand } from './cli/agents.js';
 import { registerModelsCommand } from './cli/models.js';
 import { registerUpdateCommand } from './cli/update.js';
 import { registerHubCommands } from './cli/hubs.js';
-import { registerRingsCommand } from './cli/rings.js';
 import { tickCountFromFlag } from './infra/cli-args.js';
 import { portFromEnvironment, portFromFlag, portTypedOnCommandLine } from './infra/cli-port.js';
 import { watchOwnerProcess } from './infra/owner-watch.js';
@@ -542,23 +540,6 @@ async function startGatewayInProcess(opts?: {
     };
   });
 
-  if (backend.provider) {
-    const { analyzeEstateBuddyEvidence } = await import(
-      './gateway/estate-buddy-analyzer.js'
-    );
-    const estateProvider = backend.kind === 'copilot-cli'
-      ? new (await import(
-        './providers/copilot-cli-direct.js'
-      )).CopilotCliDirectProvider({
-        model: backend.model,
-        exposeAgents: false,
-      })
-      : backend.provider;
-    server.setEstateBuddyAnalyzer(
-      (input) => analyzeEstateBuddyEvidence(estateProvider, input),
-    );
-  }
-
   const [
     { SurgeonService },
     { buildPatientSnapshot },
@@ -945,10 +926,10 @@ async function startGatewayInProcess(opts?: {
     process.env.OPENRAPPTER_MODEL = params.model;
 
     // Persist to .env so it survives restarts
-    let persisted = false;
     try {
-      await updateEnv({ OPENRAPPTER_MODEL: params.model });
-      persisted = true;
+      const env = await loadEnv();
+      env.OPENRAPPTER_MODEL = params.model;
+      await saveEnv(env);
     } catch { /* non-fatal — runtime switch still works */ }
 
     log(`${EMOJI} Model switched: ${oldModel} → ${params.model}`);
@@ -956,7 +937,7 @@ async function startGatewayInProcess(opts?: {
     return {
       model: params.model,
       previous: oldModel,
-      persisted,
+      persisted: true,
     };
   });
 
@@ -1005,6 +986,9 @@ async function startGatewayInProcess(opts?: {
         try {
           process.off('SIGINT', shutdown);
           process.off('SIGTERM', shutdown);
+          // Fence RPCs and release the owned VM before provider/channel cleanup
+          // can stall past the desktop parent's graceful-shutdown deadline.
+          await server.stop();
           imessageModelProbeStopped = true;
           if (imessageModelProbeTimer) {
             clearTimeout(imessageModelProbeTimer);
@@ -1016,7 +1000,6 @@ async function startGatewayInProcess(opts?: {
           await channelRegistry.disconnectAll();
           await imessageAssistant?.stop();
           await assistant.stop();
-          await server.stop();
         } finally {
           opts?.releaseProcessLock?.();
         }
@@ -1531,7 +1514,6 @@ program
     log.info("Let's get you connected. This takes about 2 minutes.");
 
     const env = await loadEnv();
-    const originalEnv = { ...env };
     const config = await loadConfig();
 
     const isMac = process.platform === 'darwin';
@@ -1799,9 +1781,7 @@ program
     // Bug 2 fix: wrap saves in try/catch with specific error messages
     const savedKeys = Object.keys(env);
     try {
-      await updateEnv(Object.fromEntries(
-        Object.entries(env).filter(([key, value]) => originalEnv[key] !== value),
-      ));
+      await saveEnv(env);
       log.success(`Saved ${ENV_FILE} (${savedKeys.join(', ')})`);
     } catch (err) {
       log.error(`Failed to save env file: ${(err as Error).message}`);
@@ -2610,7 +2590,6 @@ registerDoctorCommand(program);
 registerRappterCommand(program);
 registerFlightRecorderCommand(program);
 registerShowAndTellCommand(program);
-registerCleverGirlCommand(program);
 // Same silence as cron, five more times. `skills`, `agents`, `models` and
 // `update` were implemented, exported from `cli/index.ts`, and never
 // registered, so `openrappter skills list` was not a command — it was a chat
@@ -2620,7 +2599,6 @@ registerSkillsCommand(program);
 registerAgentsCommand(program);
 registerModelsCommand(program);
 registerUpdateCommand(program);
-registerRingsCommand(program);
 // `rappterhub` and `clawhub` are promised in the README but only implemented in
 // the Python runtime, and the installed launcher always prefers TypeScript when
 // `dist/` exists — so both documented commands reached the chat model instead

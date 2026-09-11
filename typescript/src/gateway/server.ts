@@ -32,12 +32,10 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
-import { registerReleaseRingMethods } from './release-ring-rpc.js';
-import { registerEstateBuddyMethods } from './methods/estate-buddy-methods.js';
-import type {
-  EstateBuddyEvidenceDraft,
-  EstateBuddyEvidenceInput,
-} from './estate-buddy-evidence-types.js';
+import { registerWorkspaceMethods, workspaceRpcError } from './methods/workspace-methods.js';
+import { registerVmMethods, vmRpcError } from './methods/vm-methods.js';
+import type { VmSupervisor } from '../vm/types.js';
+import type { VmRappPersistence } from '../vm/rapp-evidence.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
 import {
@@ -340,6 +338,38 @@ interface ParsedFrame {
   params?: Record<string, unknown>;
 }
 
+export interface GatewayServerDependencies {
+  /** One host-owned supervisor per gateway lifetime; never supplied by RPC. */
+  vmSupervisorFactory?: () => VmSupervisor | Promise<VmSupervisor>;
+  /** Supplied by the host's canonical frame persistence owner, never by RPC. */
+  vmRappPersistence?: VmRappPersistence;
+  /** Trusted projection/commit adapter; absent hosts expose a fail-closed contract. */
+  workRappAdapter?: WorkRappAdapter;
+}
+
+export interface WorkRappAdapter {
+  verify(claim: Record<string, unknown>): Promise<unknown>;
+  commit(request: Record<string, unknown>): Promise<unknown>;
+}
+
+interface WorkspaceStoreLike {
+  list(): Promise<unknown[]>;
+  get(agentId: string): Promise<unknown>;
+  ensure(agentId: string): Promise<unknown>;
+  frames(agentId: string, stream: 'body' | 'memory' | 'swarm'): Promise<{
+    frames: readonly unknown[];
+    total: number;
+  }>;
+  appendEvidence(agentId: string, input: {
+    eventKind: string;
+    subject: string;
+    dataHash: string;
+    referenceHashes?: readonly string[];
+    utc?: string;
+  }): Promise<unknown>;
+  appendFrame(agentId: string, stream: 'body' | 'memory' | 'swarm', frame: unknown): Promise<unknown>;
+}
+
 export class GatewayServer {
   private wss: WebSocketServer | null = null;
   private httpServer: ReturnType<typeof createServer> | null = null;
@@ -375,6 +405,10 @@ export class GatewayServer {
   private activeOperations = new Set<ActiveOperation>();
   private readonly metrics = new GatewayMetrics();
   private readinessProvider?: () => Promise<GatewayReadiness>;
+  private readonly vmSupervisorFactory: () => VmSupervisor | Promise<VmSupervisor>;
+  private readonly workRappAdapter?: WorkRappAdapter;
+  private vmSupervisor?: VmSupervisor;
+  private vmSupervisorPromise?: Promise<VmSupervisor>;
 
   // Rappter multi-soul manager
   private rappterManager?: RappterManager;
@@ -425,9 +459,6 @@ export class GatewayServer {
   private agentList?: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[];
   private cronStore: Record<string, unknown>[] = [];
   private surgeonService?: SurgeonService;
-  private estateBuddyAnalyzer?: (
-    input: EstateBuddyEvidenceInput,
-  ) => Promise<EstateBuddyEvidenceDraft>;
   /**
    * The approval queue `exec.pending`/`exec.respond` serve.
    *
@@ -449,8 +480,26 @@ export class GatewayServer {
   private skillsRegistryReady?: Promise<SkillsRegistryLike>;
   /** Override for the bundled `skills/` directory. Tests only. */
   private bundledSkillsDir?: string;
+  private workspaceStoreOverride?: WorkspaceStoreLike;
+  private workspaceStore?: WorkspaceStoreLike;
 
-  constructor(config?: Partial<GatewayConfig>) {
+  /** Trusted host injection, e.g. a store with an explicit swarm signature verifier. */
+  setWorkspaceStore(store: WorkspaceStoreLike): void {
+    this.workspaceStoreOverride = store;
+  }
+
+  private async getWorkspaceStore(): Promise<WorkspaceStoreLike> {
+    if (this.workspaceStoreOverride) return this.workspaceStoreOverride;
+    if (this.workspaceStore) return this.workspaceStore;
+    const { WorkspaceStore } = await import('../workspaces/index.js');
+    const store = new WorkspaceStore({
+      rootDir: path.join(this.config.dataDir ?? openrappterHome(), 'workspaces'),
+    });
+    this.workspaceStore = store;
+    return store;
+  }
+
+  constructor(config?: Partial<GatewayConfig>, dependencies: GatewayServerDependencies = {}) {
     this.config = {
       port: config?.port ?? DEFAULT_PORT,
       bind: config?.bind ?? 'loopback',
@@ -462,6 +511,12 @@ export class GatewayServer {
       executionTimeoutMs: config?.executionTimeoutMs,
       shutdownTimeoutMs: config?.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT,
     };
+    this.vmSupervisorFactory = dependencies.vmSupervisorFactory
+      ?? (async () => {
+        const { createHostTartVmSupervisor } = await import('../vm/tart-vm-supervisor.js');
+        return createHostTartVmSupervisor(this.dataDir, dependencies.vmRappPersistence);
+      });
+    this.workRappAdapter = dependencies.workRappAdapter;
     this.loadSessions();
     this.loadCronStore();
   }
@@ -771,14 +826,6 @@ export class GatewayServer {
     this.surgeonService = service;
   }
 
-  setEstateBuddyAnalyzer(
-    analyzer: (
-      input: EstateBuddyEvidenceInput,
-    ) => Promise<EstateBuddyEvidenceDraft>,
-  ): void {
-    this.estateBuddyAnalyzer = analyzer;
-  }
-
   /** Override the approval engine served by `exec.*` (tests, embedders). */
   setExecSafety(execSafety: ExecSafety): void {
     this.execSafety = execSafety;
@@ -834,6 +881,26 @@ export class GatewayServer {
     provider: (() => Promise<GatewayReadiness>) | undefined,
   ): void {
     this.readinessProvider = provider;
+  }
+
+  private async getVmSupervisor(): Promise<VmSupervisor> {
+    if (this.stopping) throw new GatewayStoppedError();
+    if (this.vmSupervisor) return this.vmSupervisor;
+    if (!this.vmSupervisorPromise) {
+      this.vmSupervisorPromise = Promise.resolve(this.vmSupervisorFactory()).then(async (supervisor) => {
+        if (this.stopping) {
+          await supervisor.shutdown();
+          throw new GatewayStoppedError();
+        }
+        this.vmSupervisor = supervisor;
+        return supervisor;
+      });
+    }
+    try {
+      return await this.vmSupervisorPromise;
+    } finally {
+      this.vmSupervisorPromise = undefined;
+    }
   }
 
   registerMethod<P = unknown, R = unknown>(
@@ -919,7 +986,23 @@ export class GatewayServer {
   }
 
   private async stopInternal(): Promise<void> {
-    if (!this.wss && !this.httpServer && this.startedAt === null) return;
+    // Cancel VM work immediately, before draining other handlers. shutdown()
+    // signals only the supervisor's child, never a pre-existing shared VM.
+    const pendingVm = this.vmSupervisorPromise;
+    const pendingVmShutdown = this.vmSupervisor
+      ? this.vmSupervisor.shutdown()
+      : pendingVm?.then((supervisor) => supervisor.shutdown());
+    const vmShutdown = pendingVmShutdown?.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    this.vmSupervisor = undefined;
+    this.vmSupervisorPromise = undefined;
+    if (!this.wss && !this.httpServer && this.startedAt === null) {
+      const error = await vmShutdown;
+      if (error) throw error;
+      return;
+    }
 
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
@@ -989,6 +1072,8 @@ export class GatewayServer {
     this.startedAt = null;
     this.metrics.stop();
     logGatewayLifecycle('gateway', 'stop', 'Gateway server stopped');
+    const vmError = await vmShutdown;
+    if (vmError) throw vmError;
   }
 
   /**
@@ -1799,7 +1884,13 @@ export class GatewayServer {
               this.metrics.recordRequest('error');
               logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'http', outcome: 'error', durationMs: Date.now() - dispatchStartedAt });
               res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
-              res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: RPC_ERROR.INTERNAL_ERROR, message: (error as Error).message } }));
+              res.end(JSON.stringify({
+                jsonrpc: '2.0', id: parsed.id,
+                error:
+                  workspaceRpcError(error)
+                  ?? vmRpcError(error)
+                  ?? { code: RPC_ERROR.INTERNAL_ERROR, message: (error as Error).message },
+              }));
             }
           } else {
             /**
@@ -2204,6 +2295,10 @@ export class GatewayServer {
       }
       this.metrics.recordRequest('error');
       logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'ws', outcome: 'error', durationMs: Date.now() - startedAt });
+      const rpcError =
+        workspaceRpcError(error)
+        ?? vmRpcError(error)
+        ?? { code: RPC_ERROR.INTERNAL_ERROR, message: (error as Error).message };
       if (!terminalSent && wantsStream) {
         providerSettled = true;
         terminalSent = true;
@@ -2211,10 +2306,10 @@ export class GatewayServer {
           id: frame.id,
           streaming: true,
           done: true,
-          error: { code: RPC_ERROR.INTERNAL_ERROR, message: (error as Error).message },
+          error: rpcError,
         });
       } else if (!wantsStream) {
-        this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.INTERNAL_ERROR, message: (error as Error).message } });
+        this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: rpcError });
       }
     }
   }
@@ -2516,7 +2611,6 @@ export class GatewayServer {
   }
 
   private registerBuiltInMethods(): void {
-    registerReleaseRingMethods(this);
     // Core
     const publicMethods: Array<[string, RpcMethodHandler]> = [
       ['status', async () => this.getStatus()],
@@ -2529,6 +2623,45 @@ export class GatewayServer {
       this.publicHttpMethods.set(name, this.methods.get(name)!);
     }
     this.registerMethod('methods', async () => Array.from(this.methods.keys()));
+    registerWorkspaceMethods(
+      this,
+      () => this.getWorkspaceStore(),
+      (event, payload) => this.broadcastEvent(event, payload),
+    );
+    const workAdapter = (params: unknown): {
+      adapter: WorkRappAdapter;
+      value: Record<string, unknown>;
+    } => {
+      if (
+        typeof params !== 'object'
+        || params === null
+        || Array.isArray(params)
+      ) {
+        throw new Error('RAPP/1 Work adapter parameters must be an object.');
+      }
+      if (!this.workRappAdapter) {
+        throw new Error(
+          'RAPP/1 Work persistence adapter is unavailable; verification and mutations are disabled.',
+        );
+      }
+      return { adapter: this.workRappAdapter, value: params as Record<string, unknown> };
+    };
+    this.registerMethod(
+      'work.rapp.verify',
+      async (params) => {
+        const { adapter, value } = workAdapter(params);
+        return adapter.verify(value);
+      },
+      { requiresAuth: true },
+    );
+    this.registerMethod(
+      'work.rapp.commit',
+      async (params) => {
+        const { adapter, value } = workAdapter(params);
+        return adapter.commit(value);
+      },
+      { requiresAuth: true },
+    );
 
     // Agents
     this.registerMethod('agents.list', async () => this.agentList ? this.agentList() : []);
@@ -3385,6 +3518,13 @@ export class GatewayServer {
     // Showcase methods
     registerShowcaseMethods(this);
     registerRappidMethods(this, { dataDir: this.dataDir });
+    registerVmMethods(this, {
+      getSupervisor: () => this.getVmSupervisor(),
+      hasCredentials: () => this.config.auth?.mode === 'token'
+        ? !!this.config.auth.tokens?.some((token) => token.length > 0)
+        : this.config.auth?.mode === 'password' && !!this.config.auth.password,
+      broadcast: (event, payload) => this.broadcastEvent(event, payload),
+    });
     if (this.surgeonService) {
       registerSurgeonMethods(this, this.surgeonService);
     }
@@ -3397,13 +3537,6 @@ export class GatewayServer {
 
     // Backup & restore methods
     registerBackupMethods(this, { dataDir: this.dataDir });
-
-    // The local-network estate remains owned by RAPP-Herdr. The gateway
-    // exposes its verified roster/chat/create receipts without duplicating
-    // device credentials or SSH routing in OpenRappter.
-    registerEstateBuddyMethods(this, {
-      analyzer: this.estateBuddyAnalyzer,
-    });
 
     // Zen streaming (live terminal screens relayed to browsers).
     //
@@ -3598,20 +3731,47 @@ export class GatewayServer {
     if (!mapping) return;
 
     const envFile = path.join(this.dataDir, '.env');
-    const changes: Record<string, string> = {};
+    const existing: Record<string, string> = {};
+
+    // Read existing env file
+    try {
+      const data = await fs.promises.readFile(envFile, 'utf-8');
+      for (const line of data.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          let val = trimmed.slice(eqIdx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          existing[key] = val;
+        }
+      }
+    } catch { /* file doesn't exist yet */ }
 
     // Update with new values
+    let changed = false;
     for (const [configKey, envKey] of Object.entries(mapping)) {
       const val = config[configKey];
       if (typeof val === 'string' && val) {
-        changes[envKey] = val;
+        existing[envKey] = val;
+        process.env[envKey] = val;
+        changed = true;
       }
     }
 
-    if (Object.keys(changes).length === 0) return;
-    const { updateEnv } = await import('../env.js');
-    await updateEnv(changes, envFile);
-    Object.assign(process.env, changes);
+    if (!changed) return;
+
+    // Write back
+    await fs.promises.mkdir(path.dirname(envFile), { recursive: true });
+    const lines = ['# openrappter environment — managed by openrappter', ''];
+    for (const [key, val] of Object.entries(existing)) {
+      lines.push(`${key}="${val}"`);
+    }
+    lines.push('');
+    await fs.promises.writeFile(envFile, lines.join('\n'));
   }
 
   private getOrCreateSession(sessionId: string, agentId?: string): ChatSession {

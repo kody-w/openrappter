@@ -13,18 +13,6 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Command } from 'commander';
-
-const ringMocks = vi.hoisted(() => ({
-  selectRing: vi.fn(() => 'stable'),
-  resolveRing: vi.fn(async () => ({
-    ring: 'stable',
-    version: '1.9.8',
-    source: { commit: 'a'.repeat(40) },
-    artifact: { install_url: 'https://registry.npmjs.org/openrappter/-/openrappter-1.9.8.tgz' },
-  })),
-}));
-vi.mock('../../release-rings.js', () => ringMocks);
-
 import { registerUpdateCommand } from '../update.js';
 import { checkForUpdate } from '../../infra/update-check.js';
 
@@ -69,13 +57,6 @@ async function runUpdate(args: string[]): Promise<RunResult> {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  ringMocks.selectRing.mockReset().mockReturnValue('stable');
-  ringMocks.resolveRing.mockReset().mockResolvedValue({
-    ring: 'stable',
-    version: '1.9.8',
-    source: { commit: 'a'.repeat(40) },
-    artifact: { install_url: 'https://registry.npmjs.org/openrappter/-/openrappter-1.9.8.tgz' },
-  });
 });
 
 describe('checkForUpdate', () => {
@@ -112,33 +93,64 @@ describe('checkForUpdate', () => {
 });
 
 describe('update command', () => {
-  it('always resolves the effective persisted/default ring even without --ring', async () => {
-    ringMocks.selectRing.mockReturnValue('beta');
-    const result = await runUpdate([]);
-    expect(result.exitCode).toBeUndefined();
-    expect(ringMocks.selectRing).toHaveBeenCalledWith({ cliRing: undefined });
-    expect(ringMocks.resolveRing).toHaveBeenCalledWith('beta', expect.anything());
-  });
+  it('does not claim you are up to date when the check never happened', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('getaddrinfo ENOTFOUND')));
 
-  it('fails nonzero when the effective ring cannot be resolved', async () => {
-    ringMocks.resolveRing.mockRejectedValueOnce(new Error('immutable receipt unreachable'));
     const result = await runUpdate([]);
+
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain('immutable receipt unreachable');
+    expect(result.stderr).toContain('Could not check for updates');
+    expect(`${result.stdout}${result.stderr}`).not.toContain('latest version');
   });
 
-  it('emits the exact resolved identity as JSON', async () => {
+  it('exits nonzero in JSON mode too, the way doctor does', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+
     const result = await runUpdate(['--json']);
-    expect(result.exitCode).toBeUndefined();
-    expect(JSON.parse(result.stdout).version).toBe('1.9.8');
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).checked).toBe(false);
   });
 
-  it('passes explicit CLI ring into the shared precedence resolver', async () => {
-    await runUpdate(['--ring', 'alpha', '--allow-downgrade']);
-    expect(ringMocks.selectRing).toHaveBeenCalledWith({ cliRing: 'alpha' });
-    expect(ringMocks.resolveRing).toHaveBeenCalledWith(
-      'stable',
-      expect.objectContaining({ allowDowngrade: true }),
+  it('says you are up to date only when the registry actually said so', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ version: '0.0.1' }) }),
     );
+
+    const result = await runUpdate([]);
+
+    expect(result.exitCode).toBeUndefined();
+    expect(result.stdout).toContain('You are using the latest version.');
+  });
+
+  /**
+   * `backup.create` was documented as auto-running before updates. It never
+   * did — nothing called it, and updating is a manual `npm install -g`, so
+   * there is no in-product step it could have hung off. Since the product
+   * cannot snapshot for you, the moment it tells you to change the
+   * installation is where it should say a snapshot is possible.
+   */
+  it('points at a backup when it offers an update', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ version: '999.0.0' }) }),
+    );
+
+    const result = await runUpdate([]);
+
+    expect(result.stdout).toContain('A new version is available!');
+    expect(result.stdout).toContain('openrappter backup create');
+  });
+
+  it('does not mention backups when there is nothing to update to', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ version: '0.0.1' }) }),
+    );
+
+    const result = await runUpdate([]);
+
+    expect(result.stdout).not.toContain('openrappter backup create');
   });
 });

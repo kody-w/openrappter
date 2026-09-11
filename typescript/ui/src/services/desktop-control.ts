@@ -1,3 +1,5 @@
+import { VIEW_IDS } from './navigation.js';
+
 interface DesktopElementSnapshot {
   ref: string;
   tag: string;
@@ -18,24 +20,7 @@ interface DesktopUiSnapshot {
   elements: DesktopElementSnapshot[];
 }
 
-const views = new Set([
-  'surgeon',
-  'chat',
-  'show-and-tell',
-  'channels',
-  'sessions',
-  'cron',
-  'config',
-  'logs',
-  'agents',
-  'skills',
-  'devices',
-  'presence',
-  'debug',
-  'showcase',
-  'zen',
-  'accounts',
-]);
+const views = new Set<string>(VIEW_IDS);
 
 const refs = new Map<string, HTMLElement>();
 let snapshotGeneration = 0;
@@ -187,7 +172,7 @@ export function snapshotDesktopUi(): DesktopUiSnapshot {
 
 async function navigate(view: unknown): Promise<Record<string, unknown>> {
   if (typeof view !== 'string' || !views.has(view)) {
-    throw new Error(`Unknown OpenRappter view: ${String(view)}`);
+    throw new Error(`Unknown RAPP Work view: ${String(view)}`);
   }
   const app = document.querySelector('openrappter-app') as
     | (HTMLElement & {
@@ -195,7 +180,7 @@ async function navigate(view: unknown): Promise<Record<string, unknown>> {
         updateComplete?: Promise<unknown>;
       })
     | null;
-  if (!app) throw new Error('OpenRappter app surface is not mounted.');
+  if (!app) throw new Error('RAPP Work app surface is not mounted.');
   app.navigate(view);
   await app.updateComplete;
   return { view };

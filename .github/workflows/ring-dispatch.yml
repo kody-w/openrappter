@@ -1,0 +1,66 @@
+name: Ring — dispatch to canary
+
+# openrappter itself never publishes a prerelease. It only tells the canary
+# ring repo which ref to build. Every ring publish happens in that ring's own
+# repo, against that ring's own npm package, so this repo's release path and
+# the production package stay exactly as they were.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'typescript/**'
+      - 'scripts/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openrappter-ring-dispatch
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    # "Not provisioned yet" and "provisioned and broken" are different facts and
+    # must not share a colour. Unset -> this job is SKIPPED, which GitHub shows
+    # as skipped rather than green: visibly not run, never falsely passing.
+    # Set -> it runs, and a missing token fails loudly below instead of dying on
+    # `gh: set the GH_TOKEN environment variable` with exit 4.
+    if: vars.RING_ENABLED == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to dispatch without the credential
+        env:
+          RING_DISPATCH_TOKEN: ${{ secrets.RING_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RING_DISPATCH_TOKEN}" ]; then
+            echo "::error::RING_ENABLED is true but RING_DISPATCH_TOKEN is not set." >&2
+            echo "Create a fine-grained PAT with contents:write on kody-w/openrappter-canary" >&2
+            echo "only, add it as the repository secret RING_DISPATCH_TOKEN, and re-run." >&2
+            exit 1
+          fi
+          echo "RING_DISPATCH_TOKEN present"
+
+      - name: Record production latest so the ring can prove it did not move
+        id: prod
+        run: |
+          set -euo pipefail
+          latest="$(npm view openrappter dist-tags.latest 2>/dev/null || echo '')"
+          printf 'latest=%s\n' "$latest" >> "$GITHUB_OUTPUT"
+          printf 'production openrappter latest = %s\n' "$latest"
+
+      - name: Ask openrappter-canary to build this ref
+        env:
+          # Fine-grained PAT with contents:write on kody-w/openrappter-canary only.
+          GH_TOKEN: ${{ secrets.RING_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api repos/kody-w/openrappter-canary/dispatches \
+            -f event_type=promote \
+            -F "client_payload[ref]=${GITHUB_SHA}" \
+            -F "client_payload[production_latest]=${{ steps.prod.outputs.latest }}"
+          echo "dispatched ${GITHUB_SHA} to openrappter-canary"

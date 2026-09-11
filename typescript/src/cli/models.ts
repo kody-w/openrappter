@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { loadEnv, updateEnv } from '../env.js';
+import { loadEnv, saveEnv } from '../env.js';
 import { COPILOT_DEFAULT_MODELS, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js';
 
 const EMOJI = '🦖';
@@ -122,10 +122,12 @@ export function registerModelsCommand(program: Command): void {
 
       const { model: previous, shadowedByEnvironment } = await resolveActiveModel();
 
+      const env = await loadEnv();
+      env.OPENRAPPTER_MODEL = requested;
       try {
-        await updateEnv({ OPENRAPPTER_MODEL: requested });
+        await saveEnv(env);
       } catch (err) {
-        // updateEnv verifies its own read-back. A failure there means the file on
+        // saveEnv verifies its own read-back. A failure there means the file on
         // disk is not what we just claimed to write.
         fail(`Failed to save model: ${err instanceof Error ? err.message : String(err)}`);
       }

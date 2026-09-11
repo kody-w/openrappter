@@ -15,8 +15,6 @@ contextBridge.exposeInMainWorld('openrappterDesktop', {
     ipcRenderer.invoke('openrappter:desktop-control', request),
   narration: (request: DesktopShowAndTellRequest) =>
     ipcRenderer.invoke('openrappter:narration', request),
-  buddyEvidence: (request: DesktopShowAndTellRequest) =>
-    ipcRenderer.invoke('openrappter:buddy-evidence', request),
   onNarrationStatus: (
     callback: (status: Record<string, unknown>) => void,
   ) => {

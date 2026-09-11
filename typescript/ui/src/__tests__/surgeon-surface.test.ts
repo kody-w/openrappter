@@ -9,14 +9,15 @@ function read(relativePath: string): string {
 }
 
 describe('OpenRappter surgeon surface', () => {
-  it('makes the adaptive surgeon the default interaction instead of the dashboard shell', () => {
+  it('retains the adaptive surgeon as a specialist behind the Work landing view', () => {
     const app = read('components/app.ts');
     const main = read('main.ts');
 
     expect(main).toContain("import './components/surgeon.js'");
-    expect(app).toContain("private currentView: View = 'surgeon'");
+    expect(app).toContain("private currentView: View = 'work'");
     expect(app).toContain('<openrappter-surgeon');
-    expect(app).toContain("this.currentView === 'surgeon'");
+    expect(app).toContain("case 'surgeon'");
+    expect(read('components/sidebar.ts')).toContain("private compatibilityItems");
   });
 
   it('uses the OpenRappter patient and Copilot surgeon framing', () => {
@@ -39,14 +40,14 @@ describe('OpenRappter surgeon surface', () => {
     expect(surgeon).toContain('portal');
   });
 
-  it('keeps static system pages behind a secondary anatomy action', () => {
+  it('keeps the specialist anatomy action and a route back to Work', () => {
     const surgeon = read('components/surgeon.ts');
     const app = read('components/app.ts');
 
     expect(surgeon).toContain('Open anatomy');
     expect(surgeon).toContain("this.navigate('presence')");
-    expect(app.indexOf("this.currentView === 'surgeon'"))
-      .toBeLessThan(app.indexOf('<openrappter-sidebar'));
+    expect(app).toContain('Back to Work');
+    expect(app).toContain("this.navigate('work')");
   });
 
   it('requires visible approval before an AI-proposed procedure can run', () => {
@@ -73,8 +74,8 @@ describe('OpenRappter surgeon resilience', () => {
   it('offers an explicit reconnect instead of an unrecoverable spinner', () => {
     const app = read('components/app.ts');
 
-    expect(app).toContain('this.connecting && !this.connected');
-    expect(app).toContain('The OpenRappter patient is unreachable.');
+    expect(app).toContain('RAPP Work is waiting for your gateway.');
+    expect(app).toContain("this.currentView === 'work' || this.connected");
     expect(app).toContain('Reconnect');
     expect(app).toContain('void this.connectToGateway()');
   });

@@ -7,7 +7,6 @@ Uses local JSON file storage (no external dependencies).
 from __future__ import annotations
 
 import os
-import stat
 
 import json
 from pathlib import Path
@@ -103,34 +102,12 @@ class ContextMemoryAgent(BasicAgent):
     
     def _load_memories(self) -> dict:
         """Load memories from file."""
-        try:
-            descriptor = os.open(
-                self.memory_file, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            )
-        except FileNotFoundError:
-            return {}
-        except OSError as error:
-            raise RuntimeError("Memory store could not be read") from error
-        with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
-            status = os.fstat(stream.fileno())
-            if not stat.S_ISREG(status.st_mode) or status.st_nlink not in (0, 1):
-                raise RuntimeError("Memory store paths must be regular files, not links")
-
-            def invalid_constant(_value):
-                raise ValueError("Non-JSON numeric constant")
-
+        if self.memory_file.exists():
             try:
-                memories = json.load(stream, parse_constant=invalid_constant)
-            except (ValueError, UnicodeError) as error:
-                raise RuntimeError("Memory store is not valid JSON") from error
-        if not isinstance(memories, dict) or any(
-            not isinstance(entry, dict) or not isinstance(entry.get("message"), str)
-            for entry in memories.values()
-        ):
-            raise RuntimeError(
-                "Memory store must be an object of memory entries with string messages"
-            )
-        return memories
+                return json.loads(self.memory_file.read_text())
+            except json.JSONDecodeError:
+                return {}
+        return {}
     
     def _recall_context(
         self,

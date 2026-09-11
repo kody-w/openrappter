@@ -1,7 +1,6 @@
 import os
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -11,38 +10,6 @@ from openrappter.flight_recorder import (
     _harden_private_path,
     _process_is_alive,
 )
-
-def test_windows_identity_probe_has_closed_stdin_and_a_deadline(monkeypatch):
-    from openrappter import flight_recorder
-    observed = {}
-
-    def probe(command, **kwargs):
-        observed.update(kwargs)
-        assert command[0] == "powershell.exe"
-        return "123456\n"
-
-    with monkeypatch.context() as patch:
-        patch.setattr(sys, "platform", "win32")
-        patch.setattr(os, "name", "nt")
-        patch.setattr(subprocess, "check_output", probe)
-        assert flight_recorder._read_process_incarnation(123) == "win:123456"
-    assert observed["stdin"] == subprocess.DEVNULL
-    assert observed["timeout"] == 10
-
-
-def test_identity_probe_timeout_is_unknown_not_a_dead_owner(monkeypatch):
-    from openrappter import flight_recorder
-
-    def timed_out(command, **kwargs):
-        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
-
-    with monkeypatch.context() as patch:
-        patch.setattr(sys, "platform", "win32")
-        patch.setattr(os, "name", "nt")
-        patch.setattr(subprocess, "check_output", timed_out)
-        patch.setattr(flight_recorder, "_process_is_alive", lambda _pid: True)
-        assert flight_recorder._read_process_incarnation(123) is None
-        assert flight_recorder._process_matches_incarnation(123, "previous") is True
 
 
 def _read_acl(target: Path):

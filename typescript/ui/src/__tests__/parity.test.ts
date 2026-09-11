@@ -1,8 +1,8 @@
 /**
- * Secondary anatomy compatibility tests.
+ * Secondary compatibility tests.
  *
- * The Copilot Surgeon is the primary interaction. These checks keep the
- * previous operational pages available behind it for direct inspection.
+ * RAPP Work is the primary interaction. These checks keep the previous
+ * operational pages available for direct inspection.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -36,7 +36,7 @@ function findAllTsFiles(dir: string): string[] {
 
 // ===== Feature Parity Tests =====
 
-describe('OpenRappter anatomy compatibility surfaces', () => {
+describe('RAPP Work legacy compatibility surfaces', () => {
   // --- Views / Tabs ---
   
   const legacyViews = [
@@ -52,7 +52,7 @@ describe('OpenRappter anatomy compatibility surfaces', () => {
     'skills',
   ];
 
-  it('keeps all legacy operational view tabs available as anatomy', () => {
+  it('keeps all legacy operational view tabs available', () => {
     const sidebarSrc = readFile(path.join(uiRoot, 'components', 'sidebar.ts'));
     
     for (const view of legacyViews) {
@@ -63,7 +63,7 @@ describe('OpenRappter anatomy compatibility surfaces', () => {
     }
   });
 
-  it('routes all legacy operational views behind the surgeon', () => {
+  it('routes all legacy operational views behind Work', () => {
     const appSrc = readFile(path.join(uiRoot, 'components', 'app.ts'));
     
     for (const view of legacyViews) {
@@ -119,9 +119,6 @@ describe('OpenRappter anatomy compatibility surfaces', () => {
     'config.get',
     'config.set',
     'config.apply',
-    'rings.get',
-    'rings.preview',
-    'rings.apply',
   ];
 
   it('openrappter services reference all required RPC methods', () => {
@@ -145,7 +142,6 @@ describe('OpenRappter anatomy compatibility surfaces', () => {
     'cron.ts',
     'logs.ts',
     'presence.ts',
-    'release-rings.ts',
   ];
 
   it('openrappter has all required controller services', () => {
@@ -287,10 +283,12 @@ describe('OpenRappter anatomy compatibility surfaces', () => {
     expect(indexHtml).toContain('--text-primary');
   });
 
-  it('positions the surgeon above the secondary anatomy navigation', () => {
+  it('positions Work above a secondary specialist compatibility area', () => {
     const sidebarSrc = readFile(path.join(uiRoot, 'components', 'sidebar.ts'));
-    expect(sidebarSrc).toContain('Operating room');
-    expect(sidebarSrc).toContain('Anatomy');
+    expect(sidebarSrc).toContain("id: 'work', label: 'Work'");
+    expect(sidebarSrc).toContain('Compatibility');
     expect(sidebarSrc).toContain('Copilot Surgeon');
+    expect(sidebarSrc).not.toContain('Operating room');
+    expect(sidebarSrc).not.toContain('Anatomy');
   });
 });

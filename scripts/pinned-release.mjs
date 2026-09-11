@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Prepare commit-pinned build notes and request constitution-gated publication.
+ * Prepare and publish a commit-pinned, source-only OpenRappter release.
  *
  * WHY A SCRIPT AND NOT A CHECKLIST
  * --------------------------------
@@ -25,7 +25,9 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { parsePackageReleaseTag } from './release-preflight.mjs';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 const REPOSITORY = process.env.OPENRAPPTER_REPOSITORY ?? 'kody-w/openrappter';
 const INSTALLER_FILES = ['install-pinned.sh'];
@@ -114,16 +116,15 @@ function buildNotes(commit, version) {
   const hashLines = hashes.map((h) => `- \`${h.file}\` — \`${h.sha256}\``).join('\n');
   const subject = git(['log', '-1', '--format=%s', commit]);
 
-  return `OpenRappter ${version} — local commit-pinned build notes.
+  return `OpenRappter ${version} — source-only, commit-pinned.
 
 **Release commit:** \`${commit}\`
 **Package version:** \`${packageVersion ?? 'unknown'}\`
 **Head commit subject:** ${subject}
 
-These are **local build instructions**, not distribution authorization.
-The installer builds OpenRappter locally from this exact commit and downloads
-no prebuilt application. Public distribution still requires the complete
-Release Constitution receipt chain and its exact immutable candidate bytes.
+This release is **source-only**. No binaries are attached. The installer builds
+OpenRappter locally from this exact commit and downloads no prebuilt
+application.
 
 ## Install
 
@@ -164,8 +165,8 @@ if (!command || command === 'help') {
   process.stdout.write(
     'Usage:\n'
     + '  node scripts/pinned-release.mjs hashes  --commit <sha>\n'
-    + '  node scripts/pinned-release.mjs notes   --commit <sha> --version <vX.Y.Z[-PRERELEASE]>\n'
-    + '  node scripts/pinned-release.mjs publish --commit <sha> --version <vX.Y.Z[-PRERELEASE]> [--dry-run]\n',
+    + '  node scripts/pinned-release.mjs notes   --commit <sha> --version <vX.Y.Z>\n'
+    + '  node scripts/pinned-release.mjs publish --commit <sha> --version <vX.Y.Z> [--dry-run]\n',
   );
   process.exit(command ? 0 : 1);
 }
@@ -181,11 +182,7 @@ if (command === 'hashes') {
 
 const version = typeof args.version === 'string' ? args.version : undefined;
 if (!version) fail('--version is required (e.g. --version v1.10.1).');
-try {
-  parsePackageReleaseTag(version);
-} catch (error) {
-  fail(error.message);
-}
+if (!/^v\d+\.\d+\.\d+/.test(version)) fail(`--version must look like v1.2.3; got '${version}'.`);
 
 if (command === 'notes') {
   process.stdout.write(buildNotes(commit, version));
@@ -194,22 +191,42 @@ if (command === 'notes') {
 
 if (command !== 'publish') fail(`unknown command '${command}'.`);
 
-if (REPOSITORY !== 'kody-w/openrappter') {
-  fail('publication requests must use the canonical constitution-governed repository.');
-}
-if (version !== `v${readVersionAtCommit(commit)}`) {
-  fail('publication request version must match the exact source commit.');
-}
-const request = [
-  'workflow', 'run', 'create-release-tag.yml',
-  '--repo', REPOSITORY, '--ref', 'main',
-  '--field', `expected_commit=${commit}`,
-  '--field', `expected_tag=${version}`,
-];
-if (args['dry-run']) {
-  process.stdout.write(`${buildNotes(commit, version)}\n`);
-  process.stdout.write(`[pinned-release] dry run — request only: gh ${request.join(' ')}\n`);
-} else {
-  execFileSync('gh', request, { stdio: 'inherit' });
-  process.stdout.write('[pinned-release] requested the Release Constitution gate; nothing is published by this script.\n');
+// ── publish ──────────────────────────────────────────────────────────────────
+const notes = buildNotes(commit, version);
+const workDir = mkdtempSync(path.join(tmpdir(), 'openrappter-release-'));
+const notesFile = path.join(workDir, 'release-notes.md');
+writeFileSync(notesFile, notes);
+
+try {
+  if (args['dry-run']) {
+    process.stdout.write(notes);
+    process.stdout.write(`\n[pinned-release] dry run — would publish ${version} at ${commit}\n`);
+    process.exit(0);
+  }
+
+  // The tag must already exist and point at this commit. Creating it here would
+  // let a release be published for a commit whose CI never ran.
+  let taggedCommit;
+  try {
+    taggedCommit = git(['rev-list', '-n', '1', version]);
+  } catch {
+    fail(`tag ${version} does not exist. Create and push it first:\n`
+      + `  git tag -a ${version} ${commit} -m "OpenRappter ${version}"\n`
+      + `  git push origin ${version}`);
+  }
+  if (taggedCommit !== commit) {
+    fail(`tag ${version} points at ${taggedCommit}, not ${commit}.`);
+  }
+
+  execFileSync('gh', [
+    'release', 'create', version,
+    '--repo', REPOSITORY,
+    '--verify-tag',
+    '--title', `OpenRappter ${version}`,
+    '--notes-file', notesFile,
+  ], { stdio: 'inherit' });
+
+  process.stdout.write(`[pinned-release] published ${version} at ${commit}\n`);
+} finally {
+  rmSync(workDir, { recursive: true, force: true });
 }

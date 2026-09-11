@@ -1,17 +1,13 @@
 {
   "name": "openrappter-desktop",
-  "version": "1.13.1",
-  "description": "Electron desktop shell for OpenRappter",
+  "version": "1.13.0",
+  "description": "RAPP Work — Your local AI workforce. Desktop workspace for local business AI.",
   "author": "Wildhaven Homes LLC",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/main.js",
   "dependencies": {
-    "@ffmpeg-installer/ffmpeg": "1.1.0",
-    "@ffprobe-installer/ffprobe": "2.1.2",
     "@huggingface/transformers": "4.2.0",
-    "mammoth": "1.12.1",
-    "pdf-parse": "2.4.5",
     "typescript": "^5.4.0"
   },
   "overrides": {
@@ -23,17 +19,21 @@
     "start": "npm run build && electron .",
     "dev": "npm run build && electron .",
     "test": "node --test test/*.test.mjs",
-    "dist": "npm run build && electron-builder",
+    "dist": "npm run build && electron-builder --publish never",
+    "release:manifest": "node scripts/release-artifacts.mjs",
+    "install:local": "node scripts/install-local.mjs",
     "postinstall": "node scripts/install-runtime.mjs"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@types/node": "^22.0.0",
     "electron": "41.10.3",
     "electron-builder": "26.15.3"
   },
   "build": {
     "appId": "com.openrappter.desktop",
-    "productName": "OpenRappter",
+    "productName": "RAPP Work",
+    "afterPack": "scripts/release-artifacts.mjs",
     "icon": "build/icon.png",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "asar": true,
@@ -44,6 +44,7 @@
       "package.json"
     ],
     "mac": {
+      "executableName": "RAPP Work",
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
@@ -51,8 +52,8 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "OpenRappter records optional Show-and-Tell narration for local Whisper transcription.",
-        "NSAppleEventsUsageDescription": "OpenRappter reads the active application and window title while Show-and-Tell is recording."
+        "NSMicrophoneUsageDescription": "RAPP Work records optional Show-and-Tell narration for local Whisper transcription.",
+        "NSAppleEventsUsageDescription": "RAPP Work reads the active application and window title while Show-and-Tell is recording."
       },
       "target": [
         "dmg",
@@ -60,11 +61,13 @@
       ]
     },
     "win": {
+      "executableName": "OpenRappter",
       "target": [
         "nsis"
       ]
     },
     "linux": {
+      "executableName": "openrappter",
       "category": "Utility",
       "target": [
         "AppImage"
@@ -74,9 +77,7 @@
       "runtime/node_modules/**/*.node",
       "runtime/node_modules/openrappter/dist/agents/python/**/*",
       "node_modules/**/*.node",
-      "node_modules/onnxruntime-node/bin/**/*",
-      "node_modules/@ffmpeg-installer/**/*",
-      "node_modules/@ffprobe-installer/**/*"
+      "node_modules/onnxruntime-node/bin/**/*"
     ]
   }
 }

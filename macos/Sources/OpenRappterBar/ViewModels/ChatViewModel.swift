@@ -26,26 +26,6 @@ public final class ChatViewModel {
     // Services
     private var rpcClient: RpcClient?
     private var sessionStore: SessionStore?
-    private var viewGeneration: UInt = 0
-    private var turnGeneration: UInt = 0
-    private var messageRevision: UInt = 0
-    private var activeRunId: String?
-    private var awaitingAcceptance = false
-    private var earlyEvents: [ChatEventPayload] = []
-    private var finishedRuns: Set<RunKey> = []
-    private var finishedRunOrder: [RunKey] = []
-    private var cachedRuns: Set<RunKey> = []
-    private var cachedRunOrder: [RunKey] = []
-    private var partialReplies: [RunKey: String] = [:]
-    private var cacheTask: Task<Void, Never>?
-
-    private struct RunKey: Hashable {
-        let session: String
-        let run: String
-    }
-
-    public var onSessionsChanged: (() -> Void)?
-    public var onEventApplied: ((ChatEventPayload) -> Void)?
 
     /// Called when the gateway reports a GitHub/Copilot auth failure. The host
     /// should kick off the device-code flow inline (no manual button click).
@@ -65,11 +45,7 @@ public final class ChatViewModel {
     // MARK: - Computed
 
     public var canSend: Bool {
-        switch chatState {
-        case .sending, .streaming: return false
-        case .idle, .error:
-            return !chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
+        !chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     public var hasMessages: Bool {
@@ -89,13 +65,6 @@ public final class ChatViewModel {
 
     public func clearConfiguration() {
         rpcClient = nil
-        invalidateView()
-        partialReplies.removeAll()
-        if case .sending = chatState {
-            chatState = .error("Connection lost while sending. Reconnect to check the conversation before retrying.")
-        } else if case .streaming = chatState {
-            chatState = .error("Connection lost. Reconnect to recover the response.")
-        }
     }
 
     var isRpcClientConfigured: Bool {
@@ -104,92 +73,78 @@ public final class ChatViewModel {
 
     // MARK: - Actions
 
-    @discardableResult
-    public func sendMessage() -> Task<Void, Never> {
+    public func sendMessage() {
         let text = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSend, let rpc = rpcClient else { return Task {} }
-        if let activeRunId, let currentSessionKey {
-            finishRun(session: currentSessionKey, run: activeRunId)
-        }
-        let sessionKey = currentSessionKey.flatMap { $0.isEmpty ? nil : $0 }
-            ?? "session_\(UUID().uuidString)"
-        if currentSessionKey != sessionKey { viewGeneration &+= 1 }
-        invalidateTurn()
-        let generation = turnGeneration
-        let target = chatTarget
-        let store = sessionStore
-        currentSessionKey = sessionKey
-        awaitingAcceptance = true
+        guard !text.isEmpty, let rpc = rpcClient else { return }
 
         chatInput = ""
         chatState = .sending
         streamingText = ""
 
+        // Add user message
         let userMsg = ChatMessage(
             role: .user,
             content: text,
-            sessionKey: sessionKey
+            sessionKey: currentSessionKey ?? ""
         )
         messages.append(userMsg)
-        messageRevision &+= 1
-        let saved = cacheMessage(userMsg, store: store)
 
-        return Task {
-            await saved.value
+        Task {
+            // Persist user message
+            await sessionStore?.addMessage(userMsg)
 
             do {
                 let accepted = try await rpc.sendChat(
                     message: text,
-                    sessionKey: sessionKey,
-                    target: target
+                    sessionKey: currentSessionKey,
+                    target: chatTarget
                 )
-                guard accepted.sessionKey == sessionKey else {
-                    throw RpcClientError.decodingFailed("Gateway accepted a different conversation")
+                currentSessionKey = accepted.sessionKey
+
+                // Update the user message with correct sessionKey if it changed
+                if userMsg.sessionKey.isEmpty {
+                    let updated = ChatMessage(
+                        id: userMsg.id,
+                        role: .user,
+                        content: text,
+                        timestamp: userMsg.timestamp,
+                        sessionKey: accepted.sessionKey
+                    )
+                    if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
+                        messages[idx] = updated
+                    }
+                    await sessionStore?.addMessage(updated)
                 }
-                guard isCurrentTurn(generation, session: sessionKey) else { return }
-                activeRunId = accepted.runId
-                awaitingAcceptance = false
+
+                // Ensure session exists
+                await sessionStore?.ensureSession(sessionKey: accepted.sessionKey)
                 chatState = .streaming
-                let queued = earlyEvents
-                earlyEvents.removeAll()
-                for event in queued where event.runId == accepted.runId {
-                    applyChatEvent(event)
-                }
             } catch {
+                chatState = .error(error.localizedDescription)
                 let errMsg = ChatMessage(
                     role: .error,
                     content: "Send failed: \(error.localizedDescription)",
-                    sessionKey: sessionKey
+                    sessionKey: currentSessionKey ?? ""
                 )
-                await cacheMessage(errMsg, store: store).value
-                guard isCurrentTurn(generation, session: sessionKey) else { return }
-                awaitingAcceptance = false
-                earlyEvents.removeAll()
-                chatState = .error(error.localizedDescription)
                 messages.append(errMsg)
-                messageRevision &+= 1
             }
         }
     }
 
-    @discardableResult
-    public func abortChat() -> Task<Void, Never> {
-        guard let sessionKey = currentSessionKey, let rpc = rpcClient else { return Task {} }
-        let generation = turnGeneration
-        let runId = activeRunId
-        return Task {
+    public func abortChat() {
+        guard let sessionKey = currentSessionKey, let rpc = rpcClient else { return }
+        Task {
             do {
-                try await rpc.abortChat(sessionKey: sessionKey, runId: runId)
-                guard isCurrentTurn(generation, session: sessionKey),
-                      activeRunId == nil || activeRunId == runId else { return }
-                if let runId { finishRun(session: sessionKey, run: runId) }
-                activeRunId = nil
+                try await rpc.abortChat(sessionKey: sessionKey)
                 chatState = .idle
                 streamingText = ""
             } catch {
-                guard isCurrentTurn(generation, session: sessionKey),
-                      activeRunId == nil || activeRunId == runId else { return }
-                if let runId, finishedRuns.contains(RunKey(session: sessionKey, run: runId)) { return }
+                // Not silent: the Stop button only renders while `chatState` is
+                // `.streaming`, so a failed abort left the UI streaming with a
+                // button that did nothing however many times it was pressed, and
+                // no way to tell that the request had not landed. Surfacing the
+                // failure also restores the input, because `.error` is not
+                // `.streaming`.
                 chatState = .error("Could not stop the response: \(error.localizedDescription)")
             }
         }
@@ -198,51 +153,6 @@ public final class ChatViewModel {
     // MARK: - Event Handling
 
     public func handleChatEvent(_ payload: ChatEventPayload) {
-        let key = RunKey(session: payload.sessionKey, run: payload.runId)
-        guard !cachedRuns.contains(key) else { return }
-        var event = payload
-        if payload.state == .delta, let text = payload.messageText {
-            if partialReplies.count >= 128, partialReplies[key] == nil,
-               let oldest = partialReplies.keys.first {
-                partialReplies.removeValue(forKey: oldest)
-            }
-            partialReplies[key] = text
-        } else if payload.state != .delta {
-            let text = payload.messageText ?? partialReplies[key]
-            finishCachedRun(key)
-            if payload.state == .final_, let text, !text.isEmpty {
-                cacheMessage(ChatMessage(
-                    id: "reply:\(payload.sessionKey):\(payload.runId)", role: .assistant,
-                    content: text, sessionKey: payload.sessionKey
-                ), store: sessionStore)
-                event = ChatEventPayload(
-                    runId: payload.runId, sessionKey: payload.sessionKey,
-                    state: payload.state, messageText: text, errorMessage: payload.errorMessage
-                )
-            }
-        }
-        guard payload.sessionKey == currentSessionKey,
-              !finishedRuns.contains(RunKey(session: payload.sessionKey, run: payload.runId)) else { return }
-        if awaitingAcceptance {
-            // The event callback can reach MainActor before the RPC continuation.
-            if earlyEvents.count == 128 { earlyEvents.removeFirst() }
-            earlyEvents.append(event)
-            return
-        }
-        applyChatEvent(event)
-    }
-
-    private func applyChatEvent(_ payload: ChatEventPayload) {
-        guard payload.sessionKey == currentSessionKey,
-              !finishedRuns.contains(RunKey(session: payload.sessionKey, run: payload.runId)) else { return }
-        guard activeRunId == nil || activeRunId == payload.runId else { return }
-        activeRunId = payload.runId
-        if payload.state != .delta {
-            finishRun(session: payload.sessionKey, run: payload.runId)
-            activeRunId = nil
-        }
-        messageRevision &+= 1
-        defer { onEventApplied?(payload) }
         switch payload.state {
         case .delta:
             streamingText = payload.messageText ?? streamingText
@@ -252,12 +162,12 @@ public final class ChatViewModel {
             let finalText = payload.messageText ?? streamingText
             if !finalText.isEmpty {
                 let msg = ChatMessage(
-                    id: "reply:\(payload.sessionKey):\(payload.runId)",
                     role: .assistant,
                     content: finalText,
                     sessionKey: payload.sessionKey
                 )
-                if !messages.contains(where: { $0.id == msg.id }) { messages.append(msg) }
+                messages.append(msg)
+                Task { await sessionStore?.addMessage(msg) }
             }
             streamingText = ""
             chatState = .idle
@@ -330,30 +240,20 @@ public final class ChatViewModel {
 
     // MARK: - Session Switching
 
-    @discardableResult
-    public func switchToSession(sessionKey: String) -> Task<Void, Never> {
-        invalidateView()
-        let generation = viewGeneration
+    public func switchToSession(sessionKey: String) {
         currentSessionKey = sessionKey
-        messages = []
         streamingText = ""
         chatState = .idle
-        let store = sessionStore
-        let rpc = rpcClient
-        let revision = messageRevision
 
-        return Task {
-            await flushPendingMessages()
-            let cached = await store?.getMessages(sessionKey: sessionKey) ?? []
-            guard isCurrentView(generation, session: sessionKey) else { return }
-            let liveIds = Set(messages.map(\.id))
-            messages = cached.filter { !liveIds.contains($0.id) } + messages
+        Task {
+            // Load messages from local cache
+            let cached = await sessionStore?.getMessages(sessionKey: sessionKey) ?? []
+            messages = cached
 
-            if let rpc {
+            // Try to load from gateway
+            if let rpc = rpcClient {
                 do {
                     let gatewayMessages = try await rpc.getSessionMessages(sessionKey: sessionKey)
-                    guard isCurrentView(generation, session: sessionKey),
-                          revision == messageRevision else { return }
                     let parsed = gatewayMessages.compactMap { parseGatewayMessage($0, sessionKey: sessionKey) }
                     if !parsed.isEmpty {
                         messages = parsed
@@ -366,26 +266,15 @@ public final class ChatViewModel {
     }
 
     public func clearMessages() {
-        if let activeRunId, let currentSessionKey {
-            finishRun(session: currentSessionKey, run: activeRunId)
-        }
-        invalidateView()
         messages = []
         streamingText = ""
         chatState = .idle
         if let sessionKey = currentSessionKey {
-            let store = sessionStore
-            let previous = cacheTask
-            cacheTask = Task {
-                await previous?.value
-                await store?.clearMessages(sessionKey: sessionKey)
-                onSessionsChanged?()
-            }
+            Task { await sessionStore?.clearMessages(sessionKey: sessionKey) }
         }
     }
 
     public func newSession() {
-        invalidateView()
         currentSessionKey = nil
         messages = []
         streamingText = ""
@@ -400,70 +289,13 @@ public final class ChatViewModel {
             sessionKey: currentSessionKey ?? "system"
         )
         messages.append(msg)
-        messageRevision &+= 1
     }
 
     // MARK: - Private
 
-    private func invalidateView() {
-        viewGeneration &+= 1
-        invalidateTurn()
-    }
-
-    private func invalidateTurn() {
-        turnGeneration &+= 1
-        activeRunId = nil
-        awaitingAcceptance = false
-        earlyEvents.removeAll()
-    }
-
-    private func isCurrentView(_ generation: UInt, session: String) -> Bool {
-        generation == viewGeneration && currentSessionKey == session
-    }
-
-    private func isCurrentTurn(_ generation: UInt, session: String) -> Bool {
-        generation == turnGeneration && currentSessionKey == session
-    }
-
-    public func flushPendingMessages() async {
-        await cacheTask?.value
-    }
-
-    @discardableResult
-    private func cacheMessage(_ message: ChatMessage, store: SessionStore?) -> Task<Void, Never> {
-        guard let store else { return Task {} }
-        let previous = cacheTask
-        let task = Task {
-            await previous?.value
-            await store.addMessage(message)
-            onSessionsChanged?()
-        }
-        cacheTask = task
-        return task
-    }
-
-    private func finishCachedRun(_ key: RunKey) {
-        partialReplies.removeValue(forKey: key)
-        guard cachedRuns.insert(key).inserted else { return }
-        cachedRunOrder.append(key)
-        if cachedRunOrder.count > 256 {
-            cachedRuns.remove(cachedRunOrder.removeFirst())
-        }
-    }
-
-    private func finishRun(session: String, run: String) {
-        let key = RunKey(session: session, run: run)
-        finishCachedRun(key)
-        guard finishedRuns.insert(key).inserted else { return }
-        finishedRunOrder.append(key)
-        if finishedRunOrder.count > 256 {
-            finishedRuns.remove(finishedRunOrder.removeFirst())
-        }
-    }
-
     private func parseGatewayMessage(_ data: [String: Any], sessionKey: String) -> ChatMessage? {
         guard let role = data["role"] as? String else { return nil }
-        let messageRole = MessageRole(rawValue: role) ?? .assistant
+        let messageRole: MessageRole = role == "user" ? .user : .assistant
 
         var content = ""
         if let contentArray = data["content"] as? [[String: Any]] {
@@ -478,11 +310,17 @@ public final class ChatViewModel {
 
         guard !content.isEmpty else { return nil }
 
+        let timestamp: Date
+        if let ts = data["timestamp"] as? Double {
+            timestamp = Date(timeIntervalSince1970: ts / 1000)
+        } else {
+            timestamp = Date()
+        }
+
         return ChatMessage(
-            id: data["id"] as? String ?? UUID().uuidString,
             role: messageRole,
             content: content,
-            timestamp: gatewayDate(data["timestamp"]) ?? Date(),
+            timestamp: timestamp,
             sessionKey: sessionKey
         )
     }

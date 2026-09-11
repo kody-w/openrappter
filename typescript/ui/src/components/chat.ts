@@ -4,29 +4,17 @@
  * session picker, message grouping, tool sidebar, focus mode, and attachments.
  */
 
-import { LitElement, html, css, nothing } from 'lit';
-import { customElement, state, query } from 'lit/decorators.js';
+import { LitElement, html, css, nothing, type PropertyValues } from 'lit';
+import { customElement, property, state, query } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { gateway } from '../services/gateway.js';
 import { renderMarkdown } from '../services/markdown.js';
 import { createLocalSpeech, spokenLineFrom } from '../../../src/voice/local-speech.js';
 import { desktopBridge } from '../services/desktop.js';
 import type { ChatSessionSummary, Attachment } from '../types.js';
-import {
-  analyzeEstateBuddyEvidence,
-  chatWithEstateBuddy,
-  createEstateBuddy,
-  listEstateBuddies,
-  type EstateBuddy,
-  type EstateBuddyEvidenceSource,
-} from '../services/estate-buddies.js';
 
 const AGENT_RUN_OVERALL_TIMEOUT_MS = 30 * 60_000;
 const RUN_ABORT_TIMEOUT_MS = 5_000;
-const MAX_ESTATE_EVIDENCE_FILES = 3;
-const MAX_ESTATE_EVIDENCE_BYTES = 100 * 1024 * 1024;
-const MAX_ESTATE_DOCUMENT_BYTES = 20 * 1024 * 1024;
-const MAX_ESTATE_EVIDENCE_TOTAL_BYTES = 150 * 1024 * 1024;
 /** Remembers which brain the operator last chose to talk to. */
 const CHAT_TARGET_STORAGE_KEY = 'openrappter.chat.target';
 
@@ -66,6 +54,14 @@ interface AttachmentPreview {
 
 @customElement('openrappter-chat')
 export class OpenRappterChat extends LitElement {
+  @property({ attribute: false }) initialSessionId: string | null = null;
+
+  protected willUpdate(changes: PropertyValues) {
+    if (changes.has('initialSessionId') && this.initialSessionId) {
+      void this.switchSession(this.initialSessionId);
+    }
+  }
+
   static styles = css`
     :host {
       display: flex;
@@ -703,158 +699,6 @@ export class OpenRappterChat extends LitElement {
       cursor: not-allowed;
     }
 
-    .estate-toolbar,
-    .estate-create {
-      display: flex;
-      gap: 0.5rem;
-      align-items: center;
-      padding-bottom: 0.75rem;
-    }
-
-    .estate-toolbar .buddy-select {
-      min-width: 220px;
-      flex: 1;
-    }
-
-    .presence-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--error);
-      flex-shrink: 0;
-    }
-
-    .presence-dot.online {
-      background: #22c55e;
-      box-shadow: 0 0 6px rgb(34 197 94 / 60%);
-    }
-
-    .estate-create {
-      align-items: stretch;
-      flex-wrap: wrap;
-      padding: 0.75rem;
-      margin-bottom: 0.75rem;
-      border: 1px solid var(--border);
-      border-radius: 0.5rem;
-      background: var(--bg-tertiary);
-    }
-
-    .estate-create input,
-    .estate-create select,
-    .estate-create textarea {
-      min-height: 36px;
-      padding: 0.4rem 0.55rem;
-      border: 1px solid var(--border);
-      border-radius: 0.375rem;
-      color: var(--text-primary);
-      background: var(--bg-secondary);
-      font: inherit;
-    }
-
-    .estate-create textarea[name="role"] {
-      flex: 1 0 100%;
-      min-height: 96px;
-      max-height: 240px;
-      resize: vertical;
-    }
-
-    .estate-evidence {
-      flex: 1 0 100%;
-      display: grid;
-      gap: 0.5rem;
-      padding: 0.75rem;
-      border: 1px dashed var(--border);
-      border-radius: 0.5rem;
-      background: var(--bg-secondary);
-    }
-
-    .estate-evidence-title {
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .estate-evidence-help {
-      margin: 0;
-      color: var(--text-secondary);
-      font-size: 0.75rem;
-      line-height: 1.45;
-    }
-
-    .estate-evidence-files {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-    }
-
-    .estate-evidence-file {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      padding: 0.3rem 0.45rem;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      color: var(--text-secondary);
-      background: var(--bg-tertiary);
-      font-size: 0.75rem;
-    }
-
-    .estate-evidence-file button {
-      min-height: 0;
-      padding: 0;
-      border: 0;
-      background: transparent;
-    }
-
-    .estate-evidence-actions {
-      display: flex;
-      gap: 0.5rem;
-      align-items: stretch;
-    }
-
-    .estate-evidence-actions textarea {
-      min-height: 54px;
-      max-height: 120px;
-      resize: vertical;
-    }
-
-    .estate-evidence-actions button {
-      flex-shrink: 0;
-    }
-
-    .estate-create button,
-    .estate-toolbar button,
-    .estate-toolbar a {
-      min-height: 36px;
-      padding: 0 0.7rem;
-      border: 1px solid var(--border);
-      border-radius: 0.375rem;
-      color: var(--text-primary);
-      background: var(--bg-tertiary);
-      font: inherit;
-      cursor: pointer;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-    }
-
-    .estate-create button:hover,
-    .estate-toolbar button:hover,
-    .estate-toolbar a:hover {
-      border-color: var(--accent);
-    }
-
-    .estate-create-status {
-      flex-basis: 100%;
-      color: var(--text-secondary);
-      font-size: 0.75rem;
-    }
-
-    .estate-note {
-      color: var(--text-secondary);
-      font-size: 0.75rem;
-      white-space: nowrap;
-    }
-
     .attach-btn {
       display: flex;
       align-items: center;
@@ -1086,24 +930,7 @@ export class OpenRappterChat extends LitElement {
    * so both replies render through this one component instead of needing a
    * second chat window open beside it.
    */
-  @state() private chatTarget: 'openrappter' | 'brainstem' | 'estate' = 'openrappter';
-  @state() private estateBuddies: EstateBuddy[] = [];
-  @state() private estateDeviceIds: string[] = [];
-  @state() private estateLoading = false;
-  @state() private selectedEstateBuddyId = '';
-  @state() private showEstateCreate = false;
-  @state() private creatingEstateBuddy = false;
-  @state() private estateCreateName = '';
-  @state() private estateCreateRole = '';
-  @state() private estateCreateDevice = '';
-  @state() private estateCreateUi: 'auto' | 'chat' | 'rapplication' = 'auto';
-  @state() private estateCreateStatus = '';
-  @state() private estateEvidenceFiles: File[] = [];
-  @state() private estateEvidenceSteering = '';
-  @state() private estateAnalyzing = false;
-  @state() private estateEvidenceAnalyzedSignature = '';
-  private estateLoadPromise: Promise<void> | null = null;
-  private estateSessions = new Map<string, string>();
+  @state() private chatTarget: 'openrappter' | 'brainstem' = 'openrappter';
   @state() private sending = false;
   @state() private speechEnabled = false;
   @state() private speechStatus = 'idle';
@@ -1162,7 +989,6 @@ export class OpenRappterChat extends LitElement {
     super.connectedCallback();
     this.restoreChatTarget();
     this.loadSessions();
-    if (this.chatTarget === 'estate') void this.loadEstateBuddies();
 
     // Listen for chat events (streaming deltas + finals)
     gateway.on('chat', this.handleChatEvent);
@@ -1665,14 +1491,6 @@ export class OpenRappterChat extends LitElement {
 
   private async handleSend() {
     if (this.sessionTransitioning) return;
-    if (this.creatingEstateBuddy) {
-      this.error = 'Wait for estate buddy creation to finish before sending.';
-      return;
-    }
-    if (this.estateAnalyzing) {
-      this.error = 'Wait for estate evidence analysis to finish before sending.';
-      return;
-    }
     const content = this.inputValue.trim();
     // Allow queueing if busy
     if (this.sending && content) {
@@ -1681,14 +1499,6 @@ export class OpenRappterChat extends LitElement {
       return;
     }
     if (!content) return;
-    if (this.chatTarget === 'estate' && !this.selectedEstateBuddyId) {
-      this.error = 'Choose an online estate buddy before sending.';
-      return;
-    }
-    if (this.chatTarget === 'estate' && this.attachments.length > 0) {
-      this.error = 'Estate buddy chat currently accepts text only.';
-      return;
-    }
 
     this.sending = true;
     const sendGeneration = ++this.sendGeneration;
@@ -1708,11 +1518,6 @@ export class OpenRappterChat extends LitElement {
     };
     this.messages = [...this.messages, userMessage];
     this.scrollToBottom();
-
-    if (this.chatTarget === 'estate') {
-      await this.sendEstateBuddyMessage(content, sendGeneration);
-      return;
-    }
 
     try {
       const sessionKey = this.sessionKey ?? `session_${Date.now()}`;
@@ -1784,50 +1589,6 @@ export class OpenRappterChat extends LitElement {
       if (sendGeneration !== this.sendGeneration) return;
       this.error = (err as Error).message;
       this.sending = false;
-    }
-  }
-
-  private async sendEstateBuddyMessage(
-    content: string,
-    sendGeneration: number,
-  ): Promise<void> {
-    const buddyId = this.selectedEstateBuddyId;
-    const sessionId = this.estateSessions.get(buddyId);
-    try {
-      const result = await chatWithEstateBuddy({
-        buddyId,
-        message: content,
-        ...(sessionId ? { sessionId } : {}),
-      });
-      if (sendGeneration !== this.sendGeneration) return;
-      if (result.session_id) {
-        this.estateSessions.set(buddyId, result.session_id);
-      }
-      this.estateBuddies = this.estateBuddies.map((buddy) =>
-        buddy.id === result.buddy.id ? result.buddy : buddy
-      );
-      this.messages = [
-        ...this.messages,
-        {
-          id: `estate_${Date.now()}`,
-          role: 'assistant',
-          content: result.response,
-          timestamp: Date.now(),
-          streaming: false,
-          commitState: 'committed',
-        },
-      ];
-      this.scrollToBottom();
-    } catch (err) {
-      if (sendGeneration !== this.sendGeneration) return;
-      this.error = (err as Error).message;
-    } finally {
-      if (sendGeneration === this.sendGeneration) {
-        this.sending = false;
-        if (this.messageQueue.length > 0) {
-          setTimeout(() => this.flushQueue(), 100);
-        }
-      }
     }
   }
 
@@ -2084,15 +1845,9 @@ export class OpenRappterChat extends LitElement {
    * believing the brainstem said something it never said.
    */
   private handleTargetChange(e: Event) {
-    if (this.sending || this.creatingEstateBuddy || this.estateAnalyzing) return;
     const value = (e.target as HTMLSelectElement).value;
-    if (
-      value !== 'openrappter'
-      && value !== 'brainstem'
-      && value !== 'estate'
-    ) return;
+    if (value !== 'openrappter' && value !== 'brainstem') return;
     this.chatTarget = value;
-    if (value === 'estate') void this.loadEstateBuddies();
     try {
       localStorage.setItem(CHAT_TARGET_STORAGE_KEY, value);
     } catch {
@@ -2103,333 +1858,9 @@ export class OpenRappterChat extends LitElement {
   private restoreChatTarget() {
     try {
       const stored = localStorage.getItem(CHAT_TARGET_STORAGE_KEY);
-      if (
-        stored === 'openrappter'
-        || stored === 'brainstem'
-        || stored === 'estate'
-      ) this.chatTarget = stored;
+      if (stored === 'openrappter' || stored === 'brainstem') this.chatTarget = stored;
     } catch {
       // Unreadable storage just means the default.
-    }
-  }
-
-  private loadEstateBuddies(): Promise<void> {
-    if (this.estateLoadPromise) return this.estateLoadPromise;
-    this.estateLoading = true;
-    const operation = (async () => {
-      try {
-        const result = await listEstateBuddies();
-        this.estateBuddies = result.buddies;
-        this.estateDeviceIds = result.devices;
-        const selected = result.buddies.find(
-          (buddy) => buddy.id === this.selectedEstateBuddyId,
-        );
-        if (!selected || selected.presence !== 'online') {
-          this.selectedEstateBuddyId = result.buddies.find(
-            (buddy) => buddy.presence === 'online',
-          )?.id ?? '';
-        }
-        if (!this.estateCreateDevice) {
-          this.estateCreateDevice = result.devices[0] ?? '';
-        }
-        this.error = null;
-      } catch (err) {
-        this.error = `Could not load estate buddies: ${(err as Error).message}`;
-      } finally {
-        this.estateLoading = false;
-        this.estateLoadPromise = null;
-      }
-    })();
-    this.estateLoadPromise = operation;
-    return operation;
-  }
-
-  private handleEstateBuddyChange(e: Event): void {
-    if (this.sending || this.creatingEstateBuddy || this.estateAnalyzing) return;
-    this.selectedEstateBuddyId = (e.target as HTMLSelectElement).value;
-  }
-
-  private estateDevices(): string[] {
-    return this.estateDeviceIds;
-  }
-
-  private evidenceMimeType(file: File): string {
-    if (file.type && file.type !== 'application/octet-stream') {
-      return file.type.toLowerCase();
-    }
-    const extension = file.name.toLowerCase().split('.').pop() ?? '';
-    const types: Record<string, string> = {
-      mp4: 'video/mp4',
-      mov: 'video/quicktime',
-      m4v: 'video/x-m4v',
-      webm: 'video/webm',
-      mp3: 'audio/mpeg',
-      m4a: 'audio/mp4',
-      wav: 'audio/wav',
-      ogg: 'audio/ogg',
-      pdf: 'application/pdf',
-      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      txt: 'text/plain',
-      md: 'text/markdown',
-      csv: 'text/csv',
-      json: 'application/json',
-      srt: 'application/x-subrip',
-      vtt: 'text/vtt',
-    };
-    return types[extension] ?? 'application/octet-stream';
-  }
-
-  private evidenceKind(file: File): EstateBuddyEvidenceSource['kind'] {
-    const mimeType = this.evidenceMimeType(file);
-    if (mimeType.startsWith('video/')) return 'video';
-    if (mimeType.startsWith('audio/')) return 'audio';
-    if (
-      mimeType.startsWith('text/')
-      || mimeType === 'application/json'
-      || mimeType === 'application/x-subrip'
-      || mimeType === 'application/pdf'
-      || mimeType
-        === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    ) return 'document';
-    throw new Error(`Unsupported evidence type: ${file.name}`);
-  }
-
-  private handleEstateEvidenceSelect(e: Event): void {
-    const input = e.target as HTMLInputElement;
-    const incoming = Array.from(input.files ?? []);
-    input.value = '';
-    try {
-      const combined = [...this.estateEvidenceFiles, ...incoming];
-      if (combined.length > MAX_ESTATE_EVIDENCE_FILES) {
-        throw new Error(
-          `Attach at most ${MAX_ESTATE_EVIDENCE_FILES} evidence files.`,
-        );
-      }
-      for (const file of combined) {
-        const kind = this.evidenceKind(file);
-        const limit = kind === 'document'
-          ? MAX_ESTATE_DOCUMENT_BYTES
-          : MAX_ESTATE_EVIDENCE_BYTES;
-        if (file.size === 0 || file.size > limit) {
-          throw new Error(
-            `${file.name} exceeds the ${kind === 'document' ? '20' : '100'} MB `
-            + 'file limit.',
-          );
-        }
-      }
-      const total = combined.reduce((sum, file) => sum + file.size, 0);
-      if (total > MAX_ESTATE_EVIDENCE_TOTAL_BYTES) {
-        throw new Error('Combined evidence exceeds the 150 MB limit.');
-      }
-      this.estateEvidenceFiles = combined;
-      this.estateEvidenceAnalyzedSignature = '';
-      this.estateCreateStatus =
-        `${combined.length} evidence file${combined.length === 1 ? '' : 's'} `
-        + 'ready for analysis.';
-      this.error = null;
-    } catch (err) {
-      this.error = (err as Error).message;
-    }
-  }
-
-  private removeEstateEvidence(index: number): void {
-    this.estateEvidenceFiles = this.estateEvidenceFiles.filter(
-      (_file, fileIndex) => fileIndex !== index,
-    );
-    this.estateEvidenceAnalyzedSignature = '';
-    this.estateCreateStatus = this.estateEvidenceFiles.length
-      ? 'Evidence changed; analyze again to refresh the draft.'
-      : '';
-  }
-
-  private estateEvidenceSignature(): string {
-    return this.estateEvidenceFiles
-      .map((file) => `${file.name}:${file.size}:${file.lastModified}`)
-      .concat(`steering:${this.estateEvidenceSteering.trim()}`)
-      .join('|');
-  }
-
-  private async extractEstateEvidence(file: File): Promise<{
-    text: string;
-    source: EstateBuddyEvidenceSource;
-    summary: string;
-  }> {
-    const mimeType = this.evidenceMimeType(file);
-    const kind = this.evidenceKind(file);
-    const desktop = desktopBridge();
-    if (desktop) {
-      const result = await desktop.buddyEvidence({
-        action: 'extract',
-        filename: file.name,
-        mimeType,
-        data: new Uint8Array(await file.arrayBuffer()),
-      });
-      if (
-        result.schema !== 'openrappter-buddy-evidence/1.0'
-        || typeof result.text !== 'string'
-        || typeof result.summary !== 'string'
-        || typeof result.mimeType !== 'string'
-        || (
-          result.kind !== 'video'
-          && result.kind !== 'audio'
-          && result.kind !== 'document'
-        )
-      ) {
-        throw new Error(`Desktop extraction failed for ${file.name}.`);
-      }
-      return {
-        text: result.text,
-        summary: result.summary,
-        source: {
-          filename: file.name,
-          mimeType: result.mimeType,
-          kind: result.kind,
-        },
-      };
-    }
-    if (
-      kind !== 'document'
-      || (
-        !mimeType.startsWith('text/')
-        && mimeType !== 'application/json'
-        && mimeType !== 'application/x-subrip'
-      )
-    ) {
-      throw new Error(
-        `${file.name} requires OpenRappter Desktop for local extraction.`,
-      );
-    }
-    const text = new TextDecoder().decode(await file.arrayBuffer()).trim();
-    if (!text) throw new Error(`${file.name} contained no text.`);
-    return {
-      text: text.slice(0, 100_000),
-      summary: `Read transcript text from ${file.name}.`,
-      source: { filename: file.name, mimeType, kind },
-    };
-  }
-
-  private async handleAnalyzeEstateEvidence(): Promise<void> {
-    if (
-      this.estateAnalyzing
-      || this.creatingEstateBuddy
-      || this.estateEvidenceFiles.length === 0
-    ) return;
-    this.estateAnalyzing = true;
-    this.estateEvidenceAnalyzedSignature = '';
-    this.error = null;
-    this.estateCreateStatus =
-      'Extracting the walkthrough and drafting the right agent…';
-    try {
-      const extracted = [];
-      const extractionWarnings: string[] = [];
-      for (const file of this.estateEvidenceFiles) {
-        try {
-          extracted.push(await this.extractEstateEvidence(file));
-        } catch (err) {
-          extractionWarnings.push(
-            `${file.name}: ${(err as Error).message}`,
-          );
-        }
-      }
-      if (extracted.length === 0) {
-        throw new Error(
-          extractionWarnings.join(' ') || 'No evidence could be extracted.',
-        );
-      }
-      const evidenceText = extracted
-        .map((item) => `# ${item.source.filename}\n${item.text}`)
-        .join('\n\n')
-        .slice(0, 100_000);
-      if (evidenceText.length < 20) {
-        throw new Error('The evidence did not contain enough usable detail.');
-      }
-      const draft = await analyzeEstateBuddyEvidence({
-        evidenceText,
-        sourceFiles: extracted.map((item) => item.source),
-        steering: this.estateEvidenceSteering.trim() || undefined,
-      });
-      this.estateCreateName = draft.name;
-      this.estateCreateRole = draft.role;
-      this.estateCreateUi = draft.ui;
-      this.estateEvidenceAnalyzedSignature = this.estateEvidenceSignature();
-      this.estateCreateStatus =
-        `Drafted from ${draft.sourceFiles.length} file`
-        + `${draft.sourceFiles.length === 1 ? '' : 's'} `
-        + `(${draft.confidence} confidence): ${draft.evidenceSummary}`
-        + (
-          extractionWarnings.length
-            ? ` Skipped: ${extractionWarnings.join(' ')}`
-            : ''
-        )
-        + (
-          draft.privacy.masked
-            ? ' Sensitive values were redacted before Copilot analysis.'
-            : ''
-        );
-    } catch (err) {
-      this.error = `Could not analyze buddy evidence: ${(err as Error).message}`;
-      this.estateCreateStatus = '';
-    } finally {
-      this.estateAnalyzing = false;
-    }
-  }
-
-  private async handleCreateEstateBuddy(e: Event): Promise<void> {
-    e.preventDefault();
-    if (this.creatingEstateBuddy || this.estateAnalyzing || this.sending) return;
-    if (
-      this.estateEvidenceFiles.length > 0
-      && this.estateEvidenceAnalyzedSignature !== this.estateEvidenceSignature()
-    ) {
-      this.error = 'Analyze the current evidence before creating the buddy.';
-      return;
-    }
-    this.creatingEstateBuddy = true;
-    this.estateCreateStatus = 'Creating, starting, and verifying the new Twin…';
-    this.error = null;
-    try {
-      if (this.estateLoadPromise) await this.estateLoadPromise;
-      const result = await createEstateBuddy({
-        deviceId: this.estateCreateDevice,
-        name: this.estateCreateName,
-        role: this.estateCreateRole,
-        ui: this.estateCreateUi,
-      });
-      await this.loadEstateBuddies();
-      const created = this.estateBuddies.find(
-        (buddy) => buddy.rappid === result.created.rappid,
-      );
-      if (!created || created.presence !== 'online') {
-        throw new Error('The verified buddy did not appear in the live roster');
-      }
-      this.selectedEstateBuddyId = created.id;
-      this.showEstateCreate = false;
-      this.estateCreateStatus =
-        `${created.name} is online and ready on ${created.device}. `
-        + (
-          result.created.ui === 'rapplication'
-            ? 'Its custom UI is active; this chat remains the default fallback.'
-            : 'Default chat is active.'
-        );
-      this.estateCreateName = '';
-      this.estateCreateRole = '';
-      this.estateEvidenceFiles = [];
-      this.estateEvidenceSteering = '';
-      this.estateEvidenceAnalyzedSignature = '';
-      this.messages = [
-        ...this.messages,
-        {
-          id: `estate_created_${Date.now()}`,
-          role: 'system',
-          content: this.estateCreateStatus,
-          timestamp: Date.now(),
-        },
-      ];
-    } catch (err) {
-      this.error = `Could not create estate buddy: ${(err as Error).message}`;
-      this.estateCreateStatus = '';
-    } finally {
-      this.creatingEstateBuddy = false;
     }
   }
 
@@ -2505,7 +1936,7 @@ export class OpenRappterChat extends LitElement {
       `;
     }
 
-    const avatar = group.role === 'user' ? '👤' : '🦖';
+    const avatar = group.role === 'user' ? 'Y' : 'RW';
 
     return html`
       <div class="message-group ${group.role}">
@@ -2629,225 +2060,6 @@ export class OpenRappterChat extends LitElement {
     `;
   }
 
-  private renderEstateControls() {
-    if (this.chatTarget !== 'estate') return nothing;
-    const selected = this.estateBuddies.find(
-      (buddy) => buddy.id === this.selectedEstateBuddyId,
-    );
-    const devices = this.estateDevices();
-    return html`
-      <div class="estate-toolbar">
-        <span class="presence-dot ${selected?.presence === 'online' ? 'online' : ''}"></span>
-        <select
-          class="brain-select buddy-select"
-          aria-label="Estate buddy"
-          .value=${this.selectedEstateBuddyId}
-          @change=${this.handleEstateBuddyChange}
-          ?disabled=${this.sending
-            || this.creatingEstateBuddy
-            || this.estateAnalyzing
-            || this.estateLoading}
-        >
-          ${this.estateLoading
-            ? html`<option value="">Refreshing estate…</option>`
-            : this.estateBuddies.length === 0
-              ? html`<option value="">No buddies available</option>`
-              : this.estateBuddies.map((buddy) => html`
-                  <option
-                    value=${buddy.id}
-                    ?disabled=${buddy.presence !== 'online'}
-                  >${buddy.presence === 'online' ? '●' : '○'}
-                    ${buddy.name} · ${buddy.device}</option>
-                `)}
-        </select>
-        <button
-          type="button"
-          @click=${this.loadEstateBuddies}
-          ?disabled=${this.estateLoading
-            || this.sending
-            || this.creatingEstateBuddy
-            || this.estateAnalyzing}
-          title="Refresh verified RAPP-Herdr presence"
-        >↻</button>
-        <button
-          type="button"
-          @click=${() => (this.showEstateCreate = !this.showEstateCreate)}
-          ?disabled=${this.sending
-            || this.creatingEstateBuddy
-            || this.estateAnalyzing
-            || this.estateLoading}
-        >+ Create AI</button>
-        ${selected?.application_url
-          ? html`<a
-              href=${selected.application_url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >Open custom UI</a>`
-          : selected?.ui === 'rapplication'
-            ? html`<span class="estate-note">Custom UI on ${selected.device}</span>`
-            : nothing}
-        ${selected
-          ? html`<span class="estate-note">Default chat fallback active</span>`
-          : nothing}
-      </div>
-      ${this.showEstateCreate
-        ? html`
-            <form class="estate-create" @submit=${this.handleCreateEstateBuddy}>
-              <div class="estate-evidence">
-                <label class="estate-evidence-title">
-                  Walkthrough video or transcript
-                  <input
-                    type="file"
-                    multiple
-                    accept="video/*,audio/*,.txt,.md,.csv,.json,.srt,.vtt,.pdf,.docx"
-                    @change=${this.handleEstateEvidenceSelect}
-                    ?disabled=${this.creatingEstateBuddy || this.estateAnalyzing}
-                  />
-                </label>
-                <p class="estate-evidence-help">
-                  Attach up to three files. Videos and audio are transcribed
-                  locally in OpenRappter Desktop; PDF, DOCX, and transcript
-                  files are extracted locally. Only extracted text is sent to
-                  your configured Copilot model to draft the agent.
-                </p>
-                ${this.estateEvidenceFiles.length
-                  ? html`
-                      <div class="estate-evidence-files">
-                        ${this.estateEvidenceFiles.map((file, index) => html`
-                          <span class="estate-evidence-file">
-                            ${this.evidenceKind(file) === 'video'
-                              ? '🎬'
-                              : this.evidenceKind(file) === 'audio'
-                                ? '🎙️'
-                                : '📄'}
-                            ${file.name}
-                            <button
-                              type="button"
-                              aria-label="Remove ${file.name}"
-                              @click=${() => this.removeEstateEvidence(index)}
-                              ?disabled=${this.estateAnalyzing}
-                            >×</button>
-                          </span>
-                        `)}
-                      </div>
-                    `
-                  : nothing}
-                <div class="estate-evidence-actions">
-                  <textarea
-                    aria-label="Evidence steering"
-                    placeholder="Optional: what should the generated agent focus on?"
-                    maxlength="4000"
-                    .value=${this.estateEvidenceSteering}
-                    @input=${(event: Event) => {
-                      this.estateEvidenceSteering =
-                        (event.target as HTMLTextAreaElement).value;
-                    }}
-                    ?disabled=${this.estateAnalyzing
-                      || this.creatingEstateBuddy}
-                  ></textarea>
-                  <button
-                    type="button"
-                    @click=${this.handleAnalyzeEstateEvidence}
-                    ?disabled=${this.estateAnalyzing
-                      || this.creatingEstateBuddy
-                      || this.estateEvidenceFiles.length === 0}
-                  >${this.estateAnalyzing
-                    ? 'Analyzing…'
-                    : 'Analyze + draft agent'}</button>
-                </div>
-              </div>
-              <select
-                aria-label="Buddy device"
-                .value=${this.estateCreateDevice}
-                @change=${(event: Event) => {
-                  this.estateCreateDevice = (event.target as HTMLSelectElement).value;
-                }}
-                ?disabled=${this.creatingEstateBuddy
-                  || this.estateAnalyzing
-                  || this.sending
-                  || this.estateLoading}
-                required
-              >
-                ${devices.map((device) => html`
-                  <option value=${device}>${device}</option>
-                `)}
-              </select>
-              <input
-                name="name"
-                aria-label="Buddy name"
-                placeholder="Buddy name"
-                maxlength="80"
-                .value=${this.estateCreateName}
-                @input=${(event: Event) => {
-                  this.estateCreateName = (event.target as HTMLInputElement).value;
-                }}
-                ?disabled=${this.creatingEstateBuddy
-                  || this.estateAnalyzing
-                  || this.sending
-                  || this.estateLoading}
-                required
-              />
-              <textarea
-                name="role"
-                aria-label="Buddy role"
-                placeholder="Generated operating role, or describe the Twin manually"
-                maxlength="4000"
-                .value=${this.estateCreateRole}
-                @input=${(event: Event) => {
-                  this.estateCreateRole = (event.target as HTMLTextAreaElement).value;
-                }}
-                ?disabled=${this.creatingEstateBuddy
-                  || this.estateAnalyzing
-                  || this.sending
-                  || this.estateLoading}
-                required
-              ></textarea>
-              <select
-                aria-label="Buddy interface"
-                .value=${this.estateCreateUi}
-                @change=${(event: Event) => {
-                  const value = (event.target as HTMLSelectElement).value;
-                  if (
-                    value === 'auto'
-                    || value === 'chat'
-                    || value === 'rapplication'
-                  ) this.estateCreateUi = value;
-                }}
-                ?disabled=${this.creatingEstateBuddy
-                  || this.estateAnalyzing
-                  || this.sending
-                  || this.estateLoading}
-              >
-                <option value="auto">Auto UI</option>
-                <option value="chat">Default chat</option>
-                <option value="rapplication">Custom rapplication</option>
-              </select>
-              <button
-                type="submit"
-                ?disabled=${this.creatingEstateBuddy
-                  || this.estateAnalyzing
-                  || this.sending
-                  || this.estateLoading
-                  || (
-                    this.estateEvidenceFiles.length > 0
-                    && this.estateEvidenceAnalyzedSignature
-                      !== this.estateEvidenceSignature()
-                  )
-                  || !this.estateCreateDevice
-                  || !this.estateCreateName.trim()
-                  || !this.estateCreateRole.trim()}
-              >${this.creatingEstateBuddy
-                ? 'Verifying…'
-                : 'Create + verify'}</button>
-              ${this.estateCreateStatus
-                ? html`<span class="estate-create-status">${this.estateCreateStatus}</span>`
-                : nothing}
-            </form>
-          `
-        : nothing}
-    `;
-  }
-
   render() {
     const groups = this.groupMessages(this.messages);
     const hasToolCalls = this.toolCalls.length > 0;
@@ -2888,13 +2100,10 @@ export class OpenRappterChat extends LitElement {
             ${groups.length === 0
               ? html`
                   <div class="empty-state">
-                    <div class="empty-state-icon">${this.chatTarget === 'estate' ? '💬' : '🦖'}</div>
+                    <div class="empty-state-icon" aria-hidden="true">RW</div>
                     <div class="empty-state-text">
-                      ${this.chatTarget === 'estate'
-                        ? html`Choose a verified estate buddy and start chatting.<br />
-                            A reply means that Twin is live, online, and ready.`
-                        : html`Start a conversation with OpenRappter.<br />
-                            Ask questions, run commands, or just chat!`}
+                      Start work with RAPP Work.<br />
+                      Describe the outcome. Review the decisions.
                     </div>
                   </div>
                 `
@@ -2927,30 +2136,24 @@ export class OpenRappterChat extends LitElement {
             : nothing}
 
           <div class="input-area">
-            ${this.renderEstateControls()}
             ${this.renderAttachmentStrip()}
             <div class="input-container">
               <select
                 class="brain-select"
-                title="Which brain answers"
+                title="Assistant runtime"
+                aria-label="Assistant runtime"
                 .value=${this.chatTarget}
                 @change=${this.handleTargetChange}
-                ?disabled=${this.sessionTransitioning
-                  || this.sending
-                  || this.creatingEstateBuddy
-                  || this.estateAnalyzing}
+                ?disabled=${this.sessionTransitioning}
               >
-                <option value="openrappter">🦖 OpenRappter</option>
-                <option value="brainstem">🧠 Brainstem</option>
-                <option value="estate">💬 RAPP Estate</option>
+                <option value="openrappter">RAPP Work</option>
+                <option value="brainstem">Brainstem (compatibility)</option>
               </select>
-              ${this.chatTarget !== 'estate'
-                ? html`<button
-                    class="attach-btn"
-                    @click=${this.handleAttachClick}
-                    title="Attach files"
-                  >📎</button>`
-                : nothing}
+              <button
+                class="attach-btn"
+                @click=${this.handleAttachClick}
+                title="Attach files"
+              >📎</button>
               <input
                 class="hidden-input"
                 type="file"
@@ -2959,11 +2162,7 @@ export class OpenRappterChat extends LitElement {
               />
               <textarea
                 class="${this.draggingOver ? 'drag-over' : ''}"
-                placeholder=${this.sending
-                  ? 'Type to queue a message...'
-                  : this.chatTarget === 'estate'
-                    ? 'Message this estate Twin (↩ to send)'
-                    : 'Message (↩ to send, Shift+↩ for line breaks, paste images)'}
+                placeholder=${this.sending ? 'Type to queue a message...' : 'Message (↩ to send, Shift+↩ for line breaks, paste images)'}
                 .value=${this.inputValue}
                 @input=${this.handleInput}
                 @keydown=${this.handleKeyDown}
@@ -2971,9 +2170,7 @@ export class OpenRappterChat extends LitElement {
                 @dragover=${this.handleDragOver}
                 @dragleave=${this.handleDragLeave}
                 @drop=${this.handleDrop}
-                ?disabled=${this.sessionTransitioning
-                  || this.creatingEstateBuddy
-                  || this.estateAnalyzing}
+                ?disabled=${this.sessionTransitioning}
                 rows="1"
               ></textarea>
               ${this.sending && this.activeRunId
@@ -2982,11 +2179,7 @@ export class OpenRappterChat extends LitElement {
               <button
                 class="send-btn"
                 @click=${this.handleSend}
-                ?disabled=${this.sessionTransitioning
-                  || this.creatingEstateBuddy
-                  || this.estateAnalyzing
-                  || (this.chatTarget === 'estate' && !this.selectedEstateBuddyId)
-                  || (!this.inputValue.trim() && !this.sending)}
+                ?disabled=${this.sessionTransitioning || (!this.inputValue.trim() && !this.sending)}
               >
                 ${this.sending ? 'Queue' : 'Send'}<span class="btn-kbd">↵</span>
               </button>

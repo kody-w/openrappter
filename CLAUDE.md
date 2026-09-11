@@ -6,17 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Make a plan, write test cases, build the application, run those tests until the application passes, then publish to the public repo and let the user know when they can test.
 
-## Release Constitution
-
-Distribution—not local development—is fail-closed behind the machine
-`openrappter-release-constitution/v1` policy in
-`kody-w/openrappter-release-train`. Never add a direct stable, tag, GitHub
-release, npm/PyPI, or installer-channel path. The exact commit/version/artifact
-must have finalized immutable receipts in order nightly → alpha → canary →
-beta, and every privileged publish job must depend on `release-constitution`.
-Emergency rollback has no bypass flag and may use only an already-receipted
-exact artifact.
-
 ## Git Worktree Etiquette
 
 Multiple Claude Code sessions may run concurrently using git worktrees. Be a good neighbor:
@@ -57,19 +46,6 @@ Run a single test file:
 ```bash
 cd typescript && npx vitest run src/path/to/file.test.ts
 ```
-
-### Native macOS Bar (`macos/`)
-```bash
-cd macos
-swift build --product OpenRappterBar
-swift run RunTests
-OPENRAPPTER_TEST_SUITES=ChatReliability,ChatRace,ApprovalIntegration swift run RunTests
-```
-
-The native runner uses named suites, not XCTest discovery. Omitting the selector
-runs every registered suite; unknown names fail instead of silently running zero
-tests. The full runner includes GUI/environment-dependent checks. Use an isolated
-`HOME`, `CFFIXED_USER_HOME`, and `TMPDIR` for tests that access local state.
 
 ### OpenClaw (`openclaw/`)
 ```bash
@@ -235,25 +211,6 @@ Agent metadata maps to MCP tools: `name` → tool name, `description` → tool d
 
 **Files**: `typescript/src/mcp/server.ts`, `typescript/src/__tests__/parity/mcp-server.test.ts` (18 tests)
 
-## Architecture: Brainstem Kernel (TypeScript)
-
-`typescript/src/brainstem.ts` is the Node implementation of the local RAPP
-brainstem wire. It serves `POST /chat`, `GET /health`, `/version`, `/agents`,
-`/agents/export/<file>`, `/models`, `POST /agents/import`, and
-`DELETE /agents/<file>`, with the same `rapp-chat/1.0` envelopes, Copilot auth
-chain, three-round tool loop, `soul.md` prompt, and disk-hot agent discovery as
-`python/openrappter/brainstem.py`.
-
-Dropped `.js`/`.ts` agents are loaded through an isolated shim: they may use
-the kernel `BasicAgent`, the local `AzureFileStorageManager` compatibility
-surface, sibling drop files, and Node builtins, but not hidden package
-internals. Every packaged `*Agent.ts` is zero-argument-instantiated in a fresh
-subprocess by
-`typescript/src/__tests__/integration/brainstem-compliance.test.ts`; strict
-standalone loading and a deliberately bad import prove the shim fails closed.
-The Python mirror and `python/tests/test_brainstem_compliance.py` remain the
-cross-language specification of record.
-
 ## Architecture: Dashboard REST API
 
 HTTP endpoints for the web dashboard UI. Designed as a mountable handler on the existing gateway HTTP server.
@@ -361,49 +318,6 @@ Skills are `SKILL.md` files stored in `~/.openrappter/skills/`. Skills get wrapp
 - **Storage** (`typescript/src/storage/`) — `StorageAdapter` interface with SQLite and in-memory implementations; migration system
 - **Config** (`typescript/src/config/`) — YAML/JSON loading, Zod schema validation, file watcher for live reload
 - **Providers** (`typescript/src/providers/`) — Model integrations: Anthropic, OpenAI, Ollama
-
-### Live memory persistence
-
-`MemoryAgent` (including `openrappter memory`) and Python's memory agents keep
-the existing `memory.json` dictionary schema. Mutations share a
-`memory.json.lock.sqlite3` sidecar: SQLite `BEGIN IMMEDIATE` covers the entire
-read–modify–write. Never delete, replace, or age-reclaim this lock database;
-process death releases its OS locks. SQLite acquisition waits at most five seconds
-(without blocking Node's event loop). Python retains its thread-level `RLock`.
-
-On POSIX, success follows a private staged-file write, file fsync, atomic
-replacement and directory fsync; newly created directory entries are synced
-too. Windows retains the staged-file flush and atomic replacement, then opens
-the published file with write access and flushes it again. It never requires
-unsupported CRT directory handles. File-open, write, replacement and flush
-errors still propagate on both platforms; POSIX directory errors remain fatal.
-
-Only a missing store is empty: corrupt JSON/UTF-8, invalid entry shapes,
-unreadable files and lock failures propagate errors without resetting data.
-Existing keys and unknown entry metadata are preserved. Linked store/lock files
-are rejected; directory aliases share a canonical lock path. POSIX files are
-created with mode 0600; Windows files inherit the containing directory's ACL.
-
-Upgrade **all writers together**, stopping old flock-only Python and unlocked
-TypeScript processes first. Both runtimes must target the same file; the
-pre-existing Python `OPENRAPPTER_HOME` relocation limitation (#330) is unchanged.
-This protocol requires a local filesystem with reliable SQLite locking, not
-an unverified network filesystem. Tests exercise concurrent writers and process
-termination/restart; they do not certify physical-power-loss behavior. In
-particular, Windows file flushing does not establish a POSIX-style durability
-guarantee for rename/directory metadata. A failure after rename but before
-acknowledgement has an uncertain outcome; an unacknowledged fact may exist.
-Orphan `.pending` files are never read as committed memory.
-
-### Managed environment updates
-
-Managed `.env` edits use `updateEnv()` in TypeScript and `LocalEnvironmentFile`
-in the Bar. Both hold the same `.env.lock.sqlite3` transaction while patching
-only their own keys; do not save a previously loaded whole-file snapshot for
-a partial update. `saveEnv()` remains an explicit full replacement.
-Credential rollback is conditional on still owning the bytes/token being
-reverted. Upgrade managed writers together; old binaries and external editors
-do not participate in this lock protocol.
 
 ## Language Parity
 

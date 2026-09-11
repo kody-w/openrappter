@@ -1,14 +1,5 @@
 # Contributing to openrappter
 
-## Distribution changes
-
-The required `Release Constitution` check statically audits every workflow
-publication operation. A distributable identity must have finalized immutable
-nightly, alpha, canary, and beta receipts in that order before stable, tags,
-GitHub releases, npm/PyPI, or installer channels may move. Changes under
-`.github/workflows/`, the constitution checker, or CODEOWNERS require owner
-review. This gate does not restrict local builds or tests.
-
 Thank you for your interest in contributing to openrappter! 🦖
 
 ## Getting Started
@@ -112,8 +103,7 @@ class MyAgent(BasicAgent):
 ## Releasing npm and PyPI packages
 
 Package releases use one canonical workflow: `.github/workflows/release.yml`.
-A strict SemVer `vX.Y.Z` or `vX.Y.Z-PRERELEASE` tag is accepted only when it
-matches:
+A strict `vX.Y.Z` tag is accepted only when it matches:
 
 - `typescript/package.json` and both root versions in `typescript/package-lock.json`
 - `typescript/desktop/package.json` and both root versions in
@@ -131,23 +121,10 @@ node scripts/release-preflight.mjs --tag vX.Y.Z
 node --test scripts/release-preflight.test.mjs
 ```
 
-Prereleases use the same version string in every manifest and runtime. Because
-the same release is published to npm and PyPI, prerelease identifiers are
-limited to the lossless common forms `alpha.N`, `beta.N`, and `rc.N`; build
-metadata (`+...`) is not supported. Python artifact filenames use the
-corresponding normalized PEP 440 spelling (`aN`, `bN`, or `rcN`). Prereleases
-are published under their explicit npm dist-tag and can never replace
-`latest`.
-
 The local preflight is deterministic and does not require registry access.
-Do not create distribution tags manually. Build an immutable candidate first,
-then obtain finalized nightly → alpha → canary → beta receipts for the same
-commit, version, and artifact digest. The canonical constitution-gated machinery
-creates the tag; the release workflow materializes those bytes without rebuilding,
-reruns the cycle-11 CI and install gates, and smoke-installs the exact artifacts.
-See [release rings](docs/release-rings.md) and [pinned release tools](RELEASING-PINNED.md).
-A tag alone is not evidence that publication completed.
-The dependency lock, pinned Python builders, and commit-derived
+Pushing the tag builds each npm and Python distribution once, reruns the
+cycle-11 CI and install gates against those files, and smoke-installs the exact
+artifacts. The dependency lock, pinned Python builders, and commit-derived
 `SOURCE_DATE_EPOCH` keep rerun artifacts reproducible. Registry publication is
 globally serialized. Before either registry is changed, both remote identities
 are checked; immediately before each publish, the workflow either confirms the

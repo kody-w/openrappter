@@ -143,7 +143,7 @@ describe('chat auto-auth', () => {
 
     vi.doMock('../../providers/copilot-auth.js', () => ({ deviceCodeLogin: mockDeviceCodeLogin }));
     vi.doMock('../../env.js', () => ({
-      updateEnv: mockSaveEnv,
+      saveEnv: mockSaveEnv,
       loadEnv: mockLoadEnv,
       HOME_DIR: '/tmp/.openrappter',
       CONFIG_FILE: '/tmp/.openrappter/config.json',
@@ -179,7 +179,7 @@ describe('chat auto-auth', () => {
 
     vi.doMock('../../providers/copilot-auth.js', () => ({ deviceCodeLogin: mockDeviceCodeLogin }));
     vi.doMock('../../env.js', () => ({
-      updateEnv: vi.fn(), loadEnv: vi.fn().mockResolvedValue({}),
+      saveEnv: vi.fn(), loadEnv: vi.fn().mockResolvedValue({}),
       HOME_DIR: '/tmp/.openrappter', CONFIG_FILE: '/tmp/.openrappter/config.json',
       ENV_FILE: '/tmp/.openrappter/.env', ensureHomeDir: vi.fn(),
     }));
@@ -210,7 +210,7 @@ describe('chat auto-auth', () => {
 
     vi.doMock('../../providers/copilot-auth.js', () => ({ deviceCodeLogin: mockDeviceCodeLogin }));
     vi.doMock('../../env.js', () => ({
-      updateEnv: mockSaveEnv, loadEnv: mockLoadEnv,
+      saveEnv: mockSaveEnv, loadEnv: mockLoadEnv,
       HOME_DIR: '/tmp/.openrappter', CONFIG_FILE: '/tmp/.openrappter/config.json',
       ENV_FILE: '/tmp/.openrappter/.env', ensureHomeDir: vi.fn(),
     }));
@@ -246,7 +246,7 @@ describe('chat auto-auth', () => {
 
     vi.doMock('../../providers/copilot-auth.js', () => ({ deviceCodeLogin: mockDeviceCodeLogin }));
     vi.doMock('../../env.js', () => ({
-      updateEnv: vi.fn(), loadEnv: vi.fn().mockResolvedValue({}),
+      saveEnv: vi.fn(), loadEnv: vi.fn().mockResolvedValue({}),
       HOME_DIR: '/tmp/.openrappter', CONFIG_FILE: '/tmp/.openrappter/config.json',
       ENV_FILE: '/tmp/.openrappter/.env', ensureHomeDir: vi.fn(),
     }));
@@ -277,7 +277,7 @@ describe('chat auto-auth', () => {
   it('should return error JSON for auth error without TTY', async () => {
     vi.doMock('../../providers/copilot-auth.js', () => ({ deviceCodeLogin: vi.fn() }));
     vi.doMock('../../env.js', () => ({
-      updateEnv: vi.fn(), loadEnv: vi.fn().mockResolvedValue({}),
+      saveEnv: vi.fn(), loadEnv: vi.fn().mockResolvedValue({}),
       HOME_DIR: '/tmp/.openrappter', CONFIG_FILE: '/tmp/.openrappter/config.json',
       ENV_FILE: '/tmp/.openrappter/.env', ensureHomeDir: vi.fn(),
     }));
@@ -308,7 +308,7 @@ describe('chat auto-auth', () => {
   it('resetChatProvider should clear cached provider', async () => {
     vi.doMock('../../providers/copilot-auth.js', () => ({ deviceCodeLogin: vi.fn() }));
     vi.doMock('../../env.js', () => ({
-      updateEnv: vi.fn(), loadEnv: vi.fn().mockResolvedValue({}),
+      saveEnv: vi.fn(), loadEnv: vi.fn().mockResolvedValue({}),
       HOME_DIR: '/tmp/.openrappter', CONFIG_FILE: '/tmp/.openrappter/config.json',
       ENV_FILE: '/tmp/.openrappter/.env', ensureHomeDir: vi.fn(),
     }));

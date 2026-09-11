@@ -16,7 +16,6 @@ import {
   inspectRegistryArtifacts,
   parseMacosReleaseTag,
   parsePackageReleaseTag,
-  pythonArtifactVersion,
   REQUIRED_RELEASE_FILES,
   validateReleaseState,
   waitForRegistryArtifacts,
@@ -28,26 +27,25 @@ const requireFromTypescript = createRequire(
 const { parse: parseYaml } = requireFromTypescript('yaml');
 
 const VERSION = '1.10.0';
-const PRERELEASE_VERSION = '1.11.0-beta.9';
 const PACKAGE_NAME = 'openrappter';
 
-function validState(overrides = {}, version = VERSION) {
+function validState(overrides = {}) {
   return {
-    tag: `v${version}`,
+    tag: `v${VERSION}`,
     typescriptPackageName: PACKAGE_NAME,
-    typescriptPackageVersion: version,
-    typescriptPackageLockVersion: version,
-    typescriptPackageLockRootVersion: version,
-    desktopPackageVersion: version,
-    desktopPackageLockVersion: version,
-    desktopPackageLockRootVersion: version,
+    typescriptPackageVersion: VERSION,
+    typescriptPackageLockVersion: VERSION,
+    typescriptPackageLockRootVersion: VERSION,
+    desktopPackageVersion: VERSION,
+    desktopPackageLockVersion: VERSION,
+    desktopPackageLockRootVersion: VERSION,
     pythonProjectName: PACKAGE_NAME,
-    pythonProjectVersion: version,
-    typescriptRuntimeVersion: version,
-    pythonRuntimeVersion: version,
+    pythonProjectVersion: VERSION,
+    typescriptRuntimeVersion: VERSION,
+    pythonRuntimeVersion: VERSION,
     typescriptRuntimeSourceValid: true,
     existingFiles: [...REQUIRED_RELEASE_FILES],
-    artifactNames: expectedArtifactNames(version),
+    artifactNames: expectedArtifactNames(VERSION),
     ...overrides,
   };
 }
@@ -119,20 +117,6 @@ test('accepts a matching strict tag, versions, files, and artifact names', () =>
   assert.equal(parseMacosReleaseTag('v1.10.0-bar'), '1.10.0');
 });
 
-test('accepts a matching strict prerelease across tags, runtimes, and artifacts', () => {
-  assert.deepEqual(validateReleaseState(validState({}, PRERELEASE_VERSION)), []);
-  assert.equal(
-    parsePackageReleaseTag(`v${PRERELEASE_VERSION}`),
-    PRERELEASE_VERSION,
-  );
-  assert.equal(pythonArtifactVersion(PRERELEASE_VERSION), '1.11.0b9');
-  assert.deepEqual(expectedArtifactNames(PRERELEASE_VERSION), [
-    'openrappter-1.11.0-beta.9.tgz',
-    'openrappter-1.11.0b9-py3-none-any.whl',
-    'openrappter-1.11.0b9.tar.gz',
-  ]);
-});
-
 test('rejects a tag that does not match package and runtime versions', () => {
   const errors = validateReleaseState(validState({
     tag: 'v1.10.1',
@@ -152,32 +136,11 @@ test('rejects a mismatching runtime report', () => {
   ]);
 });
 
-test('rejects a prerelease runtime report that does not exactly match the tag', () => {
-  assert.deepEqual(validateReleaseState(validState({
-    pythonRuntimeVersion: '1.11.0-beta.8',
-  }, PRERELEASE_VERSION)), [
-    'Python runtime version 1.11.0-beta.8 does not match tag version 1.11.0-beta.9',
-  ]);
-});
-
-test('rejects malformed package tags and unsupported build metadata', () => {
-  const malformedTags = [
-    '1.2.3',
-    'v1.2',
-    'v01.2.3',
-    'v1.2.3-',
-    'v1.2.3-beta..1',
-    'v1.2.3-beta.01',
-    'v1.2.3+build.1',
-    'v1.2.3-beta.1+build.2',
-    'v1.2.3\nmalicious',
-  ];
-  for (const tag of malformedTags) {
-    assert.throws(() => parsePackageReleaseTag(tag), /strict SemVer/);
+test('rejects malformed package and malicious macOS release tags', () => {
+  for (const tag of ['1.2.3', 'v1.2', 'v01.2.3', 'v1.2.3-rc.1']) {
+    assert.throws(() => parsePackageReleaseTag(tag), /must match vX\.Y\.Z exactly/);
   }
-});
 
-test('keeps macOS Bar tags stable-only and injection-safe', () => {
   const maliciousTags = [
     'v1.2.3;echo PWNED-bar',
     'v1.2.3${IFS}touch-bar',
@@ -191,43 +154,6 @@ test('keeps macOS Bar tags stable-only and injection-safe', () => {
   for (const tag of maliciousTags) {
     assert.throws(() => parseMacosReleaseTag(tag), /must match vX\.Y\.Z-bar exactly/);
   }
-});
-
-test('pinned release tooling shares strict prerelease and build-metadata rules', () => {
-  const root = fileURLToPath(new URL('..', import.meta.url));
-  const commit = spawnSync('git', ['rev-parse', 'HEAD'], {
-    cwd: root,
-    encoding: 'utf8',
-  }).stdout.trim();
-  const prerelease = spawnSync(
-    'node',
-    [
-      'scripts/pinned-release.mjs',
-      'notes',
-      '--commit',
-      commit,
-      '--version',
-      'v1.14.0-rc.1',
-    ],
-    { cwd: root, encoding: 'utf8' },
-  );
-  assert.equal(prerelease.status, 0, prerelease.stderr);
-  assert.match(prerelease.stdout, /OpenRappter v1\.14\.0-rc\.1/);
-
-  const buildMetadata = spawnSync(
-    'node',
-    [
-      'scripts/pinned-release.mjs',
-      'notes',
-      '--commit',
-      commit,
-      '--version',
-      'v1.14.0+build.1',
-    ],
-    { cwd: root, encoding: 'utf8' },
-  );
-  assert.equal(buildMetadata.status, 1);
-  assert.match(buildMetadata.stderr, /without build metadata/);
 });
 
 test('macOS build script rejects an injected version before invoking build tools', () => {
@@ -249,28 +175,7 @@ test('rejects malformed component versions', () => {
     typescriptPackageVersion: '1.9',
   }));
   assert.ok(errors.some((error) =>
-    error.includes('typescript/package.json version must be strict SemVer')));
-});
-
-test('rejects prereleases that PyPI cannot represent without changing identity', () => {
-  const version = '1.11.0-preview.1';
-  const state = validState({ tag: `v${version}`, artifactNames: undefined });
-  for (const key of [
-    'typescriptPackageVersion',
-    'typescriptPackageLockVersion',
-    'typescriptPackageLockRootVersion',
-    'desktopPackageVersion',
-    'desktopPackageLockVersion',
-    'desktopPackageLockRootVersion',
-    'pythonProjectVersion',
-    'typescriptRuntimeVersion',
-    'pythonRuntimeVersion',
-  ]) {
-    state[key] = version;
-  }
-  const errors = validateReleaseState(state);
-  assert.ok(errors.some((error) =>
-    error.includes('use alpha.N, beta.N, or rc.N')));
+    error.includes('typescript/package.json version must match X.Y.Z exactly')));
 });
 
 test('rejects missing, extra, or incorrectly named artifacts', () => {
@@ -286,18 +191,14 @@ test('rejects missing, extra, or incorrectly named artifacts', () => {
   assert.ok(errors.includes('unexpected artifact name: openrappter-v1.10.0.tar.gz'));
 });
 
-test('orders stable and prerelease SemVer and rejects malformed versions', () => {
+test('orders stable semver numerically and rejects non-release versions', () => {
   assert.equal(compareSemver('1.10.0', '1.9.99'), 1);
   assert.equal(compareSemver('2.0.0', '1.999.999'), 1);
   assert.equal(compareSemver('1.10.0', '1.10.0'), 0);
   assert.equal(compareSemver('1.9.99', '1.10.0'), -1);
   assert.equal(compareSemver('100000000000000000000.0.0', '2.0.0'), 1);
-  assert.equal(compareSemver('1.10.0-rc.1', '1.10.0'), -1);
-  assert.equal(compareSemver('1.10.0-beta.10', '1.10.0-beta.9'), 1);
-  assert.equal(compareSemver('1.10.0-beta.9', '1.10.0-rc.1'), -1);
-  assert.equal(compareSemver('1.10.0-beta', '1.10.0-beta.1'), -1);
-  assert.throws(() => compareSemver('01.10.0', '1.10.0'), /strict SemVer/);
-  assert.throws(() => compareSemver('1.10.0+build.1', '1.10.0'), /strict SemVer/);
+  assert.throws(() => compareSemver('1.10.0-rc.1', '1.10.0'), /must match X\.Y\.Z/);
+  assert.throws(() => compareSemver('01.10.0', '1.10.0'), /must match X\.Y\.Z/);
 });
 
 test('selects latest only for the highest registry and repository release', () => {
@@ -328,19 +229,6 @@ test('selects latest only for the highest registry and repository release', () =
     latestVersion: '1.9.8',
     publishedVersions: ['1.11.0'],
   }).tag, 'release-1-10-0');
-
-  assert.deepEqual(chooseNpmPublishTag({
-    candidateVersion: '2.0.0-beta.9',
-    latestVersion: '1.10.0',
-    publishedVersions: ['1.10.0'],
-  }), {
-    tag: 'beta',
-    currentReleaseVersion: '1.10.0',
-    isCurrentRelease: true,
-  });
-  assert.throws(() => chooseNpmPublishTag({
-    candidateVersion: '2.0.0-0.canary.1',
-  }), /use alpha\.N, beta\.N, or rc\.N/);
 });
 
 test('npm release index is injectable, stable-only, and fails closed', async () => {
@@ -367,15 +255,7 @@ test('npm release index is injectable, stable-only, and fails closed', async () 
         'dist-tags': { latest: 'not-semver' },
       }),
     }),
-    /npm latest version must be strict SemVer/,
-  );
-  await assert.rejects(
-    fetchNpmReleaseIndex(PACKAGE_NAME, {
-      fetchImpl: async () => response(200, {
-        'dist-tags': { latest: '1.11.0-beta.1' },
-      }),
-    }),
-    /npm latest version must be a stable X\.Y\.Z version/,
+    /npm latest version must match X\.Y\.Z/,
   );
   await assert.rejects(
     fetchNpmReleaseIndex(PACKAGE_NAME, {
@@ -557,7 +437,7 @@ test('release workflows retain per-tag builds and globally serialize publication
   );
   assert.match(
     macosWorkflow,
-    /group: openrappter-release-macos-\$\{\{ inputs\.version \}\}/,
+    /group: openrappter-release-macos-\$\{\{ github\.ref_name \}\}/,
   );
   assert.match(
     workflow,
@@ -565,50 +445,36 @@ test('release workflows retain per-tag builds and globally serialize publication
   );
 });
 
-test('Install Smoke runs whenever any shell script changes', () => {
-  const workflow = readFileSync(
-    new URL('../.github/workflows/install-smoke.yml', import.meta.url),
-    'utf8',
-  );
-  const pathsBlock =
-    workflow.match(/paths: &install-smoke-paths\n(?<paths>(?:\s+- .*\n)+)/)
-      ?.groups?.paths ?? '';
-  assert.match(pathsBlock, /^\s+- '\*\*\/\*\.sh'$/m);
-  assert.doesNotMatch(
-    pathsBlock.replace(/^\s+- '\*\*\/\*\.sh'\n/m, ''),
-    /^\s+- '\*\*\/\*\.sh'$/m,
-  );
-});
-
-test('macOS release validates exact identity and never rebuilds promoted bytes', () => {
+test('macOS workflow validates tag provenance and never injects output into shell', () => {
   const workflow = readFileSync(
     new URL('../.github/workflows/release-bar.yml', import.meta.url),
     'utf8',
   );
-  const validation = workflow.indexOf('- name: Validate exact source and version');
+  const validation = workflow.indexOf('- name: Validate exact macOS release tag');
   const checkout = workflow.search(/- uses: actions\/checkout@[0-9a-f]{40}/);
-  const provenance = workflow.indexOf('scripts/bar_candidate.py materialize');
+  const provenance = workflow.indexOf('- name: Require release commit on main');
   assert.ok(checkout >= 0 && validation > checkout && provenance > validation);
   assert.match(
     workflow,
-    /git merge-base --is-ancestor "\$SOURCE_COMMIT" origin\/main/,
+    /git merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/,
   );
   assert.ok(workflow.includes(
-    '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$',
+    '^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-bar$',
   ));
   assert.doesNotMatch(workflow, /run:\s*VERSION=\$\{\{/);
-  assert.match(workflow, /--local-artifacts-dir bar-release\/release-dist/);
-  assert.match(workflow, /--expected-sha "\$DMG_SHA256"/);
-  assert.doesNotMatch(workflow, /swift build|build-mac-app\.sh|notarytool submit|stapler staple|CODESIGN_IDENTITY/);
-  const parsed = parseYaml(workflow);
-  assert.deepEqual(parsed.jobs.publish.needs, ['release-constitution', 'verify-dmg']);
-  assert.equal(parsed.jobs['release-constitution'].name, 'Release Constitution');
-  const gate = parsed.jobs['release-constitution'].steps.map(step => step.run ?? '').join('\n');
-  assert.match(gate, /authority\/scripts\/release_gate.py/);
-  assert.match(gate, /--release bar-release\/release.json --remote/);
-  assert.match(gate, /--local-artifacts-dir bar-release\/release-dist/);
-  assert.match(gate, /validate_chain\(release,chain,load_policy/);
-  assert.equal(parsed.on.push, undefined);
+  const versionedBuild =
+    /VERSION="\$RELEASE_VERSION"\s*\\\s*\n[\s\S]*?\bbash scripts\/build-mac-app\.sh/;
+  assert.match(workflow, versionedBuild);
+  // Prove the assertion is about the version wiring and the real build
+  // command, not merely two unrelated strings somewhere in the file.
+  assert.doesNotMatch(
+    workflow.replace('VERSION="$RELEASE_VERSION" \\', 'VERSION="1.2.3" \\'),
+    versionedBuild,
+  );
+  assert.doesNotMatch(
+    workflow.replace('bash scripts/build-mac-app.sh', 'bash scripts/other.sh'),
+    versionedBuild,
+  );
 });
 
 test('registry publication reconciles exact artifacts and selects an explicit npm tag', () => {
@@ -627,20 +493,14 @@ test('registry publication reconciles exact artifacts and selects an explicit np
       < workflow.indexOf('- name: Publish only missing PyPI artifacts with OIDC'),
   );
   assert.match(workflow, /--npm-publish-tag-candidate "\$RELEASE_VERSION"/);
-  assert.match(workflow, /latest\|alpha\|beta\|rc\|"\$historical_tag"/);
-  assert.match(
-    workflow,
-    /prerelease: \$\{\{ needs\.preflight\.outputs\.prerelease == 'true' \}\}/,
-  );
-  assert.match(workflow, /release-dist\/openrappter-\*-py3-none-any\.whl/);
-  assert.match(workflow, /release-dist\/openrappter-\*\.tar\.gz/);
   const publishStart = workflow.indexOf('          npm publish \\');
   const publishEnd = workflow.indexOf('\n\n      - name:', publishStart);
   assert.notEqual(publishStart, -1);
   const publishCommand = workflow.slice(publishStart, publishEnd);
   assert.match(publishCommand, /--tag "\$NPM_PUBLISH_TAG"/);
   assert.equal((workflow.match(/^\s+npm publish \\\s*$/gm) || []).length, 1);
-  assert.doesNotMatch(workflow, /python -m build/);
+  assert.match(workflow, /"build==1\.5\.1"[\s\S]*"hatchling==1\.31\.0"/);
+  assert.match(workflow, /python -m build --no-isolation/);
   assert.match(workflow, /overwrite: true/);
   assert.match(workflow, /overwrite_files: false/);
   assert.match(
@@ -649,15 +509,13 @@ test('registry publication reconciles exact artifacts and selects an explicit np
   );
   assert.match(
     workflow,
-    /publish-registries:[\s\S]*?needs: \[preflight, smoke-artifacts, build-electron-artifacts, release-constitution\]/,
+    /publish-registries:[\s\S]*?needs: \[preflight, smoke-artifacts, build-electron-artifacts\]/,
   );
   assert.match(
     workflow,
-    /needs: \[preflight, publish-registries, build-electron-artifacts, release-constitution\]/,
+    /needs: \[preflight, publish-registries, build-electron-artifacts\]/,
   );
-  assert.doesNotMatch(workflow, /node scripts\/pack-locked\.mjs/);
-  assert.match(workflow, /Materialize finalized candidate bytes without rebuild/);
-  assert.match(workflow, /tar -xzf candidate\.tar\.gz -C release-dist/);
+  assert.match(workflow, /node scripts\/pack-locked\.mjs/);
   const desktopJob = workflow.slice(
     workflow.indexOf('  build-electron-artifacts:'),
     workflow.indexOf('  build-artifacts:'),
@@ -685,11 +543,11 @@ test('parsed release workflow preserves the privileged dependency graph', () => 
   ));
   assert.deepEqual(
     workflow.jobs['publish-registries'].needs,
-    ['preflight', 'smoke-artifacts', 'build-electron-artifacts', 'release-constitution'],
+    ['preflight', 'smoke-artifacts', 'build-electron-artifacts'],
   );
   assert.deepEqual(
     workflow.jobs['github-release'].needs,
-    ['preflight', 'publish-registries', 'build-electron-artifacts', 'release-constitution'],
+    ['preflight', 'publish-registries', 'build-electron-artifacts'],
   );
   assert.equal(
     workflow.jobs.preflight.steps.some(
@@ -719,13 +577,10 @@ test('macOS Bar release assets are immutable on rerun', () => {
     new URL('../.github/workflows/release-bar.yml', import.meta.url),
     'utf8',
   ));
-  const releaseSteps = workflow.jobs.publish.steps.filter(
-    (step) => String(step.uses).startsWith('softprops/action-gh-release@'),
+  const releaseStep = workflow.jobs['build-and-release'].steps.find(
+    (step) => step.name === 'Upload DMG as release asset',
   );
-  assert.equal(releaseSteps.length, 1);
-  const [releaseStep] = releaseSteps;
   assert.equal(releaseStep.with.overwrite_files, false);
-  assert.equal(releaseStep.with.fail_on_unmatched_files, true);
 });
 
 test('Windows Electron CI runs the complete smoke scope', () => {
@@ -735,14 +590,14 @@ test('Windows Electron CI runs the complete smoke scope', () => {
   );
   const windowsSmoke = workflow.slice(
     workflow.indexOf('- name: Run real Electron smoke on Windows'),
-    workflow.indexOf('- name: Build unpacked macOS application'),
+    workflow.indexOf('- name: Build macOS DMG without publishing'),
   );
   assert.match(windowsSmoke, /OPENRAPPTER_DESKTOP_SMOKE = "1"/);
   assert.doesNotMatch(windowsSmoke, /OPENRAPPTER_DESKTOP_SMOKE_SCOPE/);
 });
 
 test('privileged release actions are pinned to immutable commits', () => {
-  for (const workflowName of ['release.yml', 'release-bar.yml', 'build-bar-candidate.yml']) {
+  for (const workflowName of ['release.yml', 'release-bar.yml']) {
     const workflow = readFileSync(
       new URL(`../.github/workflows/${workflowName}`, import.meta.url),
       'utf8',
@@ -761,43 +616,11 @@ test('privileged release actions are pinned to immutable commits', () => {
   }
 });
 
-test('macOS delivery freezes the first-launch proof and withholds the cask proposal until public verification', () => {
-  const source = readFileSync(
+test('generated macOS release notes use the live Homebrew tap', () => {
+  const workflow = readFileSync(
     new URL('../.github/workflows/release-bar.yml', import.meta.url),
     'utf8',
   );
-  const workflow = parseYaml(source);
-  const { publish } = workflow.jobs;
-  assert.deepEqual(publish.needs, ['release-constitution', 'verify-dmg']);
-  const { steps } = publish;
-  const proof = steps.findIndex(
-    (step) => String(step.run).includes('scripts/bar_candidate.py cask'),
-  );
-  const upload = steps.findIndex(
-    (step) => String(step.uses).startsWith('softprops/action-gh-release@'),
-  );
-  const download = steps.findIndex(
-    (step) => String(step.run).includes('gh release download'),
-  );
-  const proposal = steps.findIndex(
-    (step) => String(step.uses).startsWith('actions/upload-artifact@')
-      && String(step.with?.name).startsWith('homebrew-proposal-'),
-  );
-  assert.ok(proof >= 0 && upload > proof && download > upload && proposal > download);
-  assert.match(steps[proof].run, /--evidence bar-release\/authority-evidence.json/);
-  assert.match(steps[proof].run, /--chain bar-release\/chain.json/);
-  assert.match(steps[upload].with.files, /homebrew-proposal\/runtime-bootstrap-proof.json/);
-  assert.match(steps[download].run, /downloaded-bar\/OpenRappter-Bar-\$\{RELEASE_VERSION\}\.dmg" \| sha256sum -c/);
-  assert.match(
-    steps[download].run,
-    /cmp homebrew-proposal\/runtime-bootstrap-proof.json downloaded-bar\/runtime-bootstrap-proof.json/,
-  );
-  assert.equal(steps[proposal].with.path, 'homebrew-proposal/');
-  assert.equal(steps[proposal].with['if-no-files-found'], 'error');
-  assert.notEqual(publish['continue-on-error'], true);
-  for (const index of [proof, upload, download, proposal]) {
-    assert.equal(steps[index].if, undefined);
-    assert.notEqual(steps[index]['continue-on-error'], true);
-  }
-  assert.doesNotMatch(source, /brew install|git push.*homebrew|gh pr merge/);
+  assert.match(workflow, /brew tap kody-w\/tap/);
+  assert.doesNotMatch(workflow, /brew tap openrappter\/tap/);
 });

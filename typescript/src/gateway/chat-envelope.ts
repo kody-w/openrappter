@@ -54,6 +54,10 @@ export interface ChatEnvelope extends Record<string, unknown> {
   model: string;
   requested_model: string;
   voice_response?: string;
+  /** Stable participant identity. Optional for legacy RAPP peers. */
+  rappid?: string;
+  /** The process incarnation that produced this reply. */
+  live_id?: string;
 }
 
 /** The six keys PARITY §2.4 requires. Exported so tests assert against the spec. */

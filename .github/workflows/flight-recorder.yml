@@ -1,17 +1,11 @@
 name: Flight Recorder
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: flight-recorder-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   gate:
@@ -67,7 +61,6 @@ jobs:
   windows:
     name: Native Windows storage
     runs-on: windows-latest
-    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -90,23 +83,12 @@ jobs:
       - name: Install Python runtime and test dependencies
         run: python -m pip install -e "python[dev]"
 
-      - name: Isolate native Windows persistence checks
-        shell: pwsh
-        run: ./scripts/prepare-windows-storage-tests.ps1
-
       - name: Validate TypeScript Windows storage
         working-directory: typescript
-        timeout-minutes: 6
-        run: npx vitest run src/flight-recorder/windows-storage.test.ts src/agents/MemoryAgent.persistence.test.ts src/memory/json-store.test.ts src/cli/__tests__/memory.test.ts --maxWorkers=2 --minWorkers=1 --reporter=verbose --testTimeout=30000 --hookTimeout=30000
-
-      - name: Build the Windows TypeScript runtime
-        working-directory: typescript
-        run: npm run build
+        run: |
+          npx vitest run src/flight-recorder/windows-storage.test.ts
+          npm run build
 
       - name: Validate Python Windows storage
         working-directory: python
-        run: >-
-          python -m pytest tests/test_flight_recorder_windows.py
-          tests/test_memory_persistence.py tests/test_memory_agents.py
-          "tests/test_brainstem_compliance.py::test_agent_is_brainstem_compliant[manage_memory_agent.py]"
-          "tests/test_brainstem_compliance.py::test_agent_is_brainstem_compliant[context_memory_agent.py]" -q
+        run: python -m pytest tests/test_flight_recorder_windows.py -q

@@ -79,7 +79,6 @@ func runAppViewModelTests() async {
 
         test("chat delta updates streaming text via ChatViewModel") {
             let vm = AppViewModel()
-            vm.chatViewModel.currentSessionKey = "sess_1"
             let dict: [String: Any] = [
                 "runId": "run_1",
                 "sessionKey": "sess_1",
@@ -99,7 +98,6 @@ func runAppViewModelTests() async {
 
         test("chat final adds message and clears streaming") {
             let vm = AppViewModel()
-            vm.chatViewModel.currentSessionKey = "sess_1"
             vm.chatViewModel.streamingText = "partial"
 
             let dict: [String: Any] = [
@@ -128,7 +126,6 @@ func runAppViewModelTests() async {
 
         test("chat error sets error state") {
             let vm = AppViewModel()
-            vm.chatViewModel.currentSessionKey = "sess_1"
             vm.chatViewModel.streamingText = "partial"
 
             let dict: [String: Any] = [
@@ -150,7 +147,6 @@ func runAppViewModelTests() async {
 
         test("chat aborted clears streaming without surfacing an error") {
             let vm = AppViewModel()
-            vm.chatViewModel.currentSessionKey = "sess_1"
             vm.chatViewModel.streamingText = "partial"
             let dict: [String: Any] = [
                 "runId": "run_1",

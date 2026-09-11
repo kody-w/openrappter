@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   desktopIdentity, dmgName, inspectAppBundle, macAppPath, runCommand,
 } from '../scripts/release-contract.mjs';
@@ -61,10 +62,11 @@ test('native command runner preserves spaces and shell metacharacters as literal
 
 test('local installer help and invalid input never invoke installation', () => {
   const script = new URL('../scripts/install-local.mjs', import.meta.url);
-  const help = spawnSync(process.execPath, [script.pathname, '--help'], { encoding: 'utf8' });
+  const scriptPath = fileURLToPath(script);
+  const help = spawnSync(process.execPath, [scriptPath, '--help'], { encoding: 'utf8' });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /--replace/);
-  const invalid = spawnSync(process.execPath, [script.pathname], { encoding: 'utf8' });
+  const invalid = spawnSync(process.execPath, [scriptPath], { encoding: 'utf8' });
   assert.equal(invalid.status, 1);
   assert.match(invalid.stderr, /installation is never implicit/);
 });

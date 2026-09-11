@@ -42,7 +42,10 @@
     "asar": true,
     "npmRebuild": false,
     "files": [
-      "dist/**/*",
+      "dist/*.js",
+      "dist/*.js.map",
+      "dist/*.cjs",
+      "dist/*.cjs.map",
       "runtime/**/*",
       "package.json"
     ],

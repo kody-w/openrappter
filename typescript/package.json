@@ -1,16 +1,9 @@
 {
   "name": "openrappter",
-  "version": "1.13.1",
-  "description": "🦖 Local-first AI agent powered by GitHub Copilot SDK — no API keys required",
+  "version": "1.13.0",
+  "description": "RAPP Work — Your local AI workforce. Local-first agents for real business work, powered by GitHub Copilot.",
   "type": "module",
   "main": "dist/index.js",
-  "exports": {
-    ".": "./dist/index.js",
-    "./release-ring-selector": {
-      "types": "./ui/dist/release-ring-selector.d.ts",
-      "import": "./ui/dist/release-ring-selector.js"
-    }
-  },
   "bin": {
     "openrappter": "./bin/openrappter.mjs"
   },
@@ -31,7 +24,7 @@
     "format": "prettier --write .",
     "prepack": "npm run build",
     "pack:locked": "node scripts/pack-locked.mjs",
-    "copy:assets": "node -e \"const fs=require('fs');fs.mkdirSync('dist/agents/python',{recursive:true});fs.copyFileSync('src/agents/python/runner.py','dist/agents/python/runner.py');fs.mkdirSync('dist/voice',{recursive:true});fs.copyFileSync('src/voice/local-speech.js','dist/voice/local-speech.js')\" && node scripts/copy-clever-girl-assets.mjs"
+    "copy:assets": "node -e \"const fs=require('fs');fs.mkdirSync('dist/agents/python',{recursive:true});fs.copyFileSync('src/agents/python/runner.py','dist/agents/python/runner.py');fs.mkdirSync('dist/voice',{recursive:true});fs.copyFileSync('src/voice/local-speech.js','dist/voice/local-speech.js')\""
   },
   "keywords": [
     "ai",
@@ -72,15 +65,12 @@
     "@github/copilot": "1.0.71",
     "@types/sharp": "^0.31.1",
     "@types/ws": "^8.18.1",
-    "ajv": "^8.20.0",
-    "ajv-formats": "^3.0.1",
     "better-sqlite3": "^12.6.2",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "json5": "^2.2.3",
     "node-edge-tts": "^1.2.10",
     "sharp": "^0.35.3",
-    "typescript": "^5.4.0",
     "ws": "^8.19.0",
     "yaml": "^2.3.4",
     "zod": "^4.3.6"
@@ -92,6 +82,7 @@
     "jsdom": "^27.4.0",
     "prettier": "^3.2.0",
     "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
     "typescript-eslint": "^8.56.0",
     "vitest": "^2.0.0"
   }

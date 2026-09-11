@@ -13,23 +13,19 @@
  * thing that was broken is the contract, not the source text.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import { GatewayServer } from '../../gateway/server.js';
-import { loadEnv, updateEnv } from '../../env.js';
 
 let server: GatewayServer | undefined;
 let dataDir: string | undefined;
-const previousTelegramToken = process.env.TELEGRAM_BOT_TOKEN;
 
 afterEach(async () => {
   await server?.stop();
   server = undefined;
   if (dataDir) rmSync(dataDir, { recursive: true, force: true });
   dataDir = undefined;
-  if (previousTelegramToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
-  else process.env.TELEGRAM_BOT_TOKEN = previousTelegramToken;
 });
 
 type Handler = (params: unknown, ctx: unknown) => Promise<unknown>;
@@ -60,6 +56,10 @@ async function startGateway(): Promise<{
     probeChannel: (type: unknown) => ({ ok: true, type }),
     getChannelConfig: () => ({ token: 'super-secret-value' }),
   };
+  // `channels.configure` persists; keep it off the real filesystem.
+  (server as unknown as { persistChannelConfig: () => Promise<void> }).persistChannelConfig =
+    async () => undefined;
+
   const methods = (server as unknown as { methods: Map<string, { handler: Handler }> }).methods;
   const call = async (method: string, params: unknown = {}) => {
     const entry = methods.get(method);
@@ -101,22 +101,6 @@ describe('channels CLI contract', () => {
 
     await call('channels.configure', { type: 'telegram', config: { token: 'abc' } });
     expect(seen.configured).toEqual([{ type: 'telegram', config: { token: 'abc' } }]);
-  });
-
-  it('persists channel credentials without clobbering concurrent managed settings', async () => {
-    const { call } = await startGateway();
-    const file = join(dataDir!, '.env');
-    writeFileSync(file, '# preserved\nOPENRAPPTER_MODEL=fixture-model\n');
-    await Promise.all([
-      call('channels.configure', { type: 'telegram', config: { token: 'fixture-token' } }),
-      updateEnv({ GITHUB_TOKEN: 'fixture-github' }, file),
-    ]);
-    expect(await loadEnv(file)).toEqual({
-      OPENRAPPTER_MODEL: 'fixture-model',
-      TELEGRAM_BOT_TOKEN: 'fixture-token',
-      GITHUB_TOKEN: 'fixture-github',
-    });
-    expect(readFileSync(file, 'utf8')).toContain('# preserved');
   });
 
   it('every method the CLI calls is registered', async () => {

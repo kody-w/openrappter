@@ -233,9 +233,8 @@ public struct RpcClient: RpcClientProtocol, Sendable {
         }
     }
 
-    public func abortChat(sessionKey: String, runId: String? = nil) async throws {
-        var params: [String: AnyCodable] = ["sessionKey": AnyCodable(sessionKey)]
-        if let runId { params["runId"] = AnyCodable(runId) }
+    public func abortChat(sessionKey: String) async throws {
+        let params: [String: AnyCodable] = ["sessionKey": AnyCodable(sessionKey)]
         let response = try await connection.sendRequest(method: "chat.abort", params: params)
         guard response.ok else {
             let msg = response.error?.message ?? "Unknown error"

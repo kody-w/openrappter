@@ -1,11 +1,16 @@
 /**
  * Canonical bytes, content addresses, and the one PRNG both runtimes share.
  *
- * Two runtimes only agree about a hash if they agree about the bytes, so the
- * canonical form is pinned here and nowhere else: keys sorted, no whitespace,
- * ASCII-escaped. Numbers use JavaScript's JSON number form; the Python mirror
- * implements that same binary64 rendering explicitly so parsed `1.0`, tiny
- * exponents, and large integral floats cannot fork a content address.
+ * Two runtimes only agree about a hash if they agree about the bytes. The
+ * historical `canonicalJson` helper remains ASCII-escaped for its existing
+ * Quantum RAPPID callers; `rappCanonicalJson` is the RAPP/1 RFC 8785 form:
+ * UTF-16 key ordering, raw UTF-8 strings, no whitespace, and ECMAScript
+ * binary64 number serialization.
+ *
+ * RAPP values use the full RFC 8785 binary64 number profile. JavaScript's
+ * JSON.stringify implements the required ECMAScript serialization; the strict
+ * parser additionally proves that an incoming decimal token denotes the same
+ * mathematical value after binary64 parsing, so lossy tokens are refused.
  *
  * The PRNG is a SHA-256 counter stream rather than a language RNG on purpose.
  * The generator that seeded the live sonic dimension used Python's Mersenne
@@ -19,8 +24,60 @@
  */
 
 import { createHash } from 'node:crypto';
+import { types as utilTypes } from 'node:util';
 
-import type { JsonValue } from './types.js';
+import type { JsonObject, JsonValue } from './types.js';
+import {
+  assertRappCanonicalValue, rappCanonicalJson, validateRappString,
+  RAPP_MAX_CANONICAL_BYTES, RAPP_MAX_CANONICAL_DEPTH,
+} from '../rapp/json.js';
+export {
+  assertRappCanonicalValue, rappCanonicalJson,
+  RAPP_PARTICLE_DOMAIN, RAPP_WAVE_DOMAIN, RAPP_EGG_DOMAIN,
+  RAPP_MAX_CANONICAL_BYTES, RAPP_MAX_CANONICAL_DEPTH,
+} from '../rapp/json.js';
+
+// Post-import poisoning is in scope and covered by tests. Same-realm intrinsic
+// replacement before module initialization is unsupported without a fresh
+// realm from which to obtain authenticated ECMAScript intrinsics.
+const SAFE_OWN_KEYS = Reflect.ownKeys;
+const SAFE_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
+const SAFE_HAS_OWN = Object.hasOwn;
+const SAFE_OBJECT_KEYS = Object.keys;
+const SAFE_REFLECT_APPLY = Reflect.apply;
+const SAFE_DEFINE_PROPERTY = Object.defineProperty;
+const SAFE_ARRAY_SORT = Array.prototype.sort;
+const SAFE_ARRAY_JOIN = Array.prototype.join;
+const SAFE_ARRAY_REVERSE = Array.prototype.reverse;
+
+function safeSort(values: string[]): string[] {
+  return SAFE_REFLECT_APPLY(SAFE_ARRAY_SORT, values, []) as string[];
+}
+
+function safeJoin(values: readonly string[], separator: string): string {
+  return SAFE_REFLECT_APPLY(
+    SAFE_ARRAY_JOIN,
+    values,
+    [separator],
+  ) as string;
+}
+
+function safeReverse<TValue>(values: TValue[]): TValue[] {
+  return SAFE_REFLECT_APPLY(SAFE_ARRAY_REVERSE, values, []) as TValue[];
+}
+
+function safeArraySet<TValue>(
+  values: TValue[],
+  index: number,
+  value: TValue,
+): void {
+  SAFE_DEFINE_PROPERTY(values, String(index), {
+    value,
+    configurable: true,
+    enumerable: true,
+    writable: true,
+  });
+}
 
 /**
  * Domain separation, in the shape RAPP/1 §5 already established and
@@ -30,9 +87,6 @@ import type { JsonValue } from './types.js';
  */
 export const AUTOCOMPLETE_DOMAIN = 'quantum-rappid/1:autocomplete';
 export const PROPOSAL_DOMAIN = 'quantum-rappid/1:proposal';
-export const RAPP_PARTICLE_DOMAIN = 'rapp/1:particle';
-export const RAPP_WAVE_DOMAIN = 'rapp/1:wave';
-export const RAPP_EGG_DOMAIN = 'rapp/1:egg';
 
 /** JSON with sorted keys, no spaces and ASCII escapes. */
 export function canonicalJson(value: JsonValue): string {
@@ -40,10 +94,20 @@ export function canonicalJson(value: JsonValue): string {
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return canonicalNumber(value);
   if (typeof value === 'string') return canonicalString(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  const keys = Object.keys(value).sort();
-  const body = keys.map((key) => `${canonicalString(key)}:${canonicalJson(value[key])}`);
-  return `{${body.join(',')}}`;
+  if (Array.isArray(value)) {
+    const items: string[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      safeArraySet(items, index, canonicalJson(value[index]));
+    }
+    return `[${safeJoin(items, ',')}]`;
+  }
+  const keys = safeSort(SAFE_OBJECT_KEYS(value));
+  const body: string[] = [];
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    safeArraySet(body, index, `${canonicalString(key)}:${canonicalJson(value[key])}`);
+  }
+  return `{${safeJoin(body, ',')}}`;
 }
 
 /**
@@ -90,78 +154,403 @@ export function sha256Hex(data: Uint8Array | string): string {
   return createHash('sha256').update(data).digest('hex');
 }
 
-function validateRappValue(value: JsonValue, depth = 1): void {
-  if (depth > 64) throw new TypeError('RAPP/1 value exceeds depth 64');
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') {
-    if (typeof value === 'string') {
-      for (let index = 0; index < value.length; index += 1) {
-        const unit = value.charCodeAt(index);
+/**
+ * Materialize a hostile programmatic JSON value without invoking accessors or
+ * rereading properties. Proxies are refused because their descriptor/ownKeys
+ * traps can present mutually inconsistent objects during one verification.
+ */
+export function snapshotRappJsonValue(value: unknown): JsonValue {
+  interface SnapshotNode {
+    object: object;
+    value: JsonValue;
+    next: SnapshotNode | null;
+  }
+  interface ActiveNode {
+    object: object;
+    next: ActiveNode | null;
+  }
+  let snapshots: SnapshotNode | null = null;
+  let active: ActiveNode | null = null;
+
+  const snapshotFor = (object: object): JsonValue | undefined => {
+    let node = snapshots;
+    while (node !== null) {
+      if (node.object === object) return node.value;
+      node = node.next;
+    }
+    return undefined;
+  };
+  const isActive = (object: object): boolean => {
+    let node = active;
+    while (node !== null) {
+      if (node.object === object) return true;
+      node = node.next;
+    }
+    return false;
+  };
+  const remember = (object: object, snapshot: JsonValue): void => {
+    const node = Object.create(null) as SnapshotNode;
+    SAFE_DEFINE_PROPERTY(node, 'object', { value: object, enumerable: true });
+    SAFE_DEFINE_PROPERTY(node, 'value', { value: snapshot, enumerable: true });
+    SAFE_DEFINE_PROPERTY(node, 'next', { value: snapshots, enumerable: true });
+    snapshots = Object.freeze(node);
+  };
+
+  const visit = (current: unknown, path: string): JsonValue => {
+    if (
+      current === null
+      || typeof current === 'string'
+      || typeof current === 'boolean'
+      || typeof current === 'number'
+    ) {
+      return current;
+    }
+    if (typeof current !== 'object') {
+      throw new TypeError(`${path} is not a JSON value`);
+    }
+    if (utilTypes.isProxy(current)) {
+      throw new TypeError(`${path} is a Proxy; RAPP verification requires stable descriptors`);
+    }
+    if (isActive(current)) throw new TypeError(`${path} contains a JSON cycle`);
+    const cached = snapshotFor(current);
+    if (cached !== undefined) return cached;
+
+    const keys = SAFE_OWN_KEYS(current);
+    const stringKeys = keys as string[];
+    const descriptors = Object.create(null) as Record<string, PropertyDescriptor>;
+    const seen = Object.create(null) as Record<string, true>;
+    for (let index = 0; index < keys.length; index += 1) {
+      const key = keys[index];
+      if (typeof key === 'symbol') {
+        throw new TypeError(`${path} contains a symbol key`);
+      }
+      if (SAFE_GET_OWN_PROPERTY_DESCRIPTOR(seen, key) !== undefined) {
+        throw new TypeError(`${path} contains duplicate own keys`);
+      }
+      seen[key] = true;
+      const descriptor = SAFE_GET_OWN_PROPERTY_DESCRIPTOR(current, key);
+      if (descriptor === undefined) {
+        throw new TypeError(`${path}.${key} changed shape during snapshot`);
+      }
+      if (!SAFE_HAS_OWN(descriptor, 'value')) {
+        throw new TypeError(`${path}.${key} is an accessor property`);
+      }
+      descriptors[key] = descriptor;
+    }
+
+    const activeNode = Object.create(null) as ActiveNode;
+    SAFE_DEFINE_PROPERTY(activeNode, 'object', { value: current, enumerable: true });
+    SAFE_DEFINE_PROPERTY(activeNode, 'next', { value: active, enumerable: true });
+    active = Object.freeze(activeNode);
+    try {
+      if (Array.isArray(current)) {
+        const lengthDescriptor = descriptors.length;
         if (
-          unit >= 0xd800
-          && unit <= 0xdfff
-          && !(
-            unit <= 0xdbff
-            && index + 1 < value.length
-            && value.charCodeAt(index + 1) >= 0xdc00
-            && value.charCodeAt(index + 1) <= 0xdfff
-          )
-          && !(
-            unit >= 0xdc00
-            && index > 0
-            && value.charCodeAt(index - 1) >= 0xd800
-            && value.charCodeAt(index - 1) <= 0xdbff
-          )
+          lengthDescriptor === undefined
+          || typeof lengthDescriptor.value !== 'number'
+          || !Number.isSafeInteger(lengthDescriptor.value)
+          || lengthDescriptor.value < 0
         ) {
-          throw new TypeError('RAPP/1 string contains an unpaired surrogate');
+          throw new TypeError(`${path}.length is invalid`);
         }
+        const length = lengthDescriptor.value;
+        let indexKeyCount = 0;
+        for (let index = 0; index < stringKeys.length; index += 1) {
+          const key = stringKeys[index];
+          if (key === 'length') continue;
+          indexKeyCount += 1;
+          if (!/^(0|[1-9]\d*)$/.test(key) || Number(key) >= length) {
+            throw new TypeError(`${path} contains a non-index array property`);
+          }
+        }
+        if (indexKeyCount !== length) {
+          throw new TypeError(`${path} contains an array hole`);
+        }
+        const result: JsonValue[] = [];
+        remember(current, result);
+        for (let index = 0; index < length; index += 1) {
+          const descriptor = descriptors[String(index)];
+          if (descriptor === undefined || descriptor.enumerable !== true) {
+            throw new TypeError(`${path}[${index}] is missing or non-enumerable`);
+          }
+          safeArraySet(result, index, visit(descriptor.value, `${path}[${index}]`));
+        }
+        return Object.freeze(result) as unknown as JsonValue[];
+      }
+
+      const prototype = Object.getPrototypeOf(current);
+      if (prototype !== Object.prototype && prototype !== null) {
+        throw new TypeError(`${path} is not a plain JSON object`);
+      }
+      const result = Object.create(null) as JsonObject;
+      remember(current, result);
+      for (let index = 0; index < stringKeys.length; index += 1) {
+        const key = stringKeys[index];
+        const descriptor = descriptors[key];
+        if (descriptor.enumerable !== true) {
+          throw new TypeError(`${path}.${key} is non-enumerable`);
+        }
+        result[key] = visit(descriptor.value, `${path}.${key}`);
+      }
+      return Object.freeze(result);
+    } finally {
+      active = activeNode.next;
+    }
+  };
+
+  const snapshot = visit(value, '$');
+  assertRappCanonicalValue(snapshot);
+  return snapshot;
+}
+
+/**
+ * Parse the RAPP/1 I-JSON profile without losing duplicate members or lossy
+ * number tokens through JSON.parse's last-value-wins behavior.
+ */
+export function parseRappJson(source: string): JsonValue {
+  if (typeof source !== 'string') {
+    throw new TypeError('RAPP/1 JSON input must be a string');
+  }
+  if (Buffer.byteLength(source, 'utf8') > RAPP_MAX_CANONICAL_BYTES) {
+    throw new TypeError('RAPP/1 JSON input exceeds 1 MiB');
+  }
+
+  let offset = 0;
+  const whitespace = (): void => {
+    while (
+      source[offset] === ' '
+      || source[offset] === '\n'
+      || source[offset] === '\r'
+      || source[offset] === '\t'
+    ) {
+      offset += 1;
+    }
+  };
+  const stringValue = (): string => {
+    if (source[offset] !== '"') throw new TypeError(`expected string at offset ${offset}`);
+    const start = offset;
+    offset += 1;
+    let escaped = false;
+    while (offset < source.length) {
+      const character = source[offset];
+      if (!escaped && character === '"') {
+        offset += 1;
+        let value: unknown;
+        try {
+          value = JSON.parse(source.slice(start, offset));
+        } catch {
+          throw new TypeError(`invalid JSON string at offset ${start}`);
+        }
+        if (typeof value !== 'string') throw new TypeError(`invalid JSON string at offset ${start}`);
+        validateRappString(value);
+        return value;
+      }
+      if (!escaped && character === '\\') escaped = true;
+      else escaped = false;
+      offset += 1;
+    }
+    throw new TypeError(`unterminated JSON string at offset ${start}`);
+  };
+  interface SignedDecimalInteger {
+    negative: boolean;
+    digits: string;
+  }
+  const signedInteger = (token: string): SignedDecimalInteger => {
+    const negative = token.startsWith('-');
+    const digits = token.replace(/^[+-]?0*/, '') || '0';
+    return { negative: digits === '0' ? false : negative, digits };
+  };
+  const compareMagnitude = (left: string, right: string): number => {
+    if (left.length !== right.length) return left.length < right.length ? -1 : 1;
+    return left === right ? 0 : left < right ? -1 : 1;
+  };
+  const addMagnitude = (left: string, right: string): string => {
+    let carry = 0;
+    const result: string[] = [];
+    for (
+      let index = 0;
+      index < Math.max(left.length, right.length) || carry > 0;
+      index += 1
+    ) {
+      const sum =
+        Number(left[left.length - 1 - index] ?? 0)
+        + Number(right[right.length - 1 - index] ?? 0)
+        + carry;
+      safeArraySet(result, result.length, String(sum % 10));
+      carry = Math.floor(sum / 10);
+    }
+    return safeJoin(safeReverse(result), '').replace(/^0+/, '') || '0';
+  };
+  const subtractMagnitude = (left: string, right: string): string => {
+    let borrow = 0;
+    const result: string[] = [];
+    for (let index = 0; index < left.length; index += 1) {
+      let difference =
+        Number(left[left.length - 1 - index])
+        - Number(right[right.length - 1 - index] ?? 0)
+        - borrow;
+      if (difference < 0) {
+        difference += 10;
+        borrow = 1;
+      } else {
+        borrow = 0;
+      }
+      safeArraySet(result, result.length, String(difference));
+    }
+    return safeJoin(safeReverse(result), '').replace(/^0+/, '') || '0';
+  };
+  const addSigned = (
+    left: SignedDecimalInteger,
+    right: SignedDecimalInteger,
+  ): SignedDecimalInteger => {
+    if (left.negative === right.negative) {
+      return {
+        negative: left.negative,
+        digits: addMagnitude(left.digits, right.digits),
+      };
+    }
+    const comparison = compareMagnitude(left.digits, right.digits);
+    if (comparison === 0) return { negative: false, digits: '0' };
+    const larger = comparison > 0 ? left : right;
+    const smaller = comparison > 0 ? right : left;
+    return {
+      negative: larger.negative,
+      digits: subtractMagnitude(larger.digits, smaller.digits),
+    };
+  };
+  const signedSmallInteger = (value: number): SignedDecimalInteger => ({
+    negative: value < 0,
+    digits: String(Math.abs(value)),
+  });
+  const decimalIdentity = (token: string): string => {
+    const match =
+      /^(-)?(0|[1-9]\d*)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(token);
+    if (match === null) throw new TypeError('invalid JSON number token');
+    let digits = `${match[2]}${match[3] ?? ''}`.replace(/^0+/, '');
+    if (digits.length === 0) return '0';
+    let trailing = 0;
+    while (digits.endsWith('0')) {
+      digits = digits.slice(0, -1);
+      trailing += 1;
+    }
+    const exponent = addSigned(
+      signedInteger(match[4] ?? '0'),
+      signedSmallInteger(trailing - (match[3] ?? '').length),
+    );
+    const exponentText =
+      `${exponent.negative ? '-' : ''}${exponent.digits}`;
+    return `${match[1] ?? ''}${digits}e${exponentText}`;
+  };
+  const numberValue = (): number => {
+    const start = offset;
+    const matcher =
+      /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+    matcher.lastIndex = offset;
+    const match = matcher.exec(source);
+    if (match === null) throw new TypeError(`invalid JSON number at offset ${start}`);
+    offset = matcher.lastIndex;
+    const token = source.slice(start, offset);
+    const value = Number(token);
+    if (!Number.isFinite(value)) {
+      throw new TypeError('RAPP/1 number token is not a finite binary64 value');
+    }
+    const canonical = JSON.stringify(value);
+    if (canonical === undefined || decimalIdentity(token) !== decimalIdentity(canonical)) {
+      throw new TypeError('RAPP/1 number token does not survive the binary64 round-trip');
+    }
+    return value;
+  };
+  const value = (depth: number): JsonValue => {
+    if (depth > RAPP_MAX_CANONICAL_DEPTH) {
+      throw new TypeError(`RAPP/1 value exceeds depth ${RAPP_MAX_CANONICAL_DEPTH}`);
+    }
+    whitespace();
+    const character = source[offset];
+    if (character === '"') return stringValue();
+    if (character === '[') {
+      offset += 1;
+      whitespace();
+      const result: JsonValue[] = [];
+      if (source[offset] === ']') {
+        offset += 1;
+        return result;
+      }
+      for (;;) {
+        safeArraySet(result, result.length, value(depth + 1));
+        whitespace();
+        if (source[offset] === ']') {
+          offset += 1;
+          return result;
+        }
+        if (source[offset] !== ',') {
+          throw new TypeError(`expected comma or ] at offset ${offset}`);
+        }
+        offset += 1;
       }
     }
-    return;
-  }
-  if (typeof value === 'number') {
-    if (!Number.isSafeInteger(value)) {
-      throw new TypeError('Quantum RAPPID frames use the RAPP/1 exact-integer profile');
+    if (character === '{') {
+      offset += 1;
+      whitespace();
+      const result: JsonObject = Object.create(null) as JsonObject;
+      const keys = Object.create(null) as Record<string, true>;
+      if (source[offset] === '}') {
+        offset += 1;
+        return result;
+      }
+      for (;;) {
+        whitespace();
+        const key = stringValue();
+        if (SAFE_GET_OWN_PROPERTY_DESCRIPTOR(keys, key) !== undefined) {
+          throw new TypeError(`duplicate JSON member: ${key}`);
+        }
+        keys[key] = true;
+        whitespace();
+        if (source[offset] !== ':') throw new TypeError(`expected colon at offset ${offset}`);
+        offset += 1;
+        result[key] = value(depth + 1);
+        whitespace();
+        if (source[offset] === '}') {
+          offset += 1;
+          return result;
+        }
+        if (source[offset] !== ',') {
+          throw new TypeError(`expected comma or } at offset ${offset}`);
+        }
+        offset += 1;
+      }
     }
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) validateRappValue(item, depth + 1);
-    return;
-  }
-  for (const [key, item] of Object.entries(value)) {
-    if ([...key].some((character) => character.codePointAt(0)! > 0xffff)) {
-      throw new TypeError('RAPP/1 exact profile refuses supplementary-plane object keys');
+    if (source.startsWith('true', offset)) {
+      offset += 4;
+      return true;
     }
-    validateRappValue(key, depth + 1);
-    validateRappValue(item, depth + 1);
-  }
-}
+    if (source.startsWith('false', offset)) {
+      offset += 5;
+      return false;
+    }
+    if (source.startsWith('null', offset)) {
+      offset += 4;
+      return null;
+    }
+    if (character === '-' || /[0-9]/.test(character ?? '')) return numberValue();
+    throw new TypeError(`invalid JSON value at offset ${offset}`);
+  };
 
-function renderRappCanonical(value: JsonValue): string {
-  if (value === null) return 'null';
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (typeof value === 'number') return String(value);
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => renderRappCanonical(item)).join(',')}]`;
+  const parsed = value(1);
+  whitespace();
+  if (offset !== source.length) {
+    throw new TypeError(`trailing JSON data at offset ${offset}`);
   }
-  return `{${Object.keys(value).sort().map((key) =>
-    `${JSON.stringify(key)}:${renderRappCanonical(value[key])}`,
-  ).join(',')}}`;
-}
-
-/** RAPP/1's exact-value canonical profile: UTF-8, sorted keys, no whitespace. */
-export function rappCanonicalJson(value: JsonValue): string {
-  validateRappValue(value);
-  const rendered = renderRappCanonical(value);
-  if (Buffer.byteLength(rendered, 'utf8') > 1024 * 1024) {
-    throw new TypeError('RAPP/1 canonical form exceeds 1 MiB');
-  }
-  return rendered;
+  // Applies canonical byte size and all decoded string/value checks.
+  rappCanonicalJson(parsed);
+  return parsed;
 }
 
 export function rappH(space: string, value: JsonValue): string {
-  return sha256Hex(Buffer.from(`${space}\n${rappCanonicalJson(value)}`, 'utf8'));
+  return rappHashCanonical(space, rappCanonicalJson(value));
+}
+
+export function rappHashCanonical(space: string, canonical: string): string {
+  return sha256Hex(Buffer.from(`${space}\n${canonical}`, 'utf8'));
 }
 
 export function rappHb(space: string, bytes: Uint8Array): string {

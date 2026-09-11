@@ -147,10 +147,8 @@ describe('canonical bytes', () => {
     expect(canonicalJson({ b: { d: 1, c: 2 }, a: 3 } as JsonObject)).toBe('{"a":3,"b":{"c":2,"d":1}}');
   });
 
-  it('keeps RAPP/1 frame values inside the exact profile and size ceiling', () => {
-    expect(() => rappCanonicalJson({ n: 2.5 })).toThrow(
-      /exact-integer profile/,
-    );
+  it('uses full binary64 JCS while retaining the size ceiling', () => {
+    expect(rappCanonicalJson({ n: 2.5 })).toBe('{"n":2.5}');
     expect(() => rappCanonicalJson('x'.repeat(1024 * 1024 + 1))).toThrow(
       /exceeds 1 MiB/,
     );

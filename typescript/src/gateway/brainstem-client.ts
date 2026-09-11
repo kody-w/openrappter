@@ -58,6 +58,7 @@ export interface BrainstemEnvelope {
 export interface BrainstemAskOptions {
   message: string;
   sessionId?: string;
+  idempotencyKey?: string;
   conversationHistory?: unknown[];
   baseUrl?: string;
   timeoutMs?: number;
@@ -193,6 +194,7 @@ export async function askBrainstem(options: BrainstemAskOptions): Promise<Brains
     user_input: options.message,
   };
   if (options.sessionId) body.session_id = options.sessionId;
+  if (options.idempotencyKey) body.idempotency_key = options.idempotencyKey;
   if (options.conversationHistory) body.conversation_history = options.conversationHistory;
 
   let response: Response;

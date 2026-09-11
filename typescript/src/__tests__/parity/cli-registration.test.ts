@@ -67,7 +67,6 @@ const REGISTERED = [
   'rappterhub',
   'clawhub',
   'memory',
-  'clever-girl',
 ];
 
 /**

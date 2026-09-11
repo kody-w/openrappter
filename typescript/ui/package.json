@@ -1,12 +1,14 @@
 {
   "name": "openrappter-ui",
+  "description": "RAPP Work — Your local AI workforce. Local work threads, approvals, evidence, and computer visibility.",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && vite build --config vite.selector.config.ts && node -e \"require('fs').copyFileSync('release-ring-selector.d.ts','dist/release-ring-selector.d.ts')\"",
+    "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:browser": "node scripts/check-work-browser.mjs"
   },
   "dependencies": {
     "dompurify": "^3.3.1",

@@ -1,9 +1,6 @@
 name: Electron Desktop
 
 on:
-  # The candidate gate requires these exact-head checks, not a PR ancestor.
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -40,11 +37,16 @@ jobs:
         working-directory: typescript/desktop
         run: npm ci
 
-      - name: Compile and test desktop security contract
+      - name: Compile and test desktop security and release contracts
         working-directory: typescript/desktop
         run: |
           npm run build
           npm test
+
+      - name: Exercise Apple Silicon Omarchy gateway integration
+        if: runner.os == 'macOS'
+        working-directory: typescript
+        run: npx vitest run src/gateway/__tests__/vm-gateway.test.ts
 
       - name: Audit desktop production dependencies
         working-directory: typescript/desktop
@@ -76,7 +78,23 @@ jobs:
           # value only CI enjoys would have hidden the problem again.
           .\node_modules\.bin\electron.cmd .
 
-      - name: Build unpacked macOS application
+      - name: Build macOS DMG without publishing
         if: runner.os == 'macOS'
         working-directory: typescript/desktop
-        run: CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist -- --dir
+        run: CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist -- --mac dmg --config.mac.notarize=false
+
+      - name: Verify RAPP Work DMG and generate release metadata
+        if: runner.os == 'macOS'
+        working-directory: typescript/desktop
+        run: npm run release:manifest -- --require-clean
+
+      - name: Upload RAPP Work macOS artifacts
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapp-work-macos-${{ github.sha }}
+          path: |
+            typescript/desktop/dist/*.dmg
+            typescript/desktop/dist/*.dmg.sha256
+            typescript/desktop/dist/*.dmg.manifest.json
+          if-no-files-found: error

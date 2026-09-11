@@ -1,10 +1,13 @@
 <div align="center">
 
-# openrappter
+# RAPP Work
 
-### AI agents powered by your existing GitHub Copilot subscription
+### Your local AI workforce.
 
-**No extra API keys. No new accounts. No additional monthly bills. Your data stays local.**
+**Serious local AI for real business work. Visible progress, reviewable decisions, and context you control.**
+
+Built on the OpenRappter runtime. Workspaces and computer execution are local;
+model inference may use GitHub Copilot or your configured cloud provider.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-22c55e.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3b82f6.svg)](https://python.org)
@@ -13,7 +16,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -21,6 +24,41 @@
 ---
 
 </div>
+
+## Meet your workforce
+
+**Work is the default web and Electron desktop view.** Keep an agent roster in
+view, follow work threads and recorded task/run timelines, review execution
+approvals, and inspect evidence instead of treating an answer as a verified result.
+
+- **Independent workspace indicators:** each agent’s reported file and memory
+  paths, active/idle presence, and isolation status. Missing boundaries are
+  labeled unknown, not assumed.
+- **A shared local computer:** a live Omarchy VM panel when the gateway supplies
+  a confirmed-local status and loopback display. This is not a hosted browser.
+- **Explicit decisions:** live approval cards use the existing execution queue.
+  Work decisions and VM mutations require verified RAPP/1 frames and the
+  canonical commit adapter. Legacy Chat is explicitly labeled unverified
+  compatibility; it is not certified Work history.
+- **RAPP/1 integrity:** per-item badges verify canonical hashes and lineage
+  under the selected authority. Missing frames never become compliance claims.
+  The gateway must own trusted genesis, durable heads, write-ahead intent,
+  terminal frames, and idempotent commits; the UI implements no frame storage.
+- **Honest capability gaps:** an unavailable workspace method enables a visibly
+  labeled, read-only local demo. Connection, authorization, and data errors do
+  not become successful-looking examples. Missing VM methods never simulate a VM.
+- **Compatibility, not deletion:** Copilot Surgeon, Quantum RAPPIDs, system
+  inspection, and all other specialist views remain under **Compatibility**.
+
+See [RAPP Work](./docs/rapp-work.md) for the UI contracts, local-computer boundary,
+demo behavior, and development checks. The exact [RAPP/1 integration
+contract](./docs/rapp-work-rapp1.md) defines the required persistence-owner
+adapter. Until that adapter is present, live legacy data is unverified and
+Work mutations fail closed.
+
+![RAPP Work desktop with a visibly labeled read-only demo](./docs/images/rapp-work-desktop.png)
+
+*Read-only example work, not an executed run. [Mobile view](./docs/images/rapp-work-mobile.png).*
 
 ## Install in One Line
 
@@ -39,46 +77,31 @@ irm https://kody-w.github.io/openrappter/install.ps1 | iex
 
 Works on macOS, Linux, WSL & Windows. Installs Node.js (if needed), clones the repo, builds both runtimes, and creates the `openrappter` command. Done.
 
+The `openrappter` package, CLI, repository URLs, runtime paths, and IPC identifiers
+remain unchanged for installation and integration compatibility.
+
 Or try the quickstart demo: `git clone https://github.com/kody-w/openrappter.git && cd openrappter && ./quickstart.sh`
-
-### Select an exact release ring
-
-Stable is the safe default. To select a maintained pointer:
-
-```bash
-curl -fsSL https://kody-w.github.io/openrappter/install.sh |
-  bash -s -- --ring beta
-```
-
-`--ring` overrides `OPENRAPPTER_RING`. The five values are `stable`, `beta`,
-`canary`, `alpha`, and `nightly`. Resolution validates a closed manifest and
-installs an exact checksummed artifact or source commit; unavailable rings fail
-closed rather than falling back. See [release ring semantics and safety](docs/release-rings.md).
 
 ---
 
-## Try the beta in a browser
+## RAPP Work workspaces
 
-**[kody-w.github.io/openrappter/beta/](https://kody-w.github.io/openrappter/beta/)** — nothing to
-install. Scan a commons, fold what is safe to absorb, watch a contradicting frame get refused by name,
-and roll back.
-
-The page loads the shipped module unmodified rather than a demonstration written to resemble it; a
-test fails the build if the served copy ever drifts from `beta/electron/`.
-
-The same thing from a terminal:
-
-```bash
-node beta/scripts/rapp-drill.mjs status
-node beta/scripts/rapp-drill.mjs scan <source>
-node beta/scripts/rapp-drill.mjs fold <source>
-node beta/scripts/rapp-drill.mjs restore
-```
+RAPP Work provides independent local workspaces at
+`~/.openrappter/workspaces/<agent-id>/`: durable identity, working files, task
+artifacts, and separate append-only body, memory, and swarm RAPP/1 streams.
+Canonical evidence emission and chain scanning are available through
+authenticated production gateway RPCs; damaged history is refused, not reset.
+Workspace creation itself emits a verified RAPP/1 frame. Action history belongs
+in canonical frames, while metadata and derived views explicitly report their
+verification status.
+See [RAPP Work workspaces](./docs/rapp-work-workspaces.md) for the API,
+durability guarantees, and local trust boundaries.
 
 ## Built on RAPP
 
-OpenRappter is an organism; [RAPP](https://github.com/kody-w/rapp-1) is the
-open, MIT-licensed substrate it stands on. That is checked, not just claimed:
+RAPP Work uses the OpenRappter framework and the open, MIT-licensed
+[RAPP](https://github.com/kody-w/rapp-1) foundation. Conformance is checked,
+not just claimed:
 
 ```bash
 python3 conformance.py     # 9 checks, proved against the code
@@ -92,6 +115,9 @@ agent that under-declares is refused there, so conformance here is what makes
 these agents adoptable by a governed deployment.
 
 Details: [`docs/RAPP.md`](docs/RAPP.md)
+
+<details>
+<summary>Compatibility: Quantum RAPPIDs and the native field companion</summary>
 
 ### Quantum RAPPIDs: organisms that grow without losing identity
 
@@ -115,10 +141,11 @@ it is compiled out of Release builds.
 
 See [Quantum RAPPIDs](./docs/quantum-rappids.md).
 
+</details>
 
 ## Get Started — Let Your AI Agent Do It
 
-The fastest way to install and use openrappter is to hand [`skills.md`](./skills.md) to any AI agent. It contains everything an agent needs — prerequisites, installation, startup, configuration, and usage — in a single file.
+To install the runtime behind RAPP Work, hand [`skills.md`](./skills.md) to an AI agent. It contains prerequisites, installation, startup, configuration, and usage. The compatibility command remains `openrappter`.
 
 **Paste this into Copilot, Claude, ChatGPT, or any AI assistant:**
 
@@ -133,9 +160,11 @@ Your agent will clone the repo, install dependencies, start the gateway and UI, 
 
 ---
 
-## What Is openrappter
+## RAPP Work and the OpenRappter runtime
 
-A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copilot** as the cloud AI backbone. Copilot handles inference; your agent data (memory, config, state) stays local in `~/.openrappter/`.
+RAPP Work is the business-facing workspace over a dual-runtime (Python +
+TypeScript) AI agent framework. **GitHub Copilot** can handle cloud inference;
+agent memory, configuration, and state remain local in `~/.openrappter/`.
 
 ### Flight Recorder: one truthful local execution history
 
@@ -188,51 +217,12 @@ openrappter show-and-tell test
 See [Show-and-Tell](./docs/show-and-tell.md) for the lifecycle, privacy boundary,
 cross-runtime contract, and artifact formats.
 
-### Rapter Clever Girl: observe recurring friction, then stop
+### RAPP Work Desktop
 
-Rapter Clever Girl Observe Mode reads only the coding-assistant history exports
-you explicitly select. It supports Claude JSONL, Codex JSONL, Copilot export
-JSONL, OpenRappter Flight JSON, and normalized JSONL; accepts explicit
-repository-activity exports, `rapp-monorepo/1.0` manifests, capability
-catalogs, and skill roots; and emits at most five evidence-backed inert
-proposals with estate-wide collision checks and conservative active-friction
-ranges.
-
-```bash
-openrappter clever-girl observe \
-  --input <path> \
-  --activity <activity-path> \
-  --estate-manifest <manifest-path> \
-  --capability-catalog <catalog-path> \
-  --skills-root .claude/skills \
-  --pretty
-
-# Prove the observer and its tests still enforce the safety contract
-node scripts/rapter-clever-girl-gate.mjs
-```
-
-The npm package installs that command and ships the v3 engine,
-backward-compatible v2/v3 reader, closed contracts, capability-contract
-schema, context matcher, and observer skill with it. Contributors can invoke the same
-engine directly with `node scripts/rapter-clever-girl.mjs observe ...`.
-
-It is local-only and has no watcher, network call, subprocess, model call,
-raw-transcript/repository output, productivity score, or apply path. Every
-selected file and analysis stage is bounded; duplicates and degraded evidence
-are visible. Transcript and repository content is untrusted data, never
-instructions. Observe Mode does not create, update, install, enable, or
-schedule a skill or automation; promotion is a separate explicit workflow.
-
-See [Rapter Clever Girl](./docs/rapter-clever-girl.md) for adapters, the
-`rapter-clever-girl.observe.v3` output contract, v2 migration, evidence/provenance,
-failure semantics, thresholds, limitations, and the promotion boundary.
-
-### Electron Desktop: Skill Recorder ergonomics, OpenRappter core
-
-OpenRappter Desktop is an Electron shell over the same headless gateway and
-dual-runtime core. It does not fork the product. The packaged app always loads
-its own current Lit UI, reuses or launches the local gateway, and exposes one
-context-isolated IPC bridge for Show-and-Tell.
+RAPP Work Desktop is an Electron shell over the same headless gateway and
+dual-runtime core. The packaged app opens Work in its current Lit UI, reuses or
+launches the local gateway, and exposes one context-isolated IPC bridge for
+Show-and-Tell. Existing Electron profiles and compatibility identifiers are retained.
 
 ```bash
 cd typescript
@@ -267,16 +257,25 @@ The local voice loop is self-bootstrapping:
 Electron also includes a native tray for quick chat, Show-and-Tell, voice
 status, and login startup. On macOS, the existing OpenRappter Bar discovers
 Electron's private authenticated endpoint and attaches to the same gateway
-instead of starting a second organism.
+instead of starting a second runtime.
 
 See [Electron Desktop](./docs/electron-desktop.md) for development, packaging,
 security boundaries, and platform targets.
 
-### Copilot Surgeon: the main interaction
+The host-side [RAPP Work Omarchy VM foundation](./docs/omarchy-vm.md) provides
+authenticated control of one persistent Tart VM on Apple Silicon, with separate
+host-managed agent workspaces. Image provisioning and future workspace mounts
+remain operator-controlled; no VM image is downloaded automatically. Mutations
+require the host's canonical RAPP/1 persistence integration; unwired or failed
+frame verification is explicit and cannot silently fall back to unaudited work.
 
-**OpenRappter is the patient. Copilot is the surgeon. It’s above that.**
+<details>
+<summary>Compatibility: Copilot Surgeon specialist view</summary>
 
-The web root is an AI-native operating room rather than a static dashboard.
+### Copilot Surgeon
+
+Open **Compatibility → Copilot Surgeon** for the existing specialist interface.
+It is no longer the web or desktop landing view.
 Every turn combines live, sanitized OpenRappter anatomy with the owner’s request.
 Copilot returns a direct response and the contextual next choices that reshape
 the interface. Static pages such as agents, channels, logs, and configuration
@@ -291,6 +290,8 @@ SHA-256 digest. The owner must approve that immutable procedure before it can
 run; high-risk work requires typing `OPERATE OPENRAPPTER`. Recovery is only
 reported after real agent-tool evidence and a post-operative verification pass.
 
+</details>
+
 ### RAPP + X: UI is optional
 
 `POST /chat` is the universal capability surface for people, AIs, twins,
@@ -302,21 +303,6 @@ runtimes are tested against -- its `required` arrays drive the assertions in
 `python/tests/test_openrappter_brainstem.py` and
 `typescript/src/__tests__/integration/rapp-chat-contract.test.ts`, so a key
 added there fails both suites until both runtimes emit it.
-
-The chat target picker can also project a RAPP-Herdr estate. It lists verified
-Twins, chats through Herdr's central routing, and creates a device-local Twin
-with default chat or a generated rapplication. A buddy is shown online only
-after its identity, health, and chat handshake succeeds. The gateway reads
-`~/.config/rapp-herdr/estate.json` and `~/.local/bin/rapp-herdr` by default;
-override those paths with `RAPP_HERDR_ESTATE` and `RAPP_HERDR_BIN`.
-
-**Create AI** can derive the Twin from evidence instead of a manually written
-role. Attach up to three walkthrough videos, audio recordings, PDFs, DOCX files,
-or text transcripts. OpenRappter Desktop extracts documents and transcribes
-media locally with its pinned Whisper model, then sends only the bounded
-extracted text to the configured Copilot backend for a reviewable name, role,
-interface, evidence summary, and confidence. The operator can edit that draft
-before RAPP-Herdr creates and verifies the Twin.
 
 ```bash
 # Install and go
@@ -334,12 +320,13 @@ openrappter --exec Shell "ls -la"
 
 | Feature | Description |
 |---------|-------------|
+| **RAPP Work** | Default business workspace: persistent agent roster, work threads, recorded run timeline, approvals, evidence, and shared local Omarchy computer visibility |
 | **Copilot-Powered** | Uses your existing GitHub Copilot subscription for AI inference — no separate API keys |
-| **Copilot Surgeon** | Adaptive primary UI: live patient anatomy, AI-generated next choices, digest-bound procedures, and evidence-gated recovery |
+| **Compatibility views** | Copilot Surgeon, Quantum RAPPIDs, and existing specialist tools remain available without replacing the Work landing view |
 | **Local-First Data** | Memory, config, and state live in `~/.openrappter/` on your machine |
 | **Single File Agents** | One file = one agent — metadata defined in native code constructors, deterministic, portable |
 | **Persistent Memory** | Remembers facts, preferences, and context across sessions |
-| **Dual Runtime** | Same agent contract in Python (22 agents) and TypeScript (36 agents) |
+| **Dual Runtime** | Same agent contract in Python (21 agents) and TypeScript (35 agents) |
 | **Data Sloshing** | Automatic context enrichment (temporal, memory, behavioral signals) before every action |
 | **Data Slush** | Agent-to-agent signal pipeline — agents return curated `data_slush` that feeds into the next agent's context |
 | **Auto-Discovery** | Drop a `*_agent.py` or `*Agent.ts` file in `agents/` — no registration needed |
@@ -358,11 +345,15 @@ openrappter --exec Shell "ls -la"
 | **Soul Templates** | 10 prebuilt personas (coder, researcher, ops, narrator, oracle, etc.) — summon with one call |
 | **Self-Updating** | Checks GitHub for new releases, updates with one command |
 | **30-Day Onboarding** | Daily tip notifications that teach one feature per day with a command to try |
-| **Dino Tamagotchi** | Animated 🦖 menu bar icon that looks around, reacts to pokes, and reflects system state |
+| **Legacy macOS Bar** | Existing native menu-bar companion retained as a compatibility option |
 
-## macOS Menu Bar Companion
+<details>
+<summary>Compatibility: native macOS menu-bar companion and installation</summary>
 
-A native Swift menu bar app with an animated 🦖 tamagotchi icon.
+## Legacy macOS Menu Bar Companion
+
+The existing native Swift companion retains its original animated icon.
+For the new business workspace, use RAPP Work Desktop or the web UI.
 
 **Two ways to get started — same result:**
 
@@ -408,16 +399,16 @@ Release builds are signed with Apple Developer ID and notarized by Apple.
 
 ### Release a new menu bar version
 
-Do not create a Bar tag manually. Build an immutable release candidate with
-`include_macos_bar` enabled; signing, notarization, and stapling happen before its
-digest is promoted through nightly → alpha → canary → beta.
-The **Release macOS Menu Bar** workflow then verifies the complete receipt chain,
-reuses those exact DMG bytes, checks Gatekeeper, and only then creates the native
-tag and release. It re-downloads the public DMG before preparing a separate,
-receipt-bound Homebrew review proposal. See [the delivery procedure](macos/SIGNING.md).
+```bash
+git tag v1.0.1-bar && git push origin v1.0.1-bar
+```
+
+This separate platform workflow builds a universal binary (Apple Silicon + Intel), packages a DMG, and creates a GitHub Release. npm and PyPI releases use the strict `vX.Y.Z` process documented in [CONTRIBUTING.md](CONTRIBUTING.md#releasing-npm-and-pypi-packages).
 
 Signing credential setup, health checks, rotation, and compromise response are
 documented in [`macos/SIGNING.md`](macos/SIGNING.md).
+
+</details>
 
 ## Manual Setup
 

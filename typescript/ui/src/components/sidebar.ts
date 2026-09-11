@@ -1,11 +1,6 @@
-/**
- * Sidebar Navigation Component
- */
-
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
-
-type View = 'surgeon' | 'rappids' | 'chat' | 'show-and-tell' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
+import type { View } from '../services/navigation.js';
 
 interface NavItem {
   id: View;
@@ -17,194 +12,109 @@ interface NavItem {
 export class OpenRappterSidebar extends LitElement {
   static styles = css`
     :host {
-      position: fixed;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      width: 240px;
-      background: var(--bg-secondary);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
+      position: fixed; left: 0; top: 0; bottom: 0; width: 192px;
+      background: var(--cp-bg-elevated); border-right: 1px solid var(--cp-border);
+      display: flex; flex-direction: column;
     }
-
-    .logo {
-      padding: 1.5rem;
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      border-bottom: 1px solid var(--border);
-    }
-
+    * { box-sizing: border-box; }
+    .logo { padding: 24px 18px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--cp-border); }
     .logo-icon {
-      font-size: 1.5rem;
+      width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px;
+      font-size: 11px; font-weight: 750; letter-spacing: -.08em;
+      background: var(--cp-accent); color: var(--cp-accent-fg);
     }
-
-    .logo-text {
-      font-size: 1.125rem;
-      font-weight: 600;
-    }
-
-    nav {
-      flex: 1;
-      padding: 1rem 0;
-      overflow-y: auto;
-      min-height: 0;
-    }
-
-    .nav-section {
-      padding: 0 0.75rem;
-      margin-bottom: 1rem;
-    }
-
+    .logo-text { font-size: 16px; font-weight: 650; letter-spacing: -.03em; color: var(--cp-text); }
+    nav { flex: 1; padding: 20px 0; overflow-y: auto; min-height: 0; }
+    .nav-section { padding: 0 12px; margin-bottom: 16px; }
     .nav-section-title {
-      font-size: 0.75rem;
-      font-weight: 500;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      padding: 0.5rem 0.75rem;
+      font-size: 10px; font-weight: 500; color: var(--cp-text-muted);
+      text-transform: uppercase; letter-spacing: .1em; padding: 8px 12px;
     }
-
     .nav-item {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      padding: 0.625rem 0.75rem;
-      border-radius: 0.375rem;
-      cursor: pointer;
-      transition: background 0.15s ease;
-      color: var(--text-secondary);
-      text-decoration: none;
-      width: 100%;
-      border: 0;
-      background: transparent;
-      font: inherit;
-      text-align: left;
+      display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: .625rem;
+      cursor: pointer; transition: background .15s ease; color: var(--cp-text-muted);
+      text-decoration: none; width: 100%; border: 0; background: var(--cp-bg-elevated);
+      font: inherit; text-align: left;
     }
-
-    .nav-item:hover {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-    }
-
-    .nav-item.active {
-      background: var(--accent);
-      color: var(--accent-foreground);
-    }
-
-    .nav-item:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
-    }
-
-    .nav-icon {
-      font-size: 1.125rem;
-      width: 1.5rem;
-      text-align: center;
-    }
-
-    .nav-label {
-      font-size: 0.875rem;
-      font-weight: 500;
-    }
-
-    .footer {
-      padding: 1rem 1.5rem;
-      border-top: 1px solid var(--border);
-      font-size: 0.75rem;
-      color: var(--text-secondary);
-    }
-
-    .footer a {
-      color: var(--accent);
-      text-decoration: none;
-    }
-
-    .footer a:hover {
-      text-decoration: underline;
+    .nav-item:hover { background: var(--cp-surface-soft); color: var(--cp-text); }
+    .nav-item.active { background: var(--cp-accent-soft); color: var(--cp-accent); }
+    .nav-item:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 2px; }
+    .nav-icon { font-size: 14px; width: 20px; text-align: center; }
+    .nav-label { font-size: 12px; font-weight: 500; }
+    .compatibility { margin-top: 24px; border-top: 1px solid var(--cp-border); padding-top: 16px; }
+    .compatibility summary { cursor: pointer; color: var(--cp-text-muted); font-size: 11px; padding: 8px 12px; }
+    .compatibility p { color: var(--cp-text-muted); font-size: 10px; line-height: 1.6; padding: 0 12px; }
+    .footer { padding: 20px; border-top: 1px solid var(--cp-border); font-size: 11px; line-height: 1.7; color: var(--cp-text-muted); }
+    .footer a { color: var(--cp-text-muted); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+    @media (max-width: 900px) {
+      :host { position: relative; width: 100%; border-right: 0; border-bottom: 1px solid var(--cp-border); }
+      .logo { padding: 14px 16px; border-bottom: 0; }
+      nav { padding: 0 4px 8px; }
+      .nav-section { margin-bottom: 0; }
+      .primary-items { display: flex; flex-wrap: wrap; gap: 4px; }
+      .primary-items .nav-item { width: auto; padding: 8px 10px; gap: 5px; }
+      .nav-section-title, .footer { display: none; }
+      .compatibility { margin: 8px 0 0; padding-top: 4px; }
+      .compatibility[open] .compatibility-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
   `;
 
-  @property({ type: String })
-  currentView: View = 'surgeon';
+  @property({ type: String }) currentView: View = 'work';
 
   private navItems: NavItem[] = [
+    { id: 'work', label: 'Work', icon: '▦' },
+    { id: 'chat', label: 'Chat', icon: '↗' },
+    { id: 'show-and-tell', label: 'Record workflow', icon: '⊙' },
+    { id: 'cron', label: 'Automations', icon: '↻' },
+    { id: 'config', label: 'Settings', icon: '≡' },
+  ];
+
+  private compatibilityItems: NavItem[] = [
     { id: 'surgeon', label: 'Copilot Surgeon', icon: '✦' },
     { id: 'rappids', label: 'Quantum RAPPIDs', icon: '◉' },
-    { id: 'chat', label: 'Chat', icon: '💬' },
-    { id: 'show-and-tell', label: 'Show & Tell', icon: '⏺' },
-    { id: 'channels', label: 'Channels', icon: '📡' },
-    { id: 'sessions', label: 'Sessions', icon: '📋' },
-    { id: 'agents', label: 'Agents', icon: '🤖' },
-    { id: 'skills', label: 'Skills', icon: '🧩' },
-    { id: 'cron', label: 'Cron Jobs', icon: '⏰' },
-    { id: 'showcase', label: 'Showcase', icon: '🎪' },
-    { id: 'zen', label: 'Zen', icon: '🧘' },
-    { id: 'accounts', label: 'Accounts', icon: '🔑' },
-    { id: 'config', label: 'Config', icon: '⚙️' },
-    { id: 'devices', label: 'Devices', icon: '💻' },
-    { id: 'presence', label: 'Health', icon: '🏥' },
-    { id: 'logs', label: 'Logs', icon: '📜' },
-    { id: 'debug', label: 'Debug', icon: '🔧' },
+    { id: 'channels', label: 'Channels', icon: '↔' },
+    { id: 'sessions', label: 'Sessions', icon: '≡' },
+    { id: 'agents', label: 'Agent management', icon: '⊞' },
+    { id: 'skills', label: 'Skills', icon: '◇' },
+    { id: 'showcase', label: 'Showcase', icon: '▤' },
+    { id: 'zen', label: 'Zen', icon: '○' },
+    { id: 'accounts', label: 'Accounts', icon: '⊡' },
+    { id: 'devices', label: 'Devices', icon: '▣' },
+    { id: 'presence', label: 'System health', icon: '⌁' },
+    { id: 'logs', label: 'Logs', icon: '≡' },
+    { id: 'debug', label: 'Debug', icon: '⌘' },
   ];
 
   private handleClick(view: View) {
-    this.dispatchEvent(
-      new CustomEvent('navigate', {
-        detail: { view },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    this.dispatchEvent(new CustomEvent('navigate', {
+      detail: { view }, bubbles: true, composed: true,
+    }));
+  }
+
+  private renderItem(item: NavItem) {
+    return html`<button type="button" class="nav-item ${this.currentView === item.id ? 'active' : ''}"
+      aria-current=${this.currentView === item.id ? 'page' : nothing}
+      data-view=${item.id} @click=${() => this.handleClick(item.id)}>
+      <span class="nav-icon" aria-hidden="true">${item.icon}</span><span class="nav-label">${item.label}</span>
+    </button>`;
   }
 
   render() {
     return html`
-      <div class="logo">
-        <span class="logo-icon">🦖</span>
-        <span class="logo-text">OpenRappter</span>
-      </div>
-
-      <nav>
+      <div class="logo"><span class="logo-icon" aria-hidden="true">RW</span><span class="logo-text">RAPP Work</span></div>
+      <nav aria-label="Product navigation">
         <div class="nav-section">
-          <div class="nav-section-title">Operating room</div>
-          ${this.navItems.slice(0, 1).map(
-            (item) => html`
-              <button
-                type="button"
-                class="nav-item ${this.currentView === item.id ? 'active' : ''}"
-                aria-current=${this.currentView === item.id ? 'page' : nothing}
-                @click=${() => this.handleClick(item.id)}
-              >
-                <span class="nav-icon">${item.icon}</span>
-                <span class="nav-label">${item.label}</span>
-              </button>
-            `
-          )}
+          <div class="nav-section-title">Workspace</div>
+          <div class="primary-items" aria-label="Primary navigation">${this.navItems.map((item) => this.renderItem(item))}</div>
         </div>
-
-        <div class="nav-section">
-          <div class="nav-section-title">Anatomy</div>
-          ${this.navItems.slice(1).map(
-            (item) => html`
-              <button
-                type="button"
-                class="nav-item ${this.currentView === item.id ? 'active' : ''}"
-                aria-current=${this.currentView === item.id ? 'page' : nothing}
-                @click=${() => this.handleClick(item.id)}
-              >
-                <span class="nav-icon">${item.icon}</span>
-                <span class="nav-label">${item.label}</span>
-              </button>
-            `
-          )}
-        </div>
+        <details class="nav-section compatibility" ?open=${this.compatibilityItems.some((item) => item.id === this.currentView)}>
+          <summary>Compatibility</summary><p>Specialist & legacy views. Existing tools, unchanged.</p>
+          <div class="compatibility-items">${this.compatibilityItems.map((item) => this.renderItem(item))}</div>
+        </details>
       </nav>
-
-      <div class="footer">
-        <a href="https://github.com/kody-w/openrappter" target="_blank">OpenRappter</a>
-        · It’s above that.
+      <div class="footer">Your local AI workforce.<br>
+        <a href="https://github.com/kody-w/openrappter" target="_blank" rel="noopener noreferrer">RAPP Work · Source ↗</a>
       </div>
     `;
   }

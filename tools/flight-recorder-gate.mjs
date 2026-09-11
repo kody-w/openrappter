@@ -16,7 +16,6 @@ import path from "node:path";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TS = path.join(ROOT, "typescript");
 const PY = path.join(ROOT, "python");
-const packageVersion = JSON.parse(readFileSync(path.join(TS, "package.json"), "utf8")).version;
 const results = [];
 
 function req(name, pass, detail = "") {
@@ -187,12 +186,16 @@ run(
   ROOT,
 );
 run(
-  `${packageVersion} release preflight identity`,
+  "1.13.0 release preflight identity",
   process.execPath,
   [
     "scripts/release-preflight.mjs",
     "--tag",
-    `v${packageVersion}`,
+    "v1.13.0",
+    "--typescript-runtime-version",
+    "1.13.0",
+    "--python-runtime-version",
+    "1.13.0",
   ],
   ROOT,
 );

@@ -140,7 +140,7 @@ export function waitForGatewayReady(
     const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
       finish(
         new Error(
-          `OpenRappter gateway exited during desktop startup (${code ?? signal ?? 'unknown'}).`,
+          `RAPP Work gateway exited during desktop startup (${code ?? signal ?? 'unknown'}).`,
         ),
       );
     };
@@ -149,7 +149,7 @@ export function waitForGatewayReady(
       child.kill('SIGTERM');
       finish(
         new Error(
-          `OpenRappter gateway did not become ready in ${Math.round(timeoutMs / 1000)} seconds.`,
+          `RAPP Work gateway did not become ready in ${Math.round(timeoutMs / 1000)} seconds.`,
         ),
       );
     }, timeoutMs);

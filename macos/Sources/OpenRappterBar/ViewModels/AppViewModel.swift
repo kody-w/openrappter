@@ -199,7 +199,6 @@ public final class AppViewModel {
         self.desktopEndpointProvider = {
             DesktopGatewayDiscovery.current()
         }
-        configureChildCallbacks()
         Task { await sessionStore.load() }
         // Start fleet live polling
         fleetViewModel.startRefreshing()
@@ -245,7 +244,6 @@ public final class AppViewModel {
         self.sessionStore = sessionStore ?? SessionStore()
         self.connectionFactory = connectionFactory
         self.desktopEndpointProvider = desktopEndpointProvider
-        configureChildCallbacks()
     }
 
     // MARK: - Actions
@@ -492,7 +490,6 @@ public final class AppViewModel {
 
         sessionsViewModel.syncFromGateway()
         startUptimeTimer()
-        approvalViewModel.loadPending()
     }
 
     /// Stop the heartbeat monitor and disconnect the WebSocket. Safe to call
@@ -747,7 +744,6 @@ public final class AppViewModel {
         stopUptimeTimer()
         await disconnectFromGateway()
         await inFlightLifecycle?.value
-        await chatViewModel.flushPendingMessages()
         await processManager.stop()
         processState = processManager.state
     }
@@ -784,15 +780,6 @@ public final class AppViewModel {
         channelsViewModel.configure(rpcClient: rpcClient)
         cronViewModel.configure(rpcClient: rpcClient)
         approvalViewModel.configure(rpcClient: rpcClient)
-    }
-
-    private func configureChildCallbacks() {
-        chatViewModel.onSessionsChanged = { [weak self] in
-            self?.sessionsViewModel.loadCached()
-        }
-        chatViewModel.onEventApplied = { [weak self] payload in
-            self?.handleChatEventActivity(payload)
-        }
     }
 
     private func clearRpcClientReferences() {
@@ -838,6 +825,8 @@ public final class AppViewModel {
         case "chat":
             guard let chatPayload = ChatEventPayload.parse(from: payload) else { return }
             chatViewModel.handleChatEvent(chatPayload)
+            // Also update legacy activity list
+            handleChatEventActivity(chatPayload)
         case "approval":
             if let dict = payload as? [String: Any] {
                 approvalViewModel.handleApprovalEvent(dict)

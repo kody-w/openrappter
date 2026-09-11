@@ -103,44 +103,20 @@ class StreamManager:
         block_type: BlockType,
         content: str,
         metadata: Optional[Dict] = None,
-        *,
-        done: bool = False,
-        block_id: Optional[str] = None,
-        delta: Optional[str] = None,
     ) -> StreamBlock:
-        """Upsert a block into the session and notify subscribers.
-
-        Mirrors the TypeScript ``pushBlock``, which takes the whole block as an
-        object and so lets the caller set ``id``, ``done`` and ``delta``. The
-        signature here stays flat and positional rather than copying that
-        object shape, but the capabilities have to match: ``done`` is the
-        documented completion signal for a block, and a caller that supplies
-        ``block_id`` is updating a block it already pushed.
-
-        A block whose id already exists in the session is *replaced*, not
-        appended, so repeatedly pushing the same id revises one block instead
-        of growing the transcript. Without a caller-supplied ``block_id`` every
-        block gets a fresh UUID and therefore always appends.
-        """
+        """Create a new block, append it to the session, and notify subscribers."""
         session = self._require_session(session_id)
-        resolved = StreamBlock(
-            id=block_id if block_id is not None else str(uuid.uuid4()),
+        block = StreamBlock(
+            id=str(uuid.uuid4()),
             type=block_type,
             content=content,
-            done=done,
+            done=False,
             timestamp=time.time(),
-            delta=delta,
             metadata=metadata,
         )
-        existing = next(
-            (i for i, b in enumerate(session.blocks) if b.id == resolved.id), None
-        )
-        if existing is not None:
-            session.blocks[existing] = resolved
-        else:
-            session.blocks.append(resolved)
-        self._notify(session_id, resolved)
-        return resolved
+        session.blocks.append(block)
+        self._notify(session_id, block)
+        return block
 
     def push_delta(self, session_id: str, block_id: str, delta: str) -> StreamBlock:
         """Append a delta to an existing block's content.

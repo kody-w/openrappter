@@ -1,7 +1,14 @@
-# OpenRappter Electron Desktop
+# RAPP Work Electron Desktop
 
-OpenRappter Desktop applies Skill Recorder's desktop ergonomics without
-forking OpenRappter's runtime.
+**Your local AI workforce.** RAPP Work Desktop opens the Work dashboard over
+the existing OpenRappter runtime. The web UI and desktop use the same Lit
+component, gateway capability checks, and Compatibility navigation.
+
+See [RAPP Work](./rapp-work.md) for workspace indicators, approval/evidence
+surfaces, the shared local Omarchy panel, and honest demo/error states.
+The [RAPP/1 integration contract](./rapp-work-rapp1.md) is mandatory for verified
+Work actions; missing canonical adapters keep mutations disabled rather than
+falling back to unframed execution.
 
 ## Architecture
 
@@ -15,7 +22,7 @@ Electron main process
   └─ exposes narrow context-isolated IPC methods
 
 Sandboxed renderer
-  └─ existing OpenRappter UI + visual Show-and-Tell workspace
+  └─ RAPP Work UI + compatibility views + visual Show-and-Tell workspace
 
 Packed OpenRappter runtime
   ├─ TypeScript gateway and agents
@@ -26,6 +33,11 @@ Packed OpenRappter runtime
 The system Node installation and Electron never share a native SQLite binary.
 `desktop/scripts/install-runtime.mjs` packs the current OpenRappter package,
 installs it under `desktop/runtime`, and rebuilds only that copy for Electron.
+
+The product name is **RAPP Work**. Package/repository names, app ID
+`com.openrappter.desktop`, `openrappter:*` IPC channels, and gateway environment
+variables remain compatible. Packaged Electron data stays in the existing
+`OpenRappter` profile; development retains `openrappter-desktop`.
 
 ## Development
 
@@ -103,26 +115,6 @@ summary in a native dialog, compiles `*_agent.ts` to the factory-based
 `*_agent.js` format, and delegates to OpenRappter's rollback-safe hot loader.
 
 ## Local narration and voice
-
-### Evidence-driven estate buddies
-
-The Chat **Create AI** panel accepts walkthrough video/audio and transcript
-documents. Electron processes raw files locally:
-
-- video/audio: bounded to 100 MB and 20 minutes, converted with `ffmpeg`, then
-  transcribed by the pinned local Whisper model
-- documents: bounded to 20 MB; TXT, Markdown, CSV, JSON, SRT, VTT, PDF, and
-  DOCX text are extracted locally
-
-Raw files never enter the gateway. Only the bounded extracted text and source
-metadata are sent to the configured Copilot backend to draft the buddy
-definition. Creation still goes through RAPP-Herdr's identity, health, and
-`READY` handshake. Desktop packages LGPL FFmpeg and FFprobe executables and can
-also discover Homebrew or standard-system installations; custom installations can set
-`OPENRAPPTER_FFMPEG_PATH` and `OPENRAPPTER_FFPROBE_PATH`.
-Sensitive values are masked before provider analysis. PDF and DOCX parsing runs
-in a killable, memory-limited child process, while startup and shutdown sweep
-or remove private evidence scratch directories.
 
 ### Whisper “tell”
 

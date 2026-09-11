@@ -6,13 +6,11 @@ import Foundation
 @Observable
 @MainActor
 public final class AccountViewModel {
-    public let authService: GitHubAuthService
+    public let authService = GitHubAuthService()
 
     private var restartGateway: (() -> Task<Void, Never>)?
 
-    public init(authService: GitHubAuthService? = nil) {
-        self.authService = authService ?? GitHubAuthService()
-    }
+    public init() {}
 
     /// Route authentication restarts through the app's centralized gateway
     /// lifecycle coordinator.

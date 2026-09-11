@@ -23,8 +23,8 @@ import {
 import { proposeContinuation } from './autocomplete.js';
 import { buildDnaPrompt, sonicParameters, writeMidi } from './midi.js';
 import {
-  appendBodyFrame,
-  buildDimensionFrame,
+  appendLegacyBodyFrame,
+  buildLegacyDimensionFrame,
   FRAME_TIME_PATTERN,
   formatFrameTime,
   mediaRef,
@@ -70,6 +70,7 @@ const STAGE_ORDINAL = { baby: 0, hatchling: 1, raptor: 2 } as const;
 
 export interface PendingGrowth {
   proposal: GrowthProposal;
+  /** Historical local profile; unregistered and never promotion-grade. */
   frameKind: 'body.dimension';
   /** Bytes that would be written, keyed by the asset path they land on. */
   payloads: Array<{ dimension: string; path: string; bytes: Buffer }>;
@@ -188,7 +189,7 @@ function draftFrame(
   report: VerificationReport,
 ): BodyFrame {
   const seq = organism.frames.length;
-  return buildDimensionFrame({
+  return buildLegacyDimensionFrame({
     rappid: organism.document.rappid,
     seq,
     utc: createdAt,
@@ -418,7 +419,7 @@ export function growOrganism(
     createdAt,
     report,
   );
-  const framePath = appendBodyFrame(organism, frame);
+  const framePath = appendLegacyBodyFrame(organism, frame);
   const verification = verifyOrganism(organism);
 
   return {

@@ -11,10 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
-import sqlite3
-import stat
-import sys
 import threading
 import uuid
 from contextlib import contextmanager
@@ -23,170 +19,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from openrappter.agents.basic_agent import BasicAgent
-
-try:
-    from openrappter.flight_recorder import private_mkdir
-except ModuleNotFoundError:
-    # Single-file cartridge loaders supply BasicAgent without the kernel helpers.
-    def private_mkdir(directory: Path) -> Path:
-        directory = Path(directory)
-        missing = []
-        candidate = directory
-        while not os.path.lexists(candidate):
-            missing.append(candidate)
-            if candidate.parent == candidate:
-                break
-            candidate = candidate.parent
-        for item in reversed(missing):
-            item.mkdir(mode=0o700, exist_ok=True)
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)  # private-mkdir-canonical
-        if not directory.is_symlink():
-            os.chmod(directory, 0o700)
-        return directory
-
-
-MEMORY_LOCK_TIMEOUT_MS = 5_000
-
-
-class MemoryStoreError(RuntimeError):
-    pass
-
-
-def _ensure_memory_directory(directory):
-    directory = Path(directory).absolute()
-    missing = []
-    current = directory
-    while not current.exists():
-        missing.append(current)
-        current = current.parent
-    private_mkdir(directory)
-    # Windows CRT cannot open directory descriptors. Do not turn that platform
-    # limitation into a constructor failure or swallow unrelated filesystem errors.
-    if missing and sys.platform != "win32":
-        for item in [*missing, current]:
-            descriptor = os.open(item, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-
-
-def _regular_memory_file(status, allow_unlinked=False):
-    if not stat.S_ISREG(status.st_mode) or (
-        status.st_nlink != 1 and not (allow_unlinked and status.st_nlink == 0)
-    ):
-        raise MemoryStoreError("Memory store paths must be regular files, not links")
-
-
-def _validate_memories(value):
-    if not isinstance(value, dict) or any(
-        not isinstance(entry, dict) or not isinstance(entry.get("message"), str)
-        for entry in value.values()
-    ):
-        raise MemoryStoreError(
-            "Memory store must be an object of memory entries with string messages"
-        )
-    return value
-
-
-def _invalid_memory_constant(_value):
-    raise ValueError("Non-JSON numeric constant")
-
-
-def _read_memory_file(file):
-    try:
-        descriptor = os.open(file, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    except FileNotFoundError:
-        return {}
-    except OSError as error:
-        raise MemoryStoreError("Memory store could not be read") from error
-    with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
-        # Atomic replacement can unlink a reader's still-valid open snapshot.
-        _regular_memory_file(os.fstat(stream.fileno()), allow_unlinked=True)
-        try:
-            value = json.load(stream, parse_constant=_invalid_memory_constant)
-        except (ValueError, UnicodeError) as error:
-            raise MemoryStoreError("Memory store is not valid JSON") from error
-    return _validate_memories(value)
-
-
-@contextmanager
-def _memory_file_lock(file, timeout_ms=MEMORY_LOCK_TIMEOUT_MS):
-    """Shared with TS memory/json-store.ts; never unlink or reclaim the lock DB.
-
-    SQLite releases its OS locks on process death. Keep this stdlib-only code
-    in the agent file so a brainstem can load it without the OpenRappter kernel.
-    """
-    file = Path(file)
-    db = None
-    try:
-        _ensure_memory_directory(file.parent)
-        lock = file.parent.resolve() / (file.name + ".lock.sqlite3")
-        try:
-            _regular_memory_file(lock.lstat())
-        except FileNotFoundError:
-            pass
-        # Closing a separately opened fd for this inode can release another
-        # SQLite connection's POSIX locks. SQLite alone owns its file handles.
-        db = sqlite3.connect(lock, timeout=timeout_ms / 1000, isolation_level=None)
-        _regular_memory_file(lock.lstat())
-        os.chmod(lock, 0o600)
-        db.execute("BEGIN IMMEDIATE")
-        db.execute("CREATE TABLE IF NOT EXISTS memory_lock (id INTEGER PRIMARY KEY)")
-    except Exception as error:
-        if db is not None:
-            db.close()
-        raise MemoryStoreError("Memory store lock could not be acquired") from error
-    try:
-        yield
-        db.execute("COMMIT")
-    except BaseException:
-        if db.in_transaction:
-            db.execute("ROLLBACK")
-        raise
-    finally:
-        db.close()
-
-
-def _write_memory_file(file, memory):
-    """Caller holds _memory_file_lock across read, mutation and this commit."""
-    _validate_memories(memory)
-    content = json.dumps(memory, indent=2, allow_nan=False) + "\n"
-    file = Path(file)
-    temporary = file.with_name(f".{file.name}.{secrets.token_hex(16)}.pending")
-    directory = None if sys.platform == "win32" else os.open(file.parent, os.O_RDONLY)
-    created = False
-    try:
-        try:
-            _regular_memory_file(file.lstat())
-        except FileNotFoundError:
-            pass
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        created = True
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, file)
-        if directory is not None:
-            os.fsync(directory)
-        else:
-            # Windows os.fsync uses _commit/FlushFileBuffers and needs write
-            # access. This does not certify rename metadata against power loss.
-            published = os.open(file, os.O_RDWR)
-            try:
-                _regular_memory_file(os.fstat(published))
-                os.fsync(published)
-            finally:
-                os.close(published)
-    finally:
-        if directory is not None:
-            os.close(directory)
-        if created:
-            try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
 
 
 
@@ -269,7 +101,7 @@ class ManageMemoryAgent(BasicAgent):
         # Storage setup
         self.home = Path.home() / ".openrappter"
         self.memory_file = self.home / "memory.json"
-        _ensure_memory_directory(self.home)
+        self.home.mkdir(exist_ok=True)
     
     def perform(self, **kwargs):
         """Store or explicitly change disclosure of a memory."""
@@ -325,16 +157,60 @@ class ManageMemoryAgent(BasicAgent):
     
     def _load_memories(self) -> dict:
         """Load memories from file."""
-        return _read_memory_file(self.memory_file)
+        if self.memory_file.exists():
+            try:
+                return json.loads(self.memory_file.read_text())
+            except json.JSONDecodeError:
+                return {}
+        return {}
     
     def _save_memories(self, memories: dict):
         """Save memories to file."""
-        _write_memory_file(self.memory_file, memories)
+        self.memory_file.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.memory_file.with_name(
+            f".{self.memory_file.name}.{uuid.uuid4().hex}.tmp"
+        )
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump(memories, stream, indent=2)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.memory_file)
+            try:
+                os.chmod(self.memory_file, 0o600)
+            except OSError:
+                pass
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
     @contextmanager
     def _file_transaction_lock(self):
-        with _memory_file_lock(self.memory_file):
+        self.memory_file.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self.memory_file.with_suffix(self.memory_file.suffix + ".lock")
+        descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            try:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            except ImportError:
+                # The iMessage service is macOS-only; retain thread safety on
+                # platforms without fcntl for general OpenRappter use.
+                pass
             yield
+        finally:
+            try:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            except ImportError:
+                pass
+            os.close(descriptor)
     
     def _store_memory(
         self,
@@ -356,13 +232,7 @@ class ManageMemoryAgent(BasicAgent):
             })
         
         # Generate unique ID
-        ids = {entry.get("id") for entry in memories.values() if isinstance(entry.get("id"), str)}
-        for _ in range(16):
-            memory_id = str(uuid.uuid4())[:12]
-            if memory_id not in memories and memory_id not in ids:
-                break
-        else:
-            raise MemoryStoreError("Could not allocate a unique memory id")
+        memory_id = str(uuid.uuid4())[:12]
         
         # Create memory entry
         trust = {
@@ -735,11 +605,6 @@ class ManageMemoryAgent(BasicAgent):
     
     def delete_memory(self, memory_id: str) -> str:
         """Delete a memory by ID."""
-        with self._memory_lock:
-            with self._file_transaction_lock():
-                return self._delete_memory_locked(memory_id)
-
-    def _delete_memory_locked(self, memory_id: str) -> str:
         memories = self._load_memories()
         
         if memory_id in memories:

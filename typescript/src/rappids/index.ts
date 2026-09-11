@@ -21,8 +21,8 @@ import { proposeContinuation } from './autocomplete.js';
 import { writeMidi } from './midi.js';
 import {
   assetBytes,
-  appendBodyFrame,
-  buildDimensionFrame,
+  appendLegacyBodyFrame,
+  buildLegacyDimensionFrame,
   formatFrameTime,
   loadOrganismByRappid,
   loadOrganisms,
@@ -58,19 +58,25 @@ export {
   AUTOCOMPLETE_DOMAIN,
   PROPOSAL_DOMAIN,
   RAPP_EGG_DOMAIN,
+  RAPP_MAX_CANONICAL_BYTES,
+  RAPP_MAX_CANONICAL_DEPTH,
   RAPP_PARTICLE_DOMAIN,
   RAPP_WAVE_DOMAIN,
   DeterministicStream,
+  assertRappCanonicalValue,
   canonicalDigest,
   canonicalJson,
   domainDigest,
   idiv,
   microToFloat,
+  parseRappJson,
   roundHalfUp,
   rappCanonicalJson,
   rappH,
+  rappHashCanonical,
   rappHb,
   sha256Hex,
+  snapshotRappJsonValue,
   traitMilli,
 } from './canonical.js';
 export { directoryHex, formatRappid, isRappid, parseRappid, rappidHex } from './identity.js';
@@ -102,19 +108,27 @@ export {
 export {
   BODY_FRAME_SCHEMA,
   FRAME_TIME_PATTERN,
+  LEGACY_BODY_DIMENSION_PROFILE,
   appendBodyFrame,
+  appendLegacyBodyFrame,
   buildDimensionFrame,
+  buildLegacyDimensionFrame,
   bodyFrameDigest,
+  bodyFrameProblems,
   bodyFrameToJson,
   formatFrameTime,
   listOrganismDirectories,
   loadOrganism,
   loadOrganismByRappid,
   loadOrganisms,
+  legacyBodyFrameProblems,
   mediaRef,
+  parseBodyFrame,
+  parseLegacyBodyFrame,
   rappidsHome,
   resolveWithin,
   storeRappObject,
+  verifyLegacyBodyDimensionFrame,
 } from './store.js';
 export {
   CENSUS_DIMENSION,
@@ -456,7 +470,7 @@ export function attachSkillDimension(
     + organism.frames.filter(
       (frame) => frame.payload.dimension === 'skill',
     ).length;
-  const frame = buildDimensionFrame({
+  const frame = buildLegacyDimensionFrame({
     rappid,
     seq: organism.frames.length,
     utc: input.createdAt ?? formatFrameTime(new Date()),
@@ -470,7 +484,7 @@ export function attachSkillDimension(
       manifest: mediaRef(manifestBytes, manifestAsset.mediaType),
     },
   });
-  const framePath = appendBodyFrame(organism, frame);
+  const framePath = appendLegacyBodyFrame(organism, frame);
   const after = verifyOrganism(organism);
   return {
     rappid,

@@ -93,6 +93,36 @@ describe('chat component terminal events', () => {
     expect(chat.messages[1].content).toBe('');
   });
 
+  it('loads a real session handed off from the Work view', async () => {
+    const call = vi.spyOn(gateway, 'call').mockImplementation(async (method) => {
+      if (method === 'chat.messages') return [{
+        id: 'work-message', role: 'assistant', content: 'Work thread history.',
+        timestamp: '2026-09-11T14:00:00Z',
+      }] as never;
+      return [] as never;
+    });
+    const chat = document.createElement('openrappter-chat') as TestChatElement & {
+      initialSessionId: string | null;
+    };
+    chat.initialSessionId = 'work-session';
+    document.body.append(chat);
+    await settle(chat);
+    await settle(chat);
+    expect(call).toHaveBeenCalledWith('chat.messages', { sessionId: 'work-session', limit: 100 });
+    expect(chat.sessionKey).toBe('work-session');
+    expect(chat.messages[0].content).toBe('Work thread history.');
+  });
+
+  it('brands the primary chat without changing the runtime compatibility target', async () => {
+    vi.spyOn(gateway, 'call').mockResolvedValue([] as never);
+    const chat = document.createElement('openrappter-chat') as TestChatElement;
+    document.body.append(chat);
+    await settle(chat);
+    expect(chat.shadowRoot!.textContent).toContain('Start work with RAPP Work.');
+    expect(chat.shadowRoot!.querySelector('option[value="openrappter"]')?.textContent).toBe('RAPP Work');
+    expect(chat.shadowRoot!.textContent).not.toContain('🦖');
+  });
+
   it('buffers deltas off-screen and atomically commits the final message', () => {
     const chat = document.createElement('openrappter-chat') as TestChatElement;
     chat.activeRunId = 'run-1';

@@ -42,12 +42,13 @@ import {
 } from './vibevoice.js';
 import { SECURE_RENDERER_PREFERENCES } from './window-security.js';
 import { waitForGatewayReady } from './gateway-ready.js';
-import {
-  extractBuddyEvidence,
-  hasActiveBuddyEvidenceJobs,
-  pruneStaleBuddyEvidence,
-  shutdownBuddyEvidenceJobs,
-} from './buddy-evidence.js';
+
+// Preserve existing Electron profiles while changing the user-facing product name.
+app.setPath('userData', path.join(
+  app.getPath('appData'),
+  app.isPackaged ? 'OpenRappter' : 'openrappter-desktop',
+));
+app.setName('RAPP Work');
 
 const packageRoot = path.join(
   import.meta.dirname,
@@ -167,7 +168,7 @@ async function chooseGatewayPort(): Promise<void> {
     }
 
   }
-  throw new Error('No local port is available for OpenRappter Desktop.');
+  throw new Error('No local port is available for RAPP Work.');
 }
 
 async function publishDesktopEndpoint(): Promise<void> {
@@ -224,7 +225,7 @@ async function waitForRenderer(window: BrowserWindow): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
       cleanup();
-      reject(new Error('OpenRappter Desktop did not finish loading.'));
+      reject(new Error('RAPP Work did not finish loading.'));
     }, 15_000);
     const cleanup = () => {
       clearTimeout(timeout);
@@ -243,12 +244,12 @@ async function waitForRenderer(window: BrowserWindow): Promise<void> {
     ) => {
       cleanup();
       reject(new Error(
-        `OpenRappter Desktop load failed (${errorCode}): ${errorDescription}`,
+        `RAPP Work load failed (${errorCode}): ${errorDescription}`,
       ));
     };
     const gone = () => {
       cleanup();
-      reject(new Error('OpenRappter Desktop renderer exited while loading.'));
+      reject(new Error('RAPP Work renderer exited while loading.'));
     };
     window.webContents.once('did-finish-load', finish);
     window.webContents.once('did-fail-load', fail);
@@ -267,7 +268,7 @@ async function focusWindow(view?: string): Promise<void> {
     await window.webContents.executeJavaScript(`
       (async () => {
         const app = document.querySelector('openrappter-app');
-        if (!app) throw new Error('OpenRappter app surface is not mounted.');
+        if (!app) throw new Error('RAPP Work app surface is not mounted.');
         app.navigate(${JSON.stringify(view)});
         await app.updateComplete;
       })()
@@ -278,9 +279,8 @@ async function focusWindow(view?: string): Promise<void> {
 function trayIcon() {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
-      <rect width="22" height="22" rx="6" fill="#10231f"/>
-      <path d="M5 13c1.5-5 5-7 9-5 2 1 3 3 2 5-1 2-3 3-5 2l-1 3-2-1 1-3c-2 0-3 0-4-1z" fill="#58f5d2"/>
-      <circle cx="13.8" cy="9.7" r="1" fill="#10231f"/>
+      <path d="M3 17V5h4c5 0 5 6 0 6H3m4 0 4 6m1-12 2 12 3-7 2 7 2-12"
+        fill="none" stroke="currentColor" stroke-width="1.6"/>
     </svg>`;
   const image = nativeImage.createFromDataURL(
     `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`,
@@ -297,7 +297,7 @@ function refreshTray(): void {
     ? '/Applications/OpenRappter Bar.app'
     : '';
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open OpenRappter', click: () => void focusWindow().catch(showTrayError) },
+    { label: 'Open RAPP Work', click: () => void focusWindow('work').catch(showTrayError) },
     { label: 'Quick Chat', click: () => void focusWindow('chat').catch(showTrayError) },
     {
       label: 'Show-and-Tell',
@@ -346,15 +346,15 @@ function refreshTray(): void {
 
 function createTray(): void {
   tray = new Tray(trayIcon());
-  tray.setToolTip('OpenRappter');
-  tray.on('click', () => void focusWindow('chat').catch(showTrayError));
+  tray.setToolTip('RAPP Work');
+  tray.on('click', () => void focusWindow('work').catch(showTrayError));
   refreshTray();
 }
 
 async function showTrayError(error: unknown): Promise<void> {
   await dialog.showMessageBox({
     type: 'error',
-    title: 'OpenRappter action failed',
+    title: 'RAPP Work action failed',
     message: error instanceof Error ? error.message : String(error),
   });
 }
@@ -473,7 +473,7 @@ async function runWhisperModelSmoke(): Promise<void> {
     const aiff = path.join(scratch, 'voice.aiff');
     const raw = path.join(scratch, 'voice.f32le');
     const phrase =
-      'OpenRappter local narration is working and this sentence stays on the device.';
+      'RAPP Work local narration is working and this sentence stays on the device.';
     const spoken = spawnSync('/usr/bin/say', ['-o', aiff, phrase], {
       encoding: 'utf8',
     });
@@ -523,7 +523,7 @@ async function runWhisperModelSmoke(): Promise<void> {
 async function runVibeVoiceModelSmoke(): Promise<void> {
   await vibeVoice().enable();
   const wav = await vibeVoice().speak(
-    'OpenRappter local voice is running entirely on this device.',
+    'RAPP Work local voice is running entirely on this device.',
     'en-Carter_man',
   );
   if (
@@ -625,55 +625,6 @@ async function handleNarration(
   return transcript;
 }
 
-async function handleBuddyEvidence(
-  event: IpcMainInvokeEvent,
-  request: unknown,
-): Promise<unknown> {
-  const input = validateTrustedRequest(event, request);
-  if (input.action !== 'extract') {
-    throw new Error(`Unsupported buddy evidence action: ${String(input.action)}`);
-  }
-  if (
-    typeof input.filename !== 'string'
-    || typeof input.mimeType !== 'string'
-  ) {
-    throw new Error('Buddy evidence requires a filename and media type.');
-  }
-  const data = bytes(input.data);
-  return extractBuddyEvidence(
-    {
-      filename: input.filename,
-      mimeType: input.mimeType,
-      data,
-    },
-    {
-      transcribe: async (samples) => {
-        if (!narration().isCached()) {
-          const approval = await dialog.showMessageBox(mainWindow!, {
-            type: 'question',
-            title: 'Analyze walkthrough locally?',
-            message: 'Download local Whisper to transcribe this walkthrough?',
-            detail:
-              `Whisper Small q8 is ${NARRATION_MODEL_DOWNLOAD_LABEL}. `
-              + 'The model is cached on this device. The video and audio never '
-              + 'leave the device; only the extracted transcript is sent to '
-              + 'your configured Copilot model when you request an agent draft.',
-            buttons: ['Cancel', 'Download and analyze'],
-            cancelId: 0,
-            defaultId: 1,
-            noLink: true,
-          });
-          if (approval.response !== 1) {
-            throw new Error('Walkthrough analysis was cancelled.');
-          }
-          await narration().download();
-        }
-        return narration().transcribe(samples, 'en');
-      },
-    },
-  );
-}
-
 async function handleVoice(
   event: IpcMainInvokeEvent,
   request: unknown,
@@ -759,7 +710,7 @@ async function nativeConsent(
     start: {
       title: 'Start Show-and-Tell?',
       detail:
-        'OpenRappter will record active app/window changes. Screenshots remain explicit-only. Keep passwords, tokens, and private material off screen.',
+        'RAPP Work will record active app/window changes. Screenshots remain explicit-only. Keep passwords, tokens, and private material off screen.',
       button: 'Start recording',
     },
     capture: {
@@ -954,7 +905,7 @@ async function dispatchRendererCommand(
     command: { action: string; args: Record<string, unknown> },
   ): Promise<unknown> {
     if (!rendererReady || !mainWindow || mainWindow.isDestroyed()) {
-      throw new Error('OpenRappter Desktop renderer is not ready.');
+      throw new Error('RAPP Work renderer is not ready.');
     }
     const encoded = Buffer.from(JSON.stringify(command), 'utf8').toString('base64');
     return mainWindow.webContents.executeJavaScript(`
@@ -1129,8 +1080,8 @@ function createWindow(): BrowserWindow {
     minWidth: 980,
     minHeight: 700,
     show: false,
-    title: 'OpenRappter',
-    backgroundColor: '#050711',
+    title: 'RAPP Work',
+    backgroundColor: '#f7f4ef',
     webPreferences: {
       preload: path.join(import.meta.dirname, 'preload.cjs'),
       ...SECURE_RENDERER_PREFERENCES,
@@ -1175,15 +1126,16 @@ function createWindow(): BrowserWindow {
           while (
             Date.now() < deadline &&
             (!appElement?.shadowRoot ||
-              /Waking the OpenRappter patient|patient is unreachable/.test(
-                appElement.shadowRoot.textContent || ''
-              ))
+              !appElement.shadowRoot.querySelector('.status-dot.connected'))
           ) {
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
-          if (!appElement?.shadowRoot) throw new Error('OpenRappter app did not render');
-          if (/patient is unreachable/.test(appElement.shadowRoot.textContent || '')) {
-            throw new Error('OpenRappter UI could not connect to the gateway');
+          if (!appElement?.shadowRoot) throw new Error('RAPP Work app did not render');
+          if (!appElement.shadowRoot.querySelector('.status-dot.connected')) {
+            throw new Error('RAPP Work UI could not connect to the gateway');
+          }
+          if (!appElement.shadowRoot.querySelector('rapp-work')) {
+            throw new Error('RAPP Work did not open the Work landing view');
           }
           const smokeScope = ${JSON.stringify(
             process.env.OPENRAPPTER_DESKTOP_SMOKE_SCOPE ?? 'full',
@@ -1391,7 +1343,6 @@ async function finishDesktopSmoke(exitCode: number): Promise<void> {
   await Promise.allSettled([
     stopOwnedShowSessions(),
     stopOwnedGateway(),
-    shutdownBuddyEvidenceJobs(),
     vibeVoiceService?.stop() ?? Promise.resolve(),
   ]);
   if (commandTimer) clearInterval(commandTimer);
@@ -1446,17 +1397,12 @@ if (!ownsInstanceLock) {
 
   app.on('before-quit', (event) => {
     if (quitting) return;
-    if (
-      !gatewayProcess
-      && !vibeVoiceService
-      && !hasActiveBuddyEvidenceJobs()
-    ) return;
+    if (!gatewayProcess && !vibeVoiceService) return;
     event.preventDefault();
     quitting = true;
     void Promise.all([
       stopOwnedShowSessions(),
       stopOwnedGateway(),
-      shutdownBuddyEvidenceJobs(),
       vibeVoiceService?.stop() ?? Promise.resolve(),
     ]).finally(() => app.quit());
   });
@@ -1470,7 +1416,6 @@ if (!ownsInstanceLock) {
   });
 
   void app.whenReady().then(async () => {
-    await pruneStaleBuddyEvidence();
     if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
       console.log('OPENRAPPTER_DESKTOP_SMOKE ready-handler');
       smokeRoot = path.join(
@@ -1538,7 +1483,7 @@ if (!ownsInstanceLock) {
           void dialog.showMessageBox(mainWindow!, {
             type: 'question',
             title: 'Allow local narration?',
-            message: 'Allow OpenRappter to use the microphone?',
+            message: 'Allow RAPP Work to use the microphone?',
             detail:
               'Audio is recorded only for the active Show-and-Tell narration and transcribed locally with Whisper.',
             buttons: ['Cancel', 'Allow microphone'],
@@ -1557,7 +1502,6 @@ if (!ownsInstanceLock) {
       );
       ipcMain.handle('openrappter:show-and-tell', handleShowAndTell);
       ipcMain.handle('openrappter:narration', handleNarration);
-      ipcMain.handle('openrappter:buddy-evidence', handleBuddyEvidence);
       ipcMain.handle('openrappter:voice', handleVoice);
       ipcMain.handle(
         'openrappter:desktop-control',
@@ -1616,8 +1560,8 @@ if (!ownsInstanceLock) {
       }
       await dialog.showMessageBox({
         type: 'error',
-        title: 'OpenRappter could not start',
-        message: 'The local OpenRappter gateway did not start.',
+        title: 'RAPP Work could not start',
+        message: 'The local RAPP Work gateway did not start.',
         detail: error instanceof Error ? error.message : String(error),
       });
       app.quit();

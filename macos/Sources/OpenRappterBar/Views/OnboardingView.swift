@@ -65,10 +65,6 @@ public struct OnboardingView: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Text("If needed, setup downloads the exact approved runtime for this signed Bar release. No Node installation or terminal is required.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
 
             Spacer().frame(height: 8)
 
@@ -80,8 +76,9 @@ public struct OnboardingView: View {
             .buttonStyle(.borderedProminent)
             .tint(.green)
 
-            Button("Check my existing setup") {
+            Button("I already set up via terminal") {
                 viewModel.skipToChat()
+                onComplete()
             }
             .buttonStyle(.plain)
             .font(.caption)
@@ -122,7 +119,7 @@ public struct OnboardingView: View {
                     .font(.callout)
                 }
 
-            case .waitingForCode(let code, let url):
+            case .waitingForCode(let code, _):
                 VStack(spacing: 8) {
                     Text("Enter this code on GitHub:")
                         .font(.callout).foregroundStyle(.secondary)
@@ -132,18 +129,10 @@ public struct OnboardingView: View {
                         .padding(8)
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(8)
-                        .textSelection(.enabled)
-                    if let destination = URL(string: url) {
-                        Link("Open GitHub sign-in", destination: destination)
-                    }
                     ProgressView()
                         .padding(.top, 4)
                     Text("Waiting for authorization...")
                         .font(.caption).foregroundStyle(.secondary)
-                    if let message = viewModel.authService.error {
-                        Text(message).font(.caption).foregroundStyle(.orange)
-                    }
-                    Button("Cancel", role: .cancel) { viewModel.cancelGitHubAuth() }
                 }
 
             case .validating:
@@ -151,7 +140,6 @@ public struct OnboardingView: View {
                     ProgressView()
                     Text("Checking credentials...")
                         .font(.callout).foregroundStyle(.secondary)
-                    Button("Cancel", role: .cancel) { viewModel.cancelGitHubAuth() }
                 }
 
             case .success:
@@ -159,7 +147,7 @@ public struct OnboardingView: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 32))
                         .foregroundStyle(.green)
-                    Text("GitHub credentials are ready")
+                    Text("Connected to GitHub Copilot!")
                         .font(.callout).bold()
 
                     Button(action: { viewModel.advance() }) {
@@ -181,8 +169,8 @@ public struct OnboardingView: View {
 
                     Button("Try Again") { viewModel.startGitHubAuth() }
                         .buttonStyle(.bordered)
-                    Button("Check runtime connection") { viewModel.retryRuntimeSetup() }
-                        .buttonStyle(.plain).font(.caption)
+                    Button("Skip for now") { viewModel.advance() }
+                        .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -210,18 +198,15 @@ public struct OnboardingView: View {
                         .font(.system(.body, design: .monospaced))
 
                     Button(action: {
-                        if viewModel.connectTelegram() { viewModel.advance() }
+                        viewModel.connectTelegram()
+                        viewModel.advance()
                     }) {
-                        Text("Save token")
+                        Text("Connect")
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.telegramToken.isEmpty)
-
-                    if let message = viewModel.errorMessage {
-                        Text(message).font(.caption).foregroundStyle(.red)
-                    }
 
                     Button("Skip — I'll add this later") {
                         viewModel.skipTelegram()
@@ -236,7 +221,7 @@ public struct OnboardingView: View {
                     if !viewModel.telegramBotName.isEmpty {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
-                        Text(viewModel.telegramBotName)
+                        Text("Connected: \(viewModel.telegramBotName)")
                     }
 
                     Button(action: { viewModel.advance() }) {
@@ -257,23 +242,12 @@ public struct OnboardingView: View {
         VStack(spacing: 20) {
             dinoAnimation
 
-            Text(viewModel.isStarting ? "Verifying your runtime…" : "Runtime setup needs attention")
+            Text("Setting everything up...")
                 .font(.title3).bold()
 
             VStack(alignment: .leading, spacing: 12) {
-                if let progress = viewModel.bootstrapProgress {
-                    Text(progress.message).font(.callout)
-                    if let fraction = progress.fraction {
-                        ProgressView(value: fraction)
-                    }
-                    if let bytes = progress.bytes {
-                        Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) + " downloaded")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                statusRow(label: "Compatible gateway and chat methods", done: viewModel.daemonStarted)
-                Text("OpenRappter Desktop remains authoritative when it is running. Otherwise, Bar uses the installed OpenRappter runtime.")
-                    .font(.caption).foregroundStyle(.secondary)
+                statusRow(label: "Starting daemon", done: viewModel.daemonStarted)
+                statusRow(label: "Installing auto-start", done: viewModel.autoStartInstalled)
             }
             .padding()
             .background(Color.gray.opacity(0.05))
@@ -285,15 +259,7 @@ public struct OnboardingView: View {
                     .foregroundStyle(.red)
             }
 
-            if viewModel.isStarting {
-                ProgressView()
-                Button("Cancel", role: .cancel) { viewModel.cancelRuntimeSetup() }
-            } else {
-                Button("Retry verified setup") { viewModel.retryRuntimeSetup() }
-                    .buttonStyle(.borderedProminent)
-                Text("Only exact checksum-verified bytes with nightly, alpha, canary, and beta approval may be installed. A pending release stays blocked until its approvals are available.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            ProgressView()
         }
     }
 
@@ -308,26 +274,27 @@ public struct OnboardingView: View {
                 .font(.title2).bold()
 
             VStack(alignment: .leading, spacing: 8) {
-                checkRow("GitHub", ok: viewModel.authState.isSuccess)
-                checkRow(viewModel.usingDesktopRuntime ? "Desktop gateway" : "Local gateway", ok: viewModel.daemonStarted)
+                checkRow("Copilot", ok: viewModel.authState.isSuccess)
+                checkRow("Daemon", ok: viewModel.daemonStarted)
+                checkRow("Auto-start", ok: viewModel.autoStartInstalled)
+                checkRow("Daily tips at 9am", ok: true)
             }
             .padding()
             .background(Color.gray.opacity(0.05))
             .cornerRadius(10)
 
-            Text("Click the 🦖 in your menu bar to chat. Optional channels, scheduled tasks, and start-at-login preferences are available in Settings.")
+            Text("Click the 🦖 in your menu bar anytime to chat with me. I'll send you a tip every morning to help you get the most out of openrappter.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Button(action: { if viewModel.isComplete { onComplete() } }) {
+            Button(action: { onComplete() }) {
                 Text("Start Chatting")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
             }
             .buttonStyle(.borderedProminent)
             .tint(.green)
-            .disabled(!viewModel.isComplete)
         }
     }
 
@@ -343,11 +310,9 @@ public struct OnboardingView: View {
             if done {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-            } else if viewModel.isStarting {
+            } else {
                 ProgressView()
                     .controlSize(.small)
-            } else {
-                Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
             }
             Text(label)
                 .font(.callout)

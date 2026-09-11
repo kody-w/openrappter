@@ -32,6 +32,20 @@ const { SECURE_RENDERER_PREFERENCES } = await import(
   '../dist/window-security.js'
 );
 
+test('RAPP Work branding preserves runtime, IPC, and existing Electron profiles', () => {
+  assert.equal(desktopPackage.name, 'openrappter-desktop');
+  assert.equal(desktopPackage.build.productName, 'RAPP Work');
+  assert.equal(desktopPackage.build.appId, 'com.openrappter.desktop');
+  assert.match(main, /app\.setName\('RAPP Work'\)/);
+  assert.match(main, /app\.setPath\('userData'/);
+  assert.match(main, /app\.isPackaged \? 'OpenRappter' : 'openrappter-desktop'/);
+  assert.match(main, /title: 'RAPP Work'/);
+  assert.match(main, /label: 'Open RAPP Work'.*focusWindow\('work'\)/);
+  assert.match(main, /tray\.on\('click'.*focusWindow\('work'\)/);
+  assert.match(main, /querySelector\('rapp-work'\)/);
+  assert.doesNotMatch(main, /Waking the OpenRappter patient|patient is unreachable/);
+});
+
 test('desktop renderer is isolated and sandboxed', () => {
   assert.deepEqual(SECURE_RENDERER_PREFERENCES, {
     contextIsolation: true,

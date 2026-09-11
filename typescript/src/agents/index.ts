@@ -9,6 +9,7 @@ export { MemoryAgent } from './MemoryAgent.js';
 export { Assistant } from './Assistant.js';
 export type { AssistantConfig, AssistantResponse } from './Assistant.js';
 export * from './workspace.js';
+export * from '../workspaces/index.js';
 export * from './types.js';
 
 // Tool agents

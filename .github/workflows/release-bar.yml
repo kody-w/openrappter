@@ -1,212 +1,237 @@
 name: Release macOS Menu Bar
+
 on:
-  workflow_dispatch:
-    inputs:
-      source_commit:
-        description: Exact source commit of the finalized candidate containing macOS Bar
-        required: true
-        type: string
-      version:
-        description: Exact stable X.Y.Z version of that candidate
-        required: true
-        type: string
+  push:
+    tags:
+      - 'v*-bar'
+
+# Serialize retries of the same macOS tag without allowing another tag or the
+# package lane to replace a pending release.
 concurrency:
-  group: openrappter-release-macos-${{ inputs.version }}
+  group: openrappter-release-macos-${{ github.ref_name }}
   cancel-in-progress: false
+
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  release-constitution:
-    name: Release Constitution
+  validate-tag:
+    name: Validate release identity
     runs-on: ubuntu-latest
     outputs:
-      commit: ${{ steps.verify.outputs.commit }}
-      version: ${{ steps.verify.outputs.version }}
-      dmg_sha256: ${{ steps.verify.outputs.dmg_sha256 }}
-      bundle_sha256: ${{ steps.verify.outputs.bundle_sha256 }}
-    env:
-      SOURCE_COMMIT: ${{ inputs.source_commit }}
-      RELEASE_VERSION: ${{ inputs.version }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ inputs.source_commit }}
           fetch-depth: 0
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          repository: kody-w/openrappter-release-train
-          ref: 931dd60f77c1e8b3a5c096fae6a5969061ccf569
-          path: authority
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with: { python-version: '3.12' }
-      - name: Validate exact source and version on canonical main
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/main
-          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 1
-          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
-          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
-          git fetch --no-tags origin main
-          git merge-base --is-ancestor "$SOURCE_COMMIT" origin/main
-      - name: Materialize the exact candidate including signed Bar bytes
-        run: |
-          python scripts/bar_candidate.py materialize --output bar-release \
-            --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION"
-      - name: Verify all four finalized receipts and every local candidate artifact
-        run: |
-          python authority/scripts/release_gate.py \
-            --policy authority/contracts/release-constitution-v1.json \
-            --release bar-release/release.json --remote \
-            --local-artifacts-dir bar-release/release-dist
-      - name: Preserve the validated immutable receipt references for cask review
-        run: |
-          PYTHONPATH=authority/scripts python - <<'PY'
-          import json
-          from pathlib import Path
-          from release_gate import fetch_chain, load_policy, validate_chain
-          release=json.load(open("bar-release/release.json"))
-          chain=fetch_chain(release)
-          validate_chain(release,chain,load_policy(Path("authority/contracts/release-constitution-v1.json")))
-          json.dump(chain,open("bar-release/chain.json","w"),indent=2,sort_keys=True)
-          PY
-      - name: Bind the verified native artifact to downstream jobs
-        id: verify
-        run: |
-          set -euo pipefail
-          sha="$(python scripts/bar_candidate.py verify --root bar-release/release-dist \
-            --parts-root bar-release/candidate-parts --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION")"
-          echo "commit=$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
-          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "dmg_sha256=$sha" >> "$GITHUB_OUTPUT"
-          echo "bundle_sha256=$(python -c 'import json; print(json.load(open("bar-release/release.json"))["artifact_sha256"])')" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: verified-bar-candidate
-          path: bar-release/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
 
-  verify-dmg:
-    name: Verify receipted DMG without mutation (${{ matrix.runner }})
-    needs: release-constitution
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [macos-14, macos-15-intel]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
-    env:
-      SOURCE_COMMIT: ${{ needs.release-constitution.outputs.commit }}
-      RELEASE_VERSION: ${{ needs.release-constitution.outputs.version }}
-      DMG_SHA256: ${{ needs.release-constitution.outputs.dmg_sha256 }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with: { ref: '${{ needs.release-constitution.outputs.commit }}' }
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with: { python-version: '3.12' }
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with: { name: verified-bar-candidate, path: bar-release }
-      - name: Verify candidate bytes, Developer ID, stapled ticket, architecture and version
+      - name: Validate exact macOS release tag
+        id: version
+        shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/bar_candidate.py verify --root bar-release/release-dist \
-            --parts-root bar-release/candidate-parts \
-            --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION" --expected-sha "$DMG_SHA256"
-          bash macos/scripts/verify-dmg.sh \
-            "bar-release/release-dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg" \
-            "$RELEASE_VERSION" "$DMG_SHA256" "$SOURCE_COMMIT"
-
-  publish:
-    name: Publish only the verified receipted Bar artifact
-    needs: [release-constitution, verify-dmg]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      SOURCE_COMMIT: ${{ needs.release-constitution.outputs.commit }}
-      RELEASE_VERSION: ${{ needs.release-constitution.outputs.version }}
-      RELEASE_TAG: v${{ needs.release-constitution.outputs.version }}-bar
-      DMG_SHA256: ${{ needs.release-constitution.outputs.dmg_sha256 }}
-      BUNDLE_SHA256: ${{ needs.release-constitution.outputs.bundle_sha256 }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ needs.release-constitution.outputs.commit }}
-          fetch-depth: 0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with: { name: verified-bar-candidate, path: bar-release }
-      - name: Recheck exact artifact before tag or publication
-        run: |
-          set -euo pipefail
-          echo "$BUNDLE_SHA256  bar-release/candidate.tar.gz" | sha256sum -c -
-          python3 scripts/bar_candidate.py verify --root bar-release/release-dist \
-            --parts-root bar-release/candidate-parts \
-            --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION" --expected-sha "$DMG_SHA256"
-      - name: Reassemble exact receipted runtime bytes without rebuilding
-        run: |
-          python3 scripts/bar_runtime.py export --root bar-release/release-dist \
-            --parts-root bar-release/candidate-parts --commit "$SOURCE_COMMIT" \
-            --version "$RELEASE_VERSION" --output publish-runtimes
-      - name: Produce the frozen first-launch proof only after constitution verification
-        run: |
-          python3 scripts/bar_candidate.py cask --root bar-release/release-dist \
-            --parts-root bar-release/candidate-parts \
-            --commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION" --expected-sha "$DMG_SHA256" \
-            --evidence bar-release/authority-evidence.json --chain bar-release/chain.json \
-            --output homebrew-proposal
-      - name: Create only the constitution-authorized native tag
-        run: |
-          set -euo pipefail
-          git fetch --force --tags origin
-          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
-            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$SOURCE_COMMIT"
+          readonly tag="${GITHUB_REF_NAME:-}"
+          if [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-bar$ ]]; then
+            readonly version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
           else
-            git config user.name github-actions
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git tag -a "$RELEASE_TAG" "$SOURCE_COMMIT" -m "Constitution-finalized Bar $RELEASE_VERSION"
-            git push origin "refs/tags/$RELEASE_TAG"
+            printf 'Refusing malformed macOS release tag: %q\n' "$tag" >&2
+            exit 1
           fi
-      - name: Publish unchanged DMG, runtime archives and frozen first-launch proof
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Require release commit on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+  build-and-release:
+    name: Build & Release DMG
+    needs: validate-tag
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      RELEASE_VERSION: ${{ needs.validate-tag.outputs.version }}
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a
+        with:
+          swift-version: '6.0'
+
+      - name: Run tests
+        run: swift build --product RunTests && .build/debug/RunTests
+
+      - name: Import Developer ID certificate
+        shell: bash
+        env:
+          CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$CERTIFICATE_P12_BASE64"
+          test -n "$CERTIFICATE_PASSWORD"
+
+          certificate_path="$RUNNER_TEMP/openrappter-signing.p12"
+          keychain_path="$RUNNER_TEMP/openrappter-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+
+          printf '%s' "$CERTIFICATE_P12_BASE64" | base64 -D > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+
+          identity="$(
+            security find-identity -v -p codesigning "$keychain_path" |
+              sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' |
+              head -1
+          )"
+          test -n "$identity"
+          printf 'CODESIGN_IDENTITY=%s\n' "$identity" >> "$GITHUB_ENV"
+          printf 'SIGNING_KEYCHAIN_PATH=%s\n' "$keychain_path" >> "$GITHUB_ENV"
+          printf 'NOTARY_KEY_PATH=%s/AuthKey_%s.p8\n' \
+            "$RUNNER_TEMP" \
+            "${{ secrets.APPLE_API_KEY_ID }}" \
+            >> "$GITHUB_ENV"
+
+      - name: Prepare notarization API key
+        shell: bash
+        env:
+          API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$API_KEY_P8_BASE64"
+          test -n "$API_KEY_ID"
+          test -n "$API_ISSUER_ID"
+          printf '%s' "$API_KEY_P8_BASE64" | base64 -D > "$NOTARY_KEY_PATH"
+          chmod 600 "$NOTARY_KEY_PATH"
+
+      - name: Build and sign universal binary and DMG
+        shell: bash
+        run: |
+          REQUIRE_SIGNING=1 \
+          VERSION="$RELEASE_VERSION" \
+          CODESIGN_IDENTITY="$CODESIGN_IDENTITY" \
+            bash scripts/build-mac-app.sh
+
+      - name: Verify bundle and artifact version
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_version="$(
+            /usr/libexec/PlistBuddy \
+              -c 'Print :CFBundleShortVersionString' \
+              'dist/OpenRappter Bar.app/Contents/Info.plist'
+          )"
+          test "$bundle_version" = "$RELEASE_VERSION"
+          test -f "dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg"
+          codesign --verify --deep --strict --verbose=2 \
+            'dist/OpenRappter Bar.app'
+          codesign --verify --strict --verbose=2 \
+            "dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg"
+
+      - name: Notarize and staple DMG
+        shell: bash
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          dmg="dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg"
+          xcrun notarytool submit "$dmg" \
+            --key "$NOTARY_KEY_PATH" \
+            --key-id "$API_KEY_ID" \
+            --issuer "$API_ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess \
+            --type open \
+            --context context:primary-signature \
+            --verbose=2 \
+            "$dmg"
+
+      - name: Verify mounted app and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg"
+          mount_dir="$RUNNER_TEMP/openrappter-dmg"
+          mkdir -p "$mount_dir"
+          cleanup() {
+            hdiutil detach "$mount_dir" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir"
+          codesign --verify --deep --strict --verbose=2 \
+            "$mount_dir/OpenRappter Bar.app"
+          spctl --assess --type execute --verbose=2 \
+            "$mount_dir/OpenRappter Bar.app"
+          cleanup
+          trap - EXIT
+          (
+            cd dist
+            shasum -a 256 "OpenRappter-Bar-${RELEASE_VERSION}.dmg" \
+              > "OpenRappter-Bar-${RELEASE_VERSION}.dmg.sha256"
+          )
+
+      - name: Remove temporary signing material
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${SIGNING_KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN_PATH" || true
+          fi
+          rm -f \
+            "$RUNNER_TEMP/openrappter-signing.p12" \
+            "${NOTARY_KEY_PATH:-}"
+
+      - name: Upload DMG as release asset
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          target_commitish: ${{ env.SOURCE_COMMIT }}
-          name: OpenRappter Bar ${{ env.RELEASE_VERSION }}
+          name: "OpenRappter Bar ${{ env.RELEASE_VERSION }}"
           body: |
-            Signed with Apple Developer ID, notarized, and stapled before ring promotion.
-            This release reuses the exact macOS Bar bytes in the finalized candidate.
-            Download the DMG and drag OpenRappter Bar to Applications. Requires macOS 14+.
-            First launch downloads the pinned official Node and dependency-complete runtime
-            for this exact release, after verifying all four immutable release receipts.
-            No system Node, npm install, or compiler is needed. Internet access is required
-            for first-launch setup; the DMG intentionally does not bundle the runtime.
-            A Homebrew update is prepared separately as a receipt-bound review proposal.
+            ## OpenRappter Bar ${{ env.RELEASE_VERSION }}
+
+            macOS menu bar companion for the OpenRappter gateway.
+
+            ### Install
+            1. Download `OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg`
+            2. Open the DMG and drag **OpenRappter Bar** to Applications
+            3. Launch **OpenRappter Bar** normally from Applications
+            4. The app appears in your menu bar and connects to the gateway at `localhost:18790`
+
+            The app is signed with Apple Developer ID and notarized by Apple.
+
+            ### Requirements
+            - macOS 14 (Sonoma) or later
+            - Universal binary (Apple Silicon + Intel)
+
+            ### Homebrew
+            ```bash
+            brew tap kody-w/tap
+            brew install --cask openrappter-bar
+            ```
           files: |
-            bar-release/release-dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg
-            bar-release/release-dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg.sha256
-            bar-release/release-dist/macos-bar.json
-            publish-runtimes/openrappter-runtime-${{ env.RELEASE_VERSION }}-darwin-arm64.tar.gz
-            publish-runtimes/openrappter-runtime-${{ env.RELEASE_VERSION }}-darwin-x86_64.tar.gz
-            homebrew-proposal/runtime-bootstrap-proof.json
+            macos/dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg
+            macos/dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg.sha256
           fail_on_unmatched_files: true
           overwrite_files: false
-      - name: Verify the actual public downloads against the exact authorized bytes
-        run: |
-          set -euo pipefail
-          gh release download "$RELEASE_TAG" --repo kody-w/openrappter \
-            --dir downloaded-bar
-          echo "$DMG_SHA256  downloaded-bar/OpenRappter-Bar-${RELEASE_VERSION}.dmg" | sha256sum -c -
-          cmp homebrew-proposal/runtime-bootstrap-proof.json downloaded-bar/runtime-bootstrap-proof.json
-          for arch in arm64 x86_64; do
-            file="openrappter-runtime-${RELEASE_VERSION}-darwin-${arch}.tar.gz"
-            cmp "publish-runtimes/$file" "downloaded-bar/$file"
-          done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: homebrew-proposal-${{ env.RELEASE_VERSION }}
-          path: homebrew-proposal/
-          if-no-files-found: error
-          retention-days: 30

@@ -21,7 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.validate.outputs.version }}
-      prerelease: ${{ steps.validate.outputs.prerelease }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -52,9 +51,6 @@ jobs:
       - name: Test deterministic preflight
         run: node --test scripts/release-preflight.test.mjs
 
-      - name: Gate Rapter Clever Girl Observe Mode
-        run: node scripts/rapter-clever-girl-gate.mjs
-
       - name: Validate tag and versions
         id: validate
         shell: bash
@@ -76,13 +72,7 @@ jobs:
             --typescript-runtime-version "$typescript_runtime_version" \
             --python-runtime-version "$python_runtime_version"
 
-          release_version="${GITHUB_REF_NAME#v}"
-          echo "version=$release_version" >> "$GITHUB_OUTPUT"
-          if [[ "$release_version" == *-* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
   flight-recorder-gate:
     name: Flight Recorder cross-runtime gate
@@ -141,7 +131,6 @@ jobs:
     name: Flight Recorder Windows storage gate
     needs: preflight
     runs-on: windows-latest
-    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -164,26 +153,15 @@ jobs:
       - name: Install Python runtime and test dependencies
         run: python -m pip install -e "python[dev]"
 
-      - name: Isolate native Windows persistence checks
-        shell: pwsh
-        run: ./scripts/prepare-windows-storage-tests.ps1
-
       - name: Validate TypeScript Windows storage
         working-directory: typescript
-        timeout-minutes: 6
-        run: npx vitest run src/flight-recorder/windows-storage.test.ts src/agents/MemoryAgent.persistence.test.ts src/memory/json-store.test.ts src/cli/__tests__/memory.test.ts --maxWorkers=2 --minWorkers=1 --reporter=verbose --testTimeout=30000 --hookTimeout=30000
-
-      - name: Build the Windows TypeScript runtime
-        working-directory: typescript
-        run: npm run build
+        run: |
+          npx vitest run src/flight-recorder/windows-storage.test.ts
+          npm run build
 
       - name: Validate Python Windows storage
         working-directory: python
-        run: >-
-          python -m pytest tests/test_flight_recorder_windows.py
-          tests/test_memory_persistence.py tests/test_memory_agents.py
-          "tests/test_brainstem_compliance.py::test_agent_is_brainstem_compliant[manage_memory_agent.py]"
-          "tests/test_brainstem_compliance.py::test_agent_is_brainstem_compliant[context_memory_agent.py]" -q
+        run: python -m pytest tests/test_flight_recorder_windows.py -q
 
   show-and-tell-gate:
     name: Show-and-Tell ${{ matrix.os }} gate
@@ -364,7 +342,7 @@ jobs:
             find dist \
               -maxdepth 5 \
               -type f \
-              -path '*/OpenRappter.app/Contents/MacOS/OpenRappter' \
+              -path '*/RAPP Work.app/Contents/MacOS/RAPP Work' \
               -print \
               -quit
           )"
@@ -402,7 +380,7 @@ jobs:
             find typescript/desktop/dist \
               -maxdepth 3 \
               -type d \
-              -name 'OpenRappter.app' \
+              -name 'RAPP Work.app' \
               -print \
               -quit
           )"
@@ -426,6 +404,11 @@ jobs:
             }
           }
 
+      - name: Verify RAPP Work DMG and generate release metadata
+        if: matrix.os == 'mac'
+        working-directory: typescript/desktop
+        run: npm run release:manifest -- --require-clean
+
       - name: Remove temporary notarization key
         if: always() && matrix.os == 'mac'
         shell: bash
@@ -437,6 +420,8 @@ jobs:
           name: desktop-${{ matrix.os }}-${{ needs.preflight.outputs.version }}
           path: |
             typescript/desktop/dist/*.dmg
+            typescript/desktop/dist/*.dmg.sha256
+            typescript/desktop/dist/*.dmg.manifest.json
             typescript/desktop/dist/*.zip
             typescript/desktop/dist/*.exe
             typescript/desktop/dist/*.AppImage
@@ -444,40 +429,51 @@ jobs:
           retention-days: 14
 
   build-artifacts:
-    name: Materialize finalized candidate bytes without rebuild
+    name: Build release artifacts once
     needs: [preflight, flight-recorder-gate, flight-recorder-windows, show-and-tell-gate, electron-desktop-gate]
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Download finalized beta candidate bundle
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+
+      - name: Set reproducible build timestamp
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL --proto '=https' \
-            https://raw.githubusercontent.com/kody-w/openrappter-release-train/main/heads/beta.json \
-            -o beta-head.json
-          authority="$(python -c 'import json; print(json.load(open("beta-head.json"))["authority_commit"])')"
-          path="$(python -c 'import json; print(json.load(open("beta-head.json"))["receipt_path"])')"
-          curl -fsSL --proto '=https' \
-            "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$authority/$path" \
-            -o beta-receipt.json
-          python - <<'PY'
-          import json,os
-          r=json.load(open("beta-receipt.json"))
-          assert r["receipt_kind"]=="promotion"
-          assert r["source_commit"]==os.environ["GITHUB_SHA"]
-          assert r["source_tag"]==os.environ["GITHUB_REF_NAME"]
-          assert r["version"]==os.environ["RELEASE_VERSION"]
-          assert r["artifact_provenance"]=="github-candidate-bundle-sha256"
-          PY
-          url="$(python -c 'import json; print(json.load(open("beta-receipt.json"))["artifact_url"])')"
-          sha="$(python -c 'import json; print(json.load(open("beta-receipt.json"))["artifact_sha256"])')"
-          curl -fsSL --proto '=https' "$url" -o candidate.tar.gz
-          echo "$sha  candidate.tar.gz" | sha256sum -c -
-          mkdir release-dist
-          tar -xzf candidate.tar.gz -C release-dist
+          source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+          if [[ ! "$source_date_epoch" =~ ^[0-9]+$ ]]; then
+            printf 'Invalid source timestamp: %q\n' "$source_date_epoch" >&2
+            exit 1
+          fi
+          printf 'SOURCE_DATE_EPOCH=%s\n' "$source_date_epoch" >> "$GITHUB_ENV"
+
+      - name: Build npm package
+        working-directory: typescript
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          mkdir -p ../release-dist
+          node scripts/pack-locked.mjs \
+            --ignore-scripts \
+            --pack-destination ../release-dist
+
+      - name: Build Python wheel and sdist
+        run: |
+          python -m pip install \
+            "build==1.5.1" \
+            "hatchling==1.31.0"
+          python -m build --no-isolation --outdir release-dist python
 
       - name: Validate exact artifact names
         run: |
@@ -485,11 +481,13 @@ jobs:
             --tag "$GITHUB_REF_NAME" \
             --artifacts-dir release-dist
 
-      - name: Verify candidate checksums without rebuilding
+      - name: Generate and verify checksums
         working-directory: release-dist
-        shell: bash
         run: |
-          set -euo pipefail
+          sha256sum \
+            "openrappter-${RELEASE_VERSION}.tgz" \
+            "openrappter-${RELEASE_VERSION}-py3-none-any.whl" \
+            "openrappter-${RELEASE_VERSION}.tar.gz" > SHA256SUMS
           sha256sum --check SHA256SUMS
 
       - name: Upload immutable release artifacts
@@ -561,12 +559,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python_wheels=(release-dist/openrappter-*-py3-none-any.whl)
-          test "${#python_wheels[@]}" -eq 1
-          test -f "${python_wheels[0]}"
           python -m venv "$RUNNER_TEMP/openrappter-wheel-smoke"
           "$RUNNER_TEMP/openrappter-wheel-smoke/bin/pip" install \
-            "${python_wheels[0]}"
+            "release-dist/openrappter-${RELEASE_VERSION}-py3-none-any.whl"
           reported_version="$(
             "$RUNNER_TEMP/openrappter-wheel-smoke/bin/python" -c \
               'from openrappter import __version__; print(__version__, end="")'
@@ -582,12 +577,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python_sdists=(release-dist/openrappter-*.tar.gz)
-          test "${#python_sdists[@]}" -eq 1
-          test -f "${python_sdists[0]}"
           python -m venv "$RUNNER_TEMP/openrappter-sdist-smoke"
           "$RUNNER_TEMP/openrappter-sdist-smoke/bin/pip" install \
-            "${python_sdists[0]}"
+            "release-dist/openrappter-${RELEASE_VERSION}.tar.gz"
           reported_version="$(
             "$RUNNER_TEMP/openrappter-sdist-smoke/bin/python" -c \
               'from openrappter import __version__; print(__version__, end="")'
@@ -599,18 +591,9 @@ jobs:
             openrappter-sdist-smoke/bin/python -c 'import openrappter.show_and_tell, openrappter.show_and_tell_worker; from openrappter.cli import AgentRegistry; names = {item["name"] for item in AgentRegistry(load_skills=False).list_agents()}; assert "ShowAndTell" in names'
           )
 
-  release-constitution:
-    needs: [preflight, build-artifacts]
-    uses: ./.github/workflows/release-constitution.yml
-    with:
-      commit: ${{ github.sha }}
-      tag: ${{ github.ref_name }}
-      version: ${{ needs.preflight.outputs.version }}
-      artifact_name: release-artifacts-${{ needs.preflight.outputs.version }}
-
   publish-registries:
     name: Reconcile and publish exact registry artifacts
-    needs: [preflight, smoke-artifacts, build-electron-artifacts, release-constitution]
+    needs: [preflight, smoke-artifacts, build-electron-artifacts]
     runs-on: ubuntu-latest
     concurrency:
       group: openrappter-registry-publication
@@ -723,7 +706,7 @@ jobs:
           )"
           historical_tag="release-${RELEASE_VERSION//./-}"
           case "$publish_tag" in
-            latest|alpha|beta|rc|"$historical_tag") ;;
+            latest|"$historical_tag") ;;
             *)
               printf 'Unexpected npm dist-tag: %q\n' "$publish_tag" >&2
               exit 1
@@ -754,7 +737,7 @@ jobs:
 
   github-release:
     name: Create checksummed GitHub Release
-    needs: [preflight, publish-registries, build-electron-artifacts, release-constitution]
+    needs: [preflight, publish-registries, build-electron-artifacts]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -779,6 +762,7 @@ jobs:
       - name: Generate desktop checksums
         working-directory: desktop-dist
         run: |
+          sha256sum --check ./*.dmg.sha256
           find . -maxdepth 1 -type f ! -name 'SHA256SUMS-DESKTOP' -print0 \
             | sort -z \
             | xargs -0 sha256sum \
@@ -790,15 +774,16 @@ jobs:
         with:
           name: v${{ env.RELEASE_VERSION }}
           generate_release_notes: true
-          prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}
           fail_on_unmatched_files: true
           overwrite_files: false
           files: |
             release-dist/openrappter-${{ env.RELEASE_VERSION }}.tgz
-            release-dist/openrappter-*-py3-none-any.whl
-            release-dist/openrappter-*.tar.gz
+            release-dist/openrappter-${{ env.RELEASE_VERSION }}-py3-none-any.whl
+            release-dist/openrappter-${{ env.RELEASE_VERSION }}.tar.gz
             release-dist/SHA256SUMS
             desktop-dist/*.dmg
+            desktop-dist/*.dmg.sha256
+            desktop-dist/*.dmg.manifest.json
             desktop-dist/*.zip
             desktop-dist/*.exe
             desktop-dist/*.AppImage

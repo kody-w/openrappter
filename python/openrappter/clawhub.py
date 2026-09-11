@@ -11,7 +11,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import yaml
 from pathlib import Path
 from typing import Optional
@@ -77,29 +76,6 @@ class SkillParser:
 
         content = path.read_text(encoding='utf-8')
         return cls.parse_content(content, path)
-
-    @classmethod
-    def resolve_skill_path(cls, path: Path) -> Optional[Path]:
-        """Resolve a user-supplied path to an actual SKILL.md file.
-
-        Accepts either a direct path to a ``SKILL.md`` (any case) or a
-        directory containing one, matching how skills are laid out on disk:
-        ``<skills_dir>/[category/]<skill>/SKILL.md``.
-        """
-        if path.is_file():
-            return path
-        if path.is_dir():
-            for candidate in ("SKILL.md", "skill.md"):
-                found = path / candidate
-                if found.is_file():
-                    return found
-        return None
-
-    @classmethod
-    def parse_path(cls, path: Path) -> Optional[ClawHubSkill]:
-        """Resolve then parse a SKILL.md path or its containing directory."""
-        resolved = cls.resolve_skill_path(path)
-        return cls.parse_file(resolved) if resolved else None
 
     @classmethod
     def parse_content(cls, content: str, path: Optional[Path] = None) -> Optional[ClawHubSkill]:
@@ -173,38 +149,6 @@ class SkillParser:
         )
 
 
-def execute_skill_script(scripts_dir: Path, query: str, skill_name: str = "") -> Optional[str]:
-    """Try to execute a script from a skill's ``scripts/`` directory.
-
-    Shared by ``ClawHubSkillAgent`` and any native, per-skill agent generated
-    by ``LearnNewAgent``'s ``import_skill`` action (see
-    ``python/openrappter/agents/learn_new_agent.py`` and
-    ``python/openrappter/agents/skill_agent.py``) so script-execution semantics
-    (interpreter choice, timeout, cwd, result shape) live in exactly one place.
-    """
-    for interpreter, pattern in ((sys.executable, "*.py"), ("bash", "*.sh")):
-        for script in scripts_dir.glob(pattern):
-            try:
-                result = subprocess.run(
-                    [interpreter, str(script), query],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    cwd=scripts_dir.parent
-                )
-                return json.dumps({
-                    "status": "success" if result.returncode == 0 else "error",
-                    "skill": skill_name,
-                    "script": script.name,
-                    "output": result.stdout or result.stderr,
-                    "return_code": result.returncode
-                })
-            except Exception:
-                continue
-
-    return None
-
-
 class ClawHubSkillAgent:
     """
     Wraps a ClawHub skill as an openrappter agent.
@@ -242,7 +186,7 @@ class ClawHubSkillAgent:
             scripts_dir = self.skill.path.parent / "scripts"
             if scripts_dir.exists():
                 # Try to find and run a matching script
-                result = execute_skill_script(scripts_dir, action or query, self.skill.name)
+                result = self._try_execute_script(scripts_dir, action or query)
                 if result:
                     return result
 
@@ -255,6 +199,49 @@ class ClawHubSkillAgent:
             "message": f"Skill '{self.skill.name}' loaded. This skill provides instructions/documentation.",
             "has_scripts": bool(self.skill.path and (self.skill.path.parent / "scripts").exists())
         })
+
+    def _try_execute_script(self, scripts_dir: Path, query: str) -> Optional[str]:
+        """Try to execute a script from the skill's scripts directory."""
+        # Look for common script patterns
+        for script in scripts_dir.glob("*.py"):
+            try:
+                result = subprocess.run(
+                    ["python", str(script), query],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    cwd=scripts_dir.parent
+                )
+                return json.dumps({
+                    "status": "success" if result.returncode == 0 else "error",
+                    "skill": self.skill.name,
+                    "script": script.name,
+                    "output": result.stdout or result.stderr,
+                    "return_code": result.returncode
+                })
+            except Exception as e:
+                continue
+
+        for script in scripts_dir.glob("*.sh"):
+            try:
+                result = subprocess.run(
+                    ["bash", str(script), query],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    cwd=scripts_dir.parent
+                )
+                return json.dumps({
+                    "status": "success" if result.returncode == 0 else "error",
+                    "skill": self.skill.name,
+                    "script": script.name,
+                    "output": result.stdout or result.stderr,
+                    "return_code": result.returncode
+                })
+            except Exception as e:
+                continue
+
+        return None
 
 
 class ClawHubClient:

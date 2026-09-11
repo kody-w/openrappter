@@ -1,506 +1,662 @@
 import AppKit
 import Foundation
+import Security
 
-protocol GatewayAuthenticating {
-    func beginGatewayAuthentication() async throws -> GatewayAuthLoginResponse
-    func pollGatewayAuthentication(deviceCode: String) async throws -> GatewayAuthPollResponse
-    func cancelGatewayAuthentication(deviceCode: String) async throws -> GatewayAuthCancelResponse
-    func activeGatewayAuthProfile() async throws -> GatewayAuthProfile?
-    func removeGatewayAuthProfile(id: String) async throws
-}
+// MARK: - GitHub Auth Service
 
-extension RpcClient: GatewayAuthenticating {}
-
-@MainActor
-struct GitHubAuthDependencies {
-    var credentials: any GitHubCredentialStoring
-    var request: (URLRequest) async throws -> (Data, HTTPURLResponse)
-    var openBrowser: (URL) -> Bool
-    var desktopIsAuthoritative: () -> Bool
-    var sleep: (TimeInterval) async throws -> Void
-    var now: () -> Date
-    var maximumLoginDuration: TimeInterval = 900
-    var maximumTransportFailures = 3
-
-    static func live(homeDirectory: String) -> Self {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 20
-        let session = URLSession(configuration: configuration)
-        return Self(
-            credentials: GitHubCredentialStore(
-                environment: LocalEnvironmentFile(homeDirectory: homeDirectory),
-                keychain: SystemGitHubKeychain()
-            ),
-            request: { request in
-                let (data, response) = try await session.data(for: request)
-                guard let http = response as? HTTPURLResponse else { throw GitHubAuthError.invalidResponse }
-                return (data, http)
-            },
-            openBrowser: { NSWorkspace.shared.open($0) },
-            desktopIsAuthoritative: { DesktopGatewayDiscovery.current() != nil },
-            sleep: { try await Task.sleep(for: .seconds($0)) },
-            now: Date.init
-        )
-    }
-}
-
-/// One device-code flow for first launch, Settings, and chat recovery.
+/// Uses Desktop gateway auth when attached, with local OAuth persistence as
+/// the standalone fallback.
 @Observable
 @MainActor
 public final class GitHubAuthService {
-    public enum AuthState: Equatable {
-        case unknown, unauthenticated, authenticating, authenticated
-    }
-
-    public private(set) var authState: AuthState = .unknown
-    public private(set) var userCode = ""
-    public private(set) var verificationURL = ""
-    public private(set) var error: String?
-    public private(set) var username: String?
+    // MARK: - Constants
 
     private static let clientId = "Iv1.b507a08c87ecfe98"
-    private let dependencies: GitHubAuthDependencies
-    private var gateway: (any GatewayAuthenticating)?
-    private var generation: UInt = 0
-    private var loginTask: Task<Bool, Never>?
-    private var statusTask: Task<Void, Never>?
-    private var pendingGateway: (code: String, client: any GatewayAuthenticating)?
-    private var codeObservers: [(String, String) -> Void] = []
+    private static let deviceCodeURL = "https://github.com/login/device/code"
+    private static let accessTokenURL = "https://github.com/login/oauth/access_token"
+    private static let scope = "read:user"
+    private static let keychainService = "com.openrappter.bar"
+    private static let keychainAccount = "github_token"
 
-    public init(homeDirectory: String = NSHomeDirectory() + "/.openrappter") {
-        dependencies = .live(homeDirectory: homeDirectory)
+    private static var envFilePath: String {
+        NSHomeDirectory() + "/.openrappter/.env"
     }
 
-    init(dependencies: GitHubAuthDependencies, gateway: (any GatewayAuthenticating)? = nil) {
-        self.dependencies = dependencies
-        self.gateway = gateway
+    // MARK: - State
+
+    public enum AuthState: Equatable {
+        case unknown
+        case unauthenticated
+        case authenticating
+        case authenticated
     }
+
+    public var authState: AuthState = .unknown
+    public var userCode: String = ""
+    public var verificationURL: String = ""
+    public var error: String?
+    public var username: String?
+
+    private var pollTask: Task<Void, Never>?
+    private var rpcClient: RpcClient?
+    private var authGeneration: UInt = 0
+    private var gatewayDeviceCode: String?
+    private var gatewayCancellationTask: Task<Void, Never>?
+    private var gatewayCancellationGeneration: UInt = 0
 
     public var usingGatewayAuthentication: Bool {
-        gateway != nil || dependencies.desktopIsAuthoritative()
-    }
-
-    public var hasStoredCredentials: Bool {
-        (try? dependencies.credentials.hasRuntimeToken()) == true
+        rpcClient != nil
     }
 
     public func configure(rpcClient: RpcClient?) {
-        configure(gateway: rpcClient)
+        let previousRpcClient = self.rpcClient
+        pollTask?.cancel()
+        pollTask = nil
+        authGeneration &+= 1
+        let generation = authGeneration
+        self.rpcClient = rpcClient
+        cancelPendingGatewayFlow(
+            refreshGeneration: generation,
+            preferredRpcClient: previousRpcClient
+        )
+        refreshAuthStatus(generation: generation)
     }
 
-    func configure(gateway: (any GatewayAuthenticating)?) {
-        cancelLogin()
-        self.gateway = gateway
-        checkAuthStatus()
+    // MARK: - Check Auth Status
+
+    /// Check Keychain first, then fall back to .env. Migrates .env token to Keychain if found.
+    public func checkAuthStatus() {
+        pollTask?.cancel()
+        pollTask = nil
+        authGeneration &+= 1
+        let generation = authGeneration
+        cancelPendingGatewayFlow(refreshGeneration: generation)
+        refreshAuthStatus(generation: generation)
     }
 
-    @discardableResult
-    public func checkAuthStatus() -> Task<Void, Never> {
-        cancelLogin()
-        let current = generation
+    private func refreshAuthStatus(generation: UInt) {
         error = nil
         username = nil
         authState = .unknown
-        let task = Task {
-            do {
-                if let gateway {
-                    let profile = try await gateway.activeGatewayAuthProfile()
-                    guard isCurrent(current) else { return }
+        if let rpcClient {
+            Task {
+                do {
+                    let profile = try await rpcClient.activeGatewayAuthProfile()
+                    guard generation == authGeneration else { return }
                     username = profile?.username ?? profile?.id
                     authState = profile == nil ? .unauthenticated : .authenticated
-                } else {
-                    try requireLocalAuthority()
-                    let identity = try await storedIdentity(generation: current)
-                    guard isCurrent(current) else { return }
-                    username = identity?.login
-                    authState = identity == nil ? .unauthenticated : .authenticated
+                } catch {
+                    guard generation == authGeneration else { return }
+                    self.error = error.localizedDescription
+                    authState = .unauthenticated
                 }
-            } catch {
-                guard isCurrent(current) else { return }
-                self.error = error.localizedDescription
-                authState = .unauthenticated
             }
+            return
         }
-        statusTask = task
-        return task
-    }
-
-    @discardableResult
-    public func login(onDeviceCode: ((String, String) -> Void)? = nil) -> Task<Bool, Never> {
-        if let loginTask {
-            if let onDeviceCode {
-                codeObservers.append(onDeviceCode)
-                if !userCode.isEmpty { onDeviceCode(userCode, verificationURL) }
-            }
-            return loginTask
-        }
-        codeObservers = onDeviceCode.map { [$0] } ?? []
-        statusTask?.cancel()
-        generation &+= 1
-        let current = generation
-        authState = .authenticating
-        error = nil
-        username = nil
-        userCode = ""
-        verificationURL = ""
-        let task = Task { () -> Bool in
-            defer {
-                if current == generation {
-                    loginTask = nil
-                    codeObservers = []
-                }
-            }
-            do {
-                if let gateway {
-                    try await loginThroughGateway(gateway, generation: current)
-                } else {
-                    try requireLocalAuthority()
-                    try await loginLocally(generation: current)
-                }
-                guard isCurrent(current) else { return false }
-                error = nil
-                userCode = ""
-                verificationURL = ""
-                authState = .authenticated
-                return true
-            } catch {
-                guard current == generation else { return false }
-                authState = .unauthenticated
-                if !(error is CancellationError) { self.error = error.localizedDescription }
-                userCode = ""
-                verificationURL = ""
-                if let pending = pendingGateway {
-                    pendingGateway = nil
-                    await cancelGateway(pending, generation: current)
-                }
-                return false
-            }
-        }
-        loginTask = task
-        return task
-    }
-
-    @discardableResult
-    public func useExistingCredentials() -> Task<Bool, Never> {
-        cancelLogin()
-        let current = generation
-        authState = .authenticating
-        let task = Task { () -> Bool in
-            defer { if current == generation { loginTask = nil } }
-            do {
-                if let gateway {
-                    let profile = try await gateway.activeGatewayAuthProfile()
-                    guard isCurrent(current) else { return false }
-                    guard let profile else { throw GitHubAuthError.gatewayFailed("Sign in through OpenRappter Desktop first.") }
-                    username = profile.username ?? profile.id
-                } else {
-                    try requireLocalAuthority()
-                    guard let identity = try await storedIdentity(generation: current) else {
-                        throw GitHubAuthError.gatewayFailed("No saved GitHub credential was found. Use GitHub sign-in.")
-                    }
-                    guard isCurrent(current) else { return false }
-                    try requireLocalAuthority()
-                    try dependencies.credentials.saveToken(identity.token) {
-                        guard isCurrent(current) else { throw CancellationError() }
-                        try requireLocalAuthority()
-                    }
-                    username = identity.login
-                }
-                authState = .authenticated
-                return true
-            } catch {
-                guard current == generation else { return false }
-                self.error = error.localizedDescription
-                authState = .unauthenticated
-                return false
-            }
-        }
-        loginTask = task
-        return task
-    }
-
-    @discardableResult
-    public func saveManualToken(_ token: String) -> Bool {
-        cancelLogin()
-        let current = generation
-        do {
-            try requireLocalAuthority()
-            try dependencies.credentials.saveToken(token) {
-                guard isCurrent(current) else { throw CancellationError() }
-                try requireLocalAuthority()
-            }
-            error = nil
+        if let token = readKeychain() {
             authState = .authenticated
-            return true
-        } catch {
-            self.error = error.localizedDescription
-            authState = .unauthenticated
-            return false
+            fetchUsername(token: token, generation: generation)
+            return
         }
+
+        if let token = readTokenFromEnv() {
+            // Migrate to Keychain
+            saveKeychain(token: token)
+            authState = .authenticated
+            fetchUsername(token: token, generation: generation)
+            return
+        }
+
+        authState = .unauthenticated
     }
 
-    @discardableResult
-    public func cancelLogin() -> Task<Void, Never> {
-        generation &+= 1
-        let current = generation
-        loginTask?.cancel()
-        loginTask = nil
-        statusTask?.cancel()
-        statusTask = nil
+    // MARK: - Login (Device Code Flow)
+
+    public func login() {
+        guard authState != .authenticating, gatewayDeviceCode == nil else { return }
+        gatewayCancellationGeneration &+= 1
+        gatewayCancellationTask?.cancel()
+        gatewayCancellationTask = nil
+        pollTask?.cancel()
+        authGeneration &+= 1
+        let generation = authGeneration
+        authState = .authenticating
+        error = nil
         userCode = ""
         verificationURL = ""
-        codeObservers = []
-        error = nil
-        username = nil
-        authState = .unauthenticated
-        let pending = pendingGateway
-        pendingGateway = nil
-        return Task {
-            if let pending { await cancelGateway(pending, generation: current) }
-        }
-    }
 
-    @discardableResult
-    public func logout() -> Task<Void, Never> {
-        let cancellation = cancelLogin()
-        let current = generation
-        authState = .unknown
-        return Task {
-            await cancellation.value
-            guard isCurrent(current) else { return }
+        if let rpcClient {
+            pollTask = Task {
+                do {
+                    let device = try await rpcClient.beginGatewayAuthentication()
+                    guard generation == authGeneration else {
+                        cancelDetachedGatewayFlow(
+                            deviceCode: device.deviceCode,
+                            preferredRpcClient: rpcClient
+                        )
+                        return
+                    }
+                    gatewayDeviceCode = device.deviceCode
+                    userCode = device.userCode
+                    verificationURL = device.verificationUri
+                    if let url = URL(string: device.verificationUri) {
+                        NSWorkspace.shared.open(url)
+                    }
+                    while !Task.isCancelled {
+                        let result: GatewayAuthPollResponse
+                        do {
+                            result = try await rpcClient.pollGatewayAuthentication(
+                                deviceCode: device.deviceCode
+                            )
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            guard generation == authGeneration else { return }
+                            self.error = "Waiting for the Desktop gateway to reconnect…"
+                            try await Task.sleep(for: .seconds(1))
+                            continue
+                        }
+                        guard generation == authGeneration else { return }
+                        self.error = nil
+                        if result.status == "pending" {
+                            try await Task.sleep(for: .seconds(1))
+                            continue
+                        }
+                        if result.status == "success" {
+                            gatewayDeviceCode = nil
+                            username = result.username
+                            authState = .authenticated
+                            Log.auth.info("Gateway-managed GitHub authentication successful")
+                            return
+                        }
+                        gatewayDeviceCode = nil
+                        throw GitHubAuthError.gatewayFailed(
+                            result.error ?? "Gateway authentication failed"
+                        )
+                    }
+                } catch is CancellationError {
+                    if generation == authGeneration, authState == .authenticating {
+                        authState = .unauthenticated
+                    }
+                } catch {
+                    guard generation == authGeneration else { return }
+                    self.error = error.localizedDescription
+                    authState = .unauthenticated
+                }
+            }
+            return
+        }
+
+        pollTask = Task {
             do {
-                if let gateway {
-                    if let profile = try await gateway.activeGatewayAuthProfile() {
-                        guard isCurrent(current) else { return }
-                        try await gateway.removeGatewayAuthProfile(id: profile.id)
-                    }
-                    let next = try await gateway.activeGatewayAuthProfile()
-                    guard isCurrent(current) else { return }
-                    username = next?.username ?? next?.id
-                    authState = next == nil ? .unauthenticated : .authenticated
-                } else {
-                    try requireLocalAuthority()
-                    try dependencies.credentials.removeToken {
-                        guard isCurrent(current) else { throw CancellationError() }
-                        try requireLocalAuthority()
-                    }
-                    username = nil
+                // Step 1: Request device code
+                let deviceResponse = try await requestDeviceCode()
+                guard generation == authGeneration else { return }
+                userCode = deviceResponse.userCode
+                verificationURL = deviceResponse.verificationURI
+
+                // Open browser
+                if let url = URL(string: deviceResponse.verificationURI) {
+                    NSWorkspace.shared.open(url)
+                }
+
+                // Step 2: Poll for access token
+                let token = try await pollForAccessToken(
+                    deviceCode: deviceResponse.deviceCode,
+                    interval: deviceResponse.interval,
+                    expiresIn: deviceResponse.expiresIn
+                )
+                guard generation == authGeneration else { return }
+
+                // Step 3: Persist
+                saveKeychain(token: token)
+                writeTokenToEnv(token: token)
+                authState = .authenticated
+                Log.auth.info("GitHub authentication successful")
+                fetchUsername(token: token, generation: generation)
+            } catch is CancellationError {
+                if generation == authGeneration, authState == .authenticating {
                     authState = .unauthenticated
                 }
             } catch {
-                guard isCurrent(current) else { return }
+                guard generation == authGeneration else { return }
+                Log.auth.error("GitHub auth failed: \(error.localizedDescription)")
                 self.error = error.localizedDescription
-                authState = .unknown
+                authState = .unauthenticated
             }
         }
     }
 
-    private func loginThroughGateway(_ client: any GatewayAuthenticating, generation current: UInt) async throws {
-        let device = try await client.beginGatewayAuthentication()
-        guard isCurrent(current) else {
-            await cancelGateway((device.deviceCode, client), generation: nil)
-            throw CancellationError()
-        }
-        guard !device.deviceCode.isEmpty else { throw GitHubAuthError.invalidResponse }
-        pendingGateway = (device.deviceCode, client)
-        try presentCode(device.userCode, url: device.verificationUri)
-        let deadline = dependencies.now().addingTimeInterval(dependencies.maximumLoginDuration)
-        var failures = 0
-        var polls = 0
-        while isCurrent(current), dependencies.now() < deadline, polls < 900 {
-            polls += 1
-            try await dependencies.sleep(1)
-            guard isCurrent(current) else { throw CancellationError() }
-            let result: GatewayAuthPollResponse
-            do {
-                result = try await client.pollGatewayAuthentication(deviceCode: device.deviceCode)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                failures += 1
-                guard failures < dependencies.maximumTransportFailures else {
-                    throw GitHubAuthError.gatewayFailed("Desktop authentication is unreachable. Reconnect Desktop and retry.")
-                }
-                continue
-            }
-            guard isCurrent(current) else { throw CancellationError() }
-            failures = 0
-            switch result.status {
-            case "pending": continue
-            case "success":
-                pendingGateway = nil
-                username = result.username
-                return
-            default:
-                throw GitHubAuthError.gatewayFailed(result.error ?? "Desktop authentication failed. Please retry.")
-            }
-        }
-        try Task.checkCancellation()
-        throw GitHubAuthError.expired
-    }
+    // MARK: - Cancel
 
-    private func loginLocally(generation current: UInt) async throws {
-        let device = try await githubJSON(
-            url: "https://github.com/login/device/code",
-            form: ["client_id": Self.clientId, "scope": "read:user"]
+    public func cancelLogin() {
+        authGeneration &+= 1
+        let generation = authGeneration
+        pollTask?.cancel()
+        pollTask = nil
+        userCode = ""
+        verificationURL = ""
+        error = nil
+        guard gatewayDeviceCode != nil else {
+            authState = .unauthenticated
+            return
+        }
+        authState = .unknown
+        cancelPendingGatewayFlow(
+            refreshGeneration: generation,
+            markCancelled: true
         )
-        guard isCurrent(current) else { throw CancellationError() }
-        guard let code = device["device_code"] as? String, !code.isEmpty,
-              let userCode = device["user_code"] as? String,
-              let url = device["verification_uri"] as? String,
-              let expires = device["expires_in"] as? Int, expires > 0 else { throw GitHubAuthError.invalidResponse }
-        try presentCode(userCode, url: url)
-        let deadline = dependencies.now().addingTimeInterval(min(Double(expires), dependencies.maximumLoginDuration))
-        var interval = max(1, min(device["interval"] as? Int ?? 5, 30))
-        var polls = 0
-        while isCurrent(current), dependencies.now() < deadline, polls < 900 {
-            polls += 1
-            try await dependencies.sleep(min(Double(interval), max(0, deadline.timeIntervalSince(dependencies.now()))))
-            guard isCurrent(current) else { throw CancellationError() }
-            guard dependencies.now() < deadline else { break }
-            let response = try await githubJSON(
-                url: "https://github.com/login/oauth/access_token",
-                form: [
-                    "client_id": Self.clientId,
-                    "device_code": code,
-                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                ]
-            )
-            guard isCurrent(current) else { throw CancellationError() }
-            if let token = response["access_token"] as? String, !token.isEmpty {
-                try requireLocalAuthority()
-                try dependencies.credentials.saveToken(token) {
-                    guard isCurrent(current) else { throw CancellationError() }
-                    try requireLocalAuthority()
+    }
+
+    // MARK: - Logout
+
+    public func logout() {
+        cancelPendingGatewayFlow()
+        authGeneration &+= 1
+        let generation = authGeneration
+        pollTask?.cancel()
+        pollTask = nil
+        if let rpcClient {
+            Task {
+                do {
+                    if let profile = try await rpcClient.activeGatewayAuthProfile() {
+                        try await rpcClient.removeGatewayAuthProfile(id: profile.id)
+                    }
+                    let nextProfile = try await rpcClient.activeGatewayAuthProfile()
+                    guard generation == authGeneration else { return }
+                    username = nextProfile?.username ?? nextProfile?.id
+                    error = nil
+                    authState = nextProfile == nil ? .unauthenticated : .authenticated
+                } catch {
+                    guard generation == authGeneration else { return }
+                    self.error = error.localizedDescription
                 }
-                return
             }
-            switch response["error"] as? String {
-            case "authorization_pending": continue
-            case "slow_down": interval = min(interval + 5, 60)
-            case "expired_token": throw GitHubAuthError.expired
-            case "access_denied": throw GitHubAuthError.denied
-            default: throw GitHubAuthError.invalidResponse
+            return
+        }
+        deleteKeychain()
+        removeTokenFromEnv()
+        username = nil
+        authState = .unauthenticated
+        Log.auth.info("GitHub token cleared")
+    }
+
+    private func cancelPendingGatewayFlow(
+        refreshGeneration: UInt? = nil,
+        markCancelled: Bool = false,
+        preferredRpcClient: RpcClient? = nil
+    ) {
+        guard let deviceCode = gatewayDeviceCode else { return }
+        gatewayCancellationGeneration &+= 1
+        let cancellationGeneration = gatewayCancellationGeneration
+        gatewayCancellationTask?.cancel()
+        let task = Task {
+            var preferredRpcClient = preferredRpcClient
+            defer {
+                if cancellationGeneration == gatewayCancellationGeneration {
+                    gatewayCancellationTask = nil
+                }
+            }
+            while !Task.isCancelled,
+                  cancellationGeneration == gatewayCancellationGeneration,
+                  gatewayDeviceCode == deviceCode {
+                guard let cancellationClient = preferredRpcClient ?? rpcClient else {
+                    gatewayDeviceCode = nil
+                    if markCancelled, refreshGeneration == authGeneration {
+                        authState = .unauthenticated
+                        error = "Desktop authentication cancellation could not be confirmed."
+                    }
+                    return
+                }
+                preferredRpcClient = nil
+                do {
+                    let result = try await cancellationClient.cancelGatewayAuthentication(
+                        deviceCode: deviceCode
+                    )
+                    guard cancellationGeneration == gatewayCancellationGeneration,
+                          gatewayDeviceCode == deviceCode else { return }
+                    gatewayDeviceCode = nil
+                    error = nil
+                    if let refreshGeneration,
+                       refreshGeneration == authGeneration {
+                        if markCancelled, result.status == "cancelled" {
+                            authState = .unauthenticated
+                        } else {
+                            refreshAuthStatus(generation: refreshGeneration)
+                        }
+                    }
+                    return
+                } catch {
+                    if rpcClient == nil {
+                        gatewayDeviceCode = nil
+                        if markCancelled, refreshGeneration == authGeneration {
+                            authState = .unauthenticated
+                            self.error = "Desktop authentication cancellation could not be confirmed."
+                        }
+                        return
+                    }
+                    if markCancelled, refreshGeneration == authGeneration {
+                        self.error = "Cancelling Desktop authentication…"
+                    }
+                    Log.auth.debug(
+                        "Gateway authentication cancellation will retry: \(error.localizedDescription)"
+                    )
+                    try? await Task.sleep(for: .seconds(1))
+                }
             }
         }
-        try Task.checkCancellation()
+        gatewayCancellationTask = task
+    }
+
+    private func cancelDetachedGatewayFlow(
+        deviceCode: String,
+        preferredRpcClient: RpcClient
+    ) {
+        Task {
+            var cancellationClientCandidate: RpcClient? = preferredRpcClient
+            while !Task.isCancelled {
+                guard let cancellationClient = cancellationClientCandidate ?? rpcClient else {
+                    return
+                }
+                cancellationClientCandidate = nil
+                do {
+                    _ = try await cancellationClient.cancelGatewayAuthentication(
+                        deviceCode: deviceCode
+                    )
+                    return
+                } catch {
+                    guard rpcClient != nil else { return }
+                    Log.auth.debug(
+                        "Detached gateway authentication cancellation will retry: \(error.localizedDescription)"
+                    )
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            }
+        }
+    }
+
+    // MARK: - Device Code Request
+
+    private struct DeviceCodeResponse {
+        let deviceCode: String
+        let userCode: String
+        let verificationURI: String
+        let expiresIn: Int
+        let interval: Int
+    }
+
+    private func requestDeviceCode() async throws -> DeviceCodeResponse {
+        var request = URLRequest(url: URL(string: Self.deviceCodeURL)!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        let body = "client_id=\(Self.clientId)&scope=\(Self.scope)"
+        request.httpBody = body.data(using: .utf8)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw GitHubAuthError.deviceCodeFailed(status)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let deviceCode = json["device_code"] as? String,
+              let userCode = json["user_code"] as? String,
+              let verificationURI = json["verification_uri"] as? String,
+              let expiresIn = json["expires_in"] as? Int,
+              let interval = json["interval"] as? Int else {
+            throw GitHubAuthError.invalidResponse
+        }
+
+        return DeviceCodeResponse(
+            deviceCode: deviceCode,
+            userCode: userCode,
+            verificationURI: verificationURI,
+            expiresIn: expiresIn,
+            interval: interval
+        )
+    }
+
+    // MARK: - Token Polling
+
+    private func pollForAccessToken(deviceCode: String, interval: Int, expiresIn: Int) async throws -> String {
+        let expiresAt = Date().addingTimeInterval(TimeInterval(expiresIn))
+        var pollInterval = max(1, interval)
+
+        var request = URLRequest(url: URL(string: Self.accessTokenURL)!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        let body = "client_id=\(Self.clientId)&device_code=\(deviceCode)&grant_type=urn:ietf:params:oauth:grant-type:device_code"
+        request.httpBody = body.data(using: .utf8)
+
+        while Date() < expiresAt {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .seconds(pollInterval))
+            try Task.checkCancellation()
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                throw GitHubAuthError.tokenRequestFailed(status)
+            }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw GitHubAuthError.invalidResponse
+            }
+
+            if let accessToken = json["access_token"] as? String {
+                return accessToken
+            }
+
+            let errorCode = json["error"] as? String ?? "unknown"
+            switch errorCode {
+            case "authorization_pending":
+                continue
+            case "slow_down":
+                pollInterval += 5
+                continue
+            case "expired_token":
+                throw GitHubAuthError.expired
+            case "access_denied":
+                throw GitHubAuthError.denied
+            default:
+                let desc = json["error_description"] as? String
+                throw GitHubAuthError.other(errorCode, desc)
+            }
+        }
+
         throw GitHubAuthError.expired
     }
 
-    private func presentCode(_ code: String, url text: String) throws {
-        guard !code.isEmpty, let url = URL(string: text),
-              url.scheme == "https", url.host == "github.com",
-              url.path == "/login/device", url.user == nil, url.password == nil else {
-            throw GitHubAuthError.invalidResponse
-        }
-        userCode = code
-        verificationURL = text
-        for observer in codeObservers { observer(code, text) }
-        if !dependencies.openBrowser(url) {
-            error = "The browser could not open. Open \(text) and enter the code shown here."
-        }
-    }
+    // MARK: - Username Fetch
 
-    private func githubJSON(url: String, form: [String: String]? = nil, token: String? = nil) async throws -> [String: Any] {
-        var request = URLRequest(url: URL(string: url)!, timeoutInterval: 15)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let form {
-            request.httpMethod = "POST"
-            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-            var components = URLComponents()
-            components.queryItems = form.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
-            request.httpBody = components.percentEncodedQuery?.data(using: .utf8)
-        }
-        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        let (data, response) = try await dependencies.request(request)
-        guard response.statusCode == 200 else { throw GitHubAuthError.requestFailed(response.statusCode) }
-        guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw GitHubAuthError.invalidResponse }
-        return result
-    }
-
-    private func requireLocalAuthority() throws {
-        guard !usingGatewayAuthentication else {
-            throw GitHubAuthError.gatewayFailed("OpenRappter Desktop owns sign-in. Reconnect it before authenticating; no local credential was changed.")
-        }
-    }
-
-    private func storedIdentity(generation current: UInt) async throws -> (token: String, login: String)? {
-        guard let primary = try dependencies.credentials.readToken() else { return nil }
-        do {
-            return (primary, try await storedUsername(primary, generation: current))
-        } catch GitHubAuthError.requestFailed(let status) where status == 401 || status == 403 {
-            guard isCurrent(current) else { throw CancellationError() }
-            try requireLocalAuthority()
-            guard let fallback = try dependencies.credentials.fallbackToken(), fallback != primary else {
-                throw GitHubAuthError.requestFailed(status)
-            }
-            return (fallback, try await storedUsername(fallback, generation: current))
-        }
-    }
-
-    private func storedUsername(_ token: String, generation current: UInt) async throws -> String {
-        try requireLocalAuthority()
-        let profile = try await githubJSON(url: "https://api.github.com/user", token: token)
-        guard isCurrent(current) else { throw CancellationError() }
-        try requireLocalAuthority()
-        guard let login = profile["login"] as? String, !login.isEmpty else {
-            throw GitHubAuthError.invalidResponse
-        }
-        return login
-    }
-
-    private func isCurrent(_ current: UInt) -> Bool {
-        current == generation && !Task.isCancelled
-    }
-
-    private func cancelGateway(
-        _ pending: (code: String, client: any GatewayAuthenticating),
-        generation current: UInt?
-    ) async {
-        for attempt in 0..<dependencies.maximumTransportFailures {
+    private func fetchUsername(token: String, generation: UInt) {
+        Task {
             do {
-                let result = try await pending.client.cancelGatewayAuthentication(deviceCode: pending.code)
-                guard (result.status == "cancelled" && result.ok)
-                        || result.status == "completed"
-                        || result.status == "missing" else { throw GitHubAuthError.invalidResponse }
-                if result.status != "cancelled", let current, current == generation {
-                    let profile = try await pending.client.activeGatewayAuthProfile()
-                    guard current == generation else { return }
-                    username = profile?.username ?? profile?.id
-                    authState = profile == nil ? .unauthenticated : .authenticated
-                    if result.status == "completed" {
-                        error = "Sign-in had already completed before cancellation. Desktop still owns this account."
-                    }
+                var request = URLRequest(url: URL(string: "https://api.github.com/user")!)
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                    return
                 }
-                return
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let login = json["login"] as? String {
+                    guard generation == authGeneration else { return }
+                    username = login
+                }
             } catch {
-                if attempt + 1 < dependencies.maximumTransportFailures {
-                    try? await dependencies.sleep(1)
+                Log.auth.debug("Failed to fetch GitHub username: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - Keychain
+
+    private func withoutKeychainInteraction<T>(_ operation: () -> T) -> T {
+        var previous = DarwinBoolean(false)
+        let hasPreviousState =
+            SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess
+        SecKeychainSetUserInteractionAllowed(false)
+        defer {
+            if hasPreviousState {
+                SecKeychainSetUserInteractionAllowed(previous.boolValue)
+            }
+        }
+        return operation()
+    }
+
+    private func readKeychain() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.keychainService,
+            kSecAttrAccount as String: Self.keychainAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseNoAuthenticationUI as String: true,
+        ]
+        var result: AnyObject?
+        let status = withoutKeychainInteraction {
+            SecItemCopyMatching(query as CFDictionary, &result)
+        }
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func saveKeychain(token: String) {
+        deleteKeychain() // Remove any existing entry
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.keychainService,
+            kSecAttrAccount as String: Self.keychainAccount,
+            kSecValueData as String: token.data(using: .utf8)!,
+            kSecUseNoAuthenticationUI as String: true,
+        ]
+        withoutKeychainInteraction {
+            SecItemAdd(query as CFDictionary, nil)
+        }
+    }
+
+    private func deleteKeychain() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.keychainService,
+            kSecAttrAccount as String: Self.keychainAccount,
+            kSecUseNoAuthenticationUI as String: true,
+        ]
+        withoutKeychainInteraction {
+            SecItemDelete(query as CFDictionary)
+        }
+    }
+
+    // MARK: - .env File
+
+    private func readTokenFromEnv() -> String? {
+        guard let data = FileManager.default.contents(atPath: Self.envFilePath),
+              let contents = String(data: data, encoding: .utf8) else { return nil }
+
+        for line in contents.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+            guard let eqIdx = trimmed.firstIndex(of: "="), eqIdx > trimmed.startIndex else { continue }
+            let key = String(trimmed[trimmed.startIndex..<eqIdx]).trimmingCharacters(in: .whitespaces)
+            if key == "GITHUB_TOKEN" {
+                var val = String(trimmed[trimmed.index(after: eqIdx)...]).trimmingCharacters(in: .whitespaces)
+                // Strip surrounding quotes
+                if (val.hasPrefix("\"") && val.hasSuffix("\"")) || (val.hasPrefix("'") && val.hasSuffix("'")) {
+                    val = String(val.dropFirst().dropLast())
+                }
+                return val.isEmpty ? nil : val
+            }
+        }
+        return nil
+    }
+
+    private func writeTokenToEnv(token: String) {
+        let fm = FileManager.default
+        let dir = (Self.envFilePath as NSString).deletingLastPathComponent
+
+        // Ensure directory exists
+        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        var lines: [String] = []
+        var replaced = false
+
+        if let data = fm.contents(atPath: Self.envFilePath),
+           let contents = String(data: data, encoding: .utf8) {
+            for line in contents.components(separatedBy: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty, !trimmed.hasPrefix("#"),
+                   let eqIdx = trimmed.firstIndex(of: "="),
+                   String(trimmed[trimmed.startIndex..<eqIdx]).trimmingCharacters(in: .whitespaces) == "GITHUB_TOKEN" {
+                    lines.append("GITHUB_TOKEN=\"\(token)\"")
+                    replaced = true
+                } else {
+                    lines.append(line)
                 }
             }
         }
-        if let current, current == generation {
-            error = "Desktop sign-in cancellation could not be confirmed. Its device code will expire; reconnect before retrying."
+
+        if !replaced {
+            if lines.isEmpty {
+                lines.append("# openrappter environment — managed by `openrappter onboard`")
+                lines.append("")
+            }
+            lines.append("GITHUB_TOKEN=\"\(token)\"")
         }
+
+        let output = lines.joined(separator: "\n")
+        try? output.write(toFile: Self.envFilePath, atomically: true, encoding: .utf8)
+    }
+
+    private func removeTokenFromEnv() {
+        guard let data = FileManager.default.contents(atPath: Self.envFilePath),
+              let contents = String(data: data, encoding: .utf8) else { return }
+
+        let lines = contents.components(separatedBy: "\n").filter { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#"),
+                  let eqIdx = trimmed.firstIndex(of: "=") else { return true }
+            let key = String(trimmed[trimmed.startIndex..<eqIdx]).trimmingCharacters(in: .whitespaces)
+            return key != "GITHUB_TOKEN"
+        }
+
+        let output = lines.joined(separator: "\n")
+        try? output.write(toFile: Self.envFilePath, atomically: true, encoding: .utf8)
     }
 }
 
+// MARK: - Errors
+
 enum GitHubAuthError: Error, LocalizedError {
-    case requestFailed(Int)
+    case deviceCodeFailed(Int)
+    case tokenRequestFailed(Int)
     case invalidResponse
     case expired
     case denied
+    case other(String, String?)
     case gatewayFailed(String)
-    case persistence(String)
 
     var errorDescription: String? {
         switch self {
-        case .requestFailed(let status): return "GitHub request failed (HTTP \(status)). Please retry."
-        case .invalidResponse: return "GitHub returned an invalid authentication response."
-        case .expired: return "Device code expired — please try again."
-        case .denied: return "Login was cancelled or denied."
-        case .gatewayFailed(let message), .persistence(let message): return message
+        case .deviceCodeFailed(let status):
+            return "GitHub device code request failed (HTTP \(status))"
+        case .tokenRequestFailed(let status):
+            return "GitHub token request failed (HTTP \(status))"
+        case .invalidResponse:
+            return "Invalid response from GitHub"
+        case .expired:
+            return "Device code expired — please try again"
+        case .denied:
+            return "Login was cancelled or denied"
+        case .other(let code, let desc):
+            return "GitHub error: \(code)\(desc.map { " — \($0)" } ?? "")"
+        case .gatewayFailed(let message):
+            return message
         }
     }
 }

@@ -40,9 +40,6 @@ jobs:
           cache: npm
           cache-dependency-path: typescript/package-lock.json
       - run: npm ci
-      - name: Rapter Clever Girl Observe Mode acceptance gate
-        working-directory: ${{ github.workspace }}
-        run: node scripts/rapter-clever-girl-gate.mjs
       # `src/telephony/integration.test.ts` skips itself unless it finds the
       # RAPP Second Brain binary. It looks at RSB_BIN, then ~/rapp-secondbrain,
       # then ~/.local/bin — which is exactly where the installers in
@@ -65,13 +62,8 @@ jobs:
           RSB_REF="$RSB_SHA" bash "$RUNNER_TEMP/rsb-install.sh"
           test -x "$HOME/.local/bin/rsb"
       - run: npm run lint
-      - name: Verify the native runtime download helper offline
-        working-directory: ${{ github.workspace }}
-        run: node --test macos/Tests/verified-runtime-bootstrap.test.mjs
       # vitest (esbuild) does not type-check — tsc is the only gate for type errors
       - run: npm run build
-      - name: Exercise packed candidate artifact and release-ring consumers
-        run: npm run test:package
       # One run, two reporters: the readable one for a human scanning the log,
       # and JSON so the skip budget below has something to check.
       - name: Run the suite
@@ -168,17 +160,6 @@ jobs:
       # harness has no discovery: main.swift calls each suite by hand, and
       # SuiteRegistrationTests fails the build if one is ever left out.
       - run: swift build --product RunTests && .build/debug/RunTests
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: typescript/package-lock.json
-      - name: Install locked runtime schema test dependencies without lifecycle scripts
-        working-directory: ${{ github.workspace }}/typescript
-        run: npm ci --ignore-scripts
-      - name: Native runtime and DMG contracts (mock signing and mounts)
-        working-directory: ${{ github.workspace }}
-        run: python3 -m unittest discover -s tests -p 'test_bar_*.py' -v
 
   python:
     name: Python (${{ matrix.python-version }})

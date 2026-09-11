@@ -27,8 +27,8 @@ describe('Electron Show-and-Tell surface', () => {
     expect(app).toContain("case 'show-and-tell'");
     expect(sidebar).toContain("id: 'show-and-tell'");
     expect(component).toContain('@customElement(\'openrappter-show-and-tell\')');
-    expect(app).toContain("if (window.openrappterDesktop)");
-    expect(app).toContain("this.navigate('chat')");
+    expect(app).toContain("private currentView: View = 'work'");
+    expect(app).not.toContain("if (window.openrappterDesktop)");
   });
 
   it('keeps desktop navigation keyboard reachable and scrollable', () => {

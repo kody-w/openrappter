@@ -2,7 +2,7 @@ import chalk from "chalk";
 import { AgentRegistry, BasicAgent } from "./agents/index.js";
 import { hasCopilotAvailable, resolveGithubToken } from "./copilot-check.js";
 import { deviceCodeLogin } from "./providers/copilot-auth.js";
-import { updateEnv } from "./env.js";
+import { saveEnv, loadEnv } from "./env.js";
 import {
   ensureFlightRecorderFromEnv,
   getFlightRecorder,
@@ -71,7 +71,9 @@ async function inlineAuth(): Promise<string | null> {
         .catch(() => {});
     });
     // Persist the token
-    await updateEnv({ GITHUB_TOKEN: token });
+    const env = await loadEnv();
+    env.GITHUB_TOKEN = token;
+    await saveEnv(env);
     process.env.GITHUB_TOKEN = token;
     resetChatProvider();
     console.log(chalk.green("  Authenticated successfully!\n"));

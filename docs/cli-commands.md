@@ -30,12 +30,10 @@ Run `openrappter <command> --help` for a command's own options.
 | `hatch` | `[options] <name>` | Hatch a twin rappter on this device |
 | `flight` |  | Inspect the local privacy-aware Flight Recorder |
 | `show-and-tell` |  | Learn a reusable skill or automation from a local demonstration |
-| `clever-girl` |  | Observe recurring friction in explicit local exports |
 | `skills` |  | Manage skills |
 | `agents` |  | Manage agents |
 | `models` |  | List, get, or set the active LLM model |
 | `update` | `[options]` | Check whether a newer openrappter is published |
-| `rings` |  | Inspect closed OpenRappter release-ring pointers |
 | `rappterhub` | `[args...]` | Manage RappterHub agents (runs the Python runtime) |
 | `clawhub` | `[args...]` | Manage ClawHub skills (runs the Python runtime) |
 | `gateway` | `[options]` | Start the gateway server (same runtime as `openrappter --daemon`) |

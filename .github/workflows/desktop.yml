@@ -43,6 +43,11 @@ jobs:
           npm run build
           npm test
 
+      - name: Exercise Apple Silicon Omarchy gateway integration
+        if: runner.os == 'macOS'
+        working-directory: typescript
+        run: npx vitest run src/gateway/__tests__/vm-gateway.test.ts
+
       - name: Audit desktop production dependencies
         working-directory: typescript/desktop
         run: npm audit --audit-level=high

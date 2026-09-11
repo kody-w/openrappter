@@ -18,6 +18,20 @@ const requireCore = createRequire(path.join(TYPESCRIPT_ROOT, 'package.json'));
 const BUILD_SCHEMA = 'rapp-work-build/1';
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
+function extractArchiveFile(extractFile, archive, archivePath) {
+  const nativePath = archivePath.split('/').join(path.sep);
+  try {
+    return extractFile(archive, archivePath);
+  } catch (error) {
+    if (nativePath === archivePath) throw error;
+    try {
+      return extractFile(archive, nativePath);
+    } catch {
+      throw error;
+    }
+  }
+}
+
 export function verifyAuthorityEmission(source, compiled) {
   const ts = requireCore('typescript');
   const config = ts.readConfigFile(path.join(TYPESCRIPT_ROOT, 'tsconfig.json'), ts.sys.readFile);
@@ -69,8 +83,9 @@ async function verifyPackagedRuntime(resources) {
   requirePlainPath(archive, 'isFile');
   const { extractFile } = await import('@electron/asar');
   const identity = desktopIdentity();
-  const desktop = JSON.parse(extractFile(archive, 'package.json').toString());
-  const runtime = JSON.parse(extractFile(
+  const desktop = JSON.parse(extractArchiveFile(extractFile, archive, 'package.json').toString());
+  const runtime = JSON.parse(extractArchiveFile(
+    extractFile,
     archive, 'runtime/node_modules/openrappter/package.json',
   ).toString());
   const core = JSON.parse(fs.readFileSync(path.join(TYPESCRIPT_ROOT, 'package.json'), 'utf8'));
@@ -80,7 +95,7 @@ async function verifyPackagedRuntime(resources) {
     throw new Error('Packaged desktop/core identity or version does not match this checkout.');
   }
   const canonical = await canonicalAuthority();
-  const bundledHash = sha256(extractFile(archive, PACKAGED_AUTHORITY));
+  const bundledHash = sha256(extractArchiveFile(extractFile, archive, PACKAGED_AUTHORITY));
   if (bundledHash !== canonical.provenance.moduleSha256) {
     throw new Error('Packaged RAPP/1 authority module differs from the canonical build. Rebuild the desktop runtime.');
   }

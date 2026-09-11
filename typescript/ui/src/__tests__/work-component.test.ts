@@ -42,7 +42,7 @@ function rpc(method: string, params?: Record<string, unknown>): unknown {
 }
 
 async function settle(element: RappWork) {
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 50; i++) {
     await new Promise((resolve) => setTimeout(resolve, 1));
     await element.updateComplete;
   }

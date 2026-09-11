@@ -37,6 +37,12 @@ const ALLOWED = {
     why: 'Drives a real Chrome over a CDP port set by OPENRAPPTER_CDP_PORT. '
       + 'No CI job provides one, so these are manual by design.',
   },
+  'src/gateway/__tests__/vm-gateway.test.ts': {
+    max: 2,
+    why: 'These two tests exercise the default host factory on Apple Silicon macOS. '
+      + 'The Electron Desktop macos-14 job runs them explicitly; other runners '
+      + 'cannot satisfy the product platform and architecture boundary.',
+  },
 };
 
 const reportPath = process.argv[2];

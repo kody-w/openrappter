@@ -5,6 +5,7 @@ import { createWorkService } from "../src/work.js";
 import { ownerPermissions, tokenSecurity } from "../src/local.js";
 import type { HostServices, Principal, ProjectionStoragePort } from "../src/ports.js";
 import type { Snapshot } from "../src/contracts.js";
+import { unavailable } from "../src/errors.js";
 
 export const token = randomBytes(48).toString("base64url");
 export const owner: Principal = { id: "test-owner", workspaceId: "test-workspace", permissions: ownerPermissions };
@@ -54,6 +55,13 @@ export function fixture(): HostServices & { storage: MemoryStorage } {
       async stop(context) { return this.inspect(context); },
     },
     diagnostics: { check: ready, async snapshot() { return { capturedAt: new Date().toISOString(), entries: [] }; }, record: vi.fn() },
+    twin: {
+      check: ready,
+      async message() { return unavailable("Injected Twin"); },
+      async conversation() { return unavailable("Injected Twin history"); },
+      async applyProposal() { return unavailable("Injected Twin application"); },
+      async dismissProposal() { return unavailable("Injected Twin dismissal"); },
+    },
   };
 }
 export const agent = {

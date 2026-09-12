@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { createHost, type RunningHost } from "../src/server.js";
 import type { HostServices } from "../src/ports.js";
+import { MAX_RPC_BYTES } from "../src/contracts.js";
 import { agent, fixture, owner, token } from "./fixture.js";
 
 let services: HostServices;
@@ -25,7 +26,8 @@ async function http(path = "/rpc", options: RequestInit = {}) {
 async function rpc(method: string, params: unknown = {}, extra: Record<string, unknown> = {}) {
   const response = await http("/rpc", {
     method: "POST", headers: { ...auth, "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: "request", method, params, ...extra }),
+    body: JSON.stringify({ jsonrpc: "2.0", id: "request", method,
+      params: method === "system.status" ? params : { workspaceId: owner.workspaceId, ...params as object }, ...extra }),
   });
   return response.json();
 }
@@ -43,7 +45,8 @@ function nextMessage(client: WebSocket) {
 }
 async function wsRpc(client: WebSocket, method: string, params: unknown = {}) {
   const next = nextMessage(client);
-  client.send(JSON.stringify({ jsonrpc: "2.0", id: randomUUID(), method, params }));
+  client.send(JSON.stringify({ jsonrpc: "2.0", id: randomUUID(), method,
+    params: { workspaceId: owner.workspaceId, ...params as object } }));
   return next;
 }
 describe("authenticated loopback HTTP transport", () => {
@@ -68,6 +71,12 @@ describe("authenticated loopback HTTP transport", () => {
     const response = await rpc("system.status");
     expect(response.result.ready).toBe(false);
     expect(JSON.stringify(response)).not.toContain("SECRET");
+  });
+  it("includes the required Twin profile in provider readiness without fabricating a fallback", async () => {
+    services.twin.check = async () => ({ state: "unavailable", detail: "The required Astra profile is unavailable." });
+    const response = await rpc("system.status");
+    expect(response.result.ready).toBe(false);
+    expect(response.result.checks.provider).toMatchObject({ state: "unavailable" });
   });
   it("rejects remote origins, opaque origins, and DNS rebinding host headers", async () => {
     for (const Origin of ["https://attacker.invalid", "null"]) {
@@ -98,7 +107,7 @@ describe("authenticated loopback HTTP transport", () => {
     expect((await http("/rpc", { method: "POST", headers: auth, body: "{}" })).status).toBe(415);
     expect((await http("/rpc", {
       method: "POST", headers: { ...auth, "Content-Type": "application/json" },
-      body: JSON.stringify({ value: "x".repeat(65536) }),
+      body: JSON.stringify({ value: "x".repeat(MAX_RPC_BYTES) }),
     })).status).toBe(413);
   });
   it("bounds chunked bodies without invoking a service", async () => {
@@ -108,8 +117,8 @@ describe("authenticated loopback HTTP transport", () => {
         headers: { ...auth, "Content-Type": "application/json", "Transfer-Encoding": "chunked" },
       }, (response) => { response.resume(); resolve(response.statusCode!); });
       request.on("error", reject);
-      request.write("x".repeat(40000));
-      request.end("x".repeat(40000));
+      request.write("x".repeat(300000));
+      request.end("x".repeat(300000));
     });
     expect(status).toBe(413);
   });
@@ -121,7 +130,7 @@ describe("authenticated loopback HTTP transport", () => {
   });
   it("rejects unknown fields at the envelope and nested parameter boundaries", async () => {
     expect((await rpc("work.snapshot", {}, { extra: true })).error.code).toBe(-32600);
-    expect((await rpc("work.snapshot", { workspaceId: "other" })).error.code).toBe(-32602);
+    expect((await rpc("work.snapshot", { workspaceId: "other" })).error.code).toBe(-32003);
     expect((await rpc("agents.save", { ...agent, unexpected: true })).error.code).toBe(-32602);
     const snapshot = (await rpc("work.snapshot")).result;
     expect((await rpc("settings.update", {
@@ -133,10 +142,10 @@ describe("authenticated loopback HTTP transport", () => {
       expect((await rpc(name)).error.code).toBe(-32601);
     }
   });
-  it("checks permissions before service calls and never accepts a client workspace override", async () => {
+  it("checks permissions before service calls and authorizes rather than trusting workspace locators", async () => {
     services.security.authorize = vi.fn(async (_, permission) => permission !== "agents:write");
     expect((await rpc("agents.save", agent)).error.code).toBe(-32003);
-    expect((await services.work.snapshot({ principal: owner, requestId: "test" })).agents).toHaveLength(0);
+    expect((await services.work.snapshot({ principal: owner, requestId: "test", workspaceId: owner.workspaceId })).agents).toHaveLength(0);
     expect((await rpc("events.read", { scope: { area: "work", workspaceId: "other" } })).error.code).toBe(-32602);
   });
   it("rejects aggregate reads missing another area's read grant", async () => {
@@ -227,7 +236,8 @@ describe("authenticated WebSocket JSON-RPC and events", () => {
     const client = await connect();
     const messages: Record<string, any>[] = [];
     client.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
-    client.send(JSON.stringify({ jsonrpc: "2.0", id: "subscribe", method: "events.subscribe", params: { scope: { area: "work" }, limit: 1 } }));
+    client.send(JSON.stringify({ jsonrpc: "2.0", id: "subscribe", method: "events.subscribe",
+      params: { workspaceId: owner.workspaceId, scope: { area: "work" }, limit: 1 } }));
     await vi.waitFor(() => expect(messages).toHaveLength(2));
     expect(messages[0]?.result.events).toHaveLength(1);
     expect(messages[1]?.params.events).toHaveLength(4);

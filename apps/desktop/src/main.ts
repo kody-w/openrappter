@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, protocol, session, Tray, utilityProcess } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, protocol, session, systemPreferences, Tray, utilityProcess } from "electron";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +6,7 @@ import { APP_URL, IPC, isAppDocument, parseRequest, supportedPlatform, trustedSe
 import { contentSecurityPolicy, serveAsset } from "./assets.js";
 import { HostProcess, type OwnedChild } from "./host-process.js";
 import { HostRpc } from "./rpc.js";
+import { allowsMicrophone } from "./permissions.js";
 
 app.setName("RAPP Work");
 app.setPath("userData", join(app.getPath("appData"), "RAPP Work"));
@@ -64,8 +65,19 @@ else {
       if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
       return serveAsset(request.url, uiDirectory, csp);
     });
-    session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-    session.defaultSession.setPermissionCheckHandler(() => false);
+    const foreground = () => Boolean(window && !window.isDestroyed() && window.isVisible() && window.isFocused());
+    session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+      const allowed = () => allowsMicrophone(contents, window?.webContents ?? null, permission, details, foreground());
+      if (!allowed()) { callback(false); return; }
+      const state = systemPreferences.getMediaAccessStatus("microphone");
+      if (state === "granted") { callback(true); return; }
+      if (state !== "not-determined") { callback(false); return; }
+      void systemPreferences.askForMediaAccess("microphone")
+        .then((granted) => callback(granted && allowed()), () => callback(false));
+    });
+    session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) =>
+      allowsMicrophone(contents, window?.webContents ?? null, permission, details, foreground())
+        && systemPreferences.getMediaAccessStatus("microphone") === "granted");
     session.defaultSession.on("will-download", (event) => event.preventDefault());
     host = new HostProcess({
       spawn: () => {
@@ -137,7 +149,11 @@ else {
       { label: "Window", submenu: [{ role: "minimize" }, { role: "zoom" }, { label: "Open RAPP Work", click: showWindow }] },
     ]));
     await window.loadURL(APP_URL);
-    void connect().catch(() => connectionChanged({ state: "offline", detail: "The owned host could not start. Refresh to retry." }));
+    void connect().catch(() => {
+      const state = host?.state;
+      connectionChanged(state?.state === "offline" ? state
+        : { state: "offline", detail: "The owned host connection failed. Refresh to retry." });
+    });
   }).catch(() => {
     dialog.showErrorBox("RAPP Work could not start", "The application requires macOS on Apple silicon and its built UI and host resources.");
     app.quit();

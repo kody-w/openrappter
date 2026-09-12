@@ -96,16 +96,15 @@ describe('clean release runtime acceptance', () => {
     const host = await createHost(services);
     cleanups.push(() => host.close());
     const principal = (await services.security.authenticate(token))!;
-    const snapshot = await services.work.snapshot({ principal, requestId: 'startup' });
-    expect(snapshot.ownerId).toBe(principal.id);
-    expect(snapshot.workspaceId).toBe(principal.workspaceId);
-    expect(snapshot.agents).toEqual([]);
-    expect(snapshot.tasks).toEqual([]);
+    const catalog = await services.work.listWorkspaces({ principal, requestId: 'startup', workspaceId: null });
+    expect(catalog.ownerId).toBe(principal.id);
+    expect(catalog.conciergeWorkspaceId).toBe(principal.workspaceId);
+    expect(catalog.workspaces).toEqual([]);
     expect(execution.probes).toEqual([]);
     execution.legacyRoots = [];
     execution.home = '';
     for (const sentinel of input.sentinels) expect(await readFile(path.join(root, sentinel.path), 'utf8')).toBe(sentinel.content);
-    expect(JSON.stringify(snapshot)).not.toContain('SYNTHETIC-DO-NOT-IMPORT');
+    expect(JSON.stringify(catalog)).not.toContain('SYNTHETIC-DO-NOT-IMPORT');
   });
 
   it('two-agent-ownership-isolation', async () => {

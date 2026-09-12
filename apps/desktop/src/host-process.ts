@@ -42,25 +42,32 @@ export class HostProcess {
       try { child = this.ports.spawn(); this.child = child; }
       catch { this.change({ state: "offline", detail: "The owned host process could not be started." }); reject(new Error("Host startup failed.")); return; }
       const token = randomBytes(48).toString("base64url");
-      const fail = () => {
+      const fail = (detail = "The local host did not complete its authenticated startup.") => {
         if (settled) return;
         settled = true; clearTimeout(timer); this.abortStart = undefined;
         this.lease = undefined;
-        try { this.ports.forceKill(child); } catch { child.kill(); }
         if (this.child === child) this.child = undefined;
-        this.change({ state: "offline", detail: "The local host did not complete its authenticated startup." });
+        this.change({ state: "offline", detail });
+        try { this.ports.forceKill(child); } catch { child.kill(); }
         reject(new Error("The owned host could not be authenticated."));
       };
       this.abortStart = fail;
-      const timer = setTimeout(fail, this.timeoutMs);
+      const timer = setTimeout(() => fail("The local host exceeded its startup deadline. Refresh to retry loading your workspaces."), this.timeoutMs);
       child.on("exit", () => {
-        if (this.child === child) { this.child = undefined; this.lease = undefined; }
+        if (this.child !== child) return;
+        this.child = undefined; this.lease = undefined;
         this.change({ state: "offline", detail: this.stopRequested ? "The local host has stopped." : "The local host exited. Refresh to restart it." });
         if (!settled) { settled = true; clearTimeout(timer); this.abortStart = undefined; reject(new Error("The owned host exited during startup.")); }
       });
       child.on("message", (raw) => {
         if (settled || this.stopRequested) return;
-        if (failedSchema.safeParse(raw).success) { fail(); return; }
+        const failure = failedSchema.safeParse(raw);
+        if (failure.success) {
+          fail(failure.data.code === "HOST_START_FAILED"
+            ? "The local host could not load its saved workspace state. No data was reset."
+            : "The local host rejected its startup handshake.");
+          return;
+        }
         const ready = readySchema.safeParse(raw);
         if (!ready.success) { fail(); return; }
         const lease = { port: ready.data.port, instanceId: ready.data.instanceId, token };
@@ -70,7 +77,7 @@ export class HostProcess {
           settled = true; clearTimeout(timer); this.abortStart = undefined; this.lease = lease;
           this.change({ state: "online", detail: "Owned loopback host authenticated. Service readiness is reported separately." });
           resolve(lease);
-        }).catch(fail);
+        }).catch(() => fail());
       });
       try { child.postMessage({ type: "bootstrap", protocolVersion: 1, token, dataDirectory: this.directory }); }
       catch { fail(); }

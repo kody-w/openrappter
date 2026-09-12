@@ -5,7 +5,7 @@ import {
   ComputerBroker, computerToolOutcome, FileComputerLeaseStore,
   type BrokerRequest, type ComputerLease, type ComputerReceipt,
 } from "@rapp-work/computer-broker";
-import type { AuthorizedEffectContext, EffectOutcome, WorkspaceScope } from "@rapp-work/work-service";
+import type { AuthorizedEffectContext, EffectOutcome, WorkSnapshot, WorkspaceScope } from "@rapp-work/work-service";
 import type { PermitClaims } from "@rapp-work/security";
 import { computerSchema, type Computer } from "./contracts.js";
 import type { ComputerPort, RequestContext } from "./ports.js";
@@ -14,8 +14,8 @@ import { committed, digest, LocalPersistence, proofReceipt } from "./persistence
 import { commandKey, digestBytes, LocalWork } from "./local-work.js";
 import { computerConfigSchema, NodeFixedCommands, TartSshDrivers, type FixedCommandTransport } from "./computer-drivers.js";
 
-const missing = (detail: string): Computer => ({
-  state: "unavailable", detail, verified: false, verifiedAt: null, evidenceIds: [],
+const missing = (detail: string, state: "unavailable" | "unresolved" = "unavailable"): Computer => ({
+  state, detail, verified: false, verifiedAt: null, evidenceIds: [],
   capabilities: { view: false, control: false },
 });
 interface GuestAuthority {
@@ -33,6 +33,10 @@ export class LocalComputer implements ComputerPort {
   private leaseActive = false;
   private operationGeneration = 0;
   private configured = false;
+  private activeOperation: {
+    scope: WorkspaceScope; businessWorkspaceId: string; leaseId: string | null;
+    operation: "starting" | "stopping" | "executing";
+  } | undefined;
   constructor(
     private readonly persistence: LocalPersistence, private readonly work: LocalWork,
     private readonly commands: FixedCommandTransport = new NodeFixedCommands(),
@@ -79,9 +83,13 @@ export class LocalComputer implements ComputerPort {
     return this.initializing;
   }
   async check() {
+    const { unresolved: _unresolved, ...health } = await this.health();
+    return health;
+  }
+  private async health() {
     try {
       await this.initialize();
-      if (!this.configured) return { state: "unavailable" as const, detail: "Configure computer.json and a local pinned Omarchy template. No guest execution is available." };
+      if (!this.configured) return { state: "unavailable" as const, unresolved: false, detail: "Configure computer.json and a local pinned Omarchy template. No guest execution is available." };
       if (!this.leaseActive) {
         const generation = this.operationGeneration;
         const p = this.persistence;
@@ -90,33 +98,78 @@ export class LocalComputer implements ComputerPort {
         const history = await p.read(p.owner.computer);
         if (!this.leaseActive && generation === this.operationGeneration
           && (held || history.commands.some((command) => command.state === "unresolved"))) {
-          return { state: "unavailable" as const, detail: "The computer has an orphaned lease or unresolved operation. Review its evidence before explicit recovery." };
+          return { state: "unavailable" as const, unresolved: true, detail: "The computer has an orphaned lease or unresolved operation. Review its evidence before explicit recovery." };
         }
       }
       await this.drivers!.check();
-      return { state: "ready" as const, detail: "Pinned local Tart and SSH drivers; guest-only execution with an exclusive lease." };
-    } catch { return { state: "unavailable" as const, detail: "The pinned Omarchy configuration, local image, SSH identity, or Tart could not be verified." }; }
+      return { state: "ready" as const, unresolved: false, detail: "Pinned local Tart and SSH drivers; guest-only execution with an exclusive lease." };
+    } catch { return { state: "unavailable" as const, unresolved: false, detail: "The pinned Omarchy configuration, local image, SSH identity, or Tart could not be verified." }; }
   }
   async inspect(context: RequestContext): Promise<Computer> {
-    this.work.assertContext(context);
-    const health = await this.check();
-    if (health.state !== "ready") return missing(health.detail);
+    this.work.contextScope(context);
+    const health = await this.health();
+    if (health.state !== "ready") return this.scopedStatus(context, missing(health.detail, health.unresolved ? "unresolved" : "unavailable"));
     try {
       const vm = await this.drivers!.tart.inspect(this.drivers!.config.vmName, AbortSignal.timeout(3000));
       const history = await this.persistence.read(this.persistence.owner.computer);
       const operation = vm?.state === "running" ? "computer.start" : "computer.stop";
       const evidence = [...history.commands].reverse().find((item) =>
         item.state === "committed" && item.status === "succeeded" && item.command.operation === operation);
-      const verified = vm?.state === "running" && evidence?.state === "committed";
-      return computerSchema.parse({
-        state: vm?.state ?? "stopped",
+      const starting = this.activeOperation?.operation === "starting";
+      const verified = !starting && vm?.state === "running" && evidence?.state === "committed";
+      return this.scopedStatus(context, computerSchema.parse({
+        state: starting ? "starting" : vm?.state ?? "stopped",
         detail: vm ? "Live Tart state from the application-owned Omarchy computer. Business commands run only in its scoped guest."
           : "A pinned local template is available. Starting will clone it locally; no image will be downloaded.",
         verified, verifiedAt: verified ? new Date().toISOString() : null,
         evidenceIds: evidence?.state === "committed" ? [evidence.proof.evidenceRef] : [],
         capabilities: { view: true, control: true },
-      });
-    } catch { return missing("The owned VM or its clone provenance could not be verified. No guest execution is available."); }
+      }), history);
+    } catch { return this.scopedStatus(context, missing("The owned VM or its clone provenance could not be verified. No guest execution is available.")); }
+  }
+  private latestStop(history: WorkSnapshot): string | null {
+    return [...history.commands].reverse().find((command) => command.state === "committed"
+      && command.status === "succeeded" && command.command.operation === "computer.stop")?.commandHash ?? null;
+  }
+  private async scopedStatus(context: RequestContext, computer: Computer, supplied?: WorkSnapshot): Promise<Computer> {
+    const workspace = context.workspaceId === null ? null : await this.work.workspaceMetadata(context);
+    let enabled = false;
+    if (workspace && computer.state === "running" && computer.verified) {
+      const history = supplied ?? await this.persistence.read(this.persistence.owner.computer);
+      const business = await this.persistence.read(workspace.catalogScope);
+      const activation = [...business.commands].reverse().flatMap((command) =>
+        command.state === "committed" && command.status === "succeeded" ? command.events : [])
+        .find((event) => event.type === "computer.workspace.enabled" && event.workspaceId === workspace.id);
+      enabled = Boolean(activation && activation.stopRef === this.latestStop(history) && history.commands.some((command) => {
+        if (command.state !== "committed" || command.status !== "succeeded" || command.command.operation !== "computer.start"
+          || command.proof.evidenceRef !== activation.evidenceRef) return false;
+        const payload = command.command.payload as { owner?: WorkspaceScope };
+        return payload.owner?.workspaceId === workspace.id && payload.owner.agentId === workspace.catalogScope.agentId;
+      }));
+    }
+    const active = this.activeOperation;
+    const own = active?.businessWorkspaceId === context.workspaceId;
+    return computerSchema.parse({
+      ...computer,
+      workspace: workspace ? { id: workspace.id, enabled, computerPolicy: workspace.computerPolicy, approvalPolicy: workspace.approvalPolicy } : null,
+      lease: {
+        state: computer.state === "unresolved" ? "unresolved" : active?.leaseId ? own ? "held" : "other-workspace" : "idle",
+        id: own ? active?.leaseId ?? null : null,
+        workspaceId: own ? active!.businessWorkspaceId : null,
+        agentId: own ? active!.scope.agentId : null,
+        agentWorkspaceId: own ? active!.scope.workspaceId : null,
+        operation: active?.operation ?? null,
+      },
+      display: {
+        state: "unavailable",
+        detail: "The shared Omarchy VM runs headless. No verified screen/display stream is configured; guest tools do not imply a live screen.",
+      },
+    });
+  }
+  private changed(): void {
+    for (const workspaceId of this.persistence.businessIds()) {
+      this.persistence.changed("work", "computer", this.persistence.businessScope(workspaceId));
+    }
   }
   private request(context: AuthorizedEffectContext, taskId: string, runId: string, suffix: string): BrokerRequest {
     return { taskId, runId, parentIntentRef: context.intentRef, idempotencyKey: `${context.intentRef}/${suffix}`, signal: context.signal };
@@ -128,6 +181,7 @@ export class LocalComputer implements ComputerPort {
   private lease(
     owner: WorkspaceScope, taskId: string, runId: string, context: AuthorizedEffectContext,
     action: (capability: object, lease: ComputerLease) => Promise<ComputerReceipt>,
+    workspaceId: string,
   ): Promise<EffectOutcome> {
     let began = false, cancelled = context.signal.aborted;
     const noEffect = (status: "denied" | "cancelled", reason: string): EffectOutcome => ({
@@ -143,9 +197,16 @@ export class LocalComputer implements ComputerPort {
       const health = await this.check();
       if (cancelled || context.signal.aborted) return noEffect("cancelled", "cancelled_before_computer_lease");
       if (health.state !== "ready") return noEffect("denied", "computer_recovery_required");
+      this.persistence.assertExecutionScope(owner, workspaceId);
+      const businessWorkspaceId = workspaceId;
       began = true; this.leaseActive = true; this.operationGeneration++;
+      this.activeOperation = {
+        scope: owner, businessWorkspaceId, leaseId: null,
+        operation: context.command.operation === "host.computer.start" ? "starting"
+          : context.command.operation === "host.computer.stop" ? "stopping" : "executing",
+      };
       try { return await this.withLease(owner, taskId, runId, context, action); }
-      finally { this.leaseActive = false; this.operationGeneration++; }
+      finally { this.leaseActive = false; this.activeOperation = undefined; this.operationGeneration++; this.changed(); }
     });
     this.operations = operation.then(() => undefined, () => undefined);
     if (cancelled) cancel();
@@ -166,34 +227,54 @@ export class LocalComputer implements ComputerPort {
       }
       throw new HostError(-32012, "The exclusive computer lease could not be verified.");
     }
+    this.activeOperation!.leaseId = acquired.lease.id;
+    this.changed();
     const receipt = await action(capability, acquired.lease);
     if (receipt.state !== "committed") throw new HostError(-32012, "The computer outcome is unresolved; its lease remains quarantined.");
     const released = this.receiptCommit(await this.broker!.release(capability, acquired.lease, {
       ...this.request(context, taskId, runId, "release"), signal: new AbortController().signal,
     }));
     const outcome = computerToolOutcome(receipt);
-    return { ...outcome, receipts: [...outcome.receipts, proofReceipt(released)] };
+    return { ...outcome, receipts: [...outcome.receipts, proofReceipt(this.receiptCommit(acquired.receipt)), proofReceipt(released)] };
   }
   start(context: RequestContext): Promise<Computer> { return this.control(context, "start"); }
   stop(context: RequestContext): Promise<Computer> { return this.control(context, "stop"); }
   private async control(context: RequestContext, action: "start" | "stop"): Promise<Computer> {
-    this.work.assertContext(context);
+    this.work.assertOwner(context);
+    const scope = this.work.assertContext(context, "computer:control");
+    if (action === "start" && !this.persistence.activeLineage(scope.workspaceId)) {
+      throw new HostError(-32009, "A paused or archived workspace lineage cannot start computer actions.");
+    }
     if ((await this.check()).state !== "ready") return unavailable("The configured local computer");
     const p = this.persistence;
     const taskId = "computer-control", runId = digest(context.requestId).slice(0, 32);
-    committed(await p.commit(p.owner.catalog, commandKey(`computer/${action}`, context), `host.computer.${action}`, { action },
-      async (effect) => this.lease(p.owner.catalog, taskId, runId, effect, async (capability, lease) => {
+    committed(await p.commit(scope, commandKey(`computer/${action}`, context), `host.computer.${action}`, { action },
+      async (effect): Promise<EffectOutcome> => {
+        let stopRef: string | null = null;
+        let evidenceRef: string | null = null;
+        const outcome = await this.lease(scope, taskId, runId, effect, async (capability, lease) => {
         if (action === "start") {
+          stopRef = this.latestStop(await p.read(p.owner.computer));
           this.receiptCommit(await this.broker!.provision(capability, lease, this.request(effect, taskId, runId, "provision")));
-          return this.broker!.start(capability, lease, this.request(effect, taskId, runId, "start"));
+          const started = await this.broker!.start(capability, lease, this.request(effect, taskId, runId, "start"));
+          evidenceRef = this.receiptCommit(started).proof.evidenceRef;
+          return started;
         }
         return this.broker!.stop(capability, lease, this.request(effect, taskId, runId, "stop"));
-      }), [{ kind: "computer", id: "omarchy" }]));
+        }, scope.workspaceId);
+        return {
+          ...outcome,
+          events: [...outcome.events, ...(action === "start" && outcome.status === "succeeded" && evidenceRef ? [{
+            type: "computer.workspace.enabled", workspaceId: scope.workspaceId, evidenceRef, stopRef,
+          }] : [])],
+        };
+      }, [{ kind: "computer", id: "omarchy" }]));
+    this.changed();
     return this.inspect(context);
   }
   async execute(
     claims: PermitClaims, scope: WorkspaceScope, input: { argv: string[]; cwd: string; timeoutMs: number; readOnly: boolean },
-    context: AuthorizedEffectContext, taskId: string, runId: string,
+    context: AuthorizedEffectContext, taskId: string, runId: string, workspaceId: string,
   ): Promise<EffectOutcome> {
     if ((await this.check()).state !== "ready") throw new Error("The computer is unavailable.");
     if (claims.executionLocation !== "guest" || claims.computer !== "omarchy"
@@ -212,15 +293,29 @@ export class LocalComputer implements ComputerPort {
       scope, inputHash: digest({ ...input, cwd: absolute }), expiresAt: claims.expiresAt,
     });
     try {
-      return await this.lease(scope, taskId, runId, context, (capability, lease) =>
-        this.broker!.execute(capability, lease, { ...this.request(context, taskId, runId, "execute"), ...input }));
+      return await this.lease(scope, taskId, runId, context, async (capability, lease) => {
+        this.persistence.assertExecutionScope(scope, workspaceId);
+        const businessWorkspaceId = workspaceId;
+        const principal = this.persistence.humanPrincipal();
+        const state = await this.inspect({ principal, workspaceId: businessWorkspaceId, requestId: `computer-check-${runId}` });
+        if (!state.workspace?.enabled) return {
+          state: "committed", computerId: "omarchy",
+          commit: { ...committed(await this.persistence.commit(this.persistence.owner.computer,
+            `${context.intentRef}/workspace-denied`, "computer.access.denied", { workspaceId: businessWorkspaceId },
+            async () => ({ status: "denied", value: { code: "workspace_computer_not_enabled" },
+              receipts: [{ kind: "no-effect" }], events: [] }))), replayed: false },
+        };
+        return this.broker!.execute(capability, lease, { ...this.request(context, taskId, runId, "execute"), ...input });
+      }, workspaceId);
     } finally { this.approved.delete(scope.workspaceId); }
   }
   async close(): Promise<void> {
     if (!this.configured) return;
-    const owner = this.persistence.owner;
+    await this.operations;
+    const workspaceId = this.persistence.businessIds()[0];
+    if (!workspaceId) return;
     const context: RequestContext = {
-      principal: { id: owner.id, workspaceId: owner.catalog.workspaceId, permissions: [] }, requestId: randomUUID(),
+      principal: this.persistence.humanPrincipal(), requestId: randomUUID(), workspaceId,
     };
     const observed = await this.inspect(context);
     if (observed.state === "running") {

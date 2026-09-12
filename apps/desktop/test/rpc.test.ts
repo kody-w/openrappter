@@ -50,14 +50,25 @@ describe("main-process JSON-RPC transport", () => {
   it("rejects forbidden renderer requests before transport and bounds unanswered calls", async () => {
     await client.connect({ port, instanceId: randomUUID(), token: "test-token" });
     expect(() => client.request({ method: "shell.execute", params: {} })).toThrow();
-    await expect(client.request({ method: "work.snapshot", params: {} })).rejects.toThrow("did not respond in time");
+    await expect(client.request({ method: "work.snapshot", params: { workspaceId: "business-one" } })).rejects.toThrow("did not respond in time");
   });
   it("fails pending requests on disconnect rather than leaving them unresolved", async () => {
     await client.connect({ port, instanceId: randomUUID(), token: "test-token" });
-    const request = client.request({ method: "work.snapshot", params: {} });
+    const request = client.request({ method: "work.snapshot", params: { workspaceId: "business-one" } });
     const rejected = expect(request).rejects.toThrow("disconnected");
     socket!.terminate();
     await rejected;
     expect(states.at(-1)?.state).toBe("offline");
+  });
+  it("gives model proposals their own bounded deadline without unbounding ordinary requests", async () => {
+    client.close();
+    client = new HostRpc((event) => events.push(event), (state) => states.push(state), 30, 120);
+    server.on("connection", (socket) => socket.on("message", (raw) => {
+      const request = JSON.parse(raw.toString());
+      if (request.method === "twin.message") setTimeout(() => socket.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { proposed: true } })), 60);
+    }));
+    await client.connect({ port, instanceId: randomUUID(), token: "test-token" });
+    await expect(client.request({ method: "twin.message", params: { workspaceId: null, message: "Create a workspace.", history: [] } })).resolves.toEqual({ proposed: true });
+    await expect(client.request({ method: "work.snapshot", params: { workspaceId: "business-one" } })).rejects.toThrow("did not respond in time");
   });
 });

@@ -7,3 +7,4 @@ export { FileStorage, emptyWorkspace } from "./storage.js";
 export { HostError } from "./errors.js";
 export * from "./ports.js";
 export * from "./contracts.js";
+export { LocalTwin, TWIN_MODEL } from "./twin.js";

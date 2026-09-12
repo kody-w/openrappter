@@ -6,7 +6,8 @@ tests can explicitly override the directory with `RAPP_WORK_USER_DATA`.
 
 The application directory contains one owner identity, one `workspaces/` store,
 an owner-process lock, provider state and optional computer configuration. The
-owner catalog, computer history and each saved agent have different workspaces.
+owner concierge/catalog, each business catalog, computer history and each saved
+agent have different workspaces.
 RPC IDs are locators, never capabilities. RAPP/1 integrity/read-back verification
 does not attest to a model's factual accuracy.
 
@@ -40,6 +41,23 @@ the RAPP Work runtime can authorize and execute those proposals.
 The transport checks authentication/catalog status, validates bounded output,
 supports cancellation and deletes its own finished session. Unsupported APIs,
 missing auth, invalid JSON and isolation-check failures are explicit errors.
+
+The conversation-first Work Twin requires the authenticated **GPT-6 Astra**
+model with advertised **max** reasoning support. Every draft explicitly
+requests **long_context**. Unsupported model/profile/session configuration is
+an error, not a fallback to another model or a fabricated assistant reply.
+Provider readiness includes this required Twin profile.
+
+Use `workspaces.list` to discover authorized business catalogs and
+`workspaces.open` to retrieve a selected workspace snapshot, Twin history,
+routines and computer state. Start a new-business conversation with
+`twin.message` and `workspaceId: null`; normal Work requests must instead
+include an authorized business `workspaceId`. No server-global selection is
+inferred. Accepting a strict proposal uses canonical Work APIs, never tools
+inside Copilot. The current host RPC integration is documented in
+[the host contract](../apps/host/README.md). The desktop and UI use the same pure
+parameter schemas, including explicit workspace bindings and bounded document
+intake; they never bypass the authenticated bridge.
 
 Supported API documentation:
 
@@ -92,10 +110,19 @@ passing `tart get omarchy-template --format json` to the exported
 `vmConfigurationHash` in `apps/host/dist/computer-drivers.js`; it hashes exactly
 OS, CPU, Memory, Disk, DiskFormat and Display using canonical JSON.
 
-Restart the app. Work → Local computer → Start clones **only the configured
+Restart the app. Select a business and use **Start agent computer** in its
+right-side panel. This clones **only the configured
 local label**, verifies its disk and configuration pins, records host-owned
 clone provenance, and starts it with no directory/disk mounts, clipboard or
 audio sharing. Existing unowned running VMs and changed pins fail closed.
+The panel reports the actual workspace lease/agent and explicit approval
+policy. The current headless driver does not supply a screen stream, so display
+availability remains unavailable rather than showing fabricated desktop imagery.
+Each workspace must explicitly enable the shared computer. Every subsequent
+tool action obtains its own scoped lease; switching the UI never transfers
+another workspace's authority. Starting does not relax an agent's instructions
+or approval policy. Computer-access policy changes are conversational,
+reviewable settings proposals.
 
 Tart lifecycle commands and `/usr/bin/ssh` use fixed argument vectors,
 sanitized environments and no host command shell. SSH uses a pinned host alias,

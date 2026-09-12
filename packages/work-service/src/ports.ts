@@ -76,6 +76,12 @@ export interface WorkAuthorizationPort {
     capability: object,
     request: AuthorizationRequest & { readonly intentRef: string },
   ): Promise<object>;
+  /** Optional canonical source/evidence adapter. It may encode references, never change the acknowledged status. */
+  recordOutcome?(
+    capability: object,
+    request: AuthorizationRequest & { readonly intentRef: string },
+    outcome: EffectOutcome,
+  ): Promise<EffectOutcome>;
 }
 
 export type TerminalStatus = "succeeded" | "failed" | "cancelled" | "denied";
@@ -170,6 +176,6 @@ export interface WorkServicePort {
     capability: object,
     command: WorkCommand,
     effect: AuthorizedEffect,
-    options?: { readonly signal?: AbortSignal },
+    options?: { readonly signal?: AbortSignal; readonly expectedHeads?: Heads },
   ): Promise<WorkCommitResult>;
 }

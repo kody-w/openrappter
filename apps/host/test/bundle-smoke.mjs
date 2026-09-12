@@ -52,21 +52,28 @@ async function stop() {
 }
 try {
   let rpc = await start();
-  const initial = await rpc("work.snapshot");
-  const provider = (await rpc("providers.list"))[0];
+  const initial = await rpc("workspaces.list");
+  const provider = (await rpc("providers.list", { workspaceId: null }))[0];
   assert.ok(["ready", "unavailable"].includes(provider.availability));
   assert.ok(["authenticated", "required", "unverified"].includes(provider.authentication));
-  const agent = await rpc("agents.save", {
-    id: "bundle-worker", name: "Bundle worker", role: "Validation", instructions: "Only perform assigned work.",
-    providerId: null, model: "", enabled: false, computerPolicy: "none", approvalPolicy: "always",
+  const business = await rpc("workspaces.create", {
+    requestId: randomUUID(), name: "Bundle validation", purpose: "Retain reviewed work without external execution.",
+    twin: { name: "Validation Twin", instructions: "Draft complete work for human review; never invent availability." },
+    approvalPolicy: "always", computerPolicy: "none", starterTask: null, starterRoutines: [],
+    leadAgent: {
+      id: "bundle-worker", name: "Bundle worker", role: "Validation", instructions: "Only perform assigned work.",
+      providerId: null, model: "", enabled: false, computerPolicy: "none", approvalPolicy: "always",
+    },
   });
+  const agent = (await rpc("work.snapshot", { workspaceId: business.id })).agents[0];
   const task = await rpc("work.createTask", {
+    workspaceId: business.id,
     requestId: randomUUID(), title: "Durable bundle work", instructions: "Retain this assigned task without executing it.",
     agentId: agent.id, priority: "normal",
   });
   assert.notEqual(agent.id, agent.workspaceId);
   assert.equal(task.workspaceId, agent.workspaceId);
-  assert.equal((await rpc("computer.inspect")).state, "unavailable");
+  assert.equal((await rpc("computer.inspect", { workspaceId: business.id })).state, "unavailable");
   const workspace = join(directory, "data", "workspaces", agent.workspaceId);
   const manifest = JSON.parse(await readFile(join(workspace, "manifest.json"), "utf8"));
   const frames = await Promise.all((await readdir(join(workspace, "frames", "body"))).sort()
@@ -81,14 +88,14 @@ try {
   assert.equal((await stat(join(workspace, "identity.json"))).mode & 0o777, 0o600);
   await stop();
   rpc = await start();
-  const restored = await rpc("work.snapshot");
+  const restored = await rpc("work.snapshot", { workspaceId: business.id });
   assert.equal(restored.ownerId, initial.ownerId);
   assert.equal(restored.agents[0].workspaceId, agent.workspaceId);
   assert.equal(restored.tasks[0].id, task.id);
   assert.equal(restored.runs.length, 0);
   await stop();
   console.log(JSON.stringify({
-    status: "passed", bundledHost: true, restartPersistence: true, canonicalFramesScanned: frames.length,
+    status: "passed", bundledHost: true, restartPersistence: true, businessWorkspace: true, canonicalFramesScanned: frames.length,
     copilot: { availability: provider.availability, authentication: provider.authentication, modelRequests: 0 },
   }));
 } finally {

@@ -1,144 +1,411 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { DisconnectedClient } from "../src/client";
-import { FixtureClient, populatedClient, testAgent, testStatus } from "./fixture";
+import { agentInputSchema, automationInputSchema, taskInputSchema, workspaceInputSchema } from "../src/model";
+import { AgentForm, AutomationForm, SavedTaskForm, SettingsForm, TaskForm, WorkspaceForm } from "../src/forms";
+import { FixtureClient, populatedClient, testHostState, testStatus } from "./fixture";
 
 async function open(client = new FixtureClient()) {
-  render(<App client={client} />);
-  await screen.findByRole("heading", { name: "Work", level: 1 });
+  const rendered = render(<App client={client} />);
+  await screen.findByText("Local host connected");
   await waitFor(() => expect(screen.queryByRole("status", { name: "Loading workspace" })).not.toBeInTheDocument());
-  return { client, user: userEvent.setup() };
+  const user = userEvent.setup();
+  return { ...rendered, client, user };
 }
-const primary = () => within(screen.getByRole("navigation", { name: "Primary navigation" }));
-describe("RAPP Work business workspace", () => {
-  it("exposes exactly four primary areas and no fabricated production records", async () => {
-    await open();
-    expect(primary().getAllByRole("link").map((link) => link.textContent)).toEqual(["Work", "Agents", "Automations", "Settings"]);
-    expect(screen.getByText("Make room for meaningful work")).toBeVisible();
-    expect(screen.queryByText(/Compatibility|Show-and-Tell|RAPPIDs|Surgeon|Skills marketplace|Zen/)).not.toBeInTheDocument();
+const composer = () => screen.getByRole("textbox", { name: "Message your Work Twin" });
+async function say(user: ReturnType<typeof userEvent.setup>, message: string) {
+  await user.clear(composer()); await user.type(composer(), message);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeEnabled());
+  await user.click(screen.getByRole("button", { name: "Send" }));
+}
+const tools = () => within(screen.getByRole("navigation", { name: "Workspace tools" }));
+
+describe("conversation-first business workspaces", () => {
+  it("creates independent workspaces through the concierge, without a blank setup form", async () => {
+    const { client, user } = await open(new FixtureClient(testHostState([])));
+    await user.click(screen.getByRole("button", { name: "New workspace" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(composer()).toHaveFocus());
+    await say(user, "Create a workspace for finance, with safe invoice reviews.");
+    const card = await screen.findByRole("article", { name: "Workspace proposal" });
+    expect(client.host.state.catalog.workspaces).toHaveLength(0);
+    await user.click(within(card).getByRole("button", { name: "Review details" }));
+    const review = within(screen.getByRole("dialog", { name: "Review workspace proposal" }));
+    expect(review.getByLabelText("Workspace name")).toHaveValue("Finance studio");
+    expect(review.getByLabelText("Workspace purpose")).not.toHaveValue("");
+    expect(review.getByLabelText("Twin instructions")).not.toHaveValue("");
+    expect(review.getByText(/Drafted by your Work Twin/)).toBeVisible();
+    await user.click(review.getByRole("button", { name: "Approve & create workspace" }));
+    await screen.findByRole("heading", { name: "Finance studio Twin", level: 1 });
+    const finance = client.host.state.catalog.workspaces[0]!;
+    expect(finance.id).not.toBe(finance.leadAgentId);
+    expect(client.host.state.workspaces[finance.id]!.agents).toHaveLength(1);
+    expect(client.host.state.conversations[finance.id]!.turns).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "New workspace" }));
+    await say(user, "Create a workspace for retail operations.");
+    await user.click(await screen.findByRole("button", { name: "Approve & create workspace" }));
+    await screen.findByRole("heading", { name: "Retail studio Twin", level: 1 });
+    expect(client.host.state.catalog.workspaces.filter((item) => item.ownerType === "human")).toHaveLength(2);
+    expect(new Set(client.host.state.catalog.workspaces.map((item) => item.id)).size).toBe(client.host.state.catalog.workspaces.length);
+    expect(screen.getByRole("button", { name: "Open workspace Finance studio" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open workspace Retail studio" })).toBeVisible();
   });
-  it("creates a persisted roster entry, edits it, and keeps the roster between areas", async () => {
+
+  it.each([
+    ["Review supplier invoices tomorrow.", "Task", "Task title", "Review supplier invoices", "Approve & create task"],
+    ["Create an agent for finance reviews.", "Agent", "Agent name", "Finance analyst", "Approve & apply agent"],
+    ["Create a daily routine to review invoices at 9am.", "Routine", "Routine name", "Morning finance review", "Approve & apply routine"],
+    ["Change settings to a compact dark theme.", "Settings", "Workspace name", "Finance studio", "Approve & apply settings"],
+  ])("drafts and prefills %s", async (message, kind, field, value, action) => {
     const { user, client } = await open();
-    await user.click(primary().getByRole("link", { name: "Agents" }));
-    await user.click(screen.getByRole("button", { name: "New agent" }));
-    let dialog = screen.getByRole("dialog", { name: "Create an agent" });
-    await user.type(within(dialog).getByLabelText("Agent name"), "Procurement analyst");
-    await user.type(within(dialog).getByLabelText("Agent instructions"), "Review supplier requests and retain evidence.");
-    await user.click(within(dialog).getByRole("button", { name: "Create agent" }));
+    await say(user, message);
+    const card = await screen.findByRole("article", { name: `${kind} proposal` });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(client.calls.some((call) => call.method === "twin.applyProposal")).toBe(false);
+    await user.click(within(card).getByRole("button", { name: "Review details" }));
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByLabelText(field)).toHaveValue(value);
+    if (kind === "Settings") {
+      expect(dialog.getByLabelText("Theme")).toHaveValue("dark");
+      expect(dialog.getByLabelText("New approval requests")).toBeChecked();
+      expect(dialog.getByLabelText("Require approval")).toHaveValue("always");
+    }
+    for (const control of screen.getByRole("dialog").querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input[required], textarea[required]"))
+      expect(control.value.trim()).not.toBe("");
+    await user.click(dialog.getByRole("button", { name: action }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(client.workspace.agents[0]?.name).toBe("Procurement analyst");
-    await user.click(primary().getByRole("link", { name: "Automations" }));
-    const sidebar = within(screen.getByRole("complementary", { name: "Workspace sidebar" }));
-    await user.click(sidebar.getByRole("button", { name: /Procurement analyst/ }));
-    dialog = screen.getByRole("dialog", { name: "Configure agent" });
-    await user.clear(within(dialog).getByLabelText("Role"));
-    await user.type(within(dialog).getByLabelText("Role"), "Procurement");
-    await user.click(within(dialog).getByRole("button", { name: "Save agent" }));
-    await waitFor(() => expect(client.workspace.agents[0]?.role).toBe("Procurement"));
+    expect(client.calls.some((call) => call.method === "twin.applyProposal")).toBe(true);
+    expect(await within(card).findByText("Applied", { exact: true })).toBeVisible();
   });
-  it("creates, starts, and cancels a task through the injected service without inventing verification", async () => {
+
+  it("applies directly and never opens a review sheet unless requested", async () => {
+    const { client, user } = await open();
+    await say(user, "Create an urgent task to review supplier invoices.");
+    await user.click(screen.getByRole("button", { name: "Approve & create task" }));
+    await waitFor(() => expect(client.workspace.tasks).toHaveLength(1));
+    expect(client.workspace.tasks[0]).toMatchObject({ title: "Review supplier invoices", priority: "high", state: "queued" });
+    expect(client.workspace.runs).toHaveLength(0);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const apply = client.calls.find((call) => call.method === "twin.applyProposal")!;
+    expect(apply.params).toMatchObject({ workspaceId: "finance", proposalHash: "a".repeat(64) });
+    expect(apply.params).not.toHaveProperty("editedDraft");
+  });
+
+  it("sends small review edits without losing the Twin's complete input or immutable identity", async () => {
+    const { client, user } = await open();
+    await say(user, "Review supplier invoices.");
+    await user.click(screen.getByRole("button", { name: "Review details" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.clear(dialog.getByLabelText("Task title"));
+    await user.type(dialog.getByLabelText("Task title"), "Review September invoices");
+    await user.selectOptions(dialog.getByLabelText("Priority"), "high");
+    await user.click(dialog.getByRole("button", { name: "Approve & create task" }));
+    await waitFor(() => expect(client.workspace.tasks[0]?.title).toBe("Review September invoices"));
+    const input = client.calls.find((call) => call.method === "twin.applyProposal")!.params as Record<string, any>;
+    expect(input.editedDraft).toMatchObject({ requestId: taskInputSchema.parse(client.host.state.conversations.finance!.proposals[0]!.draft).requestId,
+      title: "Review September invoices", agentId: "finance-lead", priority: "high" });
+    expect(input.editedDraft.instructions).toContain("Do not send payments");
+  });
+
+  it("uses follow-up questions and history instead of offering incomplete forms", async () => {
+    const { user, client } = await open();
+    await say(user, "Help me plan something useful.");
+    expect(await screen.findByText("What outcome should the task produce?")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Review details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Approve &/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reply to Twin" }));
+    await waitFor(() => expect(composer()).toHaveFocus());
+    await say(user, "Review supplier invoices tomorrow.");
+    expect(await screen.findByRole("article", { name: "Task proposal" })).toBeVisible();
+    const input = client.calls.filter((call) => call.method === "twin.message").at(-1)!.params as Record<string, any>;
+    expect(input.history.map((turn: { role: string }) => turn.role)).toEqual(["user", "assistant"]);
+    expect(input.history[0].content).toBe("Help me plan something useful.");
+    expect(input.contextRevision).toBe(9);
+  });
+
+  it("persists dismissal, never creates work, and keeps the conversation after reopening", async () => {
+    const { user, client, unmount } = await open();
+    await say(user, "Review supplier invoices.");
+    await user.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await within(screen.getByRole("article", { name: "Task proposal" })).findByText("Dismissed", { exact: true });
+    expect(client.workspace.tasks).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Approve & create task" })).not.toBeInTheDocument();
+    unmount();
+    await open(client);
+    expect(await within(screen.getByRole("article", { name: "Task proposal" })).findByText("Dismissed", { exact: true })).toBeVisible();
+    expect(within(screen.getByRole("button", { name: "Open workspace Finance studio" })).getByText("Dismissed", { exact: true })).toBeVisible();
+    expect(screen.getByText("Review supplier invoices.", { exact: true })).toBeVisible();
+  });
+
+  it("makes every create control seed and focus the Twin, not open a blank form", async () => {
+    const { user, client } = await open();
+    for (const [name, seed] of [["New task", "Create a task to "], ["New agent", "Create an agent responsible for "], ["New routine", "Create a routine that "]]) {
+      await user.click(screen.getByRole("button", { name }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(composer()).toHaveValue(seed); await waitFor(() => expect(composer()).toHaveFocus());
+    }
+    for (const [area, action] of [["Tasks", "New task with Twin"], ["Agents", "New agent with Twin"], ["Routines", "New routine with Twin"]]) {
+      await user.click(tools().getByRole("button", { name: area }));
+      const inspector = within(screen.getByRole("dialog"));
+      expect(inspector.queryByRole("textbox", { name: /Task title|Agent name|Routine name/ })).not.toBeInTheDocument();
+      await user.click(inspector.getByRole("button", { name: action }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(composer()).toHaveFocus());
+    }
+    await user.click(tools().getByRole("button", { name: "Settings" }));
+    expect(screen.queryByLabelText("Workspace name")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Change settings with Twin" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(composer()).toHaveValue("Change this workspace's settings to ");
+    expect(client.calls.some((call) => ["agents.save", "work.createTask", "automations.save", "settings.update"].includes(call.method))).toBe(false);
+  });
+
+  it("only edits existing agents and settings from fully prefilled saved records", async () => {
+    const { user, client } = await open();
+    await user.click(tools().getByRole("button", { name: "Agents" }));
+    await user.click(screen.getByRole("button", { name: "Configure agent" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Review saved agent" }));
+    expect(dialog.getByLabelText("Agent name")).toHaveValue("Operations analyst");
+    expect(dialog.getByText(/Prefilled from the saved workspace record/)).toBeVisible();
+    await user.clear(dialog.getByLabelText("Role")); await user.type(dialog.getByLabelText("Role"), "Procurement");
+    await user.click(dialog.getByRole("button", { name: "Ask Twin to review changes" }));
+    expect(client.workspace.agents[0]?.role).toBe("Finance operations");
+    const proposal = await screen.findByRole("article", { name: "Agent proposal" });
+    expect(within(proposal).getByText("Verified local integrity")).toBeVisible();
+    await user.click(within(proposal).getByRole("button", { name: "Approve & update agent" }));
+    await waitFor(() => expect(client.workspace.agents[0]?.role).toBe("Procurement"));
+    expect(client.calls.find((call) => call.method === "agents.save")!.params).toMatchObject({ workspaceId: "finance", id: "finance-lead" });
+  });
+
+  it("keeps saved tasks read-only while preserving explicit scoped run start and cancellation", async () => {
     const client = new FixtureClient();
-    client.workspace.agents.push(testAgent); client.status = testStatus(true);
     const { user } = await open(client);
-    await user.click(screen.getByRole("button", { name: "New task" }));
-    const dialog = screen.getByRole("dialog");
-    await user.type(within(dialog).getByLabelText("Task title"), "Review a contract");
-    await user.type(within(dialog).getByLabelText("Instructions and expected outcome"), "List material risks with supporting clauses.");
-    await user.selectOptions(within(dialog).getByLabelText("Assign to"), testAgent.id);
-    await user.click(within(dialog).getByRole("button", { name: "Create task" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await say(user, "Review supplier invoices.");
+    await user.click(await screen.findByRole("button", { name: "Approve & create task" }));
+    await within(screen.getByRole("article", { name: "Task proposal" })).findByText("Applied", { exact: true });
+    await user.click(tools().getByRole("button", { name: "Tasks" }));
+    await user.click(screen.getByRole("button", { name: "Review saved task" }));
+    const review = within(screen.getByRole("dialog", { name: "Review saved task" }));
+    expect(review.getByLabelText("Task title")).toHaveValue("Review supplier invoices");
+    expect(review.getByLabelText("Task title")).toHaveAttribute("readonly");
+    expect(review.getByLabelText("Assign to")).toHaveValue("Operations analyst");
+    expect(review.getByLabelText("Assign to")).toHaveAttribute("readonly");
+    await user.click(review.getByRole("button", { name: "Discuss task changes with Twin" }));
+    expect((composer() as HTMLTextAreaElement).value).toContain("existing task");
+    expect(client.calls.some((call) => call.method === "work.assignTask")).toBe(false);
+    await user.click(tools().getByRole("button", { name: "Tasks" }));
     await user.click(screen.getByRole("button", { name: "Start task" }));
-    await screen.findByText("Run accepted by the connected runtime.");
-    expect(client.workspace.runs).toHaveLength(1);
-    expect(screen.getByText("Not verified")).toBeVisible();
+    await waitFor(() => expect(client.workspace.runs[0]!.state).toBe("running"));
+    expect(client.workspace.runs[0]!.verification).toBe("not_checked");
     await user.click(screen.getByRole("tab", { name: "Runs" }));
     await user.click(screen.getByRole("button", { name: "Cancel run" }));
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel run" }));
-    await waitFor(() => expect(client.workspace.runs[0]?.state).toBe("cancelled"));
+    await user.click(within(screen.getByRole("dialog", { name: "Cancel this run?" })).getByRole("button", { name: "Cancel run" }));
+    await waitFor(() => expect(client.workspace.runs[0]!.state).toBe("cancelled"));
+    expect(client.calls.find((call) => call.method === "runs.cancel")!.params).toMatchObject({ workspaceId: "finance" });
   });
-  it("records scoped approval decisions and displays artifact content as text", async () => {
-    const { user, client } = await open(populatedClient());
-    await user.click(screen.getByRole("tab", { name: "Approvals 1" }));
-    await user.click(screen.getByRole("button", { name: "Review action" }));
-    const dialog = screen.getByRole("dialog");
-    await user.selectOptions(within(dialog).getByLabelText("Decision"), "denied");
-    await user.type(within(dialog).getByLabelText("Decision reason"), "Confirm the reviewer first.");
-    await user.click(within(dialog).getByRole("button", { name: "Deny action" }));
-    await waitFor(() => expect(client.workspace.approvals[0]?.state).toBe("denied"));
-    expect(client.workspace.runs[0]?.state).toBe("awaiting_approval");
-    await user.click(screen.getByRole("tab", { name: "Artifacts & evidence" }));
-    client.content = '<script>alert("untrusted")</script>';
-    await user.click(screen.getByRole("button", { name: "View artifact" }));
-    const content = await screen.findByLabelText("Artifact content");
-    expect(content).toHaveTextContent('<script>alert("untrusted")</script>');
-    expect(content.querySelector("script")).toBeNull();
-  });
-  it("saves disabled schedules and reports activation failure inside the form", async () => {
-    const client = new FixtureClient(); client.workspace.agents.push(testAgent);
-    const { user } = await open(client);
-    await user.click(primary().getByRole("link", { name: "Automations" }));
-    await user.click(screen.getByRole("button", { name: "New schedule" }));
-    const dialog = within(screen.getByRole("dialog"));
-    await user.type(dialog.getByLabelText("Schedule name"), "Morning review");
-    await user.type(dialog.getByLabelText("Task title"), "Review pending invoices");
-    await user.type(dialog.getByLabelText("Task instructions"), "Report exceptions only.");
-    await user.selectOptions(dialog.getByLabelText("Assigned agent"), testAgent.id);
-    await user.click(dialog.getByLabelText("Enable this schedule"));
-    await user.click(dialog.getByRole("button", { name: "Save schedule" }));
-    expect(await dialog.findByRole("alert")).toHaveTextContent("Scheduling runtime is not configured.");
-    await user.click(dialog.getByLabelText("Enable this schedule"));
-    await user.click(dialog.getByRole("button", { name: "Save schedule" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(client.workspace.automations[0]).toMatchObject({ enabled: false, nextRunAt: null });
-    expect(screen.getByText("Not scheduled")).toBeVisible();
-  });
-  it("saves typed appearance, notification, and safety settings", async () => {
+
+  it("keeps existing routine reviews prefilled and reports failed activation without inventing a next run", async () => {
     const { client, user } = await open();
-    await user.click(primary().getByRole("link", { name: "Settings" }));
-    await user.clear(screen.getByLabelText("Workspace name"));
-    await user.type(screen.getByLabelText("Workspace name"), "Finance workspace");
-    await user.selectOptions(screen.getByLabelText("Theme"), "dark");
-    await user.selectOptions(screen.getByLabelText("Density"), "compact");
-    await user.click(screen.getByLabelText("Completed runs"));
-    await user.click(screen.getByRole("button", { name: "Save preferences" }));
-    await waitFor(() => expect(client.workspace.settings.workspaceName).toBe("Finance workspace"));
-    expect(client.workspace.settings.appearance).toEqual({ theme: "dark", density: "compact" });
-    expect(client.workspace.settings.notifications.completedRuns).toBe(false);
-    await user.click(screen.getByRole("tab", { name: "Safety & access" }));
-    await user.selectOptions(screen.getByLabelText("Require approval"), "on-risk");
-    await user.click(screen.getByRole("button", { name: "Save approval policy" }));
-    await waitFor(() => expect(client.workspace.settings.work.approvalPolicy).toBe("on-risk"));
+    await say(user, "Create a daily routine to review invoices.");
+    await user.click(await screen.findByRole("button", { name: "Approve & create routine" }));
+    await within(screen.getByRole("article", { name: "Routine proposal" })).findByText("Applied", { exact: true });
+    await user.click(tools().getByRole("button", { name: "Routines" }));
+    await user.click(screen.getByRole("button", { name: "Review routine" }));
+    const review = within(screen.getByRole("dialog", { name: "Review saved routine" }));
+    expect(review.getByLabelText("Routine name")).toHaveValue("Morning finance review");
+    expect(review.getByLabelText("Local time")).toHaveValue("09:00");
+    await user.click(review.getByLabelText("Enable this routine"));
+    await user.click(review.getByRole("button", { name: "Ask Twin to review changes" }));
+    const proposals = await screen.findAllByRole("article", { name: "Routine proposal" });
+    await user.click(within(proposals.at(-1)!).getByRole("button", { name: "Review details" }));
+    client.host.state.status = testStatus(false);
+    const fresh = within(screen.getByRole("dialog", { name: "Review routine proposal" }));
+    await user.click(fresh.getByRole("button", { name: "Approve & apply routine" }));
+    expect(await fresh.findByRole("alert")).toHaveTextContent("Scheduling runtime is not configured");
+    expect(client.workspace.automations[0]).toMatchObject({ enabled: false, nextRunAt: null });
+    const reads = client.calls.filter((call) => call.method === "workspaces.open").length;
+    client.workspace.automations[0]!.name = "Routine refreshed while awaiting review";
+    act(() => {
+      for (const [subscriptionId, workspaceId] of client.host.subscriptions) if (workspaceId === "finance")
+        for (const listener of client.host.listeners) listener({ type: "events", subscriptionId, events: [], cursor: "refreshed-after-failure" });
+    });
+    await waitFor(() => expect(client.calls.filter((call) => call.method === "workspaces.open").length).toBeGreaterThan(reads));
+    await screen.findByText("Routine refreshed while awaiting review");
+    expect(fresh.getByRole("alert")).toHaveTextContent("Scheduling runtime is not configured");
   });
-  it("does not imply a working or verified computer and disables unavailable control", async () => {
-    const { user } = await open();
-    await user.click(screen.getByRole("tab", { name: "Local computer" }));
-    expect(screen.getByText("Not verified")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Start computer" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Stop computer" })).toBeDisabled();
+
+  it("refuses an incomplete host draft even if it claims to be ready for review", async () => {
+    const { user, client } = await open();
+    client.host.nextDraft = { ...client.host.makeDraft({ workspaceId: "finance", message: "Review invoices.", history: [] }),
+      draft: { title: "Incomplete draft" } };
+    await say(user, "Review supplier invoices.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("invalid response");
+    expect(screen.queryByRole("button", { name: "Review details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve & create task" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(client.workspace.tasks).toHaveLength(0);
   });
-  it("keeps stale work visible but disables actions after a disconnect", async () => {
-    const { client } = await open(populatedClient());
-    act(() => client.connection?.({ state: "offline", detail: "Host exited." }));
-    expect(await screen.findByText("Showing the last loaded workspace. Actions are disabled until the host reconnects.")).toBeVisible();
+  it("exposes the full prefilled starter routine schedule and activation policy before workspace creation", async () => {
+    const client = new FixtureClient(testHostState([]));
+    const proposal = client.host.makeDraft({ workspaceId: null, message: "Create a finance workspace.", history: [] });
+    const draft = workspaceInputSchema.parse(proposal.draft);
+    draft.starterRoutines.push({ id: crypto.randomUUID(), name: "Friday finance review", taskTitle: "Review weekly exceptions",
+      instructions: "Cite the source invoices and do not send payments.", agentId: draft.leadAgent.id,
+      cadence: { kind: "weekly", weekday: 5, at: "09:00", timezone: "UTC" }, enabled: true });
+    client.host.nextDraft = { ...proposal, draft };
+    const { user } = await open(client);
+    await say(user, "Create a finance workspace.");
+    expect(await screen.findByText("1 routine requests activation")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Review details" }));
+    const review = within(screen.getByRole("dialog"));
+    await user.click(review.getByText("Prefilled team, policies & starter work"));
+    expect(review.getByText("Friday at 09:00 · UTC")).toBeVisible();
+    expect(review.getByText("Review weekly exceptions")).toBeVisible();
+    expect(review.getByText(/Requests activation on creation/)).toBeVisible();
+    expect(client.host.state.catalog.workspaces).toHaveLength(0);
+  });
+
+  it("isolates conversation, unsent composer, and review state when switching workspaces", async () => {
+    const { client, user } = await open(new FixtureClient(testHostState(["Finance studio", "Retail studio"])));
+    await say(user, "Private finance review.");
+    await user.click(await screen.findByRole("button", { name: "Review details" }));
+    await user.clear(screen.getByLabelText("Task title")); await user.type(screen.getByLabelText("Task title"), "Uncommitted finance edit");
+    await user.click(screen.getByRole("button", { name: "Open workspace Retail studio" }));
+    await screen.findByRole("heading", { name: "Retail studio Twin", level: 1 });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(composer()).toHaveValue("");
+    expect(screen.getByRole("log")).not.toHaveTextContent("Private finance review.");
+    await user.type(composer(), "Retail unsent request");
+    await user.click(screen.getByRole("button", { name: "Open workspace Finance studio" }));
+    await screen.findByRole("article", { name: "Task proposal" });
+    expect(composer()).toHaveValue("");
+    expect(screen.getByRole("log")).not.toHaveTextContent("Retail unsent request");
+    await user.click(screen.getByRole("button", { name: "Review details" }));
+    expect(screen.getByLabelText("Task title")).toHaveValue("Review supplier invoices");
+    expect(client.host.state.conversations["business-2"]!.turns).toHaveLength(0);
+    await waitFor(() => expect([...client.host.subscriptions.values()].every((id) => id === "finance")).toBe(true));
+  });
+
+  it("does not deliver late responses into a different workspace", async () => {
+    const client = new FixtureClient(testHostState(["Finance studio", "Retail studio"]));
+    let release!: () => void;
+    client.messageGate = new Promise<void>((resolve) => { release = resolve; });
+    const { user } = await open(client);
+    await say(user, "Private finance request while waiting.");
+    await screen.findByRole("button", { name: "Working…" });
+    await user.click(screen.getByRole("button", { name: "Open workspace Retail studio" }));
+    await screen.findByRole("heading", { name: "Retail studio Twin", level: 1 });
+    await act(async () => { release(); });
+    await waitFor(() => expect(client.host.state.conversations.finance!.turns).toHaveLength(2));
+    expect(screen.getByRole("log")).not.toHaveTextContent("Private finance request");
+    expect(screen.queryByRole("article", { name: "Task proposal" })).not.toBeInTheDocument();
+    expect(composer()).toHaveValue("");
+    client.messageGate = null;
+    await user.click(screen.getByRole("button", { name: "Open workspace Finance studio" }));
+    expect(await screen.findByRole("article", { name: "Task proposal" })).toBeVisible();
+  });
+
+  it("keeps approval recommendations separate from explicit human decisions", async () => {
+    const { client, user } = await open(populatedClient());
+    await say(user, "Review pending approval and recommend whether to approve or deny.");
+    const card = await screen.findByRole("article", { name: "Approval recommendation proposal" });
+    expect(within(card).queryByRole("button", { name: /Approve &/ })).not.toBeInTheDocument();
+    expect(client.workspace.approvals[0]!.state).toBe("pending");
+    await user.click(within(card).getByRole("button", { name: "Review decision" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Your approval decision" }));
+    expect(dialog.getByLabelText("Decision reason")).toHaveValue("Confirm the reviewer and the financial data scope before sending.");
+    expect(dialog.queryByLabelText("Decision")).not.toBeInTheDocument();
+    fireEvent.submit(dialog.getByLabelText("Decision reason").closest("form")!);
+    expect(client.calls.some((call) => call.method === "approvals.decide" || call.method === "twin.applyProposal")).toBe(false);
+    await user.click(dialog.getByRole("button", { name: "Deny action" }));
+    await waitFor(() => expect(client.workspace.approvals[0]!.state).toBe("denied"));
+    expect(client.workspace.runs[0]!.state).toBe("awaiting_approval");
+    expect(client.calls.find((call) => call.method === "approvals.decide")!.params).toMatchObject({ workspaceId: "finance", decision: "denied" });
+  });
+
+  it("keeps failed or unavailable Twin requests honest and retains the user's text", async () => {
+    const { client, user } = await open();
+    client.host.failure = "The model provider is unavailable. No proposal was generated.";
+    await say(user, "Review supplier invoices.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("No proposal was generated");
+    expect(composer()).toHaveValue("Review supplier invoices.");
+    expect(screen.queryByRole("article", { name: "Task proposal" })).not.toBeInTheDocument();
+    act(() => client.host.connection({ state: "offline", detail: "Host exited." }));
+    expect(await screen.findByText(/last loaded records/)).toBeVisible();
     expect(screen.getByRole("button", { name: "New task" })).toBeDisabled();
-    expect(screen.getByRole("heading", { name: "Review supplier invoices" })).toBeVisible();
-    await waitFor(() => expect(client.listeners.size).toBe(0));
+    await waitFor(() => expect(client.host.subscriptions.size).toBe(0));
   });
-  it("supports keyboard tab selection and named navigation", async () => {
-    const { user } = await open();
-    const tasks = screen.getByRole("tab", { name: "Tasks 0" });
-    tasks.focus(); await user.keyboard("{ArrowRight}");
-    expect(screen.getByRole("tab", { name: "Runs" })).toHaveFocus();
-    expect(screen.getByRole("tab", { name: "Runs" })).toHaveAttribute("aria-selected", "true");
-    await user.keyboard("{End}");
-    expect(screen.getByRole("tab", { name: "Local computer" })).toHaveFocus();
-  });
-  it("renders an honest disconnected production state", async () => {
+
+  it("renders a disconnected production state without fabricated records or old navigation", async () => {
     render(<App client={new DisconnectedClient()} />);
-    expect(await screen.findByRole("heading", { name: "Connect your local workspace" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "New task" })).toBeDisabled();
-    expect(primary().getAllByRole("link")).toHaveLength(4);
+    expect(await screen.findByRole("heading", { name: "Connect to your local host" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.queryByRole("navigation", { name: "Primary navigation" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/marketplace|compatibility|legacy UI/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("blank review sheets are structurally unreachable", () => {
+  const props = { source: "twin" as const, onSave: async () => true, onClose: () => {}, busy: false, error: "" };
+  it("requires a complete draft prop at both the type and runtime boundaries", () => {
+    // @ts-expect-error A draft is deliberately missing to guard against optional creation props.
+    const task = <TaskForm {...props} agents={[]} />;
+    // @ts-expect-error A draft is deliberately missing to guard against optional creation props.
+    const agent = <AgentForm {...props} providers={[]} />;
+    // @ts-expect-error A draft is deliberately missing to guard against optional creation props.
+    const automation = <AutomationForm {...props} agents={[]} />;
+    // @ts-expect-error A draft is deliberately missing to guard against optional creation props.
+    const settings = <SettingsForm {...props} />;
+    // @ts-expect-error A draft is deliberately missing to guard against optional creation props.
+    const workspace = <WorkspaceForm {...props} />;
+    // @ts-expect-error Saved review must have an existing task, never a blank template.
+    const savedTask = <SavedTaskForm {...props} agents={[]} assignable={false} onAssign={async () => true} />;
+    for (const component of [task, agent, automation, settings, workspace, savedTask]) {
+      const result = render(component);
+      expect(result.container.querySelector("form")).toBeNull();
+      expect(screen.getByRole("alert")).toHaveTextContent("no blank form");
+      result.unmount();
+    }
+  });
+  it("cannot render any create review from complete values alone without its Twin proposal", () => {
+    const client = new FixtureClient();
+    const proposed = (target: "task" | "agent" | "automation" | "workspace") => client.host.makeDraft({
+      workspaceId: target === "workspace" ? null : "finance", target, message: "Draft complete work.", history: [],
+    });
+    const taskDraft = taskInputSchema.parse(proposed("task").draft);
+    const agentDraft = agentInputSchema.parse(proposed("agent").draft);
+    const routineDraft = automationInputSchema.parse(proposed("automation").draft);
+    const workspaceDraft = workspaceInputSchema.parse(proposed("workspace").draft);
+    // @ts-expect-error Complete values are not sufficient provenance for a create review.
+    const task = <TaskForm {...props} draft={taskDraft} agents={client.workspace.agents} />;
+    // @ts-expect-error Complete values are not sufficient provenance for a create review.
+    const agent = <AgentForm {...props} draft={agentDraft} providers={client.host.state.providers} />;
+    // @ts-expect-error Complete values are not sufficient provenance for a create review.
+    const routine = <AutomationForm {...props} draft={routineDraft} agents={client.workspace.agents} />;
+    // @ts-expect-error Settings intake also requires a Twin proposal, not just default preferences.
+    const settings = <SettingsForm {...props} draft={client.workspace.settings} />;
+    // @ts-expect-error Complete values are not sufficient provenance for a create review.
+    const workspace = <WorkspaceForm {...props} draft={workspaceDraft} />;
+    for (const component of [task, agent, routine, settings, workspace]) {
+      const result = render(component);
+      expect(result.container.querySelector("form")).toBeNull();
+      expect(screen.getByRole("alert")).toHaveTextContent("no blank form");
+      result.unmount();
+    }
+  });
+  it("rejects missing, mismatched, incomplete, and unbound proposal provenance", () => {
+    const client = new FixtureClient();
+    const proposal = client.host.makeDraft({ workspaceId: "finance", target: "task", message: "Review invoices.", history: [] });
+    const draft = taskInputSchema.parse(proposal.draft);
+    for (const invalid of [
+      { ...proposal, kind: "agent" as const }, { ...proposal, draft: {} }, { ...proposal, basis: null },
+      { ...proposal, readyForReview: false }, { ...proposal, draft: { ...draft, requestId: crypto.randomUUID() } },
+    ]) {
+      const result = render(<TaskForm {...props} draft={draft} proposal={invalid as unknown as Parameters<typeof TaskForm>[0]["proposal"]} agents={client.workspace.agents} />);
+      expect(result.container.querySelector("form")).toBeNull();
+      result.unmount();
+    }
   });
 });

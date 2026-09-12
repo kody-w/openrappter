@@ -2,17 +2,18 @@ import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
-import { eventReadSchema, idSchema, rpcEnvelopeSchema, serviceNames, type WorkEvent } from "./contracts.js";
+import { eventReadSchema, idSchema, MAX_RPC_BYTES, rpcEnvelopeSchema, serviceNames, type WorkEvent } from "./contracts.js";
 import type { HostServices, Principal } from "./ports.js";
 import { HostError } from "./errors.js";
 import { EventJournal } from "./events.js";
 import { createMethods, statusOf, type SubscriptionConnection } from "./methods.js";
 import { z } from "zod";
 
-const MAX_BODY = 64 * 1024;
+const MAX_BODY = MAX_RPC_BYTES;
 const MAX_BUFFER = 34 * 1024 * 1024;
 const principalSchema = z.strictObject({
   id: idSchema, workspaceId: idSchema,
+  kind: z.enum(["human", "agent"]).optional(), agentId: idSchema.optional(),
   permissions: z.array(z.enum([
     "work:read", "work:write", "agents:read", "agents:write", "automations:read", "automations:write",
     "settings:read", "settings:write", "runtime:execute", "computer:read", "computer:control", "diagnostics:read", "events:read",
@@ -20,10 +21,12 @@ const principalSchema = z.strictObject({
 });
 const required: Record<keyof HostServices, readonly string[]> = {
   storage: ["initialize", "read"],
-  security: ["authenticate", "authorize"],
-  work: ["subscribe", "snapshot", "createTask", "assignTask", "saveAgent", "saveAutomation", "updateSettings", "startRun", "cancelRun", "decideApproval", "readArtifact"],
+  security: ["authenticate", "authorize", "authorizeWorkspace"],
+  work: ["listWorkspaces", "createWorkspace", "updateWorkspace", "workspace", "children", "tree", "breadcrumb", "agentWorkspace", "retireAgent",
+    "subscribe", "snapshot", "createTask", "assignTask", "saveAgent", "saveAutomation", "updateSettings", "startRun", "cancelRun", "decideApproval", "readArtifact"],
   runtime: ["start", "cancel", "decide", "schedule"],
   provider: ["list", "configure"], computer: ["inspect", "start", "stop"], diagnostics: ["snapshot", "record"],
+  twin: ["message", "conversation", "applyProposal", "dismissProposal"],
 };
 export interface HostOptions { port?: number; allowedOrigins?: readonly string[]; eventCapacity?: number }
 export interface RunningHost {
@@ -33,7 +36,7 @@ export interface RunningHost {
   close(): Promise<void>;
 }
 export async function createHost(services: HostServices, options: HostOptions = {}): Promise<RunningHost> {
-  for (const name of serviceNames) {
+  for (const name of [...serviceNames, "twin"] as const) {
     for (const method of ["check", ...required[name]]) {
       if (typeof (services?.[name] as unknown as Record<string, unknown>)?.[method] !== "function") {
         throw new Error(`Required composition port is missing: ${name}.${method}`);
@@ -61,8 +64,9 @@ export async function createHost(services: HostServices, options: HostOptions = 
     const authorization = request.headers.authorization;
     if (!authorization?.startsWith("Bearer ") || authorization.length > 263 ||
         request.rawHeaders.filter((header, index) => index % 2 === 0 && header.toLowerCase() === "authorization").length !== 1) return null;
-    const parsed = principalSchema.safeParse(await services.security.authenticate(authorization.slice(7)));
-    return parsed.success ? parsed.data : null;
+    const identity = await services.security.authenticate(authorization.slice(7));
+    const parsed = principalSchema.safeParse(identity);
+    return parsed.success ? identity : null;
   };
   const reply = (response: ServerResponse, code: number, body: unknown) => {
     if (!response.writableEnded && !response.destroyed) {
@@ -153,7 +157,7 @@ export async function createHost(services: HostServices, options: HostOptions = 
     let chain = Promise.resolve();
     let pending = 0;
     let alive = true;
-    const subscriptions = new Map<string, () => void>();
+    const subscriptions = new Map<string, { remove: () => void; workspaceId: string }>();
     const send = (data: unknown) => {
       if (client.readyState !== WebSocket.OPEN) return;
       const json = JSON.stringify(data);
@@ -172,7 +176,9 @@ export async function createHost(services: HostServices, options: HostOptions = 
       async subscribe(input: z.infer<typeof eventReadSchema>, context) {
         if (subscriptions.size >= 16) throw new HostError(-32009, "Subscription limit reached.");
         const subscriptionId = randomUUID();
-        const page = journal.read(context.principal, input.scope, input.cursor, input.limit);
+        if (typeof context.workspaceId !== "string") throw new HostError(-32003, "A business event scope is required.");
+        const workspaceId = context.workspaceId;
+        const page = journal.read(context.principal, input.scope, input.cursor, input.limit, workspaceId);
         let cursor = page.cursor;
         let updating = false;
         let dirty = false;
@@ -187,12 +193,13 @@ export async function createHost(services: HostServices, options: HostOptions = 
             const identity = await currentIdentity();
             if (!identity) return;
             for (const permission of ["events:read", `${input.scope.area}:read`] as const) {
-              if (!await services.security.authorize(identity, permission)) { client.close(1008, "Permission revoked."); return; }
+              if (!await services.security.authorize(identity, permission)
+                || !await services.security.authorizeWorkspace(identity, workspaceId, permission)) { client.close(1008, "Permission revoked."); return; }
             }
             if (!subscriptions.has(subscriptionId)) return;
             let next;
             do {
-              next = journal.read(identity, input.scope, cursor, 200);
+              next = journal.read(identity, input.scope, cursor, 200, workspaceId);
               cursor = next.cursor;
               if (next.events.length) send({ jsonrpc: "2.0", method: "events.changed", params: { subscriptionId, ...next } });
             } while (next.events.length === 200);
@@ -202,15 +209,16 @@ export async function createHost(services: HostServices, options: HostOptions = 
             if (dirty && subscriptions.has(subscriptionId) && client.readyState === WebSocket.OPEN) pump();
           });
         };
-        const remove = journal.listen(original.workspaceId, pump);
-        subscriptions.set(subscriptionId, remove);
+        const remove = journal.listen(workspaceId, pump);
+        subscriptions.set(subscriptionId, { remove, workspaceId });
         // Finish replay even when the initial page is truncated and no new event arrives.
         setImmediate(pump);
         return { subscriptionId, ...page };
       },
-      unsubscribe(id) {
-        const remove = subscriptions.get(id);
-        remove?.();
+      unsubscribe(id, context) {
+        const subscription = subscriptions.get(id);
+        if (subscription && subscription.workspaceId !== context.workspaceId) throw new HostError(-32003, "This subscription belongs to another workspace.");
+        subscription?.remove();
         return { removed: subscriptions.delete(id) };
       },
     };
@@ -236,7 +244,7 @@ export async function createHost(services: HostServices, options: HostOptions = 
     client.on("error", () => client.terminate());
     client.on("close", () => {
       clearInterval(heartbeat);
-      for (const remove of subscriptions.values()) remove();
+      for (const subscription of subscriptions.values()) subscription.remove();
       subscriptions.clear();
     });
   }
@@ -282,7 +290,7 @@ export async function createHost(services: HostServices, options: HostOptions = 
           server.closeIdleConnections();
         });
         const closed = new Set<object>();
-        for (const name of ["runtime", "computer", "provider", "work", "diagnostics", "security", "storage"] as const) {
+        for (const name of ["twin", "runtime", "computer", "provider", "work", "diagnostics", "security", "storage"] as const) {
           if (!closed.has(services[name])) { closed.add(services[name]); await services[name].close?.(); }
         }
       })();

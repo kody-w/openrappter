@@ -1,50 +1,62 @@
 import { z } from "zod";
-// This is the pure DTO module, never the host composition or its Node dependencies.
 import {
-  agentInputSchema, agentSchema, approvalDecisionSchema, approvalSchema, artifactSchema,
-  automationInputSchema, automationSchema, computerSchema, diagnosticsSchema, emptySchema,
-  entityParamsSchema, eventPageSchema, eventReadSchema, idSchema, providerConfigSchema,
-  providerSchema, runSchema, settingsSchema, snapshotSchema, statusSchema, taskInputSchema,
-  taskSchema,
-} from "../../host/src/contracts.js";
+  agentDraftSchema, agentSchema, approvalSchema, artifactSchema, automationSchema, computerSchema, diagnosticsSchema,
+  eventPageSchema, idSchema, providerSchema, rpcParameterSchemas, runSchema, scopeSchema, settingsSchema, snapshotSchema, statusSchema,
+  taskSchema, twinApplyResultSchema, twinConversationSchema, twinDraftSchema, workspaceListSchema,
+  workspaceOpenSchema, workspaceSummarySchema,
+  workspaceChildrenSchema, workspaceTreeSchema, workspaceBreadcrumbSchema,
+} from "@rapp-work/host/contracts";
 
-export {
-  agentInputSchema, agentSchema, approvalSchema, artifactSchema, automationInputSchema,
-  automationSchema, cadenceSchema, checkSchema, computerSchema, diagnosticsSchema,
-  areaSchema, eventSchema, providerSchema, runSchema, scopeSchema, serviceNames,
-  settingsSchema, snapshotSchema, statusSchema, taskInputSchema, taskSchema,
-} from "../../host/src/contracts.js";
-export type {
-  Agent, AgentInput, Approval, Artifact, Automation, AutomationInput, Computer, Diagnostics,
-  Area, EventScope, Provider, Run, Settings, Snapshot, Status, Task, TaskInput,
-} from "../../host/src/contracts.js";
+export * from "@rapp-work/host/contracts";
 
+export const clientScopeSchema = scopeSchema.extend({ workspaceId: idSchema });
+export type EventScope = z.infer<typeof clientScopeSchema>;
+export type TwinTarget = NonNullable<z.infer<typeof rpcParameterSchemas["twin.message"]>["target"]>;
+export type AgentDraft = z.infer<typeof agentDraftSchema>;
+export const MAX_TWIN_REQUEST_BYTES = 256 * 1024;
+export const MAX_TWIN_HISTORY_BYTES = 48 * 1024;
+export const settingsReviewSchema = settingsSchema.extend({
+  computerPolicy: z.enum(["none", "read-only", "control"]).optional(),
+  parentAccess: z.enum(["inspect", "none"]).optional(),
+});
+export type SettingsReview = z.infer<typeof settingsReviewSchema>;
+const contract = <M extends keyof typeof rpcParameterSchemas, O extends z.ZodType>(method: M, output: O) => ({
+  input: rpcParameterSchemas[method], output,
+});
 export const rpcContracts = {
-  "system.status": { input: emptySchema, output: statusSchema },
-  "work.snapshot": { input: emptySchema, output: snapshotSchema },
-  "work.createTask": { input: taskInputSchema, output: taskSchema },
-  "work.assignTask": { input: z.strictObject({ id: idSchema, agentId: idSchema }), output: taskSchema },
-  "agents.save": { input: agentInputSchema, output: agentSchema },
-  "runs.start": { input: entityParamsSchema, output: runSchema },
-  "runs.cancel": { input: entityParamsSchema, output: runSchema },
-  "approvals.decide": { input: approvalDecisionSchema, output: approvalSchema },
-  "artifacts.read": {
-    input: entityParamsSchema,
-    output: z.strictObject({ artifact: artifactSchema, content: z.string().max(1_000_000) }),
-  },
-  "automations.save": { input: automationInputSchema, output: automationSchema },
-  "settings.update": { input: settingsSchema, output: settingsSchema },
-  "providers.list": { input: emptySchema, output: z.array(providerSchema).max(100) },
-  "providers.configure": { input: providerConfigSchema, output: providerSchema },
-  "computer.inspect": { input: emptySchema, output: computerSchema },
-  "computer.start": { input: emptySchema, output: computerSchema },
-  "computer.stop": { input: emptySchema, output: computerSchema },
-  "diagnostics.get": { input: emptySchema, output: diagnosticsSchema },
-  "events.read": { input: eventReadSchema, output: eventPageSchema },
-  "events.subscribe": { input: eventReadSchema, output: eventPageSchema.extend({ subscriptionId: z.uuid() }) },
-  "events.unsubscribe": {
-    input: z.strictObject({ subscriptionId: z.uuid() }), output: z.strictObject({ removed: z.boolean() }),
-  },
+  "system.status": contract("system.status", statusSchema),
+  "workspaces.list": contract("workspaces.list", workspaceListSchema),
+  "workspaces.create": contract("workspaces.create", workspaceSummarySchema),
+  "workspaces.open": contract("workspaces.open", workspaceOpenSchema),
+  "workspaces.update": contract("workspaces.update", workspaceSummarySchema),
+  "workspaces.children": contract("workspaces.children", workspaceChildrenSchema),
+  "workspaces.tree": contract("workspaces.tree", workspaceTreeSchema),
+  "workspaces.breadcrumb": contract("workspaces.breadcrumb", workspaceBreadcrumbSchema),
+  "work.snapshot": contract("work.snapshot", snapshotSchema),
+  "work.createTask": contract("work.createTask", taskSchema),
+  "work.assignTask": contract("work.assignTask", taskSchema),
+  "agents.save": contract("agents.save", agentSchema),
+  "agents.openWorkspace": contract("agents.openWorkspace", workspaceSummarySchema),
+  "agents.retire": contract("agents.retire", agentSchema),
+  "runs.start": contract("runs.start", runSchema),
+  "runs.cancel": contract("runs.cancel", runSchema),
+  "approvals.decide": contract("approvals.decide", approvalSchema),
+  "artifacts.read": contract("artifacts.read", z.strictObject({ artifact: artifactSchema, content: z.string().max(1_000_000) })),
+  "automations.save": contract("automations.save", automationSchema),
+  "settings.update": contract("settings.update", settingsSchema),
+  "providers.list": contract("providers.list", providerSchema.array().max(100)),
+  "providers.configure": contract("providers.configure", providerSchema),
+  "computer.inspect": contract("computer.inspect", computerSchema),
+  "computer.start": contract("computer.start", computerSchema),
+  "computer.stop": contract("computer.stop", computerSchema),
+  "diagnostics.get": contract("diagnostics.get", diagnosticsSchema),
+  "events.read": contract("events.read", eventPageSchema),
+  "events.subscribe": contract("events.subscribe", eventPageSchema.extend({ subscriptionId: z.uuid() })),
+  "events.unsubscribe": contract("events.unsubscribe", z.strictObject({ removed: z.boolean() })),
+  "twin.message": contract("twin.message", twinDraftSchema),
+  "twin.conversation": contract("twin.conversation", twinConversationSchema),
+  "twin.applyProposal": contract("twin.applyProposal", twinApplyResultSchema),
+  "twin.dismissProposal": contract("twin.dismissProposal", twinConversationSchema),
 } as const;
 export type RpcMethod = keyof typeof rpcContracts;
 export type RpcInput<M extends RpcMethod> = z.input<(typeof rpcContracts)[M]["input"]>;

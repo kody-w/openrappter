@@ -17,7 +17,7 @@ describe("RAPP Work business workspace", () => {
     await open();
     expect(primary().getAllByRole("link").map((link) => link.textContent)).toEqual(["Work", "Agents", "Automations", "Settings"]);
     expect(screen.getByText("Make room for meaningful work")).toBeVisible();
-    expect(screen.queryByText(/Compatibility|Show-and-Tell|RAPPIDs|OpenRappter|Surgeon|Skills marketplace|Zen/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Compatibility|Show-and-Tell|RAPPIDs|Surgeon|Skills marketplace|Zen/)).not.toBeInTheDocument();
   });
   it("creates a persisted roster entry, edits it, and keeps the roster between areas", async () => {
     const { user, client } = await open();

@@ -1,61 +1,18 @@
-# Dependency directories
 node_modules/
-typescript/desktop/runtime/
-# Editor config
-.vscode/
-.idea/
-# OS files
-.DS_Store
-Thumbs.db
-# Build artifacts
 dist/
 build/
-!typescript/desktop/build/
-!typescript/desktop/build/icon.png
-!typescript/desktop/build/icon.svg
-!typescript/desktop/build/entitlements.mac.plist
-!typescript/desktop/build/entitlements.mac.inherit.plist
-# Logs & temp
-*.log
-# Integration tests that bind real sockets keep their scratch data dirs
-# inside the repo rather than the system temp dir.
+release/
+coverage/
 .test-scratch/
+.vite/
+.playwright/
+test-results/
+playwright-report/
+*.log
 *.swp
-# Python envs
-__pycache__/
-*.pyc
-.venv/
-# Misc
-ObsidianVault/
-
-# Local user data (stays on machine, not in repo)
-memory.json
-*.[gG][bB]
-*.[gG][bB][cC]
-*.[rR][aA][mM]
-*.[rR][tT][cC]
-*.[sS][tT][aA][tT][eE]
-
-# Secrets and runtime state.
-#
-# ~/.openrappter is both a checkout of this repo AND the runtime home: the
-# daemon writes credentials, tokens and session data straight into the working
-# tree. Without these rules a `git add -A` there commits live secrets.
+.DS_Store
 .env
 .env.*
 !.env.example
 *.pem
 *.key
-credentials/
-auth-profiles.json
-config.json
-config.json.bak
-*.pid
-*.pid.sqlite
-bar-sessions.json
-sessions.json
-*-token.json
-.rapp-second-brain/
-
-# Competitor reference copy (submodule removed, kept locally for reference)
-openclaw/

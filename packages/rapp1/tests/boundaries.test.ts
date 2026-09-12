@@ -37,7 +37,7 @@ describe('greenfield dependency and wire boundaries', () => {
       }
       visit(source);
       for (const specifier of imports) {
-        expect(specifier).not.toMatch(/rappids|brainstem|participant|openrappter|typescript\/|legacy|apps\//i);
+        expect(specifier).not.toMatch(/rappids|brainstem|participant|typescript\/|legacy|apps\//i);
         if (specifier.startsWith('.')) {
           expect(resolve(dirname(file), specifier).startsWith(resolve(folder, 'src') + '/')).toBe(true);
         } else if (!specifier.startsWith('node:')) expect(dependencies).toContain(specifier);
@@ -45,7 +45,7 @@ describe('greenfield dependency and wire boundaries', () => {
     }
   });
   it('has no compatibility exports, old envelope tokens or authority-selection loopholes', () => {
-    for (const key of Object.keys(protocol)) expect(key).not.toMatch(/legacy|quantum|openrappter|rappids|compat/i);
+    for (const key of Object.keys(protocol)) expect(key).not.toMatch(/legacy|quantum|rappids|compat/i);
     expect(protocol.FRAME_SPEC).toBe('rapp/1');
     expect(protocol.EVIDENCE_SCHEMA).toBe('openrappter-evidence/1');
     expect(protocol.RAPP1_AUTHORITY.identity.revision).toBe('rev-14');

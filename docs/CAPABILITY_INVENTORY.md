@@ -66,7 +66,7 @@ The following are removed rather than hidden behind compatibility navigation:
 - Showcase tournaments, evolution, cloning, power prompts, and demo runners
 - Zen, Pong, Dojo, terminal entertainment, breathing, and experimental tabs
 - arbitrary production RPC console and generic filesystem agent editor
-- ClawHub, RappterHub, OpenClaw compatibility, and public skill marketplaces
+- third-party legacy hub compatibility and public skill marketplaces
 - Python runtime, NanoRappter, dual-runtime parity, PyPI release, and Python CLI
 - Docker/Compose deployment, Windows installer, Linux AppImage, iOS app, Swift
   menu bar app, and separate native release channels

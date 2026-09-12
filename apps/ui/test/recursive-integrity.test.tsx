@@ -20,6 +20,21 @@ async function say(user: ReturnType<typeof userEvent.setup>, message: string) {
 const childAgents = () => within(screen.getByRole("region", { name: "Child agents" }));
 
 describe("one recursive conversation-first shell", () => {
+  it("refuses a child response that changes the agent's mint-once workspace identity", async () => {
+    const client = new FixtureClient();
+    const original = client.bridge.request;
+    client.bridge.request = async (request) => {
+      if (request.method !== "agents.openWorkspace") return original(request);
+      const child = client.host.state.catalog.workspaces.find((workspace) => workspace.ownerAgentId === "finance-lead")!;
+      return { ...child, id: "wrong-child", catalogScope: { ...child.catalogScope, workspaceId: "wrong-child" },
+        lineage: ["finance", "wrong-child"] };
+    };
+    const { user } = await open(client);
+    await user.click(childAgents().getByRole("button", { name: "Open Operations analyst's workspace" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("mint-once workspace identity changed");
+    expect(screen.getByRole("heading", { name: "Finance studio Twin", level: 1 })).toBeVisible();
+    expect(screen.getByRole("main")).toHaveAttribute("data-workspace-id", "finance");
+  });
   it("opens agent-owned children, creates a nested child atomically, and navigates authoritative breadcrumbs", async () => {
     const { user, client } = await open();
     await user.click(childAgents().getByRole("button", { name: "Open Operations analyst's workspace" }));

@@ -59,6 +59,7 @@ export function App({ client }: { client: WorkClient }) {
     const generation = ++navigationGeneration.current;
     try {
       const child = await client.call("agents.openWorkspace", { workspaceId: parentId, id: agent.id });
+      if (child.id !== agent.workspaceId) throw new Error("The agent's mint-once workspace identity changed. Refresh before navigating.");
       if (currentSelection.current !== parentId || navigationGeneration.current !== generation) return;
       const result = await catalog.refresh();
       if (currentSelection.current !== parentId || navigationGeneration.current !== generation) return;

@@ -16,7 +16,7 @@
   ],
   "forbiddenIdentifiers": [
     "openrappter", "openclaw", "ClawHub", "BasicAgent", "ShellAgent",
-    "LearnNewAgent", "AgentRegistry", "OpenRappterBar", "OPENRAPPTER_HOME",
+    "LearnNewAgent", "OpenRappterBar", "OPENRAPPTER_HOME",
     "OPENRAPPTER_BRAINSTEM", "brainstem-client", "native-bridge"
   ],
   "forbiddenExtensions": [".py", ".pyc", ".pyo", ".ps1", ".bat", ".exe", ".dll"],

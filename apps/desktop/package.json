@@ -2,6 +2,7 @@
   "name": "@rapp-work/desktop",
   "version": "2.0.0",
   "private": true,
+  "author": "Wildhaven Homes LLC",
   "type": "module",
   "description": "RAPP Work for macOS Apple silicon.",
   "main": "dist/main.js",
@@ -21,11 +22,11 @@
     "@playwright/test": "^1.58.2",
     "@types/node": "^22.19.0",
     "@types/ws": "^8.18.1",
-    "electron": "^39.8.0",
-    "electron-builder": "^26.8.0",
-    "esbuild": "^0.27.3",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.2"
+    "electron": "39.8.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.27.3",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
   },
   "build": {
     "appId": "com.rapp.work",

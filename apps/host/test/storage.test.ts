@@ -27,7 +27,7 @@ describe("durable local composition", () => {
     host = await createHost(services);
     const context = { principal: (await services.security.authenticate(token))!, requestId: "test", workspaceId: null as string | null };
     expect((await services.work.listWorkspaces(context)).workspaces).toEqual([]);
-    expect(() => services.work.snapshot(context)).toThrow("Select an authorized business workspace.");
+    await expect(services.work.snapshot(context)).rejects.toThrow("Select an authorized business workspace.");
     expect((await services.runtime.check()).state).toBe("ready");
     expect(await services.computer.inspect(context)).toMatchObject({ state: "unavailable", verified: false, evidenceIds: [] });
     const business = await services.work.createWorkspace(context, {

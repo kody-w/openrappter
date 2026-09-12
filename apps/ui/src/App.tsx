@@ -4,8 +4,8 @@ import { Agents, agentAvailability } from "./Agents";
 import { Automations } from "./Automations";
 import { Avatar, Empty, Icon, Modal, type IconName } from "./components";
 import { ComputerPanel } from "./ComputerPanel";
-import { ApprovalForm, ExistingReview, ProposalReview } from "./forms";
-import type { Agent, Approval, Area, Artifact, Automation, TwinDraft, TwinMessageRequest } from "./model";
+import { ApprovalForm, ProposalReview } from "./forms";
+import type { Approval, Area, Artifact, TwinDraft, TwinMessageRequest } from "./model";
 import { Settings } from "./Settings";
 import { TwinConversation, type IntentSeed } from "./TwinConversation";
 import { useWorkspace } from "./useWorkspace";
@@ -18,8 +18,6 @@ const areas: { id: Area; label: string; icon: IconName }[] = [
 ];
 type Editor =
   | { kind: "proposal"; workspaceId: string | null; proposal: TwinDraft }
-  | { kind: "agent"; workspaceId: string; existing: Agent }
-  | { kind: "automation"; workspaceId: string; existing: Automation }
   | { kind: "approval"; workspaceId: string; approval: Approval; recommendation?: string };
 const currentArea = (): Area => areas.find((area) => `#${area.id}` === window.location.hash)?.id ?? "work";
 export function App({ client }: { client: WorkClient }) {
@@ -81,7 +79,7 @@ export function App({ client }: { client: WorkClient }) {
     if (pendingDocument) setSeed((previous) => ({ id: (previous?.id ?? 0) + 1, workspaceId: id, target: "agent", message: pendingDocument }));
   };
   const review = (proposal: TwinDraft) => {
-    if (proposal.workspaceId !== selectedId) return;
+    if (proposal.workspaceId !== selectedId || proposal.basis?.verification?.state !== "verified") return;
     if (proposal.kind === "approval") {
       const approval = snapshot?.approvals.find((item) => item.id === proposal.draft.approvalId && item.operationHash === proposal.draft.operationHash);
       if (approval && selectedId) setEditor({ kind: "approval", workspaceId: selectedId, approval, recommendation: proposal.draft.reason });
@@ -183,9 +181,9 @@ export function App({ client }: { client: WorkClient }) {
             openArtifact={(item) => { void openArtifact(item); }} openAgent={(agent) => { void state.openAgentWorkspace(agent); }} />}
           {area === "agents" && <Agents snapshot={{ ...snapshot, agents: directAgents }} providers={providers} connected={connected && !archived} create={() => intent("agent")}
             open={(agent) => { void state.openAgentWorkspace(agent); }}
-            edit={(existing) => setEditor({ kind: "agent", workspaceId: snapshot.workspaceId, existing })} />}
+            edit={(existing) => intent("agent", `Revise agent "${existing.name}" (${existing.id}). Preserve its verified existing instructions using instructionsRef unless I request changes. My requested change: `)} />}
           {area === "automations" && <Automations snapshot={snapshot} connected={connected} create={() => intent("automation")}
-            edit={(existing) => setEditor({ kind: "automation", workspaceId: snapshot.workspaceId, existing })} />}
+            edit={(existing) => intent("automation", `Revise this existing routine with a complete verified proposal. Current values:\n${JSON.stringify(existing)}\nMy requested change: `)} />}
           {area === "settings" && <Settings snapshot={snapshot} status={status} providers={providers} computer={computer} diagnostics={diagnostics}
             connected={connected} busy={busy} perform={perform} refresh={refresh} discuss={() => intent("settings")} />}
         </section>}
@@ -197,8 +195,6 @@ export function App({ client }: { client: WorkClient }) {
       discuss={() => intent("settings", "Review the computer access policy for this workspace and keep explicit approvals.")} />
     {editor?.workspaceId === selectedId && editor.kind === "proposal" && <ProposalReview proposal={editor.proposal} workspace={workspace} snapshot={snapshot}
       busy={busy} error={error} onClose={() => setEditor(null)} apply={state.applyProposal} />}
-    {editor?.workspaceId === selectedId && (editor.kind === "agent" || editor.kind === "automation") && snapshot &&
-      <ExistingReview key={editor.existing.id} kind={editor.kind} existing={editor.existing} snapshot={snapshot} busy={busy} error={error} onClose={() => setEditor(null)} perform={perform} />}
     {editor?.workspaceId === selectedId && editor.kind === "approval" && <ApprovalForm approval={editor.approval} recommendation={editor.recommendation}
       perform={perform} busy={busy} error={error} onClose={() => setEditor(null)} />}
     {artifact?.workspaceId === selectedId && <Modal title={artifact.item.name} onClose={() => setArtifact(null)} busy={artifactLoading}>

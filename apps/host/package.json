@@ -7,7 +7,7 @@
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "scripts": {
     "build": "npm run build:services && tsc -p tsconfig.build.json && esbuild src/entry.ts --bundle --platform=node --target=node22 --format=cjs --external:koffi --external:@github/copilot-sdk-* --outfile=dist/host.cjs",
-    "build:services": "tsc -b ../../packages/workspace-store ../../packages/agent-runtime ../../packages/computer-broker ../../packages/diagnostics",
+    "build:services": "tsc -b ../../packages/workspace-store ../../packages/agent-runtime ../../packages/computer-broker ../../packages/diagnostics ../../packages/domain",
     "typecheck": "npm run build:services && tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run",
@@ -16,6 +16,7 @@
   "engines": { "node": ">=22.12.0" },
   "dependencies": {
     "@rapp-work/rapp1": "2.0.0",
+    "@rapp-work/domain": "2.0.0",
     "@rapp-work/workspace-store": "2.0.0",
     "@rapp-work/security": "2.0.0",
     "@rapp-work/work-service": "2.0.0",

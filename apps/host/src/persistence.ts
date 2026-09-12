@@ -23,6 +23,8 @@ import {
   type WorkSnapshot,
 } from "@rapp-work/work-service";
 import { HostError } from "./errors.js";
+import { LifecycleStore } from "./lifecycle-store.js";
+import { LIFECYCLE_RECEIPT, type SourceReference } from "@rapp-work/domain";
 import {
   idSchema, MAX_WORKSPACE_AGENTS, MAX_WORKSPACE_DEPTH, MAX_WORKSPACES,
   workspaceOrganizationSchema, workspaceSummarySchema, type Area, type WorkEvent, type WorkspaceSummary,
@@ -78,6 +80,13 @@ export class LocalPersistence {
   private readonly capabilityActors = new WeakMap<object, Principal>();
   private readonly scopedDelegations = new WeakMap<object, Principal>();
   private readonly generations = new Map<string, number>();
+  private readonly observedHeads = new Map<string, WorkspaceHeads>();
+  private readonly scans = new Map<string, WorkspaceSnapshot>();
+  private readonly lifecycle: LifecycleStore;
+  private readonly projected = new Map<string, WorkSnapshot>();
+  private service!: WorkServicePort;
+  private readonly lineageReads = new Map<string, Promise<WorkSnapshot>>();
+  private readonly storageHandles = new Map<string, { renewAt: number; workspace: Promise<AgentWorkspace> }>();
   private readonly permits = new WeakMap<object, EffectPermit>();
   private readonly listeners = new Set<(workspaceId: string, event: WorkEvent) => void>();
   private initialized?: Promise<void>;
@@ -100,6 +109,15 @@ export class LocalPersistence {
         requiresApproval: operation.operation === "guest.shell" || operation.params.approvalRequired === true,
       }),
     });
+    this.lifecycle = new LifecycleStore({
+      workspace: async (capability, scope) => {
+        this.assert(capability, scope, "workspace.read");
+        this.assert(capability, scope, "workspace.append");
+        return this.storageWorkspace(scope);
+      },
+      digest, observe: (snapshot) => this.observe(snapshot), utc: (snapshot) => this.utc(snapshot),
+      isConcierge: (scope) => scope.workspaceId === this.identity.catalog.workspaceId && scope.agentId === this.identity.catalog.agentId,
+    });
     const service = new WorkService({
       canonical: {
         digest,
@@ -108,7 +126,7 @@ export class LocalPersistence {
             || raw.identity.workspace_id !== scope.workspaceId || raw.identity.principal_id !== this.identity.id) {
             throw new Error("A committed, owner-bound filesystem scan is required.");
           }
-          this.generations.set(scope.workspaceId, raw.generation);
+          this.observe(raw);
           return {
             scope, heads: headHashes(raw.heads),
             frames: (["body", "memory", "swarm"] as const).flatMap((stream) =>
@@ -119,11 +137,14 @@ export class LocalPersistence {
       history: {
         withExclusive: async (capability, scope, action) => {
           this.assert(capability, scope, "workspace.read");
-          const workspace = await this.store.open(capability as Capability);
-          return workspace.withExclusive(async (transaction) => action({
-            readCommitted: () => transaction.scan(),
+          const workspace = await this.storageWorkspace(scope);
+          return workspace.withExclusive(async (transaction) => {
+            let current: WorkspaceSnapshot | undefined;
+            return action({
+            readCommitted: async () => current ??= await transaction.scan(),
             append: async (events, expectedHeads) => {
-              const before = await transaction.scan();
+              this.assert(capability, scope, "workspace.append");
+              const before = current ??= await transaction.scan();
               if (canonicalJson(headHashes(before.heads)) !== canonicalJson(expectedHeads)) throw new Error("Stale committed heads.");
               let head = before.heads.body;
               const frames: RappFrame[] = [];
@@ -134,9 +155,10 @@ export class LocalPersistence {
                 });
                 frames.push(frame); head = frameHead(frame);
               }
-              await transaction.compareAndAppend({ expectedHeads: before.heads, frames });
+              current = await transaction.compareAndAppend({ expectedHeads: before.heads, frames });
             },
-          }));
+          });
+          });
         },
       },
       authorization: {
@@ -159,24 +181,39 @@ export class LocalPersistence {
         },
         issuePermit: async (capability, request) => {
           this.assert(capability, request.command.scope, "workspace.append");
-          const scanned = await (await this.store.open(capability as Capability)).scan();
+          const scanned = await (await this.storageWorkspace(request.command.scope)).scan();
           const intent = scanned.streams.body.frames.find((frame) => frame.frame_hash === request.intentRef);
           if (!intent || intent.payload.type !== "work.intent" || intent.payload.commandHash !== request.commandHash
             || digest(intent.payload.command) !== digest(request.command)
             || scanned.streams.body.frames.some((frame) => frame.payload.type === "work.outcome"
               && frame.payload.intentRef === request.intentRef)) throw new Error("No unspent canonical write-ahead intent.");
+          await this.lifecycle.recordIntent(capability, request);
           const permit = Object.freeze(Object.create(null)) as object;
           this.permits.set(permit, {
             capability: capability as Capability, context: request, entered: false, guestConsumed: false,
           });
           return permit;
         },
+        recordOutcome: (capability, request, outcome) => this.lifecycle.recordOutcome(capability, request, outcome),
       },
     });
+    this.service = service;
     this.work = {
-      read: service.read.bind(service), project: service.project.bind(service),
+      read: async (capability, scope) => {
+        this.assert(capability, scope, "workspace.read");
+        const snapshot = this.published.has(scope.workspaceId)
+          ? await this.verifyLineage(scope.workspaceId) : await this.readSources(capability, scope);
+        this.assert(capability, scope, "workspace.read");
+        return structuredClone(snapshot);
+      },
+      project: async (capability, scope, reducer) => {
+        const snapshot = await this.work.read(capability, scope);
+        const commands = snapshot.commands.filter((command) => command.state === "committed");
+        return { value: commands.reduce((value, command) => reducer.apply(value, command), reducer.initial()),
+          heads: snapshot.heads, proofs: commands.map((command) => command.proof) };
+      },
       commit: async (capability, command, effect, options) => {
-        const result = await service.commit(capability, command, async (context) => {
+        const rawResult = await service.commit(capability, command, async (context) => {
           const permit = this.permits.get(context.permit);
           if (!permit || permit.entered || permit.capability !== capability
             || permit.context.intentRef !== context.intentRef || permit.context.commandHash !== context.commandHash) {
@@ -186,6 +223,11 @@ export class LocalPersistence {
           permit.entered = true;
           return effect(context);
         }, options);
+        const result = rawResult.state === "committed" ? (() => {
+          const scanned = this.scans.get(this.scanKey(command.scope.workspaceId, rawResult.proof.heads));
+          if (!scanned) throw new Error("The command has no matching source/evidence scan.");
+          return { ...this.lifecycle.project(rawResult, scanned), replayed: rawResult.replayed };
+        })() : rawResult;
         if (result.state === "committed" && !result.replayed) {
           if (result.status === "succeeded") for (const event of result.events) {
             if (event.type === "workspace.saved" && this.metadata.has(command.scope.workspaceId)) {
@@ -203,9 +245,98 @@ export class LocalPersistence {
             if (scope) this.changed("work", this.entity(command), scope);
           }
         }
-        return result;
+        return structuredClone(result);
       },
     };
+  }
+
+  private scanKey(workspaceId: string, heads: Heads): string { return `${workspaceId}/${digest(heads)}`; }
+  private async storageWorkspace(scope: WorkspaceScope): Promise<AgentWorkspace> {
+    const known = this.storageHandles.get(scope.workspaceId);
+    if (known && known.renewAt > Date.now()) return known.workspace;
+    const workspace = this.capability(scope).then((capability) => this.store.open(capability));
+    this.storageHandles.set(scope.workspaceId, { renewAt: Date.now() + 1_800_000, workspace });
+    void workspace.catch(() => { if (this.storageHandles.get(scope.workspaceId)?.workspace === workspace) this.storageHandles.delete(scope.workspaceId); });
+    return workspace;
+  }
+  private async readSources(capability: object, scope: WorkspaceScope): Promise<WorkSnapshot> {
+    const snapshot = await this.service.read(capability, scope);
+    const key = this.scanKey(scope.workspaceId, snapshot.heads), cached = this.projected.get(key);
+    if (cached) return structuredClone(cached);
+    const raw = this.scans.get(key);
+    if (!raw) throw new Error("A matching committed source scan is required for projections.");
+    const mapped: WorkSnapshot = { ...snapshot, commands: snapshot.commands.map((command) =>
+      command.state === "committed" ? this.lifecycle.project(command, raw) : command) };
+    this.projected.set(key, mapped);
+    if (this.projected.size > 64) this.projected.delete(this.projected.keys().next().value!);
+    return structuredClone(mapped);
+  }
+  verifyLineage(workspaceId: string): Promise<WorkSnapshot> {
+    const existing = this.lineageReads.get(workspaceId);
+    if (existing) return existing;
+    const operation = (async () => {
+      const hint = this.workspaceInfo(workspaceId);
+      let parent: WorkspaceSummary | null = null;
+      let history = await this.readSources(await this.capability(this.identity.catalog), this.identity.catalog);
+      for (const id of hint.lineage) {
+        const publication = history.commands.find((command) => command.state === "committed" && command.status === "succeeded"
+          && command.events.some((event) => event.type === "catalog.workspace" && (event.workspace as JsonObject)?.id === id));
+        if (!publication || publication.state !== "committed") throw new Error("The exact workspace lineage has no canonical parent publication.");
+        const event = publication.events.find((event) => event.type === "catalog.workspace" && (event.workspace as JsonObject)?.id === id)!;
+        const birth = workspaceSummarySchema.parse(event.workspace);
+        if (birth.parentWorkspaceId !== (parent?.id ?? null) || digest(birth.lineage) !== digest([...(parent?.lineage ?? []), id])) {
+          throw new Error("Foreign or cyclic workspace lineage.");
+        }
+        this.registerWorkspace(birth, false);
+        const child = await this.readSources(await this.capability(birth.catalogScope), birth.catalogScope);
+        const bootstrap = child.commands.find((command) => command.state === "committed" && command.status === "succeeded"
+          && command.command.operation === "host.workspace.bootstrap" && publication.receipts.some((receipt) =>
+            receipt.kind === "canonical-commit" && receipt.workspaceId === birth.id && receipt.evidenceRef === command.proof.evidenceRef
+            && receipt.outcomeRef === command.proof.outcomeRef && receipt.intentRef === command.proof.intentRef));
+        if (!bootstrap || bootstrap.state !== "committed" || !bootstrap.events.some((event) =>
+          event.type === "workspace.saved" && digest(event.workspace) === digest(birth))) {
+          throw new Error("Workspace lineage is not linked to its exact verified creation source.");
+        }
+        for (const command of child.commands) {
+          if (command.state !== "committed" || command.status !== "succeeded") continue;
+          for (const event of command.events) {
+            if (event.type === "workspace.saved") this.registerWorkspace(workspaceSummarySchema.parse(event.workspace));
+            if (event.type === "workspace.evolved") {
+              const current = this.metadata.get(id)!;
+              this.metadata.set(id, { ...current, organization: workspaceOrganizationSchema.parse(event.organization), updatedAt: String(event.at) });
+            }
+          }
+        }
+        parent = this.metadata.get(id)!; history = child;
+      }
+      return history;
+    })();
+    this.lineageReads.set(workspaceId, operation);
+    void operation.finally(() => { if (this.lineageReads.get(workspaceId) === operation) this.lineageReads.delete(workspaceId); }).catch(() => {});
+    return operation;
+  }
+  private observe(snapshot: WorkspaceSnapshot): void {
+    if (!isWorkspaceSnapshot(snapshot)) throw new Error("Only committed branded scans may update trusted heads.");
+    const id = snapshot.identity.workspace_id, previous = this.observedHeads.get(id);
+    if (snapshot.generation < (this.generations.get(id) ?? 0)) throw new Error("Committed workspace generation rolled back.");
+    if (previous) for (const stream of ["body", "memory", "swarm"] as const) {
+      const head = previous[stream];
+      if (head && snapshot.streams[stream].frames[head.seq]?.frame_hash !== head.frame_hash) {
+        throw new Error("A trusted workspace head was rolled back or forked.");
+      }
+    }
+    this.observedHeads.set(id, snapshot.heads); this.generations.set(id, snapshot.generation);
+    const key = this.scanKey(id, headHashes(snapshot.heads));
+    this.scans.set(key, snapshot);
+    if (this.scans.size > 64) this.scans.delete(this.scans.keys().next().value!);
+  }
+  sourceReference(command: CommittedCommand, ordinal: number): SourceReference { return this.lifecycle.source(command, ordinal); }
+  commandFrameHashes(command: CommittedCommand): string[] { return this.lifecycle.commandFrames(command); }
+  clearProjectionCaches(): void { this.projected.clear(); }
+  async rebuildFromFrames(): Promise<void> {
+    this.projected.clear(); this.metadata.clear(); this.businesses.clear(); this.published.clear(); this.parents.clear(); this.scopes.clear();
+    this.register(this.identity.catalog); this.register(this.identity.computer);
+    await this.refreshCatalog();
   }
 
   get owner(): LocalOwner {
@@ -297,6 +428,7 @@ export class LocalPersistence {
         this.registerWorkspace(child.birth, false);
       }
       for (const receipt of bootstrap.receipts) {
+        if (receipt.kind === LIFECYCLE_RECEIPT) continue;
         if (receipt.kind !== "canonical-commit") throw new Error("Bootstrap effects require canonical workspace proofs.");
         const scope = receipt.workspaceId === birth.id ? birth.catalogScope : children.get(String(receipt.workspaceId))?.birth.catalogScope;
         if (!scope || !linked(await read(scope), receipt)) {
@@ -487,13 +619,15 @@ export class LocalPersistence {
   }
   async scopedCapability(principal: Principal, workspaceId: string, permission: HostPermission): Promise<Capability> {
     if (!this.canAccess(principal, workspaceId, permission)) throw new HostError(-32003, "The exact workspace lineage is not authorized.");
+    await this.verifyLineage(workspaceId);
+    if (!this.canAccess(principal, workspaceId, permission)) throw new HostError(-32003, "The workspace lineage permission changed.");
     const scope = this.businessScope(workspaceId);
     const readOnly = permission.endsWith(":read");
     const permissions: Permission[] = readOnly ? ["workspace.read", "artifact.read"]
       : ["workspace.read", "workspace.append", "workspace.create", "agent.manage", "task.manage", "run.execute", "artifact.read", "artifact.write"];
     const capability = await this.security.authorize(this.principal, {
       ...scope, taskId: null, permissions, expiresAt: Date.now() + 300_000,
-      resources: [`agent:${scope.agentId}`, ...this.workspaceInfo(workspaceId).lineage.map((id) => `workspace:${id}`)],
+      resources: [...new Set([`agent:${scope.agentId}`, ...this.workspaceInfo(workspaceId).lineage.map((id) => `workspace:${id}`)])].sort(),
     });
     this.scopedDelegations.set(capability, principal);
     this.capabilityActors.set(capability, principal);

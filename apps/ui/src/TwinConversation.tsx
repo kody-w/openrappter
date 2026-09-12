@@ -38,6 +38,7 @@ export function TwinConversation({ workspaceId, name, conversation, connected, b
       {conversation?.turns.map((turn) => {
         const proposal = turn.proposalId ? proposals.get(turn.proposalId) : undefined;
         const status = proposal ? stateOf(proposal.id) : undefined;
+        const verification = !connected ? "unavailable" : proposal?.basis?.verification?.state ?? "unverified";
         return <article className={`conversation-turn ${turn.role}`} key={turn.id}>
           <div className="row between"><strong>{turn.role === "user" ? "You" : name}</strong><time dateTime={turn.createdAt}>{formatDate(turn.createdAt)}</time></div>
           <div className={`turn-content preserve${turn.content.length > 4000 ? " long-document" : ""}`} tabIndex={turn.content.length > 4000 ? 0 : undefined}>{turn.content}</div>
@@ -49,10 +50,12 @@ export function TwinConversation({ workspaceId, name, conversation, connected, b
             <div className="row between"><Badge>{proposal.kind === "clarification" ? "Necessary follow-up" : proposal.kind === "approval" ? "Recommendation only" : "Complete draft"}</Badge>
               {status && <Badge tone={status === "accept" ? "positive" : "neutral"}>{status === "accept" ? "Applied" : "Dismissed"}</Badge>}</div>
             <p>{proposal.summary}</p>
+            <p className="small-text">{verification === "verified" ? "Verified local integrity — not factual truth, authorship or promotion-grade trust."
+              : verification === "unavailable" ? "Verification unavailable. Reconnect and scan the proposal before review." : "Unverified proposal. A canonical source/evidence scan is required."}</p>
             {proposal.basis?.instructionDocument && <p className="small-text">Full instruction document preserved verbatim.</p>}
             {proposal.kind === "clarification" ? <p className="small-text">Still needed: {proposal.missing.join(", ")}</p> :
               !status && <div className="row wrap">
-                <button className="button primary" disabled={!connected || busy} onClick={() => review(proposal)}>
+                <button className="button primary" disabled={!connected || busy || verification !== "verified"} onClick={() => review(proposal)}>
                   {proposal.kind === "approval" ? "Review approval decision" : "Review complete draft"}<Icon name="arrow" size={16} />
                 </button><button className="text-button" disabled={!connected || busy} onClick={() => dismiss(proposal)}>Dismiss draft</button>
               </div>}

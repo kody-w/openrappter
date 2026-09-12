@@ -460,6 +460,19 @@ export const twinHeadsSchema = z.strictObject({
   memory: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   swarm: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
 });
+export const localIntegritySchema = z.strictObject({
+  classification: z.literal("integrity-only"),
+  factualTruth: z.literal(false), authorship: z.literal(false), promotionGrade: z.literal(false),
+});
+export const frameVerificationSchema = z.discriminatedUnion("state", [
+  z.strictObject({
+    state: z.literal("verified"), sourceFrameHash: z.string().regex(/^[a-f0-9]{64}$/),
+    evidenceFrameHash: z.string().regex(/^[a-f0-9]{64}$/), publicationFrameHash: z.string().regex(/^[a-f0-9]{64}$/),
+    workspaceId: idSchema.nullable(), sourceWorkspaceId: idSchema, heads: twinHeadsSchema, trust: localIntegritySchema,
+  }),
+  z.strictObject({ state: z.literal("unverified"), detail: z.string().max(512) }),
+  z.strictObject({ state: z.literal("unavailable"), detail: z.string().max(512) }),
+]);
 export const twinBasisSchema = z.strictObject({
   schema: z.literal("rapp-work/twin-basis/1"),
   ownerId: idSchema,
@@ -471,6 +484,7 @@ export const twinBasisSchema = z.strictObject({
   instructionDocument: z.strictObject({
     turnId: z.uuid(), contentHash: z.string().regex(/^[a-f0-9]{64}$/),
   }).optional(),
+  verification: frameVerificationSchema.optional(),
 });
 const twinEnvelopeFields = {
   id: z.uuid(), workspaceId: idSchema.nullable(), createdAt: dateSchema, basis: twinBasisSchema.nullable(),
@@ -487,11 +501,18 @@ export const twinDraftSchema = z.discriminatedUnion("kind", [
 export const twinTurnSchema = z.strictObject({
   id: z.uuid(), workspaceId: idSchema.nullable(), role: z.enum(["user", "assistant"]),
   content: instructionTextSchema, proposalId: z.uuid().nullable(), createdAt: dateSchema,
+  verification: frameVerificationSchema.optional(),
 });
 export const twinEventSchema = z.strictObject({
   id: z.uuid(), workspaceId: idSchema.nullable(), proposalId: z.uuid().nullable(),
   kind: z.enum(["proposal", "accept", "dismiss", "error", "evolution"]), actorId: idSchema,
   detail: z.string().max(2000), createdAt: dateSchema,
+  references: z.strictObject({
+    conversationFrameHash: z.string().regex(/^[a-f0-9]{64}$/),
+    proposalFrameHash: z.string().regex(/^[a-f0-9]{64}$/),
+    proposalHash: z.string().regex(/^[a-f0-9]{64}$/),
+    evolutionFrameHash: z.string().regex(/^[a-f0-9]{64}$/),
+  }).optional(),
 });
 export const twinConversationSchema = z.strictObject({
   workspaceId: idSchema.nullable(),
@@ -540,6 +561,7 @@ export type TwinConversation = z.infer<typeof twinConversationSchema>;
 export type TwinApplyRequest = z.infer<typeof twinApplyRequestSchema>;
 export type TwinApplyResult = z.infer<typeof twinApplyResultSchema>;
 export type TwinDismissRequest = z.infer<typeof twinDismissRequestSchema>;
+export type FrameVerification = z.infer<typeof frameVerificationSchema>;
 
 const bound = <T extends z.ZodObject>(schema: T) => z.strictObject({
   ...schema.shape, ...workspaceBindingSchema.shape,

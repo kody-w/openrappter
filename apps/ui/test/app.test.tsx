@@ -71,8 +71,21 @@ describe("conversation-first three-column workspace", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     },
   );
+  it.each(["unverified", "unavailable"] as const)("never opens or applies a %s proposal", async (state) => {
+    const client = new FixtureClient(); client.status = testStatus(true);
+    const proposal = draftFor("agent", agentInput());
+    proposal.basis!.verification = { state, detail: "No verified canonical proposal source." };
+    client.propose = () => proposal;
+    const { user } = await open(client);
+    await user.type(composer(), "Prepare an agent draft.");
+    await user.click(screen.getByRole("button", { name: "Send intent" }));
+    const review = await screen.findByRole("button", { name: "Review complete draft" });
+    expect(review).toBeDisabled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(client.calls.some((call) => call.method === "twin.applyProposal")).toBe(false);
+  });
 
-  it("opens only prefilled agent drafts, applies reviewed edits, and reviews existing records without a new intake", async () => {
+  it("opens only verified prefilled drafts and routes existing-record changes back through a proposal", async () => {
     const client = new FixtureClient(); client.status = testStatus(true);
     client.propose = () => draftFor("agent", agentInput());
     const { user } = await open(client);
@@ -91,11 +104,10 @@ describe("conversation-first three-column workspace", () => {
     await user.click(screen.getByRole("button", { name: "Back to parent" }));
     await user.click(primary().getByRole("link", { name: "Agents" }));
     await user.click(screen.getByRole("button", { name: "Review agent definition" }));
-    dialog = within(screen.getByRole("dialog", { name: "Review existing agent" }));
-    expect(dialog.getByLabelText("Role")).toHaveValue("Procurement coordination");
-    await user.click(dialog.getByRole("button", { name: "Save reviewed changes" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(client.calls.find((call) => call.method === "agents.save")?.params).toMatchObject({ workspaceId: client.workspace.workspaceId });
+    await waitFor(() => expect(composer()).toHaveFocus());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect((composer() as HTMLTextAreaElement).value).toContain("Preserve its verified existing instructions");
+    expect(client.calls.some((call) => call.method === "agents.save")).toBe(false);
   });
 
   it("creates a workspace only from a complete reviewed proposal and opens its own computer context", async () => {

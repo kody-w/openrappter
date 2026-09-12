@@ -137,8 +137,13 @@ export class WorkService implements WorkServicePort {
         || !outcome.events.every(object) || outcome.value === undefined) {
         return unresolved("effect-uncertain");
       }
-      const acknowledged = outcome;
       stage = "persist";
+      const acknowledged = authorization.recordOutcome
+        ? jsonCopy(await authorization.recordOutcome(capability, { ...prepared.request, heads: prepared.current.heads, intentRef }, outcome))
+        : outcome;
+      if (acknowledged.status !== outcome.status || !Array.isArray(acknowledged.receipts) || acknowledged.receipts.length === 0
+        || !acknowledged.receipts.every(object) || !Array.isArray(acknowledged.events) || !acknowledged.events.every(object)
+        || acknowledged.value === undefined) return unresolved("persistence-uncertain");
       return await history.withExclusive(capability, command.scope, async (journal) => {
         let current = await this.scan(journal, command.scope);
         assertExtension(prepared.current, current);

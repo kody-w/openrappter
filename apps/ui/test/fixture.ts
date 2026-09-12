@@ -50,6 +50,11 @@ export function draftFor(kind: Exclude<TwinProposal["kind"], "clarification">, d
       schema: "rapp-work/twin-basis/1", ownerId: "test-owner", workspaceId, revision: 0,
       heads: [{ scope: { agentId: "test-twin", workspaceId: workspaceId ?? "test-concierge" }, heads: { body: null, memory: null, swarm: null } }],
       proposalHash: "a".repeat(64), optionsHash: "b".repeat(64),
+      verification: {
+        state: "verified", sourceFrameHash: "c".repeat(64), evidenceFrameHash: "d".repeat(64), publicationFrameHash: "e".repeat(64),
+        workspaceId, sourceWorkspaceId: workspaceId ?? "test-concierge", heads: { body: "e".repeat(64), memory: "c".repeat(64), swarm: null },
+        trust: { classification: "integrity-only", factualTruth: false, authorship: false, promotionGrade: false },
+      },
     }, createdAt: timestamp,
   });
 }

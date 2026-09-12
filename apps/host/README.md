@@ -75,6 +75,51 @@ The production storage port has no snapshot-mutation hook. All writes go through
 the canonical work service; `ProjectionStoragePort` is reserved for explicit
 injected record-store compositions and test fixtures.
 
+## Canonical RAPP/1 lifecycle authority
+
+Production state is reconstructed from occurrence-bound RAPP/1 **memory source
+frames plus body evidence**, not from JSON logs or a second conversation/tree
+store. The Work service's body intents remain the write-ahead command journal;
+its terminal values and events contain `rapp-work/result-ref/1` and
+`rapp-work/event-ref/1` references. The actual domain values live in verified
+memory sources. A reference is resolved only after the request-bound
+intent/outcome, evidence, publication and workspace scope all verify.
+
+| Lifecycle | Canonical source and evidence |
+| --- | --- |
+| User/voice-transcript/Twin turn | `memory.chat-turn` + exact `body.pulse` evidence |
+| Clarification/proposal | `memory.save` (`twin.clarified` / `twin.proposed`) + evidence |
+| Apply/edit/dismiss | Request-bound `memory.tool-call` intent and outcome + evidence |
+| Workspace create/evolve/rename/pause/archive | Typed workspace-domain `memory.save` sources + evidence |
+| Agent create/configure/retire | Agent-domain sources, linked atomically through the child's canonical bootstrap |
+| Routine draft/enable/pause/fire | Routine-domain sources and request-bound operation receipts |
+| Computer lease/start/stop/tool operation | Existing scoped broker/approval gates plus canonical intent/outcome sources and receipts |
+
+The lifecycle profile and source verifier are public APIs in
+`packages/domain/src/lifecycle.ts`; they use the canonical `@rapp-work/rapp1`
+builders, trusted-chain scanner and evidence verifier. Source/evidence pairs
+are appended with all-stream head CAS and read back before being referenced.
+Missing source persistence is unresolved and cannot be replayed as success.
+A voice transcript remains untrusted input until its user `memory.chat-turn`
+publication commits; no transcription boolean authorizes a model request.
+
+Workspace evolution contains the exact triggering user conversation source,
+its publication/evidence, the proposal's semantic hash and proposal source
+frame. Its visible receipt also references the evolution frame. Multi-workspace
+reads rescan trusted heads and parent publications before using lineage
+projections. In-process observed heads cannot roll back or change branches.
+Indexes return copies and can be discarded; `rebuildFromFrames()` reconstructs
+the tree and organization from canonical sources alone.
+
+Review DTOs carry `basis.verification` with `verified`, `unverified` or
+`unavailable` states. Only a host-verified proposal source can be applied; the
+UI cannot grant verification by supplying that field. Existing-record changes
+also return to the Twin for a complete proposal, with instruction references
+preserving existing text. **Verified means local integrity only**:
+`factualTruth`, `authorship` and `promotionGrade` are explicitly false.
+Body-only historical records are not promoted into verified state; they require
+an explicit reviewed migration.
+
 ## Conversation first
 
 ### Recursive workspace ownership
@@ -187,8 +232,9 @@ have separate bounds. Snapshot conversations return the latest 500 turns,
 250 proposals and 500 lifecycle events; older canonical history remains
 durable. A stale `contextRevision` rejects the message before recording a turn.
 
-User turns are committed before drafting. Assistant turns and proposals share
-a verified model-command outcome/evidence triple. Invalid output/unavailability
+User chat-turn sources are committed before drafting. Assistant chat turns and
+proposal save sources are linked through a verified request outcome and body
+evidence. Invalid output/unavailability
 persists an error event, not a fake assistant response. Uncertain model
 intents are never replayed after restart.
 
@@ -368,5 +414,10 @@ provider failure, strict exact-option validation, and recommendations that
 cannot consume approvals.
 Filesystem-backed tests use at most two workers so canonical fsync/read-back
 scenarios do not contend with all other heavy integration files at once.
+Canonical lifecycle tests scan nonzero source and evidence streams for every
+new lifecycle. Acceptance rebuilds the full tree, conversations, proposals,
+agents, routines and internal evolution after clearing projections and again
+after restart. Runtime limits are unchanged; integration deadlines account for
+the additional source/evidence durability checks.
 `npm run test:bundle` additionally boots the actual bundled host twice and scans
 its persisted frames. Test profiles are app-local and removed.

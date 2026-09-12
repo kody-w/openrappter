@@ -393,7 +393,8 @@ export class LocalRuntime implements RuntimePort {
                 events: [{ type: "ui.automation.saved", automation: json({
                   ...automation, enabled: Boolean(run), nextRunAt: run ? nextSchedule(automation, now).toISOString() : null,
                   updatedAt: new Date().toISOString(),
-                }) }],
+                }) }, { type: "routine.fired", id: automation.id, taskId: task.id, runId: run?.id ?? null,
+                  workspaceId, agentWorkspaceId: scope.workspaceId, scheduledAt: automation.nextRunAt }],
               };
             }, [{ kind: "task", id: taskId }]);
           if (fired.state === "unresolved") {

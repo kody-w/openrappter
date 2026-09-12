@@ -90,6 +90,10 @@ export class LocalWork implements WorkPort, StoragePort {
     const inherited = this.transaction.getStore();
     if (inherited?.active && inherited.workspaceId === lockId) return this.persistence.withActor(context.principal, action);
     const operation = (this.mutations.get(lockId) ?? Promise.resolve()).then(async () => {
+      if (!concierge) {
+        await this.persistence.verifyLineage(scope.workspaceId);
+        this.assertContext(context);
+      }
       const transaction = { workspaceId: lockId, active: true };
       try { return await this.transaction.run(transaction, () => this.persistence.withActor(context.principal, action)); }
       finally { transaction.active = false; }
@@ -105,9 +109,11 @@ export class LocalWork implements WorkPort, StoragePort {
     this.assertContext(context, permission);
     return this.exclusive(context, action);
   }
-  snapshot(context: RequestContext): Promise<Snapshot> {
+  async snapshot(context: RequestContext): Promise<Snapshot> {
     this.assertContext(context);
-    return this.read(context.workspaceId!);
+    const snapshot = await this.read(context.workspaceId!);
+    this.assertContext(context);
+    return snapshot;
   }
   async read(workspaceId: string): Promise<Snapshot> {
     const p = this.persistence;
@@ -260,6 +266,7 @@ export class LocalWork implements WorkPort, StoragePort {
   async workspaceMetadata(context: RequestContext): Promise<WorkspaceSummary> {
     const scope = this.assertContext(context);
     const history = await this.persistence.read(scope);
+    this.assertContext(context);
     let selected: WorkspaceSummary | undefined;
     for (const command of succeeded(history.commands)) for (const event of command.events) {
       if (event.type === "workspace.saved") selected = workspaceSummarySchema.parse(event.workspace);
@@ -283,14 +290,14 @@ export class LocalWork implements WorkPort, StoragePort {
       approvalPolicy: lineage.some((item) => item.approvalPolicy === "always") ? "always" : "on-risk",
     };
   }
-  private async persistAgent(scope: WorkspaceScope, agent: Agent, key: string, workspace?: WorkspaceSummary): Promise<CommittedCommand> {
+  private async persistAgent(scope: WorkspaceScope, agent: Agent, key: string, workspace?: WorkspaceSummary, change = "configured"): Promise<CommittedCommand> {
     const p = this.persistence;
     const definition = committed(await new WorkServiceAgentDefinitions(p.work).save(
       await p.capability(scope), definitionFor(agent), `definition/${key}`,
     ));
     return committed(await p.commit(scope, `agent/save/${key}`, "host.agent.definition", { agent: json(agent) }, async (): Promise<EffectOutcome> => ({
       status: "succeeded", value: json(agent), receipts: [proofReceipt(definition)],
-      events: [{ type: "ui.agent.saved", agent: json(agent) }, ...(workspace ? [{ type: "workspace.saved", workspace: json(workspace) }] : [])],
+      events: [{ type: "ui.agent.saved", change, agent: json(agent) }, ...(workspace ? [{ type: "workspace.saved", workspace: json(workspace) }] : [])],
     })));
   }
   private async persistTask(scope: WorkspaceScope, input: Parameters<WorkPort["createTask"]>[1], key: string, agent?: Agent): Promise<CommittedCommand> {
@@ -324,7 +331,7 @@ export class LocalWork implements WorkPort, StoragePort {
     await this.persistence.mintWorkspace(workspace);
     const proof = committed(await this.persistence.commit(agentScope(agent), `workspace/bootstrap/${key}`, "host.workspace.bootstrap",
       { parentWorkspaceId: parent.id, agent: json(agent) }, async (): Promise<EffectOutcome> => {
-        const saved = await this.persistAgent(agentScope(agent), agent, key);
+        const saved = await this.persistAgent(agentScope(agent), agent, key, undefined, "created");
         return {
           status: "succeeded", value: json(workspace), receipts: [proofReceipt(saved)],
           events: [
@@ -427,7 +434,7 @@ export class LocalWork implements WorkPort, StoragePort {
         "host.workspace.update", input, async (): Promise<EffectOutcome> => ({
           status: "succeeded", value: json(workspace), receipts: [{ kind: "workspace-updated" }],
           events: [
-            { type: "workspace.saved", workspace: json(workspace) },
+            { type: "workspace.saved", change: current.name !== workspace.name ? "renamed" : "updated", workspace: json(workspace) },
             { type: "twin.identity.saved", identity: json(input.twin), parentWorkspaceId: workspace.id },
             { type: "ui.settings.saved", settings: json({
               ...snapshot.settings, workspaceName: workspace.name,
@@ -581,7 +588,7 @@ export class LocalWork implements WorkPort, StoragePort {
           status: "succeeded", value: json(settings), receipts: [{ kind: "settings-updated" }],
           events: [
             { type: "ui.settings.saved", settings: json(settings) },
-            { type: "workspace.saved", workspace: json({ ...workspace, name: settings.workspaceName,
+            { type: "workspace.saved", change: workspace.name !== settings.workspaceName ? "renamed" : "updated", workspace: json({ ...workspace, name: settings.workspaceName,
               approvalPolicy: settings.work.approvalPolicy, updatedAt: new Date().toISOString() }) },
           ],
         }))).value);
@@ -659,7 +666,7 @@ export class LocalWork implements WorkPort, StoragePort {
           const saved = committed(await this.persistence.commit(agentScope(agent), `automation/save/${intentRef}`,
             "host.automation.save", input, async (): Promise<EffectOutcome> => ({
               status: "succeeded", value: json(automation), receipts: [{ kind: "schedule-configured" }],
-              events: [{ type: "ui.automation.saved", automation: json(automation) },
+              events: [{ type: "ui.automation.saved", change: !input.enabled && snapshot.automations.some((item) => item.id === input.id && item.enabled) ? "paused" : "saved", automation: json(automation) },
                 { type: "catalog.automation", id: automation.id, scope: json(agentScope(agent)), parentWorkspaceId: agent.workspaceId }],
             })));
           return { status: "succeeded", value: saved.value, receipts: [proofReceipt(saved)],

@@ -59,10 +59,17 @@ authorized catalog before use.
 New workspace, agent, task, routine and settings actions focus the Twin's
 single intent/document composer. They never open a blank create form.
 `ProposalReview` refuses to render a form without a complete, hash-bound,
-workspace-matching proposal. Existing-record reviews require the full record
-and membership in the selected snapshot. Settings are initially read-only;
+workspace-matching **verified proposal frame**. Existing-record changes return
+to conversation and a new verified proposal; instruction references retain
+existing text without re-entry. Settings are initially read-only;
 the Twin proposes changes and the review merges them with complete current
 values.
+
+Proposal cards distinguish verified local integrity from unverified and
+unavailable verification. Unverified/unavailable drafts cannot open a mutable
+review or be applied. Verification is not factual truth, authorship or
+promotion-grade trust. The host independently rescans the proposal/evidence
+and current heads; renderer booleans and copied hashes cannot confer authority.
 
 Pasted Markdown documents are retained verbatim, including locked evidence
 phrases and line endings. Oversized input stays visible with an explicit

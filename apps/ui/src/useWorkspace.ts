@@ -147,7 +147,7 @@ export function useWorkspace(client: WorkClient) {
     }), "The Twin has responded. Internal organization may evolve; external work still requires review.");
   }, [client, conversation, run, selectedId]);
   const applyProposal = useCallback(async (draft: TwinDraft, editedDraft?: Record<string, unknown>) => {
-    if (selection.current !== draft.workspaceId || !draft.basis || !draft.readyForReview) return false;
+    if (selection.current !== draft.workspaceId || draft.basis?.verification?.state !== "verified" || !draft.readyForReview) return false;
     const result = await run("twin.applyProposal", () => client.call("twin.applyProposal", {
       workspaceId: draft.workspaceId, id: draft.id, proposalHash: draft.basis!.proposalHash,
       ...(editedDraft ? { editedDraft } : {}),

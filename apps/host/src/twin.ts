@@ -10,6 +10,7 @@ import {
   type AgentInput, type Computer, type Provider, type Snapshot, type TwinApplyRequest, type TwinApplyResult,
   type TwinBasis, type TwinConversation, type TwinDismissRequest, type TwinDraft, type TwinEvent,
   type TwinMessageRequest, type TwinProposal, type TwinTurn, type WorkspaceSummary,
+  type FrameVerification,
 } from "./contracts.js";
 import type { ComputerPort, Permission, ProviderPort, RequestContext, RuntimePort, SecurityPort, TwinPort } from "./ports.js";
 import { HostError, conflict, notFound } from "./errors.js";
@@ -39,6 +40,7 @@ const SYSTEM = [
   "The current owning agent's definition is managed in its parent. Never act as a parent or sibling, and do not propose an expansion beyond inherited capabilities.",
   "You may include an evolution object to organize INTERNAL workspace content: Twin summary, task/notes/routine sections, disabled routine suggestions, and default focus.",
   "Internal evolution is applied from this conversation without a form. It cannot change providers, tools, approvals, computer actions, enabled schedules or external effects. Use only supplied task/agent IDs.",
+  "When revising an existing agent, you may copy its supplied instructionsRef into instructions to retain its complete verified instructions without asking the human to re-enter them.",
 ].join("\n");
 const modelSchema = JSON.parse(JSON.stringify(z.toJSONSchema(twinModelResponseSchema, { io: "input" }))) as JsonObject;
 const ranks = { none: 0, "read-only": 1, control: 2 };
@@ -63,7 +65,7 @@ interface Options {
   ownerAgent: Snapshot["agents"][number] | null;
   limits: { maxDepth: number; depth: number; remainingDepth: number; remainingAgents: number };
   catalog: { id: string; name: string; purpose: string }[];
-  agents: Pick<Snapshot["agents"][number], "id" | "name" | "role" | "enabled" | "providerId" | "model" | "computerPolicy" | "approvalPolicy">[];
+  agents: (Pick<Snapshot["agents"][number], "id" | "name" | "role" | "enabled" | "providerId" | "model" | "computerPolicy" | "approvalPolicy"> & { instructionsRef: string })[];
   tasks: Pick<Snapshot["tasks"][number], "id" | "title" | "agentId" | "state">[];
   approvals: Pick<Snapshot["approvals"][number], "id" | "operationHash" | "state" | "expiresAt" | "risk" | "reason">[];
   routines: Pick<Snapshot["automations"][number], "id" | "agentId" | "enabled">[];
@@ -77,7 +79,7 @@ interface Options {
     toolsByComputerPolicy: Record<AgentInput["computerPolicy"], string[]>;
   };
 }
-interface Capture { revision: number; heads: TwinBasis["heads"]; options: Options }
+interface Capture { revision: number; heads: TwinBasis["heads"]; options: Options; agentInputs: Snapshot["agents"] }
 function optionsHash(options: Options): string {
   if (!options.workspace) return digest(options);
   const { organization: _organization, revision: _revision, updatedAt: _updatedAt, ...workspace } = options.workspace;
@@ -85,7 +87,7 @@ function optionsHash(options: Options): string {
 }
 function proposalHash(draft: TwinDraft): string {
   if (!draft.basis) throw new HostError(-32009, "The proposal has no canonical basis.");
-  const { proposalHash: _hash, ...basis } = draft.basis;
+  const { proposalHash: _hash, verification: _verification, ...basis } = draft.basis;
   return digest({ ...draft, basis });
 }
 function modelFailure(error: unknown): { code: number; detail: string } | null {
@@ -146,9 +148,9 @@ export class LocalTwin implements TwinPort {
     const turns: TwinTurn[] = [], proposals: TwinDraft[] = [], events: TwinEvent[] = [];
     for (const command of history.commands) {
       if (command.state !== "committed") continue;
-      for (const event of command.events) {
-        if (event.type === "twin.turn") turns.push(twinTurnSchema.parse(event.turn));
-        if (event.type === "twin.proposal") proposals.push(twinDraftSchema.parse(event.proposal));
+      for (const [index, event] of command.events.entries()) {
+        if (event.type === "twin.turn") turns.push({ ...twinTurnSchema.parse(event.turn), verification: this.verification(command, index, context.workspaceId!) });
+        if (event.type === "twin.proposal") proposals.push(this.projectDraft(command));
         if (event.type === "twin.event") events.push(twinEventSchema.parse(event.event));
       }
     }
@@ -156,9 +158,26 @@ export class LocalTwin implements TwinPort {
       throw new Error("Twin history crosses workspace ownership.");
     }
     const revision = context.workspaceId === null ? this.persistence.revision(scope) : (await this.work.snapshot(context)).revision;
+    this.work.contextScope(context);
     return twinConversationSchema.parse({
       workspaceId: context.workspaceId, revision, turns: turns.slice(-500), proposals: proposals.slice(-250), events: events.slice(-500),
     });
+  }
+  private verification(command: CommittedCommand, index: number, workspaceId: string | null): FrameVerification {
+    const source = this.persistence.sourceReference(command, index);
+    return {
+      state: "verified", sourceFrameHash: source.source_frame_hash, evidenceFrameHash: source.evidence_frame_hash,
+      publicationFrameHash: command.proof.evidenceRef, workspaceId, sourceWorkspaceId: command.command.scope.workspaceId,
+      heads: command.proof.heads,
+      trust: { classification: "integrity-only", factualTruth: false, authorship: false, promotionGrade: false },
+    };
+  }
+  private projectDraft(command: CommittedCommand): TwinDraft {
+    const index = command.events.findIndex((event) => event.type === "twin.proposal");
+    if (index < 0) throw new HostError(-32012, "No verified canonical proposal source is available.");
+    const draft = twinDraftSchema.parse(command.events[index]!.proposal);
+    if (!draft.basis) throw new HostError(-32012, "The canonical proposal has no review basis.");
+    return { ...draft, basis: { ...draft.basis, verification: this.verification(command, index, draft.workspaceId) } };
   }
   private async capture(context: RequestContext): Promise<Capture> {
     const p = this.persistence, scope = this.work.contextScope(context);
@@ -187,7 +206,7 @@ export class LocalTwin implements TwinPort {
       && provider.modelOptions?.some((option) => option.model === TWIN_MODEL.model && option.reasoningEfforts.includes("max"))
         ? [{ providerId: provider.id, model: TWIN_MODEL.model }] : []);
     return {
-      revision: snapshot?.revision ?? p.revision(scope), heads,
+      revision: snapshot?.revision ?? p.revision(scope), heads, agentInputs: snapshot?.agents ?? [],
       options: {
         workspace: workspace ? { ...workspace, revision: 0 } : null,
         lineage: lineage.map(({ id, name, ownerType, ownerAgentId, status, computerPolicy, approvalPolicy }) =>
@@ -198,7 +217,7 @@ export class LocalTwin implements TwinPort {
           remainingAgents: workspace ? MAX_WORKSPACE_AGENTS - p.childrenOf(workspace.id).length : MAX_WORKSPACE_AGENTS },
         catalog: catalog?.workspaces.slice(0, 100).map(({ id, name, purpose }) => ({ id, name, purpose: purpose.slice(0, 240) })) ?? [],
         agents: snapshot?.agents.slice(0, 200).map(({ id, name, role, enabled, providerId, model, computerPolicy, approvalPolicy }) =>
-          ({ id, name, role, enabled, providerId, model, computerPolicy, approvalPolicy })) ?? [],
+          ({ id, name, role, enabled, providerId, model, computerPolicy, approvalPolicy, instructionsRef: `rapp-work:agent-instructions/${id}` })) ?? [],
         tasks: snapshot?.tasks.slice(-100).map(({ id, title, agentId, state }) => ({ id, title, agentId, state })) ?? [],
         approvals: snapshot?.approvals.filter((item) => item.state === "pending").slice(-100)
           .map(({ id, operationHash, state, expiresAt, risk, reason }) => ({ id, operationHash, state, expiresAt, risk, reason })) ?? [],
@@ -288,7 +307,7 @@ export class LocalTwin implements TwinPort {
       const failure = result.value as { code: number; detail: string };
       throw new HostError(failure.code, failure.detail);
     }
-    return twinDraftSchema.parse(committed(result).value);
+    return this.projectDraft(committed(result));
   }
   async message(context: RequestContext, raw: TwinMessageRequest): Promise<TwinDraft> {
     const parsed = twinMessageRequestSchema.safeParse(raw);
@@ -318,10 +337,11 @@ export class LocalTwin implements TwinPort {
           proposalId: null, createdAt: new Date().toISOString(),
         };
         const document = selectInstructionDocument(input.message, userTurn.id, prior.turns, prior.proposals.at(-1)?.kind === "clarification");
-        committed(await p.commit(scope, commandKey("twin/user", context), "twin.user", input, async () => ({
+        const userCommand = committed(await p.commit(scope, commandKey("twin/user", context), "twin.user", input, async () => ({
           status: "succeeded", value: json(userTurn), receipts: [{ kind: "human-message", actorId: context.principal.id }],
           events: [{ type: "twin.turn", turn: json(userTurn) }],
         })));
+        const userSource = p.sourceReference(userCommand, userCommand.events.findIndex((event) => event.type === "twin.turn"));
         const captured = await this.capture(context);
         const result = await p.commit(scope, key, "twin.message", input, async (): Promise<EffectOutcome> => {
           try {
@@ -349,6 +369,12 @@ export class LocalTwin implements TwinPort {
               parse: (value) => {
                 const { evolution, ...raw } = twinModelResponseSchema.parse(value);
                 const parsed = twinProposalSchema.parse(raw);
+                if (parsed.kind === "agent") {
+                  const existing = captured.agentInputs.find((agent) => agent.id === parsed.draft.id);
+                  if (existing && parsed.draft.instructions === `rapp-work:agent-instructions/${existing.id}`) {
+                    parsed.draft.instructions = existing.instructions;
+                  }
+                }
                 const proposal = document ? bindInstructionDocument(parsed, document) : parsed;
                 this.validate(proposal, captured.options, ids, input.target, context.principal.kind === "agent");
                 if (evolution) this.validateEvolution(evolution, captured.options, ids);
@@ -374,7 +400,9 @@ export class LocalTwin implements TwinPort {
                 { type: "twin.event", event: json(this.event(context, id, "proposal", proposal.summary)) },
                 ...(evolution ? [
                   { type: "workspace.evolved", workspaceId: input.workspaceId, organization: json(evolution),
-                    proposalId: id, actorId: context.principal.id, at: draft.createdAt },
+                    proposalId: id, actorId: context.principal.id, at: draft.createdAt, triggerTurnId: userTurn.id,
+                    conversationFrameHash: userSource.source_frame_hash, conversationEvidenceHash: userSource.evidence_frame_hash,
+                    conversationPublicationHash: userCommand.proof.evidenceRef, proposalHash: draft.basis!.proposalHash },
                   { type: "twin.event", event: json(this.event(context, id, "evolution", "Workspace evolved from this conversation")) },
                 ] : []),
               ],
@@ -403,7 +431,7 @@ export class LocalTwin implements TwinPort {
       && entry.command.operation === "twin.message" && entry.events.some((event) =>
         event.type === "twin.proposal" && (event.proposal as { id?: string } | null)?.id === id));
     if (!command || command.state !== "committed") return notFound();
-    const draft = twinDraftSchema.parse(command.value);
+    const draft = this.projectDraft(command);
     this.assertBinding(context, draft.workspaceId);
     if (!draft.basis || draft.basis.ownerId !== this.persistence.owner.id || draft.basis.workspaceId !== context.workspaceId
       || draft.basis.proposalHash !== hash || proposalHash(draft) !== hash) {
@@ -418,8 +446,7 @@ export class LocalTwin implements TwinPort {
     }
     for (const current of captured.heads) {
       const previous = draft.basis.heads.find((item) => digest(item.scope) === digest(current.scope));
-      const expected = current.scope.workspaceId === source.command.scope.workspaceId
-        ? { body: source.proof.heads.body, memory: previous?.heads.memory ?? null, swarm: previous?.heads.swarm ?? null } : previous?.heads;
+      const expected = current.scope.workspaceId === source.command.scope.workspaceId ? source.proof.heads : previous?.heads;
       if (!previous || !expected || digest(current.heads) !== digest(expected)) {
         throw new HostError(-32015, "The proposal is stale against current canonical workspace heads.");
       }
@@ -429,9 +456,9 @@ export class LocalTwin implements TwinPort {
     const frames = scan.streams.body.frames;
     const before = basis.heads.body === null ? -1 : frames.findIndex((frame) => frame.frame_hash === basis.heads.body);
     const after = frames.findIndex((frame) => frame.frame_hash === source.proof.evidenceRef);
+    const allowed = new Set(this.persistence.commandFrameHashes(source));
     if ((basis.heads.body !== null && before < 0) || after <= before
-      || digest(frames.slice(before + 1, after + 1).map((frame) => frame.frame_hash))
-        !== digest([source.proof.intentRef, source.proof.outcomeRef, source.proof.evidenceRef])) {
+      || frames.slice(before + 1, after + 1).some((frame) => !allowed.has(frame.frame_hash))) {
       throw new HostError(-32015, "Canonical context changed while the model was drafting. Request a refreshed proposal.");
     }
     return captured;
@@ -442,6 +469,7 @@ export class LocalTwin implements TwinPort {
     await this.authorize(context, [...readPermissions, "work:write"]);
     return this.work.exclusive(context, async () => {
       const { scope, history, command, draft } = await this.find(context, input.id, input.proposalHash);
+      if (draft.basis?.verification?.state !== "verified") throw new HostError(-32012, "Unverified proposals cannot be applied.");
       if (!draft.readyForReview) conflict("Answer the Twin's necessary follow-up before review.");
       if (draft.kind === "approval") conflict("This is a recommendation only. Use approvals.decide for an explicit human decision.");
       if (draft.kind === "clarification" || draft.kind === "approval") throw new Error("Unreachable proposal kind.");
@@ -541,7 +569,8 @@ export class LocalTwin implements TwinPort {
         });
         return {
           status: "succeeded", value: json(value), receipts: [proofReceipt(command), proofReceipt(receipt), ...extraReceipts],
-          events: [{ type: "twin.event", event: json(this.event(context, draft.id, "accept", "The human accepted this reviewed draft.")) }],
+          events: [{ type: "twin.event", edited: digest(proposal.draft) !== digest(draft.draft),
+            event: json(this.event(context, draft.id, "accept", "The human accepted this reviewed draft.")) }],
         };
       }, [], undefined, command.proof.heads);
       return twinApplyResultSchema.parse(committed(applied).value);

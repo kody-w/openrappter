@@ -93,10 +93,20 @@ User/assistant turns, proposals, acceptances and dismissals are canonical
 Work commands in the owning catalog. Global creation conversations remain in
 the concierge. A model output is untrusted until its discriminant, complete
 draft and every availability-dependent choice pass validation.
+Their authority is the mapped RAPP/1 memory source and linked body evidence,
+not a body log containing a parallel JSON copy. User/Twin turns use
+`memory.chat-turn`; proposals and domain transitions use `memory.save`;
+request-bound apply/dismiss/edit and operation intents/outcomes use
+`memory.tool-call`. Work outcomes contain source references. Source scans,
+publication proofs and exact lineage are required before projection.
 Optional internal evolution can update only a bounded Twin summary, sections,
 disabled routine suggestions and default focus. Its canonical receipt belongs
 to the same conversation and workspace. External effects, active schedules,
 provider/tool expansion, approval decisions and computer actions remain gated.
+Evolution also binds the exact triggering chat source/publication and proposal
+frame/semantic hashes. Review sheets require a verified proposal projection;
+verification means integrity-only with factual truth, authorship and
+promotion-grade trust explicitly false.
 
 Review binds a proposal hash to canonical heads and verified option inventory.
 Acceptance reauthorizes the target action and calls the same Work APIs as an

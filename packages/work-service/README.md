@@ -14,7 +14,9 @@ There is no default store, authority implementation, or permissive adapter.
 4. compares optional expected heads under the same lock, then durably appends
    a body intent with head CAS, reads it back, and scans it;
 5. releases the short storage lock, obtains an intent-bound permit and invokes the effect once;
-6. reacquires the lock, verifies extension of the intent's basis, and appends an
+6. lets an optional `recordOutcome` adapter durably record canonical domain
+   sources and replace values/events with references, then reacquires the
+   lock, verifies extension of the intent's basis, and appends an
    acknowledged terminal outcome and hash-linked receipt evidence;
 7. reads back/scans every append before returning a committed proof.
 
@@ -27,6 +29,10 @@ commands can commit approval/cancellation evidence meanwhile. A competing retry
 sees the durable pending intent and cannot execute the effect a second time.
 The service does not interpret an index, a log, or a caller's verification flag
 as evidence. It independently checks work-event linkage and receipt digests.
+`recordOutcome` cannot change the acknowledged terminal status. If source
+persistence fails or an adapter tries to promote a failed outcome, the command
+remains unresolved and is not replayed. The production host uses this seam for
+RAPP/1 memory chat/save/tool-call sources and exact linked evidence.
 An `expectedHeads` mismatch throws `stale_heads` before any new intent/effect.
 Already committed identical commands still replay their original proof after
 authorization; a stale review cannot execute a second time. Callers reviewing

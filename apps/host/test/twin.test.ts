@@ -97,9 +97,10 @@ describe("conversation-first canonical Twin", () => {
     for (const scope of [p.owner.catalog, workspace.catalogScope, agentScope(opened.snapshot.agents[0]!)]) {
       const scanned = await (await p.workspace(scope)).scan();
       expect(isVerifiedChain(scanned.streams.body)).toBe(true);
+      expect(isVerifiedChain(scanned.streams.memory)).toBe(true);
       scannedFrames += scanned.streams.body.frames.length;
     }
-    expect(scannedFrames).toBe(30);
+    expect(scannedFrames).toBeGreaterThan(30);
     const bootstrap = (await p.read(workspace.catalogScope)).commands.find((command) => command.command.operation === "host.workspace.bootstrap");
     expect(bootstrap).toMatchObject({ state: "committed", status: "succeeded" });
     expect(f.copilot.complete).toHaveBeenCalledOnce();

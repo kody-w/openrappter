@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Badge, Field, FormFooter, Modal } from "./components";
 import {
-  agentInputSchema, agentSchema, automationInputSchema, automationSchema, twinDraftSchema, twinProposalSchema,
+  twinDraftSchema, twinProposalSchema,
   type Approval, type Snapshot, type TwinDraft, type WorkspaceSummary,
 } from "./model";
 import type { Perform } from "./useWorkspace";
@@ -110,10 +110,10 @@ export function ProposalReview({ proposal, workspace, snapshot, busy, error, onC
   apply: (proposal: TwinDraft, editedDraft?: Record<string, unknown>) => Promise<boolean>;
 }) {
   const parsed = twinDraftSchema.safeParse(proposal);
-  if (!parsed.success || !parsed.data.readyForReview || !parsed.data.basis || parsed.data.kind === "approval"
+  if (!parsed.success || !parsed.data.readyForReview || parsed.data.basis?.verification?.state !== "verified" || parsed.data.kind === "approval"
     || parsed.data.workspaceId !== (workspace?.id ?? null)
     || (parsed.data.kind !== "workspace" && (!snapshot || snapshot.workspaceId !== workspace?.id))) {
-    return <p role="alert">A complete, workspace-bound proposal is required before a creation review can open.</p>;
+    return <p role="alert">A complete, verified, workspace-bound proposal frame is required before a review can open.</p>;
   }
   const reviewed = parsed.data;
   const kind = reviewed.kind;
@@ -124,7 +124,7 @@ export function ProposalReview({ proposal, workspace, snapshot, busy, error, onC
       work: { ...settings.work, ...patch.work }, notifications: { ...settings.notifications, ...patch.notifications } };
   }
   return <Modal title={`Review ${kind === "automation" ? "routine" : kind} draft`} onClose={onClose} busy={busy}>
-    <div className="review-summary"><Badge>Ready for review</Badge><p>{reviewed.summary}</p>
+    <div className="review-summary"><Badge>Verified local integrity</Badge><p>{reviewed.summary}</p>
       <p className="small-text muted">Model confidence: {Math.round(reviewed.confidence * 100)}%. The host rechecks hashes, current heads, and verified options before applying.</p></div>
     <ReviewFields key={reviewed.id} kind={kind} initial={initial} document={Boolean(reviewed.basis!.instructionDocument)}
       busy={busy} error={error} onClose={onClose} label="Approve draft" submit={async (draft) => {
@@ -135,28 +135,6 @@ export function ProposalReview({ proposal, workspace, snapshot, busy, error, onC
         if (!valid.success) throw new Error("The review must retain a complete draft. Ask the Twin to revise it.");
         return apply(reviewed, draft);
       }} />
-  </Modal>;
-}
-export function ExistingReview({ kind, existing, snapshot, busy, error, onClose, perform }: {
-  kind: "agent" | "automation"; existing: unknown; snapshot: Snapshot; busy: boolean; error: string;
-  onClose: () => void; perform: Perform;
-}) {
-  const [parentRevision] = useState(snapshot.revision);
-  const parsed = kind === "agent" ? agentSchema.safeParse(existing) : automationSchema.safeParse(existing);
-  const records = kind === "agent" ? snapshot.agents : snapshot.automations;
-  if (!parsed.success || !records.some((item) => item.id === parsed.data.id && item.workspaceId === parsed.data.workspaceId)) {
-    return <p role="alert">A complete existing record in this workspace is required for review.</p>;
-  }
-  const { workspaceId: _workspaceId, updatedAt: _updatedAt, ...rest } = parsed.data;
-  const initial = { ...rest } as Record<string, unknown>;
-  delete initial.nextRunAt;
-  delete initial.originWorkspaceId;
-  delete initial.retiredAt;
-  return <Modal title={`Review existing ${kind === "automation" ? "routine" : "agent"}`} onClose={onClose} busy={busy}>
-    <ReviewFields kind={kind} initial={initial} document={false} busy={busy} error={error} onClose={onClose}
-      label="Save reviewed changes" submit={async (value) => kind === "agent"
-        ? perform("agents.save", { ...agentInputSchema.parse(value), parentRevision }, "Existing agent updated.")
-        : perform("automations.save", automationInputSchema.parse(value), "Existing routine updated.")} />
   </Modal>;
 }
 export function ApprovalForm({ approval, perform, busy, error, onClose, recommendation }: {

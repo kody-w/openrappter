@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.import-plan/v1",
+  "title": "RAPP Work inert review-only migration plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "mode", "authoritative", "requiresAuthorization", "target", "items", "sourceDisposition"],
+  "properties": {
+    "schema": { "const": "rapp-work.import-plan/v1" },
+    "mode": { "const": "review-only" },
+    "authoritative": { "const": false },
+    "requiresAuthorization": { "const": true },
+    "sourceDisposition": { "const": "leave-unchanged" },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId", "workspaceId"],
+      "properties": {
+        "agentId": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$" },
+        "workspaceId": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$" }
+      }
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["recordId", "targetPath", "content", "sha256", "proposedEvent"],
+        "properties": {
+          "recordId": { "type": "string", "maxLength": 512 },
+          "targetPath": { "type": "string", "pattern": "^imports/[a-f0-9]{64}-[a-f0-9]{64}-(0|[1-9][0-9]*)\\.json$" },
+          "content": { "type": "string", "maxLength": 600000 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "proposedEvent": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "sourceHash", "sourceModifiedAt", "plannedAt", "targetPath", "artifactHash", "kind", "reviewRequired"],
+            "properties": {
+              "type": { "const": "migration.import.proposed" },
+              "sourceHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "sourceModifiedAt": { "type": "string", "format": "date-time" },
+              "plannedAt": { "type": "string", "format": "date-time" },
+              "targetPath": { "type": "string" },
+              "artifactHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "kind": { "enum": ["agent", "task", "memory"] },
+              "reviewRequired": { "const": true }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$comment": "Matches packages/migration ImportPlan. The release validator additionally verifies content hashes, source binding, canonical target paths, unique selections, exact UTC instants, credential exclusion and strict inert content fields. Agent definitions must be disabled and require policy review; tasks must be drafts; memories must be untrusted. Target IDs are locators, not authority. This plan neither copies files nor commits frames: applying reviewed data requires a separately authenticated destination capability and verified canonical import receipts. Normal startup never invokes inventory."
+}

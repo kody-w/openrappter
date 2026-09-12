@@ -1,0 +1,15 @@
+{
+  "schema": "rapp-work.migration-negative-fixtures/1",
+  "synthetic": true,
+  "legacyImport": "import { ShellAgent } from '../../typescript/src/agents/ShellAgent.js';",
+  "escapedLegacyImport": "import 'op\\u0065nrappter';",
+  "computedImport": "const selected = process.env.MODULE; await import(selected);",
+  "legacyIdentifier": "openrappter",
+  "legacyRoot": "typescript",
+  "legacyPackage": "openrappter",
+  "legacyResource": "bar/index.html",
+  "legacyNativeAsset": "runtime/python/bootstrap.py",
+  "normativeWire": "openrappter-evidence/1",
+  "normativeImport": "import 'openrappter-evidence/1';",
+  "unsupportedSources": ["startup.js", "agent.py", "../escape.json", "/absolute.json", "C:/outside.json", "folder\\file.json", "credentials.json", ".env.json"]
+}

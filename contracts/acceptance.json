@@ -1,0 +1,18 @@
+{
+  "schema": "rapp-work.acceptance/1",
+  "required": [
+    "startup-ignores-legacy-home",
+    "two-agent-ownership-isolation",
+    "frames-only-rebuild",
+    "no-host-shell-fallback",
+    "missing-computer-zero-execution",
+    "missing-persistence-zero-execution",
+    "clean-artifact-allowlist",
+    "altered-artifact-rejected",
+    "unsigned-production-rejected"
+  ],
+  "executionBoundary": "Only the shared host-owned Omarchy guest may execute business tools.",
+  "durabilityBoundary": "Verified write-ahead frames and mandatory persistence precede every tool execution.",
+  "migrationBoundary": "Explicit reviewed data import; normal startup does not discover, import, execute or modify prior homes.",
+  "rebuildBoundary": "Verified RAPP/1 frames and identity are sufficient; projection databases and caches are disposable."
+}

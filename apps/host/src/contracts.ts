@@ -169,6 +169,21 @@ export const providerSchema = z.strictObject({
     maxContextWindowTokens: z.number().int().positive(),
   })).max(500).optional(),
 });
+export const computerWorkspaceSchema = z.strictObject({
+  id: idSchema, enabled: z.boolean(),
+  computerPolicy: z.enum(["none", "read-only", "control"]),
+  approvalPolicy: z.enum(["always", "on-risk"]),
+});
+export const computerLeaseSchema = z.strictObject({
+  state: z.enum(["idle", "held", "other-workspace", "unresolved"]),
+  id: z.uuid().nullable(), workspaceId: idSchema.nullable(), agentId: idSchema.nullable(),
+  agentWorkspaceId: idSchema.nullable(),
+  operation: z.enum(["starting", "stopping", "executing"]).nullable(),
+});
+export const computerDisplaySchema = z.strictObject({
+  state: z.enum(["available", "unavailable"]),
+  detail: z.string().max(1000),
+});
 export const computerSchema = z.strictObject({
   state: z.enum(["unavailable", "stopped", "starting", "running", "unresolved", "error"]),
   detail: z.string().max(2000),
@@ -176,21 +191,9 @@ export const computerSchema = z.strictObject({
   verifiedAt: dateSchema.nullable(),
   evidenceIds: z.array(idSchema).max(200),
   capabilities: z.strictObject({ view: z.boolean(), control: z.boolean() }),
-  workspace: z.strictObject({
-    id: idSchema, enabled: z.boolean(),
-    computerPolicy: z.enum(["none", "read-only", "control"]),
-    approvalPolicy: z.enum(["always", "on-risk"]),
-  }).nullable().optional(),
-  lease: z.strictObject({
-    state: z.enum(["idle", "held", "other-workspace", "unresolved"]),
-    id: z.uuid().nullable(), workspaceId: idSchema.nullable(), agentId: idSchema.nullable(),
-    agentWorkspaceId: idSchema.nullable(),
-    operation: z.enum(["starting", "stopping", "executing"]).nullable(),
-  }).optional(),
-  display: z.strictObject({
-    state: z.enum(["available", "unavailable"]),
-    detail: z.string().max(1000),
-  }).optional(),
+  workspace: computerWorkspaceSchema.nullable().optional(),
+  lease: computerLeaseSchema.optional(),
+  display: computerDisplaySchema.optional(),
 }).refine((computer) => !computer.verified ||
   (computer.state === "running" && computer.verifiedAt !== null && computer.evidenceIds.length > 0), {
   message: "Computer verification requires running service evidence.",
@@ -262,6 +265,9 @@ export type Settings = z.infer<typeof settingsSchema>;
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export type Provider = z.infer<typeof providerSchema>;
 export type Computer = z.infer<typeof computerSchema>;
+export type ComputerWorkspaceStatus = z.infer<typeof computerWorkspaceSchema>;
+export type ComputerLeaseStatus = z.infer<typeof computerLeaseSchema>;
+export type ComputerDisplayStatus = z.infer<typeof computerDisplaySchema>;
 export type Diagnostics = z.infer<typeof diagnosticsSchema>;
 export type Status = z.infer<typeof statusSchema>;
 export type EventScope = z.infer<typeof scopeSchema>;
@@ -503,16 +509,20 @@ export const twinTurnSchema = z.strictObject({
   content: instructionTextSchema, proposalId: z.uuid().nullable(), createdAt: dateSchema,
   verification: frameVerificationSchema.optional(),
 });
+export const twinEvolutionReferencesSchema = z.strictObject({
+  conversationFrameHash: z.string().regex(/^[a-f0-9]{64}$/),
+  proposalFrameHash: z.string().regex(/^[a-f0-9]{64}$/),
+  proposalHash: z.string().regex(/^[a-f0-9]{64}$/),
+  evolutionFrameHash: z.string().regex(/^[a-f0-9]{64}$/),
+});
 export const twinEventSchema = z.strictObject({
   id: z.uuid(), workspaceId: idSchema.nullable(), proposalId: z.uuid().nullable(),
   kind: z.enum(["proposal", "accept", "dismiss", "error", "evolution"]), actorId: idSchema,
   detail: z.string().max(2000), createdAt: dateSchema,
-  references: z.strictObject({
-    conversationFrameHash: z.string().regex(/^[a-f0-9]{64}$/),
-    proposalFrameHash: z.string().regex(/^[a-f0-9]{64}$/),
-    proposalHash: z.string().regex(/^[a-f0-9]{64}$/),
-    evolutionFrameHash: z.string().regex(/^[a-f0-9]{64}$/),
-  }).optional(),
+  references: twinEvolutionReferencesSchema.optional(),
+});
+export const twinEvolutionEventSchema = twinEventSchema.extend({
+  kind: z.literal("evolution"), references: twinEvolutionReferencesSchema,
 });
 export const twinConversationSchema = z.strictObject({
   workspaceId: idSchema.nullable(),
@@ -534,6 +544,15 @@ export const twinApplyResultSchema = z.strictObject({
   kind: z.enum(["workspace", "task", "agent", "automation", "settings"]),
   status: z.literal("applied"), result: z.record(z.string(), z.unknown()), createdAt: dateSchema,
 });
+export const agentWorkspaceResultSchema = z.strictObject({
+  agent: agentSchema, workspace: workspaceSummarySchema,
+}).refine(({ agent, workspace }) => workspace.id === agent.workspaceId && workspace.ownerType === "agent"
+  && workspace.ownerAgentId === agent.id && workspace.leadAgentId === agent.id,
+  "The agent result must contain its own dedicated child workspace.");
+export const twinAgentApplyResultSchema = twinApplyResultSchema.extend({
+  workspaceId: idSchema, kind: z.literal("agent"), result: agentWorkspaceResultSchema,
+}).refine(({ workspaceId, result }) => result.workspace.parentWorkspaceId === workspaceId,
+  "The proposal workspace must be the dedicated child's parent.");
 export const workspaceOpenSchema = z.strictObject({
   workspace: workspaceSummarySchema,
   snapshot: snapshotSchema,
@@ -545,6 +564,10 @@ export const workspaceOpenSchema = z.strictObject({
 export type WorkspaceInput = z.infer<typeof workspaceInputSchema>;
 export type WorkspaceDetails = z.infer<typeof workspaceDetailsSchema>;
 export type WorkspaceSummary = z.infer<typeof workspaceSummarySchema>;
+export type WorkspaceLineage = Pick<WorkspaceSummary,
+  "id" | "ownerId" | "ownerType" | "ownerAgentId" | "parentWorkspaceId" | "rootWorkspaceId"
+  | "lineage" | "depth" | "status" | "parentAccess" | "catalogScope" | "revision">;
+export type TwinIdentity = z.infer<typeof twinIdentitySchema>;
 export type WorkspaceList = z.infer<typeof workspaceListSchema>;
 export type WorkspaceOpen = z.infer<typeof workspaceOpenSchema>;
 export type WorkspaceOrganization = z.infer<typeof workspaceOrganizationSchema>;
@@ -557,9 +580,13 @@ export type TwinDraft = z.infer<typeof twinDraftSchema>;
 export type TwinBasis = z.infer<typeof twinBasisSchema>;
 export type TwinTurn = z.infer<typeof twinTurnSchema>;
 export type TwinEvent = z.infer<typeof twinEventSchema>;
+export type TwinEvolutionReferences = z.infer<typeof twinEvolutionReferencesSchema>;
+export type TwinEvolutionEvent = z.infer<typeof twinEvolutionEventSchema>;
 export type TwinConversation = z.infer<typeof twinConversationSchema>;
 export type TwinApplyRequest = z.infer<typeof twinApplyRequestSchema>;
 export type TwinApplyResult = z.infer<typeof twinApplyResultSchema>;
+export type AgentWorkspaceResult = z.infer<typeof agentWorkspaceResultSchema>;
+export type TwinAgentApplyResult = z.infer<typeof twinAgentApplyResultSchema>;
 export type TwinDismissRequest = z.infer<typeof twinDismissRequestSchema>;
 export type FrameVerification = z.infer<typeof frameVerificationSchema>;
 

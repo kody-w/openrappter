@@ -4,14 +4,18 @@
   "private": true,
   "type": "module",
   "description": "RAPP Work authenticated local application host.",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./contracts": { "types": "./dist/contracts.d.ts", "import": "./dist/contracts.js" }
+  },
   "scripts": {
     "build": "npm run build:services && tsc -p tsconfig.build.json && esbuild src/entry.ts --bundle --platform=node --target=node22 --format=cjs --external:koffi --external:@github/copilot-sdk-* --outfile=dist/host.cjs",
     "build:services": "tsc -b ../../packages/workspace-store ../../packages/agent-runtime ../../packages/computer-broker ../../packages/diagnostics ../../packages/domain",
     "typecheck": "npm run build:services && tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "test:bundle": "npm run build && node test/bundle-smoke.mjs"
+    "test:bundle": "npm run build && node test/bundle-smoke.mjs",
+    "test:contracts": "npm run build && node test/contracts-smoke.mjs"
   },
   "engines": { "node": ">=22.12.0" },
   "dependencies": {

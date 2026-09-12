@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isVerifiedChain } from "@rapp-work/rapp1";
-import { MAX_WORKSPACE_AGENTS, MAX_WORKSPACE_DEPTH, workspaceSummarySchema } from "../src/contracts.js";
+import { MAX_WORKSPACE_AGENTS, MAX_WORKSPACE_DEPTH, twinEvolutionEventSchema, workspaceSummarySchema } from "../src/contracts.js";
 import { agentScope } from "../src/local-work.js";
 import { agentInput, productionFixture } from "./production-fixture.js";
 
@@ -117,10 +117,17 @@ describe("recursive canonical workspace lineage", () => {
     expect((await f.services.work.snapshot(f.context())).tasks).toEqual([]);
     expect((await f.services.twin.conversation(f.context(b.workspaceId))).turns).toEqual([]);
     expect((await f.services.twin.conversation(f.context())).turns).toEqual([]);
-    expect((await f.services.twin.conversation(f.context(a.workspaceId))).events.some((event) => event.kind === "evolution")).toBe(true);
+    const evolution = twinEvolutionEventSchema.parse(
+      (await f.services.twin.conversation(f.context(a.workspaceId))).events.find((event) => event.kind === "evolution"),
+    );
+    expect(evolution.workspaceId).toBe(a.workspaceId);
     const scan = await (await f.services.persistence.workspace(agentScope(a))).scan();
     expect(isVerifiedChain(scan.streams.body)).toBe(true);
     expect(JSON.stringify(scan.streams.body.frames)).toContain("workspace.evolved");
+    for (const hash of [evolution.references.conversationFrameHash, evolution.references.proposalFrameHash,
+      evolution.references.evolutionFrameHash]) {
+      expect(scan.streams.memory.frames.some((frame) => frame.frame_hash === hash)).toBe(true);
+    }
     await f.close(false); fixtures.splice(fixtures.indexOf(f), 1);
     const recovered = await setup(f.directory);
     expect((await recovered.services.work.workspace(recovered.context(a.workspaceId))).organization).toEqual(evolved.organization);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agentWorkspaceResultSchema, automationSchema, eventSchema, rpcContracts, settingsReviewSchema, taskSchema, workspaceSummarySchema, type EventScope, type RpcInput, type RpcMethod, type RpcResult } from "./model";
+import { agentWorkspaceResultSchema, automationSchema, eventSchema, rpcContracts, settingsReviewSchema, taskSchema, twinAgentApplyResultSchema, workspaceSummarySchema, type EventScope, type RpcInput, type RpcMethod, type RpcResult } from "./model";
 
 export const hostStateSchema = z.strictObject({
   state: z.enum(["starting", "online", "offline"]), detail: z.string().max(512),
@@ -80,6 +80,8 @@ export class BridgeClient implements WorkClient {
       const schemas = { workspace: workspaceSummarySchema, agent: agentWorkspaceResultSchema, task: taskSchema, automation: automationSchema, settings: settingsReviewSchema };
       if (!schemas[receipt.kind].safeParse(receipt.result).success)
         throw new Error("The host returned an invalid response: the applied record or child workspace is incomplete.");
+      if (receipt.kind === "agent" && !twinAgentApplyResultSchema.safeParse(receipt).success)
+        throw new Error("The host returned an invalid response: the agent proposal's parent and child workspace do not agree.");
     }
     return output.data as RpcResult<M>;
   }

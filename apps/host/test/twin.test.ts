@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { isVerifiedChain } from "@rapp-work/rapp1";
 import { agentScope } from "../src/local-work.js";
 import {
-  twinConversationSchema, twinDraftSchema, twinMessageRequestSchema, twinProposalSchema, workspaceInputSchema,
+  twinConversationSchema, twinDraftSchema, twinMessageRequestSchema, twinProposalSchema, twinAgentApplyResultSchema, workspaceInputSchema,
   workspaceListSchema, workspaceOpenSchema, type TwinDraft, type TwinProposal,
 } from "../src/contracts.js";
 import { productionFixture, until, workspaceInput } from "./production-fixture.js";
@@ -323,7 +323,18 @@ describe("conversation-first canonical Twin", () => {
     expect((await f.rpc("twin.applyProposal", {
       ...applyInput(agentDraft), editedDraft: { ...agentDraft.draft, id: f.workspace!.leadAgentId },
     })).error?.code).toBe(-32602);
-    expect((await f.rpc("twin.applyProposal", applyInput(agentDraft))).error).toBeUndefined();
+    const appliedAgent = await f.rpc("twin.applyProposal", applyInput(agentDraft));
+    expect(appliedAgent.error).toBeUndefined();
+    const childResult = twinAgentApplyResultSchema.parse(appliedAgent.result);
+    expect(childResult.workspaceId).toBe(f.workspace!.id);
+    expect(childResult.result.workspace).toMatchObject({
+      id: childResult.result.agent.workspaceId, ownerAgentId: childResult.result.agent.id,
+      parentWorkspaceId: f.workspace!.id, rootWorkspaceId: f.workspace!.id, depth: 1,
+    });
+    const childScan = await (await f.services.persistence.workspace(childResult.result.workspace.catalogScope)).scan();
+    expect(isVerifiedChain(childScan.streams.body)).toBe(true);
+    expect(isVerifiedChain(childScan.streams.memory)).toBe(true);
+    expect(childScan.streams.memory.frames.length).toBeGreaterThan(0);
     kind = "automation";
     const routine = await message(f, f.workspace!.id, "Review work every hour.", "automation");
     expect((await f.rpc("twin.applyProposal", applyInput(routine))).error).toBeUndefined();

@@ -5,9 +5,9 @@ import {
   taskSchema, twinApplyResultSchema, twinConversationSchema, twinDraftSchema, workspaceListSchema,
   workspaceOpenSchema, workspaceSummarySchema,
   workspaceChildrenSchema, workspaceTreeSchema, workspaceBreadcrumbSchema,
-} from "../../host/src/contracts.js";
+} from "@rapp-work/host/contracts";
 
-export * from "../../host/src/contracts.js";
+export * from "@rapp-work/host/contracts";
 
 export const clientScopeSchema = scopeSchema.extend({ workspaceId: idSchema });
 export type EventScope = z.infer<typeof clientScopeSchema>;
@@ -20,12 +20,6 @@ export const settingsReviewSchema = settingsSchema.extend({
   parentAccess: z.enum(["inspect", "none"]).optional(),
 });
 export type SettingsReview = z.infer<typeof settingsReviewSchema>;
-export const agentWorkspaceResultSchema = z.strictObject({
-  agent: agentSchema, workspace: workspaceSummarySchema,
-}).refine(({ agent, workspace }) => agent.workspaceId === workspace.id
-  && workspace.ownerAgentId === agent.id && workspace.ownerType === "agent",
-  "The agent and its atomically created workspace must agree.");
-
 const contract = <M extends keyof typeof rpcParameterSchemas, O extends z.ZodType>(method: M, output: O) => ({
   input: rpcParameterSchemas[method], output,
 });

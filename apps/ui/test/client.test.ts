@@ -2,9 +2,18 @@ import { describe, expect, it, vi } from "vitest";
 import { BridgeClient, type DesktopBridge } from "../src/client";
 import { rpcContracts, twinDraftSchema, twinMessageRequestSchema } from "../src/model";
 import { parameterSchemas, parseRequest } from "../../desktop/src/contract";
+import * as publicContracts from "@rapp-work/host/contracts";
+import { agentWorkspaceResultSchema, twinAgentApplyResultSchema, twinEvolutionEventSchema } from "../src/model";
 import { FixtureClient, testWorkspace } from "./fixture";
 
 describe("typed desktop and host wire boundary", () => {
+  it("uses the public contract entry and canonical named validators without duplicate DTOs", () => {
+    expect(parameterSchemas).toBe(publicContracts.rpcParameterSchemas);
+    expect(rpcContracts["twin.message"].input).toBe(publicContracts.rpcParameterSchemas["twin.message"]);
+    expect(agentWorkspaceResultSchema).toBe(publicContracts.agentWorkspaceResultSchema);
+    expect(twinAgentApplyResultSchema).toBe(publicContracts.twinAgentApplyResultSchema);
+    expect(twinEvolutionEventSchema).toBe(publicContracts.twinEvolutionEventSchema);
+  });
   function setup(result: unknown) {
     const listeners = new Set<(event: unknown) => void>();
     const bridge: DesktopBridge = {
@@ -78,6 +87,17 @@ describe("typed desktop and host wire boundary", () => {
     const id = crypto.randomUUID();
     const { client } = setup({ id, workspaceId: "finance", kind: "task", status: "applied", result: {}, createdAt: new Date().toISOString() });
     await expect(client.call("twin.applyProposal", { id, workspaceId: "finance", proposalHash: "a".repeat(64) })).rejects.toThrow("invalid response");
+  });
+  it("rejects agent acceptance with a mismatched child lead or proposal parent", async () => {
+    const fixture = new FixtureClient();
+    const agent = fixture.workspace.agents[0]!;
+    const workspace = fixture.host.state.catalog.workspaces.find((item) => item.id === agent.workspaceId)!;
+    for (const [parent, child] of [["other-parent", workspace], ["finance", { ...workspace, leadAgentId: "other-agent" }]] as const) {
+      const id = crypto.randomUUID();
+      const { client } = setup({ id, workspaceId: parent, kind: "agent", status: "applied",
+        result: { agent, workspace: child }, createdAt: new Date().toISOString() });
+      await expect(client.call("twin.applyProposal", { id, workspaceId: parent, proposalHash: "a".repeat(64) })).rejects.toThrow("invalid response");
+    }
   });
   it("keeps the UI and preload's closed RPC allowlists and payload validation aligned", () => {
     expect(Object.keys(rpcContracts).sort()).toEqual(Object.keys(parameterSchemas).sort());

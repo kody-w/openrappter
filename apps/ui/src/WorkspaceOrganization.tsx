@@ -1,5 +1,5 @@
 import { Badge, Icon, formatDate } from "./components";
-import type { AutomationInput, Snapshot, TwinConversation, WorkspaceSummary } from "./model";
+import { twinEvolutionEventSchema, type AutomationInput, type Snapshot, type TwinConversation, type WorkspaceSummary } from "./model";
 
 export function WorkspaceOrganization({ workspace, snapshot, conversation, discussRoutine, connected }: {
   workspace: WorkspaceSummary; snapshot: Snapshot; conversation: TwinConversation | null;
@@ -8,7 +8,7 @@ export function WorkspaceOrganization({ workspace, snapshot, conversation, discu
 }) {
   const organization = workspace.organization;
   const receipt = [...(conversation?.events ?? [])].reverse().find((event) => event.kind === "evolution" && event.workspaceId === workspace.id
-    && event.references && conversation?.proposals.some((proposal) => proposal.id === event.proposalId
+    && twinEvolutionEventSchema.safeParse(event).success && event.references && conversation?.proposals.some((proposal) => proposal.id === event.proposalId
       && proposal.workspaceId === workspace.id && proposal.basis?.proposalHash === event.references!.proposalHash
       && proposal.basis.verification?.state === "verified"
       && proposal.basis.verification.sourceFrameHash === event.references!.proposalFrameHash)

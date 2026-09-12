@@ -54,7 +54,8 @@ build does not attest to either.
   cannot make network connections. The theme bootstrap uses a CSP hash.
 * The frozen preload exposes exactly `request`, `hostState`, and `onEvent`.
   Both preload and main enforce the host's shared `rpcParameterSchemas` closed
-  method allowlist and strict parameters; no separate wire schema is maintained.
+  method allowlist and strict parameters through the browser-safe
+  `@rapp-work/host/contracts` public entry; no separate wire schema is maintained.
   Main accepts requests only from the owned top-level application frame.
   Business and recursive agent-workspace operations and event subscriptions/unsubscriptions carry an explicit
   `workspaceId`; only the global concierge accepts `null` where documented.

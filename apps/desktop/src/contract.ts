@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MAX_RPC_BYTES, rpcParameterSchemas } from "../../host/src/contracts.js";
+import { MAX_RPC_BYTES, rpcParameterSchemas } from "@rapp-work/host/contracts";
 
 export const APP_URL = "rapp-work://app/index.html";
 export const IPC = { request: "work:request", state: "work:state", event: "work:event" } as const;

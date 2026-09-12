@@ -94,8 +94,10 @@ There is no per-agent unmanaged VM or host-shell fallback.
 
 ## One authoritative wire contract
 
-`src/model.ts` and the desktop preload use the pure schemas and
-`rpcParameterSchemas` exported by `apps/host/src/contracts.ts`. There are no
+`src/model.ts` and the desktop preload use the browser-safe
+`@rapp-work/host/contracts` public entry for pure schemas and
+`rpcParameterSchemas`. The definitions live in `apps/host/src/contracts.ts`;
+the Node host package root is never imported into the renderer. There are no
 independent copies of the host wire schemas. The original `TwinDraft` and
 `TwinMessageRequest` envelopes are unchanged; lineage, proof, and document
 binding are the host's defined projections.
@@ -144,6 +146,7 @@ export PLAYWRIGHT_BROWSERS_PATH="$PWD/apps/ui/node_modules/.cache/ms-playwright"
 npm exec --workspace @rapp-work/ui -- playwright install chromium
 npm --prefix apps/ui run test:browser
 npm --prefix apps/ui run test:canonical
+npm --prefix apps/host run test:contracts
 ```
 
 Unit/browser fixtures exercise UI interaction only and never enter production.

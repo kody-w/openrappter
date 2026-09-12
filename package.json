@@ -1,0 +1,27 @@
+{
+  "name": "rapp-work",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Serious local AI for real business work.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "check": "npm run typecheck && npm test && npm run build",
+    "legacy:absent": "node scripts/check-legacy-absence.mjs"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.2"
+  }
+}

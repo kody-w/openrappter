@@ -1,0 +1,27 @@
+{
+  "name": "@rapp-work/release",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./acceptance": "./src/acceptance.mjs",
+    "./migration": {
+      "types": "./src/migration-contract.d.mts",
+      "default": "./src/migration-contract.mjs"
+    }
+  },
+  "scripts": {
+    "build": "node --check src/index.mjs",
+    "lint": "node --test test/syntax.test.mjs",
+    "typecheck": "node --test test/syntax.test.mjs",
+    "test": "node --test test/*.test.mjs",
+    "build:native": "node src/build-native.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "typescript": "^5.9.3"
+  }
+}

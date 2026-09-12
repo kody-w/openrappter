@@ -1,0 +1,11 @@
+{
+  "protocol": "RAPP/1",
+  "status": "accepted",
+  "revision": "rev-14",
+  "repository": "https://github.com/kody-w/rapp-1",
+  "checkpoint_commit": "caf6ef276cafa92aa744499af90dc1a28559941a",
+  "frame_hash": "59629adab4e26d156f3d66ecfb766e08705919ea1d2adc92ba0ad2b17337dfc2",
+  "payload_hash": "c7549bbd3e133b833930e24e008817ea295734b870f41706455d3f45821aba3a",
+  "normative_sha256": "d345235be5bc698d78c5893285abd09f2e62a398f781123d1de8da313a01c7de",
+  "bootstrap_profile_sha256": "1666e44acf532f854d4bf74868c9af9f9b362055692189ac858a7c8b52dcd5bb"
+}

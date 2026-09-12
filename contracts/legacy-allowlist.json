@@ -1,0 +1,19 @@
+{
+  "schema": "rapp-work.legacy-allowlist/1",
+  "normativeWireIdentifiers": [
+    {
+      "identifier": "openrappter-evidence/1",
+      "reason": "An existing normative evidence wire identifier, not a runtime module or product name."
+    }
+  ],
+  "migrationFixtures": [
+    {
+      "path": "tests/fixtures/migration/legacy-home.json",
+      "reason": "Inert, synthetic home sentinels. Never an importable module or a packaged resource."
+    },
+    {
+      "path": "tests/fixtures/migration/rejected-inputs.json",
+      "reason": "Inert negative-test inputs for removed modules, assets, executable data, and paths."
+    }
+  ]
+}

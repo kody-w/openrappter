@@ -1,0 +1,33 @@
+{
+  "schema": "rapp-work.artifact-allowlist/1",
+  "product": "RAPP Work",
+  "bundleIdentifier": "com.rapp.work",
+  "architecture": "arm64",
+  "platform": "darwin",
+  "canonicalFixturesRoot": "packages/rapp1/fixtures",
+  "applicationName": "RAPP Work.app",
+  "developmentApplicationName": "RAPP Work Development.app",
+  "resources": [
+    "app.asar", "rapp-work-build.json", "rapp-work-installer",
+    "icon.icns", "electron.icns", "LICENSE", "NOTICE"
+  ],
+  "frameworks": [
+    "Electron Framework.framework", "Mantle.framework",
+    "ReactiveObjC.framework", "Squirrel.framework",
+    "RAPP Work Helper.app", "RAPP Work Helper (GPU).app",
+    "RAPP Work Helper (Plugin).app", "RAPP Work Helper (Renderer).app"
+  ],
+  "asarFiles": ["package.json", "LICENSE", "NOTICE", "assets/icon.png", "assets/tray.png"],
+  "asarDirectories": ["dist"],
+  "runtimePackages": [
+    "@rapp-work/host", "@rapp-work/rapp1", "@rapp-work/workspace-store",
+    "@rapp-work/domain", "@rapp-work/work-service", "@rapp-work/agent-runtime",
+    "@rapp-work/model-provider", "@rapp-work/security",
+    "@rapp-work/computer-broker", "@rapp-work/diagnostics",
+    "@github/copilot-sdk", "vscode-jsonrpc", "ws", "zod"
+  ],
+  "requiredAsarFiles": ["package.json"],
+  "requiredResources": ["app.asar", "rapp-work-build.json", "rapp-work-installer", "host/host.cjs", "ui/index.html"],
+  "requiredComponents": ["Contents/Info.plist", "Contents/MacOS/RAPP Work", "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"],
+  "nativeFiles": ["Contents/MacOS/RAPP Work", "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework", "Contents/Resources/rapp-work-installer"]
+}

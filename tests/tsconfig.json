@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": "..",
+    "paths": {
+      "@rapp-work/*": ["packages/*/src/index.ts"]
+    }
+  },
+  "include": ["acceptance/**/*.ts"]
+}

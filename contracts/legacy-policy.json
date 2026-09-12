@@ -1,0 +1,33 @@
+{
+  "schema": "rapp-work.legacy-policy/1",
+  "forbiddenRoots": [
+    "typescript", "python", "macos", "ios", "vui", "agents", "tools",
+    "openclaw", "openrappter-obsidian", "fable5", "parity_vectors"
+  ],
+  "forbiddenPathSegments": [
+    "openrappter", ".openrappter", "openclaw", "clawhub", "brainstem",
+    "channels", "marketplace", "bar", "native-bridge"
+  ],
+  "forbiddenFiles": [
+    "install.sh", "install.ps1", "install.bat", "install-pinned.sh",
+    "quickstart.sh", "Dockerfile", "docker-compose.yml", ".dockerignore",
+    "conformance.py", "parity_harness.py", "ts_parity_driver.mjs",
+    "pong.js", "dojo.html", "RELEASING-PINNED.md"
+  ],
+  "forbiddenIdentifiers": [
+    "openrappter", "openclaw", "ClawHub", "BasicAgent", "ShellAgent",
+    "LearnNewAgent", "OpenRappterBar", "OPENRAPPTER_HOME",
+    "OPENRAPPTER_BRAINSTEM", "brainstem-client", "native-bridge"
+  ],
+  "forbiddenExtensions": [".py", ".pyc", ".pyo", ".ps1", ".bat", ".exe", ".dll"],
+  "ignoredSourceDirectories": [
+    ".git", "node_modules", ".test-scratch", "dist", "build", "coverage"
+  ],
+  "workspaceDirectories": [
+    "apps/desktop", "apps/host", "apps/ui",
+    "packages/rapp1", "packages/workspace-store", "packages/domain",
+    "packages/work-service", "packages/agent-runtime", "packages/model-provider",
+    "packages/security", "packages/computer-broker", "packages/diagnostics",
+    "packages/migration", "packages/release"
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "name": "@rapp-work/ui",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The RAPP Work business workspace.",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:browser": "playwright test"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
+    "@playwright/test": "^1.58.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "5.1.4",
+    "jsdom": "^28.1.0",
+    "typescript": "^5.9.3",
+    "vite": "7.3.6",
+    "vitest": "^4.1.2"
+  }
+}

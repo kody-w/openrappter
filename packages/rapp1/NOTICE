@@ -1,0 +1,9 @@
+Copyright 2026 Wildhaven Homes LLC
+
+This product includes software developed at Wildhaven Homes LLC.
+The canonical RAPP/1 rules and accepted checkpoint fixtures are extracted
+from the Apache-2.0 licensed repository. The implementation is isolated
+from its former runtime and exposes no compatibility layer.
+
+Licensed under the Apache License, Version 2.0.
+https://www.apache.org/licenses/LICENSE-2.0

@@ -1,0 +1,106 @@
+name: Release macOS
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rapp-work-production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    environment: production
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+      PROVENANCE_PUBLIC_KEY: ${{ vars.RAPP_WORK_PROVENANCE_PUBLIC_KEY }}
+      SIGNING_DIRECTORY: packages/release/dist/signing
+      OUTPUT_DIRECTORY: packages/release/dist/artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Require exact Apple Silicon release identity
+        run: |
+          test "$(uname -m)" = arm64
+          node --input-type=module -e 'import fs from "node:fs"; const p=JSON.parse(fs.readFileSync("package.json")); if (process.env.GITHUB_REF_NAME !== `v${p.version}`) throw Error("Tag must exactly match the clean workspace version");'
+      - run: npm ci
+      - run: npm run typecheck && npm run lint && npm test && npm run build
+      - run: node scripts/check-release-constitution.mjs
+      - run: node scripts/run-acceptance.mjs
+      - name: Package the new desktop output without publishing
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run package:dir --workspace @rapp-work/desktop -- --config.directories.output=dist/package
+      - name: Open isolated signing keychain
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+          PROVENANCE_PRIVATE_KEY: ${{ secrets.RAPP_WORK_PROVENANCE_PRIVATE_KEY }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const directory = process.env.SIGNING_DIRECTORY;
+          for (const name of ["DEVELOPER_ID_P12", "DEVELOPER_ID_PASSWORD", "NOTARY_KEY", "NOTARY_KEY_ID", "NOTARY_ISSUER", "PROVENANCE_PRIVATE_KEY", "PROVENANCE_PUBLIC_KEY", "APPLE_TEAM_ID", "SIGNING_IDENTITY"]) {
+            if (!process.env[name]) throw Error(`Missing protected production input: ${name}`);
+          }
+          fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+          fs.writeFileSync(`${directory}/developer-id.p12`, Buffer.from(process.env.DEVELOPER_ID_P12, "base64"), { mode: 0o600 });
+          fs.writeFileSync(`${directory}/notary.p8`, process.env.NOTARY_KEY, { mode: 0o600 });
+          fs.writeFileSync(`${directory}/provenance-private.pem`, process.env.PROVENANCE_PRIVATE_KEY, { mode: 0o600 });
+          fs.writeFileSync(`${directory}/provenance-public.pem`, process.env.PROVENANCE_PUBLIC_KEY, { mode: 0o600 });
+          NODE
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$SIGNING_DIRECTORY/release.keychain-db"
+          security set-keychain-settings -lut 3600 "$SIGNING_DIRECTORY/release.keychain-db"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$SIGNING_DIRECTORY/release.keychain-db"
+          security import "$SIGNING_DIRECTORY/developer-id.p12" -k "$SIGNING_DIRECTORY/release.keychain-db" -P "$DEVELOPER_ID_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$SIGNING_DIRECTORY/release.keychain-db"
+          security list-keychains -d user -s "$PWD/$SIGNING_DIRECTORY/release.keychain-db"
+          security default-keychain -d user -s "$PWD/$SIGNING_DIRECTORY/release.keychain-db"
+          xcrun notarytool store-credentials rapp-work-production --key "$SIGNING_DIRECTORY/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --keychain "$SIGNING_DIRECTORY/release.keychain-db"
+      - name: Sign, notarize, staple and seal complete provenance
+        run: |
+          VERSION="$(node -p 'JSON.parse(require("fs").readFileSync("package.json")).version')"
+          node scripts/release-macos.mjs \
+            --app "apps/desktop/dist/package/mac-arm64/RAPP Work.app" \
+            --output "$OUTPUT_DIRECTORY" --version "$VERSION" \
+            --signing-identity "$SIGNING_IDENTITY" --team-id "$APPLE_TEAM_ID" \
+            --notary-profile rapp-work-production \
+            --private-key "$SIGNING_DIRECTORY/provenance-private.pem" \
+            --trusted-key "$SIGNING_DIRECTORY/provenance-public.pem"
+      - name: Independently remount and verify the exact production artifact
+        run: |
+          VERSION="$(node -p 'JSON.parse(require("fs").readFileSync("package.json")).version')"
+          DMG="$OUTPUT_DIRECTORY/RAPP-Work-$VERSION-macos-arm64.dmg"
+          node scripts/verify-release.mjs --root . --dmg "$DMG" --manifest "$DMG.provenance.json" \
+            --expected-commit "$GITHUB_SHA" --team-id "$APPLE_TEAM_ID" \
+            --trusted-key "$SIGNING_DIRECTORY/provenance-public.pem"
+      - name: Publish only verified production files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p 'JSON.parse(require("fs").readFileSync("package.json")).version')"
+          DMG="$OUTPUT_DIRECTORY/RAPP-Work-$VERSION-macos-arm64.dmg"
+          gh release create "$GITHUB_REF_NAME" "$DMG" "$DMG.provenance.json" \
+            --verify-tag --title "RAPP Work $VERSION" --notes "RAPP Work for macOS Apple Silicon. Verify the DMG with its signed provenance before installation."
+      - name: Remove signing material
+        if: always()
+        run: |
+          if [ -f "$SIGNING_DIRECTORY/release.keychain-db" ]; then
+            security delete-keychain "$SIGNING_DIRECTORY/release.keychain-db"
+          fi
+          node --input-type=module -e 'import fs from "node:fs"; fs.rmSync(process.env.SIGNING_DIRECTORY, { recursive: true, force: true });'

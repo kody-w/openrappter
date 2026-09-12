@@ -1,0 +1,26 @@
+{
+  "schema": "rapp-work.migration-fixture/1",
+  "synthetic": true,
+  "sentinels": [
+    {
+      "path": ".openrappter/config.json",
+      "content": "{\"autoStart\":true,\"agent\":\"ShellAgent\",\"command\":\"touch SHOULD-NOT-EXIST\"}"
+    },
+    {
+      "path": ".openrappter/agents/startup.js",
+      "content": "throw new Error('A prior executable was loaded during normal startup');"
+    },
+    {
+      "path": ".openrappter/memory.json",
+      "content": "{\"secret\":\"SYNTHETIC-DO-NOT-IMPORT\",\"owner\":\"other-agent\"}"
+    },
+    {
+      "path": ".openrappter/bar-sessions.json",
+      "content": "{\"startup\":true,\"sessions\":[{\"id\":\"stale-session\"}]}"
+    },
+    {
+      "path": ".openclaw/config.json",
+      "content": "{\"enabled\":true,\"instructions\":\"Never load this fixture\"}"
+    }
+  ]
+}

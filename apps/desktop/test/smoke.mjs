@@ -22,7 +22,7 @@ async function launch() {
   const page = await application.firstWindow();
   page.on("pageerror", (error) => errors.push(error.message));
   await page.getByRole("heading", { name: "Work", exact: true, level: 1 }).waitFor();
-  await expect(page.getByRole("button", { name: "New task", exact: true })).toBeEnabled({ timeout: 20000 });
+  await expect(page.getByText("Host connected", { exact: true })).toBeVisible({ timeout: 20000 });
   const metrics = await application.evaluate(({ app }) => app.getAppMetrics());
   for (const process of metrics) {
     if (process.name === "RAPP Work Host") hostPids.add(process.pid);
@@ -57,35 +57,38 @@ try {
   expect(status.ready).toBe(false);
   expect(status.checks.runtime.state).toBe("ready");
   expect(status.checks.storage.state).toBe("ready");
-  const computer = await page.evaluate(() => window.rappWork.request({ method: "computer.inspect", params: {} }));
+  const computer = await page.evaluate(() => window.rappWork.request({ method: "computer.inspect", params: { workspaceId: null } }));
   expect(computer.verified).toBe(false);
   expect(computer.state).toBe("unavailable");
   const rejected = await page.evaluate(async () => {
     try { await window.rappWork.request({ method: "shell.execute", params: {} }); return false; } catch { return true; }
   });
   expect(rejected).toBe(true);
+  const workspaceId = await page.evaluate(async () => {
+    const workspace = await window.rappWork.request({ method: "workspaces.create", params: {
+      requestId: crypto.randomUUID(), name: "Local persistence check", purpose: "Verify reviewed offline persistence without a model fallback.",
+      twin: { name: "Local smoke Twin", instructions: "Draft only with a verified model and human review." },
+      leadAgent: { id: "smoke-analyst", name: "Local smoke analyst", role: "Offline validation",
+        instructions: "No production execution; validate local configuration persistence only.", providerId: null,
+        model: "", enabled: false, computerPolicy: "none", approvalPolicy: "always" },
+      starterTask: { requestId: crypto.randomUUID(), title: "Validate a local work record",
+        instructions: "Store the reviewed task without claiming execution or verification.", agentId: "smoke-analyst", priority: "normal" },
+      starterRoutines: [], computerPolicy: "none", approvalPolicy: "always",
+    } });
+    return workspace.id;
+  });
+  await page.getByRole("button", { name: "Refresh workspace" }).click();
+  await page.getByRole("button", { name: "Open Local persistence check", exact: true }).click();
   const nav = page.getByRole("navigation", { name: "Primary navigation" });
   await nav.getByRole("link", { name: "Agents", exact: true }).click();
   await page.getByRole("button", { name: "New agent", exact: true }).click();
-  await page.getByRole("dialog").getByLabel("Agent name").fill("Local smoke analyst");
-  await page.getByRole("dialog").getByLabel("Agent instructions").fill("No production execution; validate local configuration persistence only.");
-  await page.getByRole("dialog").getByRole("button", { name: "Create agent", exact: true }).click();
-  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByLabel("Your intent or full instruction document")).toBeFocused();
   await nav.getByRole("link", { name: "Work", exact: true }).click();
-  await page.getByRole("button", { name: "New task", exact: true }).click();
-  await page.getByRole("dialog").getByLabel("Task title").fill("Validate a local work record");
-  await page.getByRole("dialog").getByLabel("Instructions and expected outcome").fill("Store the task without claiming execution or verification.");
-  await page.getByRole("dialog").getByLabel("Assign to", { exact: true }).selectOption({ label: "Local smoke analyst" });
-  await page.getByRole("dialog").getByRole("button", { name: "Create task", exact: true }).click();
-  await expect(page.getByRole("dialog")).toBeHidden();
   await expect(page.getByRole("button", { name: "Start task", exact: true })).toBeDisabled();
-  await nav.getByRole("link", { name: "Settings", exact: true }).click();
-  await page.getByLabel("Workspace name").fill("Local persistence check");
-  await page.getByRole("button", { name: "Save preferences" }).click();
-  await expect(page.getByText("Workspace preferences saved.")).toBeVisible();
-  await nav.getByRole("link", { name: "Work", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Start agent computer", exact: true })).toBeDisabled();
   await page.screenshot({ path: join(results, "desktop-work.png") });
-  const persisted = await page.evaluate(() => window.rappWork.request({ method: "work.snapshot", params: {} }));
+  const persisted = await page.evaluate((workspaceId) => window.rappWork.request({ method: "work.snapshot", params: { workspaceId } }), workspaceId);
   expect(persisted.tasks).toHaveLength(1);
   expect(persisted.agents).toHaveLength(1);
   expect(persisted.tasks[0].workspaceId).toBe(persisted.agents[0].workspaceId);
@@ -98,13 +101,14 @@ try {
   await quitAndCheck();
   page = await launch();
   await expect(page.getByRole("heading", { name: "Validate a local work record", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Configure Local smoke analyst" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Review Local smoke analyst" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start task", exact: true })).toBeDisabled();
   await quitAndCheck();
   expect(errors).toEqual([]);
   const report = {
     product: "RAPP Work", platform: process.platform, architecture: process.arch,
-    passed: ["sandboxed preload", "authenticated owned host", "strict method allowlist", "canonical per-agent persistence across desktop restart", "real runtime and unavailable computer reported honestly", "owned process shutdown", "zero renderer errors"],
+    passed: ["sandboxed preload", "authenticated owned host", "shared scoped RPC schemas", "proposal-only creation intake",
+      "canonical business and agent persistence across desktop restart", "unavailable computer panel", "owned process shutdown", "zero renderer errors"],
     runtimeExecutionTested: false, computerVerificationTested: false,
   };
   await writeFile(join(results, "desktop-smoke.json"), JSON.stringify(report, null, 2));

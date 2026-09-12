@@ -12,7 +12,9 @@ asks a necessary follow-up. The human reviews, makes small edits, and accepts
 or dismisses it. Blank forms are not the normal workflow. Workspace creation
 starts in the owner's concierge; each business has its own Twin conversation,
 catalog, agents, work and routines. See the [host RPC contract](apps/host/README.md)
-for integration; this host change does not update the desktop or UI.
+for integration. The three-column UI keeps workspace context on the left,
+conversation and complete reviews in the center, and the shared agent computer
+on the right. Paste full instruction documents without re-entering their fields.
 
 ## The product
 

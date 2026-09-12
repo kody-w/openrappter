@@ -18,7 +18,9 @@ npm run build
 npm start
 ```
 
-The desktop build stages only the built host bundle and UI, and generates its
+The desktop build typechecks without emitting into imported source folders,
+bundles the shell and preload with the shared pure RPC schemas, and stages only
+the built host bundle and UI. It uses its
 own RAPP Work PNG/ICNS/tray assets. It fails if either application has not been
 built. Packaging is restricted to macOS arm64 DMG/ZIP:
 
@@ -48,6 +50,8 @@ build does not attest to either.
   cannot make network connections. The theme bootstrap uses a CSP hash.
 * The frozen preload exposes exactly `request`, `hostState`, and `onEvent`.
   Both preload and main enforce a closed method allowlist and strict parameters.
+  These are imported from the host's pure shared DTO module, including Twin
+  requests, mandatory business bindings, and lossless bounded document input.
   Main accepts requests only from the owned top-level application frame.
 * Main generates a fresh secret, sends it over private parent/child IPC, validates
   a versioned readiness handshake, and performs an authenticated health probe.
@@ -78,8 +82,9 @@ npm run test:smoke
 ```
 
 The smoke test launches the actual Electron shell and bundled host, verifies the
-preload/renderer boundary and authenticated connection, creates real local agent
-and task records, changes typed settings, restarts the app, checks persistence
+preload/renderer boundary and authenticated connection, creates complete reviewed
+offline business/agent/task records through the canonical APIs, confirms new
+actions open conversation rather than forms, restarts the app, checks persistence
 and private permissions, and ensures the owned host does not survive Quit.
 It verifies runtime availability, while the isolated profile's provider setup
 and computer remain unavailable; it does not perform model/guest work.

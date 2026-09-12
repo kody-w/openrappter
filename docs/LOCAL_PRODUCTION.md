@@ -55,7 +55,9 @@ routines and computer state. Start a new-business conversation with
 include an authorized business `workspaceId`. No server-global selection is
 inferred. Accepting a strict proposal uses canonical Work APIs, never tools
 inside Copilot. The current host RPC integration is documented in
-[the host contract](../apps/host/README.md); this change does not replace the UI.
+[the host contract](../apps/host/README.md). The desktop and UI use the same pure
+parameter schemas, including explicit workspace bindings and bounded document
+intake; they never bypass the authenticated bridge.
 
 Supported API documentation:
 
@@ -108,10 +110,19 @@ passing `tart get omarchy-template --format json` to the exported
 `vmConfigurationHash` in `apps/host/dist/computer-drivers.js`; it hashes exactly
 OS, CPU, Memory, Disk, DiskFormat and Display using canonical JSON.
 
-Restart the app. Work → Local computer → Start clones **only the configured
+Restart the app. Select a business and use **Start agent computer** in its
+right-side panel. This clones **only the configured
 local label**, verifies its disk and configuration pins, records host-owned
 clone provenance, and starts it with no directory/disk mounts, clipboard or
 audio sharing. Existing unowned running VMs and changed pins fail closed.
+The panel reports the actual workspace lease/agent and explicit approval
+policy. The current headless driver does not supply a screen stream, so display
+availability remains unavailable rather than showing fabricated desktop imagery.
+Each workspace must explicitly enable the shared computer. Every subsequent
+tool action obtains its own scoped lease; switching the UI never transfers
+another workspace's authority. Starting does not relax an agent's instructions
+or approval policy. Computer-access policy changes are conversational,
+reviewable settings proposals.
 
 Tart lifecycle commands and `/usr/bin/ssh` use fixed argument vectors,
 sanitized environments and no host command shell. SSH uses a pinned host alias,

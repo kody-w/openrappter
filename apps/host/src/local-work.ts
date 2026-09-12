@@ -196,6 +196,10 @@ export class LocalWork implements WorkPort, StoragePort {
     };
   }
   async workspace(context: RequestContext): Promise<WorkspaceSummary> {
+    const selected = await this.workspaceMetadata(context);
+    return { ...selected, revision: (await this.read(selected.id)).revision };
+  }
+  async workspaceMetadata(context: RequestContext): Promise<WorkspaceSummary> {
     const scope = this.assertContext(context);
     const history = await this.persistence.read(scope);
     let selected: WorkspaceSummary | undefined;
@@ -205,7 +209,7 @@ export class LocalWork implements WorkPort, StoragePort {
     if (!selected || selected.ownerId !== context.principal.id || selected.id !== scope.workspaceId
       || selected.parentWorkspaceId !== this.persistence.owner.catalog.workspaceId
       || selected.catalogScope.agentId !== scope.agentId) throw new Error("No verified business catalog identity.");
-    return { ...selected, revision: (await this.read(scope.workspaceId)).revision };
+    return selected;
   }
   private validateAgentPolicy(agent: AgentInput, workspace: Pick<WorkspaceDetails, "computerPolicy" | "approvalPolicy">): void {
     const rank = { none: 0, "read-only": 1, control: 2 };

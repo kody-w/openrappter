@@ -50,11 +50,11 @@ describe("main-process JSON-RPC transport", () => {
   it("rejects forbidden renderer requests before transport and bounds unanswered calls", async () => {
     await client.connect({ port, instanceId: randomUUID(), token: "test-token" });
     expect(() => client.request({ method: "shell.execute", params: {} })).toThrow();
-    await expect(client.request({ method: "work.snapshot", params: {} })).rejects.toThrow("did not respond in time");
+    await expect(client.request({ method: "work.snapshot", params: { workspaceId: "test-workspace" } })).rejects.toThrow("did not respond in time");
   });
   it("fails pending requests on disconnect rather than leaving them unresolved", async () => {
     await client.connect({ port, instanceId: randomUUID(), token: "test-token" });
-    const request = client.request({ method: "work.snapshot", params: {} });
+    const request = client.request({ method: "work.snapshot", params: { workspaceId: "test-workspace" } });
     const rejected = expect(request).rejects.toThrow("disconnected");
     socket!.terminate();
     await rejected;

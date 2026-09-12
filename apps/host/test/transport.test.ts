@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { createHost, type RunningHost } from "../src/server.js";
 import type { HostServices } from "../src/ports.js";
+import { MAX_RPC_BYTES } from "../src/contracts.js";
 import { agent, fixture, owner, token } from "./fixture.js";
 
 let services: HostServices;
@@ -106,7 +107,7 @@ describe("authenticated loopback HTTP transport", () => {
     expect((await http("/rpc", { method: "POST", headers: auth, body: "{}" })).status).toBe(415);
     expect((await http("/rpc", {
       method: "POST", headers: { ...auth, "Content-Type": "application/json" },
-      body: JSON.stringify({ value: "x".repeat(65536) }),
+      body: JSON.stringify({ value: "x".repeat(MAX_RPC_BYTES) }),
     })).status).toBe(413);
   });
   it("bounds chunked bodies without invoking a service", async () => {
@@ -116,8 +117,8 @@ describe("authenticated loopback HTTP transport", () => {
         headers: { ...auth, "Content-Type": "application/json", "Transfer-Encoding": "chunked" },
       }, (response) => { response.resume(); resolve(response.statusCode!); });
       request.on("error", reject);
-      request.write("x".repeat(40000));
-      request.end("x".repeat(40000));
+      request.write("x".repeat(300000));
+      request.end("x".repeat(300000));
     });
     expect(status).toBe(413);
   });

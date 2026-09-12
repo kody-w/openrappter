@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
-import { eventReadSchema, idSchema, rpcEnvelopeSchema, serviceNames, type WorkEvent } from "./contracts.js";
+import { eventReadSchema, idSchema, MAX_RPC_BYTES, rpcEnvelopeSchema, serviceNames, type WorkEvent } from "./contracts.js";
 import type { HostServices, Principal } from "./ports.js";
 import { HostError } from "./errors.js";
 import { EventJournal } from "./events.js";
 import { createMethods, statusOf, type SubscriptionConnection } from "./methods.js";
 import { z } from "zod";
 
-const MAX_BODY = 64 * 1024;
+const MAX_BODY = MAX_RPC_BYTES;
 const MAX_BUFFER = 34 * 1024 * 1024;
 const principalSchema = z.strictObject({
   id: idSchema, workspaceId: idSchema,

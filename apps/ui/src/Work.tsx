@@ -3,7 +3,7 @@ import { Avatar, Badge, Empty, formatDate, Icon, Modal, StatusBadge, TabPanel, T
 import type { Approval, Artifact, Computer, Run, Snapshot, Status } from "./model";
 import type { Perform } from "./useWorkspace";
 
-export type WorkTab = "tasks" | "runs" | "approvals" | "artifacts" | "computer";
+export type WorkTab = "tasks" | "runs" | "approvals" | "artifacts";
 interface Props {
   snapshot: Snapshot; status: Status | null; computer: Computer | null;
   connected: boolean; busy: boolean; perform: Perform; newTask: () => void;
@@ -24,7 +24,8 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
   const selected = tasks.find((task) => task.id === selectedId) ?? tasks[0];
   const selectedAgent = snapshot.agents.find((agent) => agent.id === selected?.agentId);
   const agentReady = Boolean(selectedAgent?.enabled && selectedAgent.providerId && selectedAgent.model
-    && (selectedAgent.computerPolicy === "none" || computer?.state === "running" && computer.verified));
+    && (selectedAgent.computerPolicy === "none" || computer?.state === "running" && computer.verified
+      && computer.workspace?.id === snapshot.workspaceId && computer.workspace.enabled));
   const canExecute = connected && status?.checks.runtime.state === "ready" && status.checks.provider.state === "ready";
   return <>
     <section className="metrics" aria-label="Work overview">
@@ -36,7 +37,7 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
       <Tabs label="Work views" selected={tab} onChange={setTab} tabs={[
         { id: "tasks", label: "Tasks", count: snapshot.tasks.length }, { id: "runs", label: "Runs" },
         { id: "approvals", label: "Approvals", count: pending.length },
-        { id: "artifacts", label: "Artifacts & evidence" }, { id: "computer", label: "Local computer" },
+        { id: "artifacts", label: "Artifacts & evidence" },
       ]} />
       <TabPanel id={tab}>
         {tab === "tasks" && <>
@@ -114,29 +115,6 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
             <p className="small-text">{artifact.mediaType} · {new Intl.NumberFormat().format(artifact.bytes)} bytes</p><time dateTime={artifact.createdAt}>{formatDate(artifact.createdAt)}</time>
             <button className="button secondary" onClick={() => openArtifact(artifact)} disabled={!connected}>View artifact<Icon name="arrow" size={16} /></button>
           </article>)}</div>)}
-        {tab === "computer" && <div className="computer-layout">
-          <section className="computer-preview" aria-label="Local computer availability"><Icon name="computer" size={64} />
-            <h2>{computer?.state === "running" ? "Computer service reports running" : "Your local computer workspace"}</h2>
-            <p>{computer?.detail ?? "Computer status has not been reported by a connected service."}</p>
-            <StatusBadge state={computer?.state ?? "unavailable"} />
-          </section>
-          <section className="computer-details"><h3>Access & verification</h3>
-            <dl className="metadata">
-              <div><dt>View capability</dt><dd>{computer?.capabilities.view ? "Reported available" : "Not available"}</dd></div>
-              <div><dt>Control capability</dt><dd>{computer?.capabilities.control ? "Reported available" : "Not available"}</dd></div>
-              <div><dt>Verification</dt><dd><StatusBadge state={computer?.verified ? "passed" : "not_checked"} /></dd></div>
-              <div><dt>Verified at</dt><dd>{formatDate(computer?.verifiedAt ?? null)}</dd></div>
-              <div><dt>Evidence references</dt><dd>{computer?.evidenceIds.length ?? 0}</dd></div>
-            </dl>
-            <p className="inline-note">A connected service must report real computer state and evidence. Agent access is governed by its configuration and approval policy.</p>
-            <div className="row wrap">
-              <button className="button primary" disabled={!connected || busy || computer?.state !== "stopped" || !computer.capabilities.control || status?.checks.computer.state !== "ready"}
-                onClick={() => { void perform("computer.start", {}, "Computer start response received. Review the service-reported state."); }}>Start computer</button>
-              <button className="button secondary" disabled={!connected || busy || computer?.state !== "running" || !computer.capabilities.control}
-                onClick={() => { void perform("computer.stop", {}, "Computer stop response received."); }}>Stop computer</button>
-            </div>
-          </section>
-        </div>}
       </TabPanel>
     </div>
     {cancelRun && <Modal title="Cancel this run?" onClose={() => setCancelRun(null)} busy={busy}>

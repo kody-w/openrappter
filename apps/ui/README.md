@@ -1,6 +1,8 @@
 # RAPP Work workspace
 
-A React/TypeScript desktop workspace with exactly four primary areas:
+A conversation-first React/TypeScript desktop with three columns: business
+workspaces/roster, Twin conversation and complete reviews, and a persistent
+shared-computer panel. The four record areas remain:
 
 * **Work:** task creation/assignment, run history/cancellation, scoped approvals,
   artifacts and evidence, and service-reported local computer state.
@@ -29,6 +31,37 @@ snapshot refreshes, are cleaned on disconnect, and never create synthetic runs.
 Last-loaded work is identified as stale and mutation controls are disabled when
 disconnected. Computer “running” and “verified” are separate service assertions;
 missing services cannot become a successful result.
+
+Every RPC and subscription is bound to the selected authorized business.
+Selection immediately clears computer state, draft editors, artifact content
+and pending-response ownership. Late responses from another workspace cannot
+replace the selected view or transfer a lease. The desktop's preload and main
+process share the same pure RPC parameter schemas as the host.
+
+## Intent, then review
+
+New workspace, agent, task, routine and settings actions focus the Twin's
+single intent/document composer. They never open a blank create form.
+`ProposalReview` refuses to render a form without a complete, hash-bound,
+workspace-matching proposal. Existing-record reviews require the full record
+and membership in the selected snapshot. Settings are initially read-only;
+the Twin proposes changes and the review merges them with complete current
+values.
+
+Pasted Markdown documents are retained verbatim, including locked evidence
+phrases and line endings. Oversized input stays visible with an explicit
+error; it is never silently truncated. A document already supplied to the
+concierge is retained when the necessary follow-up is selecting its business.
+The instruction text in a document-backed proposal is read-only; submit a
+revised document to change its restrictions. Suggested routines remain
+disabled until another explicit review.
+
+The prominent **Start agent computer** control uses `computer.start` for the
+current business. The right panel distinguishes shared VM state, workspace
+enablement, actual current lease/agent, approval policy, and display
+availability. Unavailable/unresolved states disable startup; no screen is
+invented for the headless driver. Each operation obtains a fresh scoped broker
+lease, and agent policies still apply after starting the VM.
 
 ## Interaction and accessibility
 
@@ -63,10 +96,12 @@ npm run test:browser
 
 The browser suite serves the **production build**, checks a real disconnected
 cold load, exercises the main workflow twice, tests persistence through an
-injected test bridge, approvals, artifacts, schedules, provider references,
-diagnostics, keyboard focus, and WCAG checks in both themes at 1360px and 375px.
+injected test bridge, long pasted instructions, complete draft reviews,
+approvals, artifacts, workspace-scoped computer start/switching, keyboard focus,
+three-column positioning, and WCAG checks in both themes at 1360px and 375px.
 Screenshots/traces are app-local in ignored `test-results/`. Fixtures exist only
-under `test/` and `e2e/`; they are never bundled into production.
+under `test/` and `e2e/`; their separate in-memory test bundle is injected only
+by Playwright and is never included in the production bundle.
 
 The browser tests do not verify a real execution runtime or virtual machine.
 Actual Electron/host persistence is covered by the desktop smoke test.

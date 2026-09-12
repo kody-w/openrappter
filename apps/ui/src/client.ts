@@ -19,7 +19,7 @@ export interface DesktopBridge {
 }
 export interface WorkClient {
   call<M extends RpcMethod>(method: M, params: RpcInput<M>): Promise<RpcResult<M>>;
-  subscribe(scope: EventScope, changed: () => void): Promise<() => void>;
+  subscribe(workspaceId: string, scope: EventScope, changed: () => void): Promise<() => void>;
   onConnection(changed: (state: HostState) => void): () => void;
 }
 export class BridgeClient implements WorkClient {
@@ -27,13 +27,13 @@ export class BridgeClient implements WorkClient {
   async call<M extends RpcMethod>(method: M, params: RpcInput<M>): Promise<RpcResult<M>> {
     const contract = rpcContracts[method];
     const input = contract.input.safeParse(params);
-    if (!input.success) throw new Error("Please check the form fields and try again.");
+    if (!input.success) throw new Error("The request or reviewed draft is incomplete or invalid. Ask the Twin to revise it.");
     const raw = await this.bridge.request({ method, params: input.data });
     const output = contract.output.safeParse(raw);
     if (!output.success) throw new Error("The host returned an invalid response. Refresh diagnostics before continuing.");
     return output.data as RpcResult<M>;
   }
-  async subscribe(scope: EventScope, changed: () => void): Promise<() => void> {
+  async subscribe(workspaceId: string, scope: EventScope, changed: () => void): Promise<() => void> {
     let subscriptionId: string | undefined;
     const queued = new Set<string>();
     const remove = this.bridge.onEvent((raw) => {
@@ -43,12 +43,12 @@ export class BridgeClient implements WorkClient {
       else if (parsed.data.subscriptionId === subscriptionId) changed();
     });
     try {
-      const subscription = await this.call("events.subscribe", { scope, limit: 200 });
+      const subscription = await this.call("events.subscribe", { workspaceId, scope, limit: 200 });
       subscriptionId = subscription.subscriptionId;
       if (subscription.events.length || queued.has(subscriptionId)) changed();
       return () => {
         remove();
-        void this.call("events.unsubscribe", { subscriptionId: subscription.subscriptionId }).catch(() => {});
+        void this.call("events.unsubscribe", { workspaceId, subscriptionId: subscription.subscriptionId }).catch(() => {});
       };
     } catch (error) { remove(); throw error; }
   }

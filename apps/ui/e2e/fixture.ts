@@ -1,83 +1,115 @@
 import type { Page } from "@playwright/test";
-import { populatedClient, testStatus, testWorkspace, timestamp } from "../test/fixture";
-import type { Snapshot } from "../src/model";
+import { fileURLToPath } from "node:url";
+import { build } from "vite";
 
+let fixtureBundle: Promise<string> | undefined;
+async function browserFixture() {
+  fixtureBundle ??= (async () => {
+    const result = await build({
+      configFile: false, logLevel: "silent",
+      build: { write: false, emptyOutDir: false, minify: false,
+        lib: { entry: fileURLToPath(new URL("../test/fixture.ts", import.meta.url)), name: "RappWorkTestFixture", formats: ["iife"] } },
+    });
+    for (const output of Array.isArray(result) ? result : [result]) {
+      if (!("output" in output)) continue;
+      const entry = output.output.find((item) => item.type === "chunk" && item.isEntry);
+      if (entry?.type === "chunk") return `${entry.code}\nwindow.RappWorkTestFixture = RappWorkTestFixture;`;
+    }
+    throw new Error("Browser fixture bundle is missing.");
+  })();
+  return fixtureBundle;
+}
 export async function installFixture(page: Page, populated = false) {
-  const seed = populated ? populatedClient().workspace : testWorkspace();
-  await page.addInitScript(({ seed, status, timestamp }) => {
-    const storageKey = "rapp-work-browser-test-only";
-    let snapshot: Snapshot = JSON.parse(localStorage.getItem(storageKey) ?? JSON.stringify(seed));
-    const save = () => { snapshot.revision++; localStorage.setItem(storageKey, JSON.stringify(snapshot)); };
+  await page.addInitScript({ content: await browserFixture() });
+  await page.addInitScript(({ populated }) => {
+    const storageKey = "rapp-work-conversation-browser-test-only";
     const requests: { method: string; params: unknown }[] = [];
+    const subscribers = new Map<string, string>();
+    const listeners = new Set<(event: unknown) => void>();
     Object.defineProperty(window, "__testRequests", { value: requests });
+    let loading: Promise<any> | undefined;
+    const get = () => loading ??= (async () => {
+      const fixtures = (window as any).RappWorkTestFixture;
+      const client = populated ? fixtures.populatedClient() : new fixtures.FixtureClient();
+      client.status = fixtures.testStatus(true); client.machineState = "stopped";
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        const saved = JSON.parse(stored);
+        client.workspaces = new Map(saved.workspaces); client.conversations = new Map(saved.conversations);
+        client.workspace = client.workspaces.values().next().value;
+        client.machineState = saved.machineState; client.enabled = new Set(saved.enabled);
+      } else client.addWorkspace("second-workspace", "Borealis");
+      client.propose = (request: any) => {
+        const workspace = client.workspaces.get(request.workspaceId);
+        const baseAgent = { id: crypto.randomUUID(), name: "Procurement reviewer", role: "Procurement",
+          instructions: request.message, providerId: "github-copilot", model: "gpt-6-astra",
+          computerPolicy: "none", approvalPolicy: "always", enabled: true, suggestedRoutines: [] };
+        if (request.target === "workspace") {
+          const { suggestedRoutines: _routines, ...leadAgent } = baseAgent;
+          return fixtures.draftFor("workspace", { requestId: crypto.randomUUID(), name: "Consulting workspace",
+            purpose: request.message, twin: { name: "Consulting Twin", instructions: "Draft complete business work for review." },
+            leadAgent, starterTask: null, starterRoutines: [], approvalPolicy: "always", computerPolicy: "none" }, null);
+        }
+        if (request.target === "agent" || request.message.startsWith("# Inventory")) {
+          const document = request.message.startsWith("# Inventory");
+          const proposal = fixtures.draftFor("agent", {
+            ...baseAgent, name: document ? "Inventory Visibility Agent" : "Procurement reviewer",
+            enabled: !document,
+          }, request.workspaceId);
+          if (document) proposal.basis.instructionDocument = { turnId: crypto.randomUUID(), contentHash: "c".repeat(64) };
+          return proposal;
+        }
+        if (request.target === "automation") return fixtures.draftFor("automation", {
+          id: crypto.randomUUID(), name: "Weekly finance review", taskTitle: "Review weekly exceptions",
+          instructions: request.message, agentId: workspace.agents[0].id,
+          cadence: { kind: "weekly", at: "09:00", weekday: 5, timezone: "America/New_York" }, enabled: false,
+        }, request.workspaceId);
+        if (request.target === "settings") return fixtures.draftFor("settings", {
+          workspaceName: "Procurement operations", appearance: { theme: "dark", density: "compact" },
+        }, request.workspaceId);
+        return fixtures.draftFor("task", { requestId: crypto.randomUUID(), title: request.message,
+          instructions: "Summarize material risks and retain evidence.", agentId: workspace.agents[0]?.id ?? null,
+          priority: "normal" }, request.workspaceId);
+      };
+      const notify = () => {
+        for (const [subscriptionId] of subscribers) for (const listener of listeners) listener({
+          type: "events", subscriptionId, events: [{ id: crypto.randomUUID(), area: "work", entityId: "computer",
+            kind: "updated", at: new Date().toISOString() }], cursor: "test-only-cursor",
+        });
+      };
+      client.listeners.add(notify);
+      return client;
+    })().catch((error) => { (window as any).__fixtureError = String(error?.stack ?? error); throw error; });
     window.rappWork = {
-      async hostState() { return { state: "online", detail: "Injected browser test host." }; },
-      onEvent() { return () => {}; },
+      async hostState() { await get(); return { state: "online", detail: "Explicitly injected browser test host." }; },
+      onEvent(callback) { listeners.add(callback); return () => { listeners.delete(callback); }; },
       async request({ method, params }) {
         requests.push({ method, params });
         const input = params as Record<string, any>;
-        const now = new Date().toISOString();
-        switch (method) {
-          case "work.snapshot": return structuredClone(snapshot);
-          case "system.status": return status;
-          case "providers.list": return [{ id: "test-provider", name: "Injected provider", configured: true,
-            availability: "ready", authentication: "authenticated", models: ["test-model"], detail: "Browser test adapter." }];
-          case "computer.inspect": return { state: "unavailable", verified: false, verifiedAt: null, evidenceIds: [], capabilities: { view: false, control: false }, detail: "No computer is connected. This test does not exercise a virtual machine." };
-          case "diagnostics.get": return { capturedAt: timestamp, entries: [] };
-          case "events.subscribe": return { subscriptionId: crypto.randomUUID(), events: [], cursor: "test-only-cursor" };
-          case "events.unsubscribe": return { removed: true };
-          case "agents.save": {
-            const agent = { ...input, workspaceId: snapshot.agents.find((agent) => agent.id === input.id)?.workspaceId ?? crypto.randomUUID(), updatedAt: now } as Snapshot["agents"][number];
-            const existing = snapshot.agents.findIndex((item) => item.id === agent.id);
-            if (existing >= 0) snapshot.agents[existing] = agent; else snapshot.agents.push(agent);
-            save(); return agent;
-          }
-          case "work.createTask": {
-            const { requestId, ...fields } = input;
-            const task = { ...fields, workspaceId: snapshot.agents.find((agent) => agent.id === fields.agentId)?.workspaceId ?? null,
-              id: requestId, state: "queued", createdAt: now, updatedAt: now } as Snapshot["tasks"][number];
-            if (!snapshot.tasks.some((item) => item.id === task.id)) snapshot.tasks.unshift(task);
-            save(); return task;
-          }
-          case "work.assignTask": {
-            const task = snapshot.tasks.find((item) => item.id === input.id)!;
-            task.agentId = input.agentId; task.workspaceId = snapshot.agents.find((agent) => agent.id === input.agentId)!.workspaceId; save(); return task;
-          }
-          case "runs.start": {
-            const task = snapshot.tasks.find((item) => item.id === input.id)!;
-            const run = { id: crypto.randomUUID(), taskId: task.id, agentId: task.agentId!, workspaceId: task.workspaceId!,
-              state: "running" as const, startedAt: now, finishedAt: null, summary: "Accepted by browser test adapter.", verification: "not_checked" as const, evidenceIds: [] };
-            task.state = "running"; snapshot.runs.unshift(run); save(); return run;
-          }
-          case "runs.cancel": {
-            const run = snapshot.runs.find((item) => item.id === input.id)!;
-            run.state = "cancelled"; run.finishedAt = now;
-            snapshot.tasks.find((item) => item.id === run.taskId)!.state = "cancelled"; save(); return run;
-          }
-          case "approvals.decide": {
-            const approval = snapshot.approvals.find((item) => item.id === input.id)!;
-            approval.state = input.decision; approval.decisionReason = input.reason; approval.decidedAt = now; save(); return approval;
-          }
-          case "artifacts.read": return { artifact: snapshot.artifacts.find((item) => item.id === input.id), content: '{"source":"Injected browser test evidence","result":"Review required"}' };
-          case "automations.save": {
-            const automation = { ...input, workspaceId: snapshot.agents.find((agent) => agent.id === input.agentId)!.workspaceId,
-              updatedAt: now, nextRunAt: input.enabled ? now : null } as Snapshot["automations"][number];
-            const index = snapshot.automations.findIndex((item) => item.id === automation.id);
-            if (index >= 0) snapshot.automations[index] = automation; else snapshot.automations.push(automation);
-            save(); return automation;
-          }
-          case "settings.update": snapshot.settings = input as Snapshot["settings"]; save(); return snapshot.settings;
-          case "providers.configure": return { id: input.id, name: "Injected provider", configured: true,
-            availability: "ready", authentication: "authenticated", models: ["test-model"], detail: "Browser test adapter." };
-          default: throw new Error(`Unsupported browser test method: ${method}`);
+        if (method === "events.subscribe") {
+          const subscriptionId = crypto.randomUUID(); subscribers.set(subscriptionId, input.workspaceId);
+          return { subscriptionId, events: [], cursor: "test-only-cursor" };
         }
+        if (method === "events.unsubscribe") return { removed: subscribers.delete(input.subscriptionId) };
+        const client = await get();
+        const result = await client.call(method, params);
+        localStorage.setItem(storageKey, JSON.stringify({
+          workspaces: [...client.workspaces], conversations: [...client.conversations],
+          machineState: client.machineState, enabled: [...client.enabled],
+        }));
+        return result;
       },
     };
-  }, { seed, status: testStatus(true), timestamp });
+  }, { populated });
 }
 export async function navigate(page: Page, area: string) {
   const toggle = page.getByRole("button", { name: "Toggle navigation" });
   if (await toggle.isVisible() && await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
   await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: area, exact: true }).click();
   await page.getByRole("heading", { name: area, exact: true, level: 1 }).waitFor();
+}
+export async function propose(page: Page, text: string) {
+  await page.getByLabel("Your intent or full instruction document").fill(text);
+  await page.getByRole("button", { name: "Send intent", exact: true }).click();
+  await page.getByRole("button", { name: "Review complete draft", exact: true }).last().click();
 }

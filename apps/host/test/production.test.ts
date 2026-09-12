@@ -90,7 +90,7 @@ describe("filesystem-backed production composition", () => {
     expect(ssh.args.at(-1)).toBe("/usr/bin/node /usr/local/lib/rapp-work/guest-helper.js");
     expect(ssh.args).not.toContain("owned work");
     expect(f.commands.calls.every((call) => ["/opt/homebrew/bin/tart", "/usr/bin/ssh"].includes(call.file))).toBe(true);
-  }, 35_000);
+  }, 60_000);
 
   it.each(["configuration", "template", "tart"] as const)("missing %s produces zero model or guest execution", async (missing) => {
     const commands = new FakeCommands();

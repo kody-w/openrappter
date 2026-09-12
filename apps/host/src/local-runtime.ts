@@ -67,7 +67,9 @@ export class LocalRuntime implements RuntimePort {
     if ([...this.active.values()].some((item) => item.agent.workspaceId === input.agent.workspaceId)) conflict("This agent already has an active run.");
     if (input.agent.computerPolicy !== "none") {
       const computer = await this.computer.inspect(context);
-      if (computer.state !== "running" || !computer.verified) unavailable("The agent's verified Omarchy computer");
+      if (computer.state !== "running" || !computer.verified || computer.workspace?.id !== business.workspaceId || !computer.workspace?.enabled) {
+        unavailable("This workspace's enabled, verified Omarchy computer");
+      }
     }
     const scope = agentScope(input.agent);
     const p = this.persistence;

@@ -2,6 +2,11 @@ import { z } from "zod";
 
 export const idSchema = z.string().min(1).max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/);
 export const textSchema = z.string().trim().min(1).max(160);
+export const MAX_INSTRUCTION_CHARS = 64_000;
+export const MAX_RPC_BYTES = 512 * 1024;
+export const instructionTextSchema = z.string().min(1).max(MAX_INSTRUCTION_CHARS)
+  .refine((value) => value.trim().length > 0 && new TextEncoder().encode(value).byteLength <= 128 * 1024,
+    "Instructions must contain text and fit within 128 KiB.");
 export const dateSchema = z.iso.datetime();
 export const areaSchema = z.enum(["work", "agents", "automations", "settings"]);
 export const checkSchema = z.strictObject({
@@ -24,7 +29,7 @@ export const agentInputSchema = z.strictObject({
   id: idSchema,
   name: textSchema,
   role: z.string().trim().max(240),
-  instructions: z.string().trim().max(16000),
+  instructions: instructionTextSchema,
   providerId: idSchema.nullable(),
   model: z.string().max(160),
   computerPolicy: z.enum(["none", "read-only", "control"]),
@@ -164,12 +169,27 @@ export const providerSchema = z.strictObject({
   })).max(500).optional(),
 });
 export const computerSchema = z.strictObject({
-  state: z.enum(["unavailable", "stopped", "starting", "running", "error"]),
+  state: z.enum(["unavailable", "stopped", "starting", "running", "unresolved", "error"]),
   detail: z.string().max(2000),
   verified: z.boolean(),
   verifiedAt: dateSchema.nullable(),
   evidenceIds: z.array(idSchema).max(200),
   capabilities: z.strictObject({ view: z.boolean(), control: z.boolean() }),
+  workspace: z.strictObject({
+    id: idSchema, enabled: z.boolean(),
+    computerPolicy: z.enum(["none", "read-only", "control"]),
+    approvalPolicy: z.enum(["always", "on-risk"]),
+  }).nullable().optional(),
+  lease: z.strictObject({
+    state: z.enum(["idle", "held", "other-workspace", "unresolved"]),
+    id: z.uuid().nullable(), workspaceId: idSchema.nullable(), agentId: idSchema.nullable(),
+    agentWorkspaceId: idSchema.nullable(),
+    operation: z.enum(["starting", "stopping", "executing"]).nullable(),
+  }).optional(),
+  display: z.strictObject({
+    state: z.enum(["available", "unavailable"]),
+    detail: z.string().max(1000),
+  }).optional(),
 }).refine((computer) => !computer.verified ||
   (computer.state === "running" && computer.verifiedAt !== null && computer.evidenceIds.length > 0), {
   message: "Computer verification requires running service evidence.",
@@ -263,7 +283,7 @@ export const workspaceDetailsSchema = z.strictObject({
 });
 const leadAgentSchema = agentInputSchema.extend({
   role: z.string().trim().min(1).max(240),
-  instructions: z.string().trim().min(1).max(16000),
+  instructions: instructionTextSchema,
 });
 export const workspaceInputSchema = workspaceDetailsSchema.extend({
   requestId: z.uuid(),
@@ -311,6 +331,7 @@ export const settingsPatchSchema = z.strictObject({
   appearance: settingsSchema.shape.appearance.partial().optional(),
   work: settingsSchema.shape.work.partial().optional(),
   notifications: settingsSchema.shape.notifications.partial().optional(),
+  computerPolicy: z.enum(["none", "read-only", "control"]).optional(),
 }).refine((patch) => Object.values(patch).some((value) =>
   typeof value === "string" || (value !== undefined && Object.keys(value).length > 0)), "Specify a meaningful settings change.");
 export const approvalRecommendationSchema = z.strictObject({
@@ -321,14 +342,15 @@ export const approvalRecommendationSchema = z.strictObject({
 });
 export const twinTargetSchema = z.enum(["auto", "workspace", "task", "agent", "automation", "settings", "approval"]);
 export const twinMessageRequestSchema = conciergeBindingSchema.extend({
-  message: z.string().trim().min(1).max(8000),
+  message: instructionTextSchema,
   target: twinTargetSchema.optional(),
   history: z.array(z.strictObject({
     role: z.enum(["user", "assistant"]),
     content: z.string().trim().min(1).max(8000),
   })).max(24),
   contextRevision: z.number().int().nonnegative().optional(),
-}).refine((input) => new TextEncoder().encode(JSON.stringify(input)).byteLength <= 48 * 1024,
+}).refine((input) => new TextEncoder().encode(JSON.stringify(input)).byteLength <= 256 * 1024
+  && new TextEncoder().encode(JSON.stringify(input.history)).byteLength <= 48 * 1024,
   "The conversation request exceeds its byte bound.");
 const proposalFields = {
   assistantMessage: z.string().trim().min(1).max(8000),
@@ -341,10 +363,20 @@ const completeAgentDraftSchema = leadAgentSchema.extend({
   providerId: idSchema,
   model: z.string().min(1).max(160),
 });
+export const agentDraftSchema = completeAgentDraftSchema.extend({
+  suggestedRoutines: z.array(automationInputSchema).max(8).optional(),
+}).superRefine((draft, context) => {
+  const routines = draft.suggestedRoutines ?? [];
+  if (new Set(routines.map((routine) => routine.id)).size !== routines.length
+    || routines.some((routine) => routine.agentId !== draft.id || routine.enabled)) {
+    context.addIssue({ code: "custom", path: ["suggestedRoutines"],
+      message: "Suggested routines belong to this agent and remain disabled until separately reviewed." });
+  }
+});
 export const twinProposalSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("workspace"), ...proposalFields, draft: workspaceInputSchema }),
   z.strictObject({ kind: z.literal("task"), ...proposalFields, draft: taskInputSchema }),
-  z.strictObject({ kind: z.literal("agent"), ...proposalFields, draft: completeAgentDraftSchema }),
+  z.strictObject({ kind: z.literal("agent"), ...proposalFields, draft: agentDraftSchema }),
   z.strictObject({ kind: z.literal("automation"), ...proposalFields, draft: automationInputSchema }),
   z.strictObject({ kind: z.literal("settings"), ...proposalFields, draft: settingsPatchSchema }),
   z.strictObject({ kind: z.literal("approval"), ...proposalFields, draft: approvalRecommendationSchema }),
@@ -371,6 +403,9 @@ export const twinBasisSchema = z.strictObject({
   heads: z.array(z.strictObject({ scope: workspaceScopeSchema, heads: twinHeadsSchema })).min(1).max(1002),
   optionsHash: z.string().regex(/^[a-f0-9]{64}$/),
   proposalHash: z.string().regex(/^[a-f0-9]{64}$/),
+  instructionDocument: z.strictObject({
+    turnId: z.uuid(), contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  }).optional(),
 });
 const twinEnvelopeFields = {
   id: z.uuid(), workspaceId: idSchema.nullable(), createdAt: dateSchema, basis: twinBasisSchema.nullable(),
@@ -386,7 +421,7 @@ export const twinDraftSchema = z.discriminatedUnion("kind", [
 ]);
 export const twinTurnSchema = z.strictObject({
   id: z.uuid(), workspaceId: idSchema.nullable(), role: z.enum(["user", "assistant"]),
-  content: z.string().min(1).max(8000), proposalId: z.uuid().nullable(), createdAt: dateSchema,
+  content: instructionTextSchema, proposalId: z.uuid().nullable(), createdAt: dateSchema,
 });
 export const twinEventSchema = z.strictObject({
   id: z.uuid(), workspaceId: idSchema.nullable(), proposalId: z.uuid().nullable(),
@@ -435,3 +470,28 @@ export type TwinConversation = z.infer<typeof twinConversationSchema>;
 export type TwinApplyRequest = z.infer<typeof twinApplyRequestSchema>;
 export type TwinApplyResult = z.infer<typeof twinApplyResultSchema>;
 export type TwinDismissRequest = z.infer<typeof twinDismissRequestSchema>;
+
+const bound = <T extends z.ZodObject>(schema: T) => z.strictObject({
+  ...schema.shape, ...workspaceBindingSchema.shape,
+} as T["shape"] & typeof workspaceBindingSchema.shape);
+export const rpcParameterSchemas = {
+  "system.status": emptySchema,
+  "workspaces.list": emptySchema,
+  "workspaces.create": workspaceInputSchema,
+  "workspaces.open": workspaceBindingSchema,
+  "workspaces.update": bound(workspaceDetailsSchema),
+  "work.snapshot": workspaceBindingSchema,
+  "work.createTask": bound(taskInputSchema),
+  "work.assignTask": bound(z.strictObject({ id: idSchema, agentId: idSchema })),
+  "agents.save": bound(agentInputSchema),
+  "runs.start": bound(entityParamsSchema), "runs.cancel": bound(entityParamsSchema),
+  "approvals.decide": bound(approvalDecisionSchema), "artifacts.read": bound(entityParamsSchema),
+  "automations.save": bound(automationInputSchema), "settings.update": bound(settingsSchema),
+  "providers.list": conciergeBindingSchema, "providers.configure": bound(providerConfigSchema),
+  "computer.inspect": conciergeBindingSchema, "computer.start": workspaceBindingSchema, "computer.stop": workspaceBindingSchema,
+  "diagnostics.get": conciergeBindingSchema,
+  "events.read": bound(eventReadSchema), "events.subscribe": bound(eventReadSchema),
+  "events.unsubscribe": bound(z.strictObject({ subscriptionId: z.uuid() })),
+  "twin.message": twinMessageRequestSchema, "twin.conversation": conciergeBindingSchema,
+  "twin.applyProposal": twinApplyRequestSchema, "twin.dismissProposal": twinDismissRequestSchema,
+} as const;

@@ -11,8 +11,8 @@ describe("desktop boundary contracts", () => {
     const bridge = createBridge({ invoke, on: emitter.on.bind(emitter), removeListener: emitter.removeListener.bind(emitter) });
     expect(Object.keys(bridge).sort()).toEqual(["hostState", "onEvent", "request"]);
     expect(Object.isFrozen(bridge)).toBe(true);
-    await bridge.request({ method: "work.snapshot", params: {} });
-    expect(invoke).toHaveBeenCalledWith(IPC.request, { method: "work.snapshot", params: {} });
+    await bridge.request({ method: "work.snapshot", params: { workspaceId: "test-workspace" } });
+    expect(invoke).toHaveBeenCalledWith(IPC.request, { method: "work.snapshot", params: { workspaceId: "test-workspace" } });
     expect(await bridge.hostState()).toEqual({ state: "online", detail: "Injected." });
   });
   it("drops malformed events and removes only its listener", () => {
@@ -28,14 +28,22 @@ describe("desktop boundary contracts", () => {
     remove(); expect(emitter.listenerCount(IPC.event)).toBe(1);
   });
   it("uses a closed method allowlist with strict nested parameter schemas", () => {
-    expect(Object.keys(parameterSchemas)).toHaveLength(20);
+    expect(Object.keys(parameterSchemas)).toHaveLength(28);
     for (const method of ["shell.execute", "chat.send", "sessions.list", "__proto__", "constructor"]) {
       expect(() => parseRequest({ method, params: {} })).toThrow();
     }
-    expect(() => parseRequest({ method: "work.snapshot", params: { workspaceId: "other" } })).toThrow();
+    expect(() => parseRequest({ method: "work.snapshot", params: {} })).toThrow();
+    expect(parseRequest({ method: "work.snapshot", params: { workspaceId: "other" } }).params).toEqual({ workspaceId: "other" });
     expect(() => parseRequest({ method: "events.read", params: { scope: { area: "work", injected: true } } })).toThrow();
     expect(() => parseRequest({ method: "work.snapshot", params: {}, endpoint: "https://other.invalid" })).toThrow();
     expect(() => parseRequest({ method: "settings.update", params: { appearance: { theme: "arbitrary" } } })).toThrow();
+  });
+  it("accepts bounded pasted instructions verbatim but cannot admit caller authority or a missing workspace binding", () => {
+    const message = "# Inventory Visibility Agent — Manual Global Instructions\n" + "Preserve source evidence.\n".repeat(1500);
+    expect(parseRequest({ method: "twin.message", params: { workspaceId: "test-workspace", message, history: [], target: "agent" } }).params)
+      .toMatchObject({ message });
+    expect(() => parseRequest({ method: "twin.message", params: { message, history: [] } })).toThrow();
+    expect(() => parseRequest({ method: "computer.start", params: { workspaceId: "test-workspace", lease: {} } })).toThrow();
   });
   it("only accepts IPC from the owned main frame at the application document", () => {
     const contents = { mainFrame: { url: APP_URL } };

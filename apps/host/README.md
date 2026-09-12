@@ -133,8 +133,9 @@ Business context contains only that business's agents, work and approvals.
 Supplied history is untrusted conversation data, never authority, and is not
 re-persisted as if the supplied assistant turns were canonical.
 
-Limits: 24 supplied history entries, 8,000 characters per message/turn, and
-48 KiB per serialized message request. Provider prompts/schemas and responses
+Limits: 24 supplied history entries (8,000 characters each, 48 KiB together),
+64,000 characters / 128 KiB for an intent or instruction document, and
+256 KiB per serialized Twin message request. Provider prompts/schemas and responses
 have separate bounds. Snapshot conversations return the latest 500 turns,
 250 proposals and 500 lifecycle events; older canonical history remains
 durable. A stale `contextRevision` rejects the message before recording a turn.
@@ -143,6 +144,23 @@ User turns are committed before drafting. Assistant turns and proposals share
 a verified model-command outcome/evidence triple. Invalid output/unavailability
 persists an error event, not a fake assistant response. Uncertain model
 intents are never replayed after restart.
+
+### Pasted instruction documents
+
+Markdown instruction blocks are primary intake. A heading such as
+`# Inventory Visibility Agent — Manual Global Instructions` supplies the agent
+identity; the model derives its role and complete configuration without asking
+for the name or instructions again. The host gives the tool-free model an
+explicit instruction-document reference and binds that reference to the
+original text, including line endings, whitespace, and locked evidence phrases.
+This is lossless source binding, not an AI fallback or a synthesized summary.
+
+The proposal basis records the canonical source turn and content hash. Invalid
+rewrites, a different supplied identity, weaker computer/approval policy, or
+automatic activation contrary to the document are rejected. Missing model
+availability remains an error. Necessary follow-ups retain the document from
+the owning conversation. Suggested routines are complete, agent-owned and
+disabled; saving them additionally requires automation-write permission.
 
 ### Accept, edit, dismiss
 
@@ -196,7 +214,7 @@ private parent/child IPC, never to the renderer or on a process command line.
 
 Unknown fields, unknown methods, batches, binary WebSocket frames, and
 notification-style commands without an ID are rejected. Inputs are capped at
-64 KiB; service results at 32 MiB, consistent with the local store capacity.
+512 KiB; service results at 32 MiB, consistent with the local store capacity.
 WebSocket buffering is bounded at 34 MiB, requests at 32 per connection, and
 subscriptions at 16. HTTP headers/body reads, service health checks, socket
 heartbeats, and transport shutdown are bounded. Internal exception details are
@@ -257,6 +275,31 @@ Production work subscriptions publish only after canonical commit verification.
 `host.publish` remains available for explicitly injected compositions. Nothing
 in the renderer manufactures run completion or computer verification.
 
+## Shared agent computer
+
+Every selected workspace has a persistent right-side panel with a prominent
+**Start agent computer** action. It calls authenticated, explicitly
+workspace-bound `computer.start`; only the existing ComputerBroker may acquire
+the lease, provision the pinned Omarchy image, start the single VM, and release
+the lease with canonical evidence. A second workspace starts through its own
+fresh scope and lease, not another workspace's handle, and does not clone a
+second VM.
+
+Successful start persists a workspace enablement marker linked to its own
+broker start proof and the last verified shared stop. Enablement is not itself
+a capability or a held lease. Every later agent tool acquires a fresh
+agent-workspace lease and rechecks business enablement. A shared stop invalidates
+earlier enablement. Existing agent restrictions, workspace computer policy and
+exact human approvals still apply. To change the access ceiling, ask the Twin
+for a reviewed `settings` patch with `computerPolicy`.
+
+Computer DTOs report `unavailable`, `starting`, `running`, `stopped` or
+`unresolved`, scoped enablement/policy, actual active lease/agent, and display
+availability. Other-workspace leases expose no reusable handle or private agent
+identity. An orphaned lease or uncertain operation reports unresolved and is
+never stolen or replayed. The current Tart driver is headless: display
+availability is explicitly **unavailable**, even while guest tools can run.
+
 ## Test coverage
 
  with injected services and cover
@@ -271,5 +314,7 @@ review edits, canonical conversation scans, partial-bootstrap publication
 failure, hash/head/inventory staleness, concurrent accepts, missing bindings,
 provider failure, strict exact-option validation, and recommendations that
 cannot consume approvals.
+Filesystem-backed tests use at most two workers so canonical fsync/read-back
+scenarios do not contend with all other heavy integration files at once.
 `npm run test:bundle` additionally boots the actual bundled host twice and scans
 its persisted frames. Test profiles are app-local and removed.

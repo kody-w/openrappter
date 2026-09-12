@@ -1,4 +1,4 @@
-import { parseModelResponse } from "@rapp-work/model-provider";
+import { ModelProviderError, parseModelResponse } from "@rapp-work/model-provider";
 import type { ModelMessage, ModelResponse, ToolCall } from "@rapp-work/model-provider";
 import type { JsonObject, JsonValue, WorkCommand, WorkCommitResult, WorkspaceScope } from "@rapp-work/work-service";
 import { abortable, Semaphore } from "./concurrency.js";
@@ -51,6 +51,10 @@ export class AgentRuntime {
   }
 
   get activeRunCount(): number { return this.active.size; }
+
+  async settlePending(): Promise<void> {
+    await Promise.allSettled([...this.active.values()].flatMap((run) => [...run.pending]));
+  }
 
   private async track<T>(run: ActiveRun, operation: () => Promise<T>): Promise<T> {
     run.controller.signal.throwIfAborted();
@@ -136,15 +140,16 @@ export class AgentRuntime {
     const unresolved = (reason: string): RunResult => ({
       runId: request.runId, status: "unresolved", steps, toolCalls, reason,
     });
-    const finish = async (status: "succeeded" | "failed" | "cancelled", detail: { output?: string; reason?: string }): Promise<RunResult> => {
+    const finish = async (status: "succeeded" | "failed" | "cancelled", detail: { output?: string; reason?: string }, settledCancellation = false): Promise<RunResult> => {
       const result: RunResult = { runId: request.runId, status, steps, toolCalls, ...detail };
-      const committed = await this.track(active, () => this.dependencies.work.commit(capability,
+      const commit = () => this.dependencies.work.commit(capability,
         this.command(request, "finish", "agent.run.finish", result as unknown as JsonValue),
         async () => ({
           status: "succeeded", value: result as unknown as JsonValue,
           receipts: [{ kind: "runtime-terminal", runId: request.runId }],
           events: [{ type: "agent.run.finished", runId: request.runId, result: result as unknown as JsonObject }],
-        }), { signal }));
+        }), { signal: settledCancellation ? new AbortController().signal : signal });
+      const committed = settledCancellation ? await commit() : await this.track(active, commit);
       this.checkCommit(committed);
       if (committed.status !== "succeeded") throw new UnresolvedStep();
       return { ...result, proof: committed.proof, replayed: committed.replayed };
@@ -229,9 +234,27 @@ export class AgentRuntime {
       }
       return await finish("failed", { reason: "step_budget_exhausted" });
     } catch (error) {
-      if (signal.aborted) return started || active.pending.size > 0
-        ? unresolved(signal.reason === "deadline_exceeded" ? "deadline_unconfirmed" : "cancellation_unconfirmed")
-        : { ...empty, status: "cancelled", reason: "cancelled_before_start" };
+      if (signal.aborted) {
+        if (!started && active.pending.size === 0) return { ...empty, status: "cancelled", reason: "cancelled_before_start" };
+        if (started && signal.reason !== "deadline_exceeded" && signal.reason !== "unresolved_step") {
+          let grace: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const settled = await Promise.race([
+              Promise.allSettled([...active.pending]).then(() => true),
+              new Promise<boolean>((resolve) => { grace = setTimeout(() => resolve(false), 2000); }),
+            ]);
+            if (settled) {
+              const snapshot = await this.dependencies.work.read(capability, request.scope);
+              const uncertain = snapshot.commands.some((entry) => entry.state === "unresolved"
+                && entry.command.idempotencyKey.startsWith(`run/${encodeURIComponent(request.runId)}/`));
+              if (!uncertain) return await finish(signal.reason === "tool_batch_stopped" ? "failed" : "cancelled",
+                { reason: signal.reason === "tool_batch_stopped" ? "tool_batch_stopped" : "cancelled_after_acknowledgement" }, true);
+            }
+          } catch { /* Only complete, read-back outcomes can confirm cancellation. */ }
+          finally { clearTimeout(grace); }
+        }
+        return unresolved(signal.reason === "deadline_exceeded" ? "deadline_unconfirmed" : "cancellation_unconfirmed");
+      }
       if (error instanceof UnresolvedStep) return unresolved("unresolved_step");
       if (!started) throw error;
       if (active.pending.size > 0) return unresolved("effect_unconfirmed");
@@ -259,14 +282,23 @@ export class AgentRuntime {
       this.command(request, `model:${step}`, "model.complete", {
         model: definition.model, messages: json(messages), tools: json(descriptions), maxOutputTokens,
       }), async ({ signal }) => {
-        const response = parseModelResponse(await this.dependencies.provider.complete({
-          model: definition.model, messages: structuredClone(messages),
-          tools: structuredClone(descriptions), maxOutputTokens, signal,
-        }));
-        return {
-          status: "succeeded", value: json(response), events: [],
-          receipts: [{ kind: "model-response", provider: this.dependencies.provider.id, step }],
-        };
+        try {
+          const response = parseModelResponse(await this.dependencies.provider.complete({
+            model: definition.model, messages: structuredClone(messages),
+            tools: structuredClone(descriptions), maxOutputTokens, signal,
+          }));
+          return {
+            status: "succeeded", value: json(response), events: [],
+            receipts: [{ kind: "model-response", provider: this.dependencies.provider.id, step }],
+          };
+        } catch (error) {
+          if (!(error instanceof ModelProviderError)) throw error;
+          return {
+            status: error.code === "cancelled" ? "cancelled" : "failed",
+            value: { code: error.code }, events: [],
+            receipts: [{ kind: "model-error", provider: this.dependencies.provider.id, code: error.code, step }],
+          };
+        }
       }, { signal: active.controller.signal }));
     this.checkCommit(result);
     if (result.status !== "succeeded") throw new AgentRuntimeError("model_failed");

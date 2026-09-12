@@ -4,7 +4,7 @@ Serious local AI for real business work.
 
 RAPP Work is a desktop workspace for persistent agents, assigned work,
 reviewable approvals, and evidence-backed results. It supports **macOS on Apple
-Silicon**. Node.js 22 or newer is required for source development.
+Silicon**. Node.js 22.12 or newer is required for source development.
 
 ## The product
 
@@ -55,6 +55,10 @@ node scripts/run-acceptance.mjs
 
 See [the clean architecture](docs/CLEAN_ARCHITECTURE.md) and
 [the Release Constitution](contracts/RELEASE_CONSTITUTION.md).
+The host now composes real canonical persistence, per-agent runtimes, the
+model-only Copilot SDK adapter and the pinned Tart/SSH computer broker.
+Follow [local production setup](docs/LOCAL_PRODUCTION.md) for authentication
+and an existing Omarchy image. Missing services remain explicitly unavailable.
 
 ## Build an explicit unsigned development DMG
 

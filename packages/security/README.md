@@ -60,6 +60,10 @@ failed or uncertain persistence returns no executable permit.
 The broker calls `consumePermit(permit, exactRequest)` synchronously **before**
 dispatch. It verifies exact binding, current grants and expiry, then destroys
 the handle before returning guest-only claims. Failed dispatch cannot reuse it.
+`claimGuestExecution(claims, exactRequest)` transfers those actual, authority-
+owned consumed claims once to the composition's guest transport. A copied JSON
+claims object, a different operation, a revoked capability or a second transfer
+is rejected.
 After process loss, the durable reservation prevents reminting/replay; an
 uncertain business outcome must be recorded/reconciled, not executed again.
 Permits are necessary, not sufficient: the broker must still verify the owned

@@ -6,13 +6,25 @@
   "description": "RAPP Work authenticated local application host.",
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && esbuild src/entry.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/host.cjs",
-    "typecheck": "tsc --noEmit",
+    "build": "npm run build:services && tsc -p tsconfig.build.json && esbuild src/entry.ts --bundle --platform=node --target=node22 --format=cjs --external:koffi --external:@github/copilot-sdk-* --outfile=dist/host.cjs",
+    "build:services": "tsc -b ../../packages/workspace-store ../../packages/agent-runtime ../../packages/computer-broker ../../packages/diagnostics",
+    "typecheck": "npm run build:services && tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:bundle": "npm run build && node test/bundle-smoke.mjs"
   },
-  "engines": { "node": ">=22" },
-  "dependencies": { "ws": "^8.18.3", "zod": "^4.1.12" },
+  "engines": { "node": ">=22.12.0" },
+  "dependencies": {
+    "@rapp-work/rapp1": "2.0.0",
+    "@rapp-work/workspace-store": "2.0.0",
+    "@rapp-work/security": "2.0.0",
+    "@rapp-work/work-service": "2.0.0",
+    "@rapp-work/agent-runtime": "2.0.0",
+    "@rapp-work/model-provider": "2.0.0",
+    "@rapp-work/computer-broker": "2.0.0",
+    "@rapp-work/diagnostics": "2.0.0",
+    "ws": "^8.18.3", "zod": "^4.1.12"
+  },
   "devDependencies": {
     "@types/node": "^22.19.0",
     "@types/ws": "^8.18.1",

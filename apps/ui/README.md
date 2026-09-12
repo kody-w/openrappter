@@ -20,7 +20,9 @@ honest disconnected state unless given a `WorkClient`.
 `App` accepts the structural `WorkClient` interface in `src/client.ts`. The
 production `BridgeClient` uses only the preload's `request`, `hostState`, and
 `onEvent` functions. `src/model.ts` validates every input and response at runtime.
-These app-owned schemas intentionally do not import unintegrated packages.
+It imports the host's pure DTO schemas; no host implementation or Node
+dependencies enter the renderer. Agent and assigned-work DTOs carry the actual
+independently minted workspace ID. Uncertain outcomes remain visibly unresolved.
 
 The host is authoritative for records and settings. Event subscriptions trigger
 snapshot refreshes, are cleaned on disconnect, and never create synthetic runs.

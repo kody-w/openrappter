@@ -15,13 +15,17 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
   const [filter, setFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [cancelRun, setCancelRun] = useState<Run | null>(null);
-  const pending = snapshot.approvals.filter((approval) => approval.state === "pending");
+  const pending = snapshot.approvals.filter((approval) => approval.state === "pending"
+    && snapshot.runs.some((run) => run.id === approval.runId && run.state === "awaiting_approval"));
   const active = snapshot.tasks.filter((task) => ["queued", "running", "awaiting_approval"].includes(task.state));
   const tasks = snapshot.tasks.filter((task) =>
     (filter === "all" || task.state === filter) &&
     `${task.title} ${task.instructions}`.toLowerCase().includes(query.toLowerCase()));
   const selected = tasks.find((task) => task.id === selectedId) ?? tasks[0];
-  const canExecute = connected && status?.checks.runtime.state === "ready";
+  const selectedAgent = snapshot.agents.find((agent) => agent.id === selected?.agentId);
+  const agentReady = Boolean(selectedAgent?.enabled && selectedAgent.providerId && selectedAgent.model
+    && (selectedAgent.computerPolicy === "none" || computer?.state === "running" && computer.verified));
+  const canExecute = connected && status?.checks.runtime.state === "ready" && status.checks.provider.state === "ready";
   return <>
     <section className="metrics" aria-label="Work overview">
       <div><span className="metric-icon"><Icon name="work" /></span><dl><dt>Active work</dt><dd>{active.length}<span>tasks</span></dd></dl></div>
@@ -56,11 +60,12 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
               <h2>{selected.title}</h2><p className="preserve">{selected.instructions}</p>
               <dl className="metadata">
                 <div><dt>Assigned to</dt><dd>{snapshot.agents.find((agent) => agent.id === selected.agentId)?.name ?? "Unassigned"}</dd></div>
+                <div><dt>Agent workspace</dt><dd className="mono">{selected.workspaceId ?? "Minted when assigned"}</dd></div>
                 <div><dt>Created</dt><dd>{formatDate(selected.createdAt)}</dd></div>
                 <div><dt>Priority</dt><dd>{selected.priority === "high" ? "High" : "Normal"}</dd></div>
               </dl>
               {["queued", "failed", "cancelled"].includes(selected.state) && <div className="action-block">
-                <form className="assignment-form" onSubmit={(event) => {
+                {!snapshot.runs.some((run) => run.taskId === selected.id) && <form className="assignment-form" onSubmit={(event) => {
                   event.preventDefault();
                   const agentId = String(new FormData(event.currentTarget).get("agentId"));
                   void perform("work.assignTask", { id: selected.id, agentId }, "Task assignment saved.");
@@ -70,9 +75,9 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
                     <option value="" disabled>Select an agent</option>{snapshot.agents.filter((agent) => agent.enabled).map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
                   </select>
                   <button type="submit" className="button secondary" disabled={!connected || busy || !snapshot.agents.some((agent) => agent.enabled)}>Assign</button>
-                </form>
-                <button className="button primary" disabled={!canExecute || busy || !selected.agentId} onClick={() => { void perform("runs.start", { id: selected.id }, "Run accepted by the connected runtime."); }}><Icon name="arrow" size={16} />Start task</button>
-                {!canExecute && <p className="field-help">A ready runtime and configured provider are required to start work.</p>}
+                </form>}
+                <button className="button primary" disabled={!canExecute || !agentReady || busy} onClick={() => { void perform("runs.start", { id: selected.id }, "Run accepted by the connected runtime."); }}><Icon name="arrow" size={16} />Start task</button>
+                {(!canExecute || !agentReady) && <p className="field-help">Choose an enabled agent with a connected model and the computer its policy requires.</p>}
                 {!selected.agentId && <p className="field-help">This task has no assigned agent.</p>}
               </div>}
               <h3 className="section-label">Run history</h3>
@@ -98,8 +103,9 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
           <div className="card-list">{snapshot.approvals.map((approval) => <article className="approval-card" key={approval.id}>
             <div className="row between wrap"><div className="row"><span className="surface-icon"><Icon name="shield" /></span><div><h3>{approval.action}</h3><p className="muted small-text">{snapshot.tasks.find((task) => task.id === approval.taskId)?.title ?? "Task"} · {formatDate(approval.createdAt)}</p></div></div><StatusBadge state={approval.state} /></div>
             <p>{approval.reason}</p><div className="row between wrap"><Badge tone={approval.risk === "high" ? "attention" : "neutral"}>{approval.risk} risk</Badge>
-              {approval.state === "pending" ? <button className="button secondary" disabled={!connected || busy} onClick={() => review(approval)}>Review action<Icon name="arrow" size={16} /></button> :
-                <p className="muted small-text">{approval.decisionReason}</p>}</div>
+              {approval.consumedBy && <Badge>Consumed once</Badge>}
+              {approval.state === "pending" && pending.some((item) => item.id === approval.id) ? <button className="button secondary" disabled={!connected || busy} onClick={() => review(approval)}>Review action<Icon name="arrow" size={16} /></button> :
+                <p className="muted small-text">{approval.decisionReason || "No active run; this approval cannot execute."}</p>}</div>
           </article>)}</div>)}
         {tab === "artifacts" && (!snapshot.artifacts.length ? <Empty icon="document" title="Outputs with a paper trail">Documents and execution evidence appear only when reported by the connected services. Nothing is marked verified by assumption.</Empty> :
           <div className="artifact-grid">{snapshot.artifacts.map((artifact) => <article className="artifact-card" key={artifact.id}>
@@ -136,7 +142,7 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
     {cancelRun && <Modal title="Cancel this run?" onClose={() => setCancelRun(null)} busy={busy}>
       <div className="form-body"><p>The connected runtime will be asked to cancel this run. Existing artifacts and evidence will remain available.</p><p className="mono">{cancelRun.id}</p></div>
       <footer className="form-footer"><button className="button secondary" onClick={() => setCancelRun(null)} disabled={busy}>Keep running</button><button className="button danger" disabled={busy} onClick={() => {
-        void perform("runs.cancel", { id: cancelRun.id }, "Cancellation confirmed by the runtime.").then((done) => { if (done) setCancelRun(null); });
+        void perform("runs.cancel", { id: cancelRun.id }, "Cancellation response received. Unresolved actions are never replayed.").then((done) => { if (done) setCancelRun(null); });
       }}>{busy ? "Cancelling…" : "Cancel run"}</button></footer>
     </Modal>}
   </>;

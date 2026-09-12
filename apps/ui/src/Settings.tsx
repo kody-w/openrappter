@@ -47,17 +47,18 @@ export function Settings({ snapshot, status, providers, diagnostics, computer, c
         <div className="settings-footer"><button className="button primary" type="submit" disabled={busy || !connected}>{busy ? "Saving…" : "Save preferences"}</button></div>
       </form>}
       {tab === "providers" && <div className="settings-content">
-        <div className="section-header flush"><div><h2>Provider connections</h2><p className="muted">Provider readiness is reported by the injected provider service.</p></div><button className="button secondary" disabled={!connected || busy} onClick={() => { void refresh(); }}><Icon name="refresh" size={16} />Refresh providers</button></div>
-        {!providers.length ? <Empty icon="settings" title="No provider service connected">A provider adapter must be installed in the host composition before models are available. Credentials stay outside the renderer; only secure connection references are accepted here.</Empty> :
+        <div className="section-header flush"><div><h2>Provider connections</h2><p className="muted">Authentication and models are reported by the local GitHub Copilot runtime.</p></div><button className="button secondary" disabled={!connected || busy} onClick={() => { void refresh(); }}><Icon name="refresh" size={16} />Refresh providers</button></div>
+        {!providers.length ? <Empty icon="settings" title="No provider status available">Refresh the connection to the local host. Credentials stay outside the renderer.</Empty> :
           <div className="stack">{providers.map((provider) => <article className="provider-card" key={provider.id}>
             <div className="row between"><h3>{provider.name}</h3><Badge tone={provider.configured ? "positive" : "neutral"}>{provider.configured ? "Connected" : "Needs setup"}</Badge></div>
             <p className="muted">{provider.detail}</p><p className="small-text">{provider.models.length ? provider.models.join(" · ") : "No models reported"}</p>
+            <p className="small-text">Runtime: {provider.availability} · Authentication: {provider.authentication}</p>
             <form className="provider-form" onSubmit={(event) => {
               event.preventDefault();
               const connectionRef = String(new FormData(event.currentTarget).get("connectionRef"));
               void perform("providers.configure", { id: provider.id, connectionRef }, "Provider connection response received.");
             }}><Field id={`provider-${provider.id}`} label="Secure connection reference" help="Use a reference managed by the provider service, never an API key.">
-                <input id={`provider-${provider.id}`} name="connectionRef" required maxLength={160} aria-describedby={`provider-${provider.id}-help`} placeholder="connections/your-provider" autoComplete="off" />
+                <input id={`provider-${provider.id}`} name="connectionRef" required maxLength={160} aria-describedby={`provider-${provider.id}-help`} defaultValue={provider.id === "github-copilot" ? "copilot-cli" : ""} placeholder="copilot-cli" autoComplete="off" />
               </Field><button className="button secondary" disabled={busy || !connected}>Connect reference</button></form>
           </article>)}</div>}
       </div>}

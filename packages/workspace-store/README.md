@@ -27,6 +27,14 @@ existing directory with a missing/damaged identity is never automatically
 reminted. Display/configuration changes belong in domain frames, not identity
 replacement.
 
+`workspace.withExclusive(transaction => ...)` exposes committed scanning and
+batch CAS under one short cross-process lock. Transaction operations are
+serialized and drained before releasing the lock; handles cannot be reused
+after the callback. The production work adapter uses this boundary for intent
+and terminal commits, never to hold a lock while a human or provider works.
+`PrivateRoot` is also public for the trusted host's private configuration and
+owner-process lock, not as an agent filesystem API.
+
 The layout is `identity.json`, `manifest.json`, `frames/{body,memory,swarm}`,
 `artifacts`, `imports`, plus private lock/transaction control files. The
 manifest contains only identity/authority binding and committed chain
@@ -90,4 +98,6 @@ attachments remain inert.
 tests real competing processes, process death at five commit cuts, creation
 failure, corrupted recovery, capability isolation, path/link attacks, full
 scans, signed swarm persistence, and real-store approval/permit CAS integration.
-Test files stay under the package's ignored `.test-scratch` tree and are removed.
+Lock contention tests also cover atomic owner-file publication/unlink races:
+uncertain owner records are not proof of process death. Test files stay under
+the package's ignored `.test-scratch` tree and are removed.

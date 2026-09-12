@@ -5,6 +5,9 @@
   "type": "module",
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "files": ["dist"],
+  "dependencies": {
+    "@github/copilot-sdk": "1.0.13"
+  },
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",

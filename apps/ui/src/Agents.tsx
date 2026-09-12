@@ -22,6 +22,7 @@ export function Agents({ snapshot, providers, edit, create, connected }: {
     </Empty> : <div className="agent-grid">{agents.map((agent) => <article key={agent.id} className="agent-card">
       <div className="row between"><Avatar name={agent.name} /><Badge tone={agentAvailability(agent, providers, snapshot) === "Working" ? "positive" : "neutral"}>{agentAvailability(agent, providers, snapshot)}</Badge></div>
       <h3>{agent.name}</h3><p className="muted">{agent.role || "No role specified"}</p><p className="clamp agent-instructions">{agent.instructions || "No instructions configured."}</p>
+      <p className="mono small-text" title="This agent's independently minted workspace">{agent.workspaceId}</p>
       <dl className="metadata compact"><div><dt>Model</dt><dd>{agent.model || "Not connected"}</dd></div><div><dt>Computer</dt><dd>{agent.computerPolicy === "none" ? "No access" : agent.computerPolicy === "read-only" ? "Read-only" : "Controlled access"}</dd></div><div><dt>Approval</dt><dd>{agent.approvalPolicy === "always" ? "Always required" : "Sensitive actions"}</dd></div></dl>
       <button className="button secondary" disabled={!connected} onClick={() => edit(agent)}>Configure agent<Icon name="arrow" size={16} /></button>
     </article>)}</div>}

@@ -140,6 +140,7 @@ export function ApprovalForm({ approval, perform, busy, error, onClose }: FormPr
     <div className="row between"><h3>{approval.action}</h3><StatusBadge state={approval.state} /></div>
     <p>{approval.reason}</p>
     <dl className="metadata"><div><dt>Risk</dt><dd>{approval.risk}</dd></div><div><dt>Run</dt><dd className="mono">{approval.runId}</dd></div></dl>
+    <dl className="metadata"><div><dt>Agent workspace</dt><dd className="mono">{approval.workspaceId}</dd></div><div><dt>Exact operation</dt><dd className="mono">{approval.operationHash}</dd></div></dl>
     <Field id="approval-decision" label="Decision"><select id="approval-decision" value={decision} onChange={(event) => setDecision(event.target.value as typeof decision)}>
       <option value="approved">Approve this action only</option><option value="denied">Deny this action</option>
     </select></Field>

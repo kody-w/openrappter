@@ -104,6 +104,9 @@ describe('real filesystem-backed approval/permit commit integration', () => {
     expect(executions).toBe(0);
     const claims = f.security.consumePermit(won.value, f.request);
     expect(claims.executionLocation).toBe('guest');
+    expect(() => f.security.claimGuestExecution({ ...claims }, f.request)).toThrow();
+    f.security.claimGuestExecution(claims, f.request);
+    expect(() => f.security.claimGuestExecution(claims, f.request)).toThrow();
     executions++;
     expect(() => f.security.consumePermit(won.value, f.request)).toThrow();
     expect(executions).toBe(1);

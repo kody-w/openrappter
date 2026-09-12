@@ -3,12 +3,12 @@ import { vi } from "vitest";
 import { emptyWorkspace } from "../src/storage.js";
 import { createWorkService } from "../src/work.js";
 import { ownerPermissions, tokenSecurity } from "../src/local.js";
-import type { HostServices, Principal, StoragePort } from "../src/ports.js";
+import type { HostServices, Principal, ProjectionStoragePort } from "../src/ports.js";
 import type { Snapshot } from "../src/contracts.js";
 
 export const token = randomBytes(48).toString("base64url");
 export const owner: Principal = { id: "test-owner", workspaceId: "test-workspace", permissions: ownerPermissions };
-export class MemoryStorage implements StoragePort {
+export class MemoryStorage implements ProjectionStoragePort {
   data = new Map<string, Snapshot>();
   private queue: Promise<unknown> = Promise.resolve();
   async initialize() {}
@@ -26,7 +26,7 @@ export class MemoryStorage implements StoragePort {
     return next;
   }
 }
-export function fixture(): HostServices {
+export function fixture(): HostServices & { storage: MemoryStorage } {
   const storage = new MemoryStorage();
   const ready = async () => ({ state: "ready" as const, detail: "Injected test service." });
   return {
@@ -34,7 +34,7 @@ export function fixture(): HostServices {
     runtime: {
       check: ready,
       start: vi.fn(async (_, { runId, task, agent }) => ({
-        id: runId, taskId: task.id, agentId: agent.id, state: "running" as const,
+        id: runId, taskId: task.id, agentId: agent.id, workspaceId: agent.workspaceId, state: "running" as const,
         startedAt: new Date().toISOString(), finishedAt: null, summary: "Accepted by injected runtime.",
         verification: "not_checked" as const, evidenceIds: [],
       })),
@@ -44,8 +44,8 @@ export function fixture(): HostServices {
     },
     provider: {
       check: ready,
-      async list() { return [{ id: "test-provider", name: "Test provider", configured: true, models: ["test-model"], detail: "Injected." }]; },
-      async configure(_, { id }) { return { id, name: "Test provider", configured: true, models: ["test-model"], detail: "Injected." }; },
+      async list() { return [{ id: "test-provider", name: "Test provider", configured: true, availability: "ready", authentication: "authenticated", models: ["test-model"], detail: "Injected." }]; },
+      async configure(_, { id }) { return { id, name: "Test provider", configured: true, availability: "ready", authentication: "authenticated", models: ["test-model"], detail: "Injected." }; },
     },
     computer: {
       check: ready,

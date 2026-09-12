@@ -17,6 +17,7 @@ describe("WorkService canonical orchestration", () => {
     expect(store.log).toEqual([
       "authorize:read", "read", "scan", "authorize:command",
       "append:work.intent", "read", "scan", "authorize:permit", "effect", "scan",
+      "read", "scan",
       "append:work.outcome", "read", "scan", "append:work.evidence", "read", "scan",
     ]);
     if (result.state !== "committed") throw new Error("not committed");

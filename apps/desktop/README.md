@@ -6,17 +6,12 @@ No secondary window/bar, voice-model payload, or non-Node runtime is shipped.
 
 ## Build
 
-Install each application's dependencies with its own lockfile:
+Install the clean workspace from the root lockfile:
 
 ```sh
-cd apps/host
-npm ci --workspaces=false
+npm ci
 npm run build
-cd ../ui
-npm ci --workspaces=false
-npm run build
-cd ../desktop
-npm ci --workspaces=false
+cd apps/desktop
 npm run typecheck
 npm test
 npm run build
@@ -61,13 +56,14 @@ build does not attest to either.
 * Startup is bounded. Concurrent starts share one process. Unexpected exit
   invalidates the lease; Refresh can start a new owned host. Closing the window
   hides it in the tray; explicit Quit stops the owned process, forcibly if needed.
-* Work data is kept beneath Electron's RAPP Work user-data directory in private
-  workspace files. Unpackaged smoke runs can isolate data with
+* The production user-data path is explicitly the new RAPP Work directory.
+  One owner and a canonical per-agent workspace store live beneath it.
+  Unpackaged smoke runs can isolate data with
   `RAPP_WORK_USER_DATA`; packaged applications ignore that override.
 
-Host connection does not mean execution readiness. The supplied host composition
-persists local records but reports runtime/provider/computer adapters unavailable.
-It makes no virtual-machine or execution-verification claim.
+Host connection does not mean provider/computer readiness. The composition
+uses real public-package adapters and reports missing authentication,
+configuration or image explicitly. See [setup](../../docs/LOCAL_PRODUCTION.md).
 
 ## Tests
 
@@ -85,6 +81,7 @@ The smoke test launches the actual Electron shell and bundled host, verifies the
 preload/renderer boundary and authenticated connection, creates real local agent
 and task records, changes typed settings, restarts the app, checks persistence
 and private permissions, and ensures the owned host does not survive Quit.
-It asserts that runtime execution and computer verification remain unavailable.
+It verifies runtime availability, while the isolated profile's provider setup
+and computer remain unavailable; it does not perform model/guest work.
 The isolated profile is removed; a screenshot and result JSON remain in the
 ignored `test-results/` directory.

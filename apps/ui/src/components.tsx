@@ -29,11 +29,11 @@ export function StatusBadge({ state }: { state: string }) {
     awaiting_approval: "Needs approval", not_checked: "Not verified", ready: "Ready", queued: "Queued",
     running: "Running", completed: "Completed", failed: "Failed", cancelled: "Cancelled", unavailable: "Not connected",
     degraded: "Needs attention", stopped: "Stopped", starting: "Starting", error: "Unavailable", pending: "Pending",
-    approved: "Approved", denied: "Denied", passed: "Verified",
+    approved: "Approved", denied: "Denied", passed: "Verified", unresolved: "Unresolved",
   };
   const positive = ["ready", "completed", "approved", "passed"].includes(state);
   const danger = ["failed", "error", "denied"].includes(state);
-  const attention = ["awaiting_approval", "pending", "degraded"].includes(state);
+  const attention = ["awaiting_approval", "pending", "degraded", "unresolved"].includes(state);
   return <Badge tone={positive ? "positive" : danger ? "danger" : attention ? "attention" : "neutral"}>{labels[state] ?? state}</Badge>;
 }
 export function Empty({ icon, title, children, action }: { icon: IconName; title: string; children: ReactNode; action?: ReactNode }) {

@@ -8,10 +8,18 @@ different VM, image, SSH key, or host command.
 Mandatory ports are `WorkServicePort`, `ComputerLeaseStorePort`,
 `TartControlPort`, `ScopedGuestPort`, and `WorkspaceArtifactsPort`. The host
 composition root must bind actual Tart and pinned SSH/guest-helper adapters.
+The production adapters are `apps/host/src/computer-drivers.ts` and
+`local-computer.ts`; setup is documented in
+[local production setup](../../docs/LOCAL_PRODUCTION.md). They verify a local
+template's configuration and raw disk hash before cloning, retain host-owned
+provenance and never download an image.
 The Tart port exposes only fixed lifecycle/address operations, not a shell.
 The guest port must verify the pinned key **before sending work**, enforce its
 scoped permit, deny symlink escapes, and bound output/transfers. This package
-has no child-process/host-shell API or fallback.
+has no host-shell API or fallback. Its separate `guest-helper` executable runs
+only in Linux, inside the VM; it invokes Bubblewrap with fixed isolation
+arguments, an explicit workspace mount and the authorized argv. A read-only
+request changes the mount to read-only.
 
 `acquire` yields a process-local opaque lease only after the durable acquisition
 receipt is verified. `FileComputerLeaseStore` provides private, fsynced,

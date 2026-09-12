@@ -182,6 +182,7 @@ describe("authenticated WebSocket JSON-RPC and events", () => {
     const content = "\n".repeat(600000);
     const artifact = {
       id: "artifact", taskId: "task", runId: "run", name: "Report.txt", mediaType: "text/plain" as const,
+      agentId: "agent-one", workspaceId: "agent-workspace",
       bytes: Buffer.byteLength(content), createdAt: new Date().toISOString(), evidence: true,
       sha256: createHash("sha256").update(content).digest("hex"),
     };

@@ -97,7 +97,7 @@ describe("single pinned ComputerBroker", () => {
       workspace: scope, root: "/workspaces/workspace-a",
     });
     expect(session.permit).toMatchObject({ intentRef: session.intentRef });
-    expect(call).toEqual({ argv: ["date"], cwd: "/workspaces/workspace-a", timeoutMs: 1000, maxOutputBytes: 4096 });
+    expect(call).toEqual({ argv: ["date"], cwd: "/workspaces/workspace-a", timeoutMs: 1000, maxOutputBytes: 4096, readOnly: false });
     expect((await test.service.read(test.capability, configuration.historyScope)).commands.map(
       (entry) => entry.command.operation,
     )).toEqual(["computer.lease.acquire", "computer.execute"]);

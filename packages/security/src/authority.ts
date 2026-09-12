@@ -45,6 +45,7 @@ export class SecurityAuthority {
   readonly #principals = new WeakMap<object, PrincipalClaims>();
   readonly #capabilities = new WeakMap<object, { view: CapabilityView; principal: Principal; parent?: Capability }>();
   readonly #permits = new WeakMap<object, { claims: PermitClaims; capability: Capability }>();
+  readonly #consumed = new WeakMap<object, Capability>();
   #lastNow = 0;
 
   constructor(options: AuthorityOptions) {
@@ -259,6 +260,17 @@ export class SecurityAuthority {
     this.inspectCapability(selected.capability, 'run.execute');
     if (selected.claims.expiresAt <= this.#now()) throw new AuthorizationError('expired', 'Execution permit expired');
     this.#permits.delete(permit);
+    this.#consumed.set(selected.claims, selected.capability);
     return selected.claims;
+  }
+
+  /** Transfers an already consumed permit to exactly one guest transport composition. */
+  claimGuestExecution(claims: PermitClaims, request: OperationRequest): void {
+    const capability = this.#consumed.get(claims);
+    if (!capability || claims.operationHash !== operationHash(request) || claims.expiresAt <= this.#now()) {
+      throw new AuthorizationError('guest-claim', 'Foreign, expired or already transferred guest execution claim');
+    }
+    this.inspectCapability(capability, 'run.execute');
+    this.#consumed.delete(claims);
   }
 }

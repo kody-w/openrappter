@@ -13,6 +13,7 @@ export interface ComputerConfiguration {
   readonly maxLeaseMs: number;
   readonly maxOutputBytes: number;
   readonly maxArtifactBytes: number;
+  readonly configurationRef?: string;
 }
 
 export interface VMInspection {
@@ -57,7 +58,7 @@ export interface GuestAcknowledgement {
 export interface ScopedGuestPort {
   execute(
     session: GuestSession,
-    request: { readonly argv: readonly string[]; readonly cwd: string; readonly timeoutMs: number; readonly maxOutputBytes: number },
+    request: { readonly argv: readonly string[]; readonly cwd: string; readonly timeoutMs: number; readonly maxOutputBytes: number; readonly readOnly?: boolean },
   ): Promise<GuestAcknowledgement & { readonly exitCode: number; readonly stdout: string; readonly stderr: string }>;
   upload(
     session: GuestSession,
@@ -135,6 +136,7 @@ export interface ExecuteRequest extends BrokerRequest {
   readonly argv: readonly string[];
   readonly cwd: string;
   readonly timeoutMs: number;
+  readonly readOnly?: boolean;
 }
 
 export interface UploadRequest extends BrokerRequest {

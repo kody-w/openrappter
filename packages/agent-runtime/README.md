@@ -18,13 +18,19 @@ Tool batches are policy/input-checked before any member runs. Tools receive
 an intent-bound permit and the authenticated invocation capability, never a
 provider-created grant. Tool adapters may call the computer broker's **separate**
 computer history, returning `computerToolOutcome` for linkage into the agent
-tool commit; they must not recursively commit to the locked agent workspace.
+tool commit. Work-service effect phases do not hold a storage lock, so a tool
+can durably request approval in its own workspace without blocking decisions.
 
 Run IDs are persistent idempotency keys. A recorded start without a terminal
 is unresolved on restart, not resumable work. Cancellation/deadlines stop new
 steps promptly. Unacknowledged in-flight work stays unresolved and retains its
 real concurrency slot until it settles, even if an adapter ignores its signal.
 `inspectRun` reads durable evidence rather than process-local progress.
+Acknowledged cancellation gets a bounded settling grace period and a canonical
+terminal record; uncertainty is never relabeled cancellation. `settlePending`
+lets a composition retain its own concurrency reservation until an outstanding
+effect really finishes. The production host creates isolated per-run engines
+and captures each agent's policy rather than using a shared current-agent value.
 
 ```sh
 npm run build --workspace @rapp-work/agent-runtime

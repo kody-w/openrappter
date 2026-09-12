@@ -20,6 +20,8 @@ const currentArea = (): Area => areas.find((area) => `#${area.id}` === window.lo
 export function App({ client }: { client: WorkClient }) {
   const state = useWorkspace(client);
   const { snapshot, status, providers, computer, diagnostics, loading, connected, error, notice, busy, refresh, perform } = state;
+  const pendingApprovals = snapshot?.approvals.filter((approval) => approval.state === "pending"
+    && snapshot.runs.some((run) => run.id === approval.runId && run.state === "awaiting_approval")).length ?? 0;
   const [area, setArea] = useState<Area>(currentArea);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
@@ -50,7 +52,7 @@ export function App({ client }: { client: WorkClient }) {
   }, [snapshot?.settings.appearance.theme, snapshot?.settings.appearance.density]);
   useEffect(() => {
     if (!snapshot) return;
-    const approvals = snapshot.approvals.filter((item) => item.state === "pending").length;
+    const approvals = pendingApprovals;
     const completed = snapshot.runs.filter((item) => item.state === "completed").length;
     const previous = previousCounts.current;
     if (previous?.workspace === snapshot.workspaceId) {
@@ -58,7 +60,7 @@ export function App({ client }: { client: WorkClient }) {
       else if (snapshot.settings.notifications.completedRuns && completed > previous.completed) setAnnouncement("A runtime has reported a completed run. Review its evidence in Work.");
     }
     previousCounts.current = { workspace: snapshot.workspaceId, approvals, completed };
-  }, [snapshot]);
+  }, [snapshot, pendingApprovals]);
   const navigate = (next: Area) => {
     window.location.hash = next;
     setArea(next); setMenuOpen(false);
@@ -82,8 +84,8 @@ export function App({ client }: { client: WorkClient }) {
       <nav aria-label="Primary navigation"><ul>{areas.map((item) => <li key={item.id}>
         <a href={`#${item.id}`} aria-label={item.label} aria-current={area === item.id ? "page" : undefined} onClick={(event) => { event.preventDefault(); navigate(item.id); }}>
           <Icon name={item.icon} /><span>{item.label}</span>
-          {item.id === "work" && !!snapshot?.approvals.filter((approval) => approval.state === "pending").length &&
-            <span className="nav-count" aria-label="pending approvals">{snapshot.approvals.filter((approval) => approval.state === "pending").length}</span>}
+          {item.id === "work" && pendingApprovals > 0 &&
+            <span className="nav-count" aria-label="pending approvals">{pendingApprovals}</span>}
         </a>
       </li>)}</ul></nav>
       <section className="roster" aria-labelledby="roster-title">

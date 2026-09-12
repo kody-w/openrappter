@@ -41,6 +41,7 @@ export class ComputerBroker {
       scope: this.config.historyScope, idempotencyKey: request.idempotencyKey, operation,
       payload: {
         computerId: this.config.id, vmName: this.config.vmName, image: this.config.image,
+        configurationRef: this.config.configurationRef ?? null,
         hostKey: this.config.hostKey, owner: owner as unknown as JsonValue,
         parentIntentRef: request.parentIntentRef, taskId: request.taskId, runId: request.runId, ...payload,
       },
@@ -68,7 +69,14 @@ export class ComputerBroker {
     const commit = await this.dependencies.work.commit(capability,
       this.command(owner, request, "computer.lease.acquire", {}),
       async () => {
-        host = await this.dependencies.leases.acquire(this.config.id, owner);
+        try { host = await this.dependencies.leases.acquire(this.config.id, owner); }
+        catch (error) {
+          if (!(error instanceof ComputerBrokerError) || error.code !== "computer_busy") throw error;
+          return {
+            status: "denied", value: { code: "computer_busy" },
+            receipts: [{ kind: "no-effect", reason: "computer_busy" }], events: [],
+          };
+        }
         if (!text(host.id)) throw new ComputerBrokerError("invalid_host_lease");
         return {
           status: "succeeded", value: { leaseId: host.id }, receipts: [{ kind: "computer-lease", leaseId: host.id }],
@@ -229,13 +237,15 @@ export class ComputerBroker {
     const argv = Object.freeze([...request.argv]);
     const cwd = guestPath(state.owner, request.cwd, true);
     const timeoutMs = request.timeoutMs;
+    const readOnly = request.readOnly ?? false;
+    if (typeof readOnly !== "boolean") throw new ComputerBrokerError("invalid_guest_execution");
     const parentIntentRef = request.parentIntentRef;
     return this.perform(capability, lease, request, "computer.execute", {
-      argv: [...argv], cwd, timeoutMs,
+      argv: [...argv], cwd, timeoutMs, readOnly,
     }, async (held, context) => {
       const session = await this.session(held, context);
       const result = await this.dependencies.guest.execute(session, {
-        argv, cwd, timeoutMs, maxOutputBytes: this.config.maxOutputBytes,
+        argv, cwd, timeoutMs, maxOutputBytes: this.config.maxOutputBytes, readOnly,
       });
       this.acknowledge(result, session);
       if (!Number.isSafeInteger(result.exitCode) || result.exitCode < 0 || result.exitCode > 255

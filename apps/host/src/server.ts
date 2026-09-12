@@ -19,9 +19,9 @@ const principalSchema = z.strictObject({
   ])).max(32),
 });
 const required: Record<keyof HostServices, readonly string[]> = {
-  storage: ["initialize", "read", "transact"],
+  storage: ["initialize", "read"],
   security: ["authenticate", "authorize"],
-  work: ["snapshot", "createTask", "assignTask", "saveAgent", "saveAutomation", "updateSettings", "startRun", "cancelRun", "decideApproval", "readArtifact"],
+  work: ["subscribe", "snapshot", "createTask", "assignTask", "saveAgent", "saveAutomation", "updateSettings", "startRun", "cancelRun", "decideApproval", "readArtifact"],
   runtime: ["start", "cancel", "decide", "schedule"],
   provider: ["list", "configure"], computer: ["inspect", "start", "stop"], diagnostics: ["snapshot", "record"],
 };
@@ -240,7 +240,15 @@ export async function createHost(services: HostServices, options: HostOptions = 
       subscriptions.clear();
     });
   }
-  await services.storage.initialize();
+  try { await services.storage.initialize(); }
+  catch (error) {
+    sockets.close();
+    await services.runtime.close?.().catch(() => {});
+    await services.provider.close?.().catch(() => {});
+    await services.storage.close?.().catch(() => {});
+    throw error;
+  }
+  const unsubscribe = services.work.subscribe((workspaceId, event) => journal.publish(workspaceId, event));
   try {
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
@@ -253,6 +261,7 @@ export async function createHost(services: HostServices, options: HostOptions = 
       });
     });
   } catch (error) {
+    unsubscribe();
     await services.storage.close?.();
     throw error;
   }
@@ -263,6 +272,7 @@ export async function createHost(services: HostServices, options: HostOptions = 
     close() {
       stopped ??= (async () => {
         closing = true;
+        unsubscribe();
         for (const client of sockets.clients) client.terminate();
         sockets.close();
         await new Promise<void>((resolve, reject) => {
@@ -271,7 +281,10 @@ export async function createHost(services: HostServices, options: HostOptions = 
           server.close((error) => { clearTimeout(deadline); error ? reject(error) : resolve(); });
           server.closeIdleConnections();
         });
-        for (const name of [...serviceNames].reverse()) await services[name].close?.();
+        const closed = new Set<object>();
+        for (const name of ["runtime", "computer", "provider", "work", "diagnostics", "security", "storage"] as const) {
+          if (!closed.has(services[name])) { closed.add(services[name]); await services[name].close?.(); }
+        }
       })();
       return stopped;
     },

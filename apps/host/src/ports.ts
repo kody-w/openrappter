@@ -1,6 +1,7 @@
 import type {
   Agent, AgentInput, Approval, Artifact, Automation, AutomationInput, Check,
   Computer, Diagnostics, Provider, Run, Settings, Snapshot, Task, TaskInput,
+  WorkEvent,
 } from "./contracts.js";
 
 export type Permission = `${"work" | "agents" | "automations" | "settings"}:${"read" | "write"}`
@@ -14,6 +15,8 @@ export interface ServicePort {
 export interface StoragePort extends ServicePort {
   initialize(): Promise<void>;
   read(workspaceId: string): Promise<Snapshot>;
+}
+export interface ProjectionStoragePort extends StoragePort {
   transact<T>(workspaceId: string, update: (draft: Snapshot) => T | Promise<T>): Promise<T>;
 }
 export interface SecurityPort extends ServicePort {
@@ -40,6 +43,7 @@ export interface DiagnosticsPort extends ServicePort {
   record(event: { code: string; method: string }): void;
 }
 export interface WorkPort extends ServicePort {
+  subscribe(listener: (workspaceId: string, event: WorkEvent) => void): () => void;
   snapshot(context: RequestContext): Promise<Snapshot>;
   createTask(context: RequestContext, input: TaskInput): Promise<Task>;
   assignTask(context: RequestContext, input: { id: string; agentId: string }): Promise<Task>;

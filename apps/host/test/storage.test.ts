@@ -22,20 +22,21 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 describe("durable local composition", () => {
-  it("has empty production state and never reports a configured runtime or verified computer", async () => {
+  it("has empty canonical production state, a real runtime and an explicitly unavailable computer", async () => {
     const services = createLocalServices({ directory: join(directory, "local"), token });
     host = await createHost(services);
-    const context = { principal: { id: "desktop-owner", workspaceId: "local", permissions: [] }, requestId: "test" };
+    const context = { principal: (await services.security.authenticate(token))!, requestId: "test" };
     expect((await services.work.snapshot(context)).agents).toEqual([]);
-    expect((await services.runtime.check()).state).toBe("unavailable");
+    expect((await services.runtime.check()).state).toBe("ready");
     expect(await services.computer.inspect(context)).toMatchObject({ state: "unavailable", verified: false, evidenceIds: [] });
-    await services.work.saveAgent(context, agent);
-    await expect(services.work.saveAutomation(context, {
+    await services.work.saveAgent(context, { ...agent, providerId: "github-copilot" });
+    const automation = await services.work.saveAutomation(context, {
       id: "schedule", name: "Review", taskTitle: "Review", instructions: "Review actual inputs",
       agentId: agent.id, cadence: { kind: "daily", at: "09:00", timezone: "UTC" }, enabled: true,
-    }, services.runtime)).rejects.toThrow("not configured");
-    expect((await services.work.snapshot(context)).automations).toEqual([]);
-  });
+    }, services.runtime);
+    expect(automation.nextRunAt).not.toBeNull();
+    expect((await services.work.snapshot(context)).automations).toHaveLength(1);
+  }, 15000);
   it("persists across storage reconstruction and uses private file permissions", async () => {
     await storage.transact("local", (snapshot) => { snapshot.settings.workspaceName = "Operations"; });
     const reopened = new FileStorage(join(directory, "data"));

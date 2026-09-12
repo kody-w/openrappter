@@ -55,7 +55,7 @@ try {
   expect(preferences).toEqual({ sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true });
   const status = await page.evaluate(() => window.rappWork.request({ method: "system.status", params: {} }));
   expect(status.ready).toBe(false);
-  expect(status.checks.runtime.state).toBe("unavailable");
+  expect(status.checks.runtime.state).toBe("ready");
   expect(status.checks.storage.state).toBe("ready");
   const computer = await page.evaluate(() => window.rappWork.request({ method: "computer.inspect", params: {} }));
   expect(computer.verified).toBe(false);
@@ -85,11 +85,16 @@ try {
   await expect(page.getByText("Workspace preferences saved.")).toBeVisible();
   await nav.getByRole("link", { name: "Work", exact: true }).click();
   await page.screenshot({ path: join(results, "desktop-work.png") });
-  const path = join(profile, "workspaces", "local.json");
+  const persisted = await page.evaluate(() => window.rappWork.request({ method: "work.snapshot", params: {} }));
+  expect(persisted.tasks).toHaveLength(1);
+  expect(persisted.agents).toHaveLength(1);
+  expect(persisted.tasks[0].workspaceId).toBe(persisted.agents[0].workspaceId);
+  expect(persisted.agents[0].workspaceId).not.toBe(persisted.agents[0].id);
+  const path = join(profile, "workspaces", persisted.agents[0].workspaceId, "identity.json");
   expect((await stat(path)).mode & 0o777).toBe(0o600);
-  const persisted = JSON.parse(await readFile(path, "utf8"));
-  expect(persisted.snapshot.tasks).toHaveLength(1);
-  expect(persisted.snapshot.agents).toHaveLength(1);
+  const identity = JSON.parse(await readFile(path, "utf8"));
+  expect(identity.agent_id).toBe(persisted.agents[0].id);
+  expect(identity.workspace_id).toBe(persisted.tasks[0].workspaceId);
   await quitAndCheck();
   page = await launch();
   await expect(page.getByRole("heading", { name: "Validate a local work record", exact: true })).toBeVisible();
@@ -99,7 +104,7 @@ try {
   expect(errors).toEqual([]);
   const report = {
     product: "RAPP Work", platform: process.platform, architecture: process.arch,
-    passed: ["sandboxed preload", "authenticated owned host", "strict method allowlist", "real local persistence across desktop restart", "unavailable execution and computer reported honestly", "owned process shutdown", "zero renderer errors"],
+    passed: ["sandboxed preload", "authenticated owned host", "strict method allowlist", "canonical per-agent persistence across desktop restart", "real runtime and unavailable computer reported honestly", "owned process shutdown", "zero renderer errors"],
     runtimeExecutionTested: false, computerVerificationTested: false,
   };
   await writeFile(join(results, "desktop-smoke.json"), JSON.stringify(report, null, 2));

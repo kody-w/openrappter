@@ -20,30 +20,33 @@ export async function installFixture(page: Page, populated = false) {
         switch (method) {
           case "work.snapshot": return structuredClone(snapshot);
           case "system.status": return status;
-          case "providers.list": return [{ id: "test-provider", name: "Injected provider", configured: true, models: ["test-model"], detail: "Browser test adapter." }];
+          case "providers.list": return [{ id: "test-provider", name: "Injected provider", configured: true,
+            availability: "ready", authentication: "authenticated", models: ["test-model"], detail: "Browser test adapter." }];
           case "computer.inspect": return { state: "unavailable", verified: false, verifiedAt: null, evidenceIds: [], capabilities: { view: false, control: false }, detail: "No computer is connected. This test does not exercise a virtual machine." };
           case "diagnostics.get": return { capturedAt: timestamp, entries: [] };
           case "events.subscribe": return { subscriptionId: crypto.randomUUID(), events: [], cursor: "test-only-cursor" };
           case "events.unsubscribe": return { removed: true };
           case "agents.save": {
-            const agent = { ...input, updatedAt: now } as Snapshot["agents"][number];
+            const agent = { ...input, workspaceId: snapshot.agents.find((agent) => agent.id === input.id)?.workspaceId ?? crypto.randomUUID(), updatedAt: now } as Snapshot["agents"][number];
             const existing = snapshot.agents.findIndex((item) => item.id === agent.id);
             if (existing >= 0) snapshot.agents[existing] = agent; else snapshot.agents.push(agent);
             save(); return agent;
           }
           case "work.createTask": {
             const { requestId, ...fields } = input;
-            const task = { ...fields, id: requestId, state: "queued", createdAt: now, updatedAt: now } as Snapshot["tasks"][number];
+            const task = { ...fields, workspaceId: snapshot.agents.find((agent) => agent.id === fields.agentId)?.workspaceId ?? null,
+              id: requestId, state: "queued", createdAt: now, updatedAt: now } as Snapshot["tasks"][number];
             if (!snapshot.tasks.some((item) => item.id === task.id)) snapshot.tasks.unshift(task);
             save(); return task;
           }
           case "work.assignTask": {
             const task = snapshot.tasks.find((item) => item.id === input.id)!;
-            task.agentId = input.agentId; save(); return task;
+            task.agentId = input.agentId; task.workspaceId = snapshot.agents.find((agent) => agent.id === input.agentId)!.workspaceId; save(); return task;
           }
           case "runs.start": {
             const task = snapshot.tasks.find((item) => item.id === input.id)!;
-            const run = { id: crypto.randomUUID(), taskId: task.id, agentId: task.agentId!, state: "running" as const, startedAt: now, finishedAt: null, summary: "Accepted by browser test adapter.", verification: "not_checked" as const, evidenceIds: [] };
+            const run = { id: crypto.randomUUID(), taskId: task.id, agentId: task.agentId!, workspaceId: task.workspaceId!,
+              state: "running" as const, startedAt: now, finishedAt: null, summary: "Accepted by browser test adapter.", verification: "not_checked" as const, evidenceIds: [] };
             task.state = "running"; snapshot.runs.unshift(run); save(); return run;
           }
           case "runs.cancel": {
@@ -57,13 +60,15 @@ export async function installFixture(page: Page, populated = false) {
           }
           case "artifacts.read": return { artifact: snapshot.artifacts.find((item) => item.id === input.id), content: '{"source":"Injected browser test evidence","result":"Review required"}' };
           case "automations.save": {
-            const automation = { ...input, updatedAt: now, nextRunAt: input.enabled ? now : null } as Snapshot["automations"][number];
+            const automation = { ...input, workspaceId: snapshot.agents.find((agent) => agent.id === input.agentId)!.workspaceId,
+              updatedAt: now, nextRunAt: input.enabled ? now : null } as Snapshot["automations"][number];
             const index = snapshot.automations.findIndex((item) => item.id === automation.id);
             if (index >= 0) snapshot.automations[index] = automation; else snapshot.automations.push(automation);
             save(); return automation;
           }
           case "settings.update": snapshot.settings = input as Snapshot["settings"]; save(); return snapshot.settings;
-          case "providers.configure": return { id: input.id, name: "Injected provider", configured: true, models: ["test-model"], detail: "Browser test adapter." };
+          case "providers.configure": return { id: input.id, name: "Injected provider", configured: true,
+            availability: "ready", authentication: "authenticated", models: ["test-model"], detail: "Browser test adapter." };
           default: throw new Error(`Unsupported browser test method: ${method}`);
         }
       },

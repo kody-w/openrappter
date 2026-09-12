@@ -204,7 +204,13 @@ export class PrivateRoot {
     const token = randomUUID();
     for (;;) {
       await this.guard();
-      if (await this.stat('.lock-recovery') === null && await this.mkdir('.lock')) {
+      let acquired = false;
+      try { acquired = await this.stat('.lock-recovery') === null && await this.mkdir('.lock'); }
+      catch (error) {
+        // The previous holder may remove its lock between mkdir(EEXIST) and lstat.
+        if (!missing(error)) throw error;
+      }
+      if (acquired) {
         try {
           await this.writeAtomic('.lock/owner.json', canonicalJson({ pid: process.pid, token }));
         } catch (error) {
@@ -237,6 +243,10 @@ export class PrivateRoot {
       pid = owner.pid as number;
     } catch (error) {
       if (missing(error)) return;
+      // An atomic no-replace publish briefly has two links; an unlocking holder
+      // can also unlink an already-open owner record. Neither is proof of death.
+      if (error instanceof WorkspaceError
+        && ['unsafe-node', 'file-replaced', 'file-changed'].includes(error.code)) return;
       throw error;
     }
     if (alive(pid)) return;

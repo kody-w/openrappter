@@ -4,10 +4,11 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { idSchema, snapshotSchema, type Check, type Snapshot } from "./contracts.js";
-import type { StoragePort } from "./ports.js";
+import type { ProjectionStoragePort } from "./ports.js";
 
 export function emptyWorkspace(workspaceId: string): Snapshot {
   return {
+    ownerId: "test-owner",
     workspaceId: idSchema.parse(workspaceId), revision: 0,
     agents: [], tasks: [], runs: [], approvals: [], artifacts: [], automations: [],
     settings: {
@@ -20,7 +21,7 @@ export function emptyWorkspace(workspaceId: string): Snapshot {
 }
 const diskSchema = z.strictObject({ version: z.literal(1), snapshot: snapshotSchema });
 
-export class FileStorage implements StoragePort {
+export class FileStorage implements ProjectionStoragePort {
   private readonly directory: string;
   private initialized = false;
   private closing = false;

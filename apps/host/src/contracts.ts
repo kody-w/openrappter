@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const idSchema = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
+export const idSchema = z.string().min(1).max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/);
 export const textSchema = z.string().trim().min(1).max(160);
 export const dateSchema = z.iso.datetime();
 export const areaSchema = z.enum(["work", "agents", "automations", "settings"]);
@@ -31,7 +31,7 @@ export const agentInputSchema = z.strictObject({
   approvalPolicy: z.enum(["always", "on-risk"]),
   enabled: z.boolean(),
 });
-export const agentSchema = agentInputSchema.extend({ updatedAt: dateSchema });
+export const agentSchema = agentInputSchema.extend({ workspaceId: idSchema, updatedAt: dateSchema });
 export const taskInputSchema = z.strictObject({
   requestId: z.uuid(),
   title: textSchema,
@@ -41,15 +41,17 @@ export const taskInputSchema = z.strictObject({
 });
 export const taskSchema = taskInputSchema.omit({ requestId: true }).extend({
   id: idSchema,
-  state: z.enum(["queued", "running", "awaiting_approval", "completed", "failed", "cancelled"]),
+  workspaceId: idSchema.nullable(),
+  state: z.enum(["queued", "running", "awaiting_approval", "completed", "failed", "cancelled", "unresolved"]),
   createdAt: dateSchema,
   updatedAt: dateSchema,
-});
+}).refine((task) => (task.agentId === null) === (task.workspaceId === null), "Assigned tasks require an agent workspace.");
 export const runSchema = z.strictObject({
   id: idSchema,
   taskId: idSchema,
   agentId: idSchema,
-  state: z.enum(["running", "awaiting_approval", "completed", "failed", "cancelled"]),
+  workspaceId: idSchema,
+  state: z.enum(["running", "awaiting_approval", "completed", "failed", "cancelled", "unresolved"]),
   startedAt: dateSchema,
   finishedAt: dateSchema.nullable(),
   summary: z.string().max(4000),
@@ -62,6 +64,11 @@ export const approvalSchema = z.strictObject({
   id: idSchema,
   runId: idSchema,
   taskId: idSchema,
+  agentId: idSchema,
+  workspaceId: idSchema,
+  operationHash: z.string().regex(/^[a-f0-9]{64}$/),
+  expiresAt: dateSchema,
+  consumedBy: idSchema.nullable(),
   action: textSchema,
   reason: z.string().max(4000),
   risk: z.enum(["low", "medium", "high"]),
@@ -74,6 +81,8 @@ export const artifactSchema = z.strictObject({
   id: idSchema,
   taskId: idSchema,
   runId: idSchema,
+  agentId: idSchema,
+  workspaceId: idSchema,
   name: textSchema,
   mediaType: z.enum(["text/plain", "text/markdown", "application/json"]),
   bytes: z.number().int().nonnegative().max(1_000_000),
@@ -104,10 +113,12 @@ export const automationInputSchema = z.strictObject({
   enabled: z.boolean(),
 });
 export const automationSchema = automationInputSchema.extend({
+  workspaceId: idSchema,
   updatedAt: dateSchema,
   nextRunAt: dateSchema.nullable(),
 });
 export const snapshotSchema = z.strictObject({
+  ownerId: idSchema,
   workspaceId: idSchema,
   revision: z.number().int().nonnegative(),
   agents: z.array(agentSchema).max(1000),
@@ -117,11 +128,33 @@ export const snapshotSchema = z.strictObject({
   artifacts: z.array(artifactSchema).max(20000),
   automations: z.array(automationSchema).max(1000),
   settings: settingsSchema,
+}).superRefine((snapshot, context) => {
+  const agents = new Map(snapshot.agents.map((agent) => [agent.id, agent]));
+  const tasks = new Map(snapshot.tasks.map((task) => [task.id, task]));
+  const runs = new Map(snapshot.runs.map((run) => [run.id, run]));
+  const reject = (path: (string | number)[]) => context.addIssue({ code: "custom", path, message: "Agent, task and workspace ownership must agree." });
+  if (agents.size !== snapshot.agents.length || new Set(snapshot.agents.map((agent) => agent.workspaceId)).size !== agents.size) reject(["agents"]);
+  for (const [index, task] of snapshot.tasks.entries()) {
+    if (task.agentId !== null && agents.get(task.agentId)?.workspaceId !== task.workspaceId) reject(["tasks", index]);
+  }
+  for (const [index, run] of snapshot.runs.entries()) {
+    const task = tasks.get(run.taskId);
+    if (!task || task.agentId !== run.agentId || task.workspaceId !== run.workspaceId) reject(["runs", index]);
+  }
+  for (const key of ["approvals", "artifacts"] as const) for (const [index, item] of snapshot[key].entries()) {
+    const run = runs.get(item.runId);
+    if (!run || run.taskId !== item.taskId || run.agentId !== item.agentId || run.workspaceId !== item.workspaceId) reject([key, index]);
+  }
+  for (const [index, item] of snapshot.automations.entries()) {
+    if (agents.get(item.agentId)?.workspaceId !== item.workspaceId) reject(["automations", index]);
+  }
 });
 export const providerSchema = z.strictObject({
   id: idSchema,
   name: textSchema,
   configured: z.boolean(),
+  availability: z.enum(["ready", "unavailable"]),
+  authentication: z.enum(["authenticated", "required", "unverified"]),
   models: z.array(z.string().min(1).max(160)).max(500),
   detail: z.string().max(512),
 });

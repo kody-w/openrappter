@@ -68,7 +68,7 @@ export class WorkService implements WorkServicePort {
     const signal = options.signal ?? new AbortController().signal;
     signal.throwIfAborted();
     await authorization.authorizeRead(capability, command.scope);
-    return history.withExclusive(capability, command.scope, async (journal) => {
+    const prepared = await history.withExclusive(capability, command.scope, async (journal) => {
       let current = await this.scan(journal, command.scope);
       const request = { command, commandHash, heads: current.heads };
       const principal = await authorization.authorizeCommand(capability, request);
@@ -81,90 +81,103 @@ export class WorkService implements WorkServicePort {
         return { ...previous, replayed: true };
       }
       signal.throwIfAborted();
-      let intentRef: string | undefined;
-      let stage: "persist" | "effect" = "persist";
-      const unresolved = (reason: "persistence-uncertain" | "effect-uncertain"): WorkCommitResult => ({
-        state: "unresolved", command, commandHash, reason, replayed: false,
-        ...(intentRef === undefined ? {} : { intentRef }),
-      });
-      const appendAndScan = async (event: JsonObject): Promise<VerifiedFrame> => {
-        await journal.append([jsonCopy(event)], current.heads);
-        const next = await this.scan(journal, command.scope);
-        assertExtension(current, next);
-        const existing = new Set(current.frames.map((frame) => frame.ref));
-        const matching = next.frames.filter((frame) => !existing.has(frame.ref) && frame.stream === "body"
-          && canonical.digest(frame.value) === canonical.digest(event));
-        if (matching.length !== 1 || next.frames.length !== current.frames.length + 1) {
-          throw new WorkServiceError("append_not_read_back");
-        }
-        current = next;
-        return matching[0]!;
-      };
       try {
-        const intent = await appendAndScan({
+        const appended = await this.appendAndScan(journal, current, {
           type: "work.intent", version: 1, commandHash,
           command: command as unknown as JsonValue, principalId: principal.principalId,
           at: this.now().toISOString(),
         });
-        intentRef = intent.ref;
-        let outcome: EffectOutcome | undefined;
-        let permit: object | undefined;
-        if (signal.aborted) {
+        current = appended.history;
+        return { state: "prepared" as const, current, request, intentRef: appended.frame.ref };
+      } catch {
+        return { state: "unresolved" as const, command, commandHash, reason: "persistence-uncertain" as const, replayed: false };
+      }
+    });
+    if (prepared.state !== "prepared") return prepared;
+    const { intentRef } = prepared;
+    const unresolved = (reason: "persistence-uncertain" | "effect-uncertain"): WorkCommitResult => ({
+      state: "unresolved", command, commandHash, intentRef, reason, replayed: false,
+    });
+    let stage: "persist" | "effect" = "effect";
+    try {
+      let outcome: EffectOutcome | undefined;
+      let permit: object | undefined;
+      if (signal.aborted) {
+        outcome = {
+          status: "cancelled", value: { code: "cancelled_before_effect" }, events: [],
+          receipts: [{ kind: "no-effect", reason: "cancelled_before_effect" }],
+        };
+      } else {
+        try {
+          permit = await authorization.issuePermit(capability, {
+            ...prepared.request, heads: prepared.current.heads, intentRef,
+          });
+          if (!permit || typeof permit !== "object") throw new WorkServiceError("invalid_permit");
+        } catch {
           outcome = {
-            status: "cancelled", value: { code: "cancelled_before_effect" }, events: [],
-            receipts: [{ kind: "no-effect", reason: "cancelled_before_effect" }],
+            status: "denied", value: { code: "permit_denied" }, events: [],
+            receipts: [{ kind: "no-effect", reason: "permit_denied" }],
           };
-        } else {
-          try {
-            permit = await authorization.issuePermit(capability, {
-              ...request, heads: current.heads, intentRef,
-            });
-            if (!permit || typeof permit !== "object") throw new WorkServiceError("invalid_permit");
-          } catch {
+        }
+        if (permit) {
+          if (signal.aborted) {
             outcome = {
-              status: "denied", value: { code: "permit_denied" }, events: [],
-              receipts: [{ kind: "no-effect", reason: "permit_denied" }],
+              status: "cancelled", value: { code: "cancelled_before_effect" }, events: [],
+              receipts: [{ kind: "no-effect", reason: "cancelled_before_effect" }],
             };
-          }
-          if (permit) {
-            if (signal.aborted) {
-              outcome = {
-                status: "cancelled", value: { code: "cancelled_before_effect" }, events: [],
-                receipts: [{ kind: "no-effect", reason: "cancelled_before_effect" }],
-              };
-            } else {
-              stage = "effect";
-              outcome = jsonCopy(await effect({ permit, command, commandHash, intentRef, signal }));
-            }
-          }
+          } else outcome = jsonCopy(await effect({ permit, command, commandHash, intentRef, signal }));
         }
-        if (!outcome || !["succeeded", "failed", "cancelled", "denied"].includes(outcome.status)
-          || !Array.isArray(outcome.receipts) || outcome.receipts.length === 0
-          || !outcome.receipts.every(object) || !Array.isArray(outcome.events)
-          || !outcome.events.every(object) || outcome.value === undefined) {
-          return unresolved("effect-uncertain");
+      }
+      if (!outcome || !["succeeded", "failed", "cancelled", "denied"].includes(outcome.status)
+        || !Array.isArray(outcome.receipts) || outcome.receipts.length === 0
+        || !outcome.receipts.every(object) || !Array.isArray(outcome.events)
+        || !outcome.events.every(object) || outcome.value === undefined) {
+        return unresolved("effect-uncertain");
+      }
+      const acknowledged = outcome;
+      stage = "persist";
+      return await history.withExclusive(capability, command.scope, async (journal) => {
+        let current = await this.scan(journal, command.scope);
+        assertExtension(prepared.current, current);
+        const pending = reduceHistory(current, canonical).commands.find((entry) => entry.commandHash === commandHash);
+        if (!pending || pending.state !== "unresolved" || pending.intentRef !== intentRef || pending.reason !== "intent-only") {
+          throw new WorkServiceError("intent_changed_during_effect");
         }
-        // A thrown effect is ambiguous. Only an explicit, acknowledged outcome is terminal.
-        stage = "persist";
-        const terminal = await appendAndScan({
+        const terminal = await this.appendAndScan(journal, current, {
           type: "work.outcome", version: 1, commandHash, intentRef,
-          status: outcome.status, value: outcome.value, events: [...outcome.events],
-          receiptsHash: canonical.digest([...outcome.receipts]),
+          status: acknowledged.status, value: acknowledged.value, events: [...acknowledged.events],
+          receiptsHash: canonical.digest([...acknowledged.receipts]),
           at: this.now().toISOString(),
         });
-        const outcomeRef = terminal.ref;
-        await appendAndScan({
-          type: "work.evidence", version: 1, commandHash, intentRef, outcomeRef,
-          receipts: [...outcome.receipts], at: this.now().toISOString(),
+        current = terminal.history;
+        const evidence = await this.appendAndScan(journal, current, {
+          type: "work.evidence", version: 1, commandHash, intentRef, outcomeRef: terminal.frame.ref,
+          receipts: [...acknowledged.receipts], at: this.now().toISOString(),
         });
-        const committed = reduceHistory(current, canonical).commands.find(
+        const committed = reduceHistory(evidence.history, canonical).commands.find(
           (entry) => entry.commandHash === commandHash,
         );
         if (!committed || committed.state !== "committed") return unresolved("persistence-uncertain");
         return { ...committed, replayed: false };
-      } catch {
-        return unresolved(stage === "effect" ? "effect-uncertain" : "persistence-uncertain");
-      }
-    });
+      });
+    } catch {
+      return unresolved(stage === "effect" ? "effect-uncertain" : "persistence-uncertain");
+    }
+  }
+
+  private async appendAndScan(
+    journal: CommitJournal, current: VerifiedHistory, event: JsonObject,
+  ): Promise<{ history: VerifiedHistory; frame: VerifiedFrame }> {
+    const { canonical } = this.dependencies;
+    await journal.append([jsonCopy(event)], current.heads);
+    const next = await this.scan(journal, current.scope);
+    assertExtension(current, next);
+    const existing = new Set(current.frames.map((frame) => frame.ref));
+    const matching = next.frames.filter((frame) => !existing.has(frame.ref) && frame.stream === "body"
+      && canonical.digest(frame.value) === canonical.digest(event));
+    if (matching.length !== 1 || next.frames.length !== current.frames.length + 1) {
+      throw new WorkServiceError("append_not_read_back");
+    }
+    return { history: next, frame: matching[0]! };
   }
 }

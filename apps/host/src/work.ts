@@ -3,12 +3,13 @@ import {
   agentInputSchema, automationInputSchema, providerSchema, runSchema, settingsSchema, taskInputSchema,
   type AgentInput, type AutomationInput, type Check, type Settings, type TaskInput,
 } from "./contracts.js";
-import type { ProviderPort, RequestContext, RuntimePort, StoragePort, WorkPort } from "./ports.js";
+import type { ProjectionStoragePort, ProviderPort, RequestContext, RuntimePort, WorkPort } from "./ports.js";
 import { conflict, notFound, unavailable } from "./errors.js";
 
-export function createWorkService(storage: StoragePort): WorkPort {
+export function createWorkService(storage: ProjectionStoragePort): WorkPort {
   const now = () => new Date().toISOString();
   return {
+    subscribe: () => () => {},
     async check(): Promise<Check> { return storage.check(); },
     snapshot: ({ principal }) => storage.read(principal.workspaceId),
     createTask: (context, raw: TaskInput) => storage.transact(context.principal.workspaceId, (draft) => {
@@ -23,7 +24,8 @@ export function createWorkService(storage: StoragePort): WorkPort {
       }
       if (input.agentId && !draft.agents.some((agent) => agent.id === input.agentId)) notFound();
       const { requestId, ...fields } = input;
-      const task = { ...fields, id: requestId, state: "queued" as const, createdAt: now(), updatedAt: now() };
+      const task = { ...fields, workspaceId: draft.agents.find((agent) => agent.id === fields.agentId)?.workspaceId ?? null,
+        id: requestId, state: "queued" as const, createdAt: now(), updatedAt: now() };
       draft.tasks.unshift(task);
       return task;
     }),
@@ -32,6 +34,7 @@ export function createWorkService(storage: StoragePort): WorkPort {
       if (!["queued", "failed", "cancelled"].includes(task.state)) conflict("Only inactive tasks can be reassigned.");
       if (!draft.agents.some((agent) => agent.id === input.agentId && agent.enabled)) conflict("Choose an enabled agent.");
       task.agentId = input.agentId;
+      task.workspaceId = draft.agents.find((agent) => agent.id === input.agentId)!.workspaceId;
       task.updatedAt = now();
       return task;
     }),
@@ -41,7 +44,7 @@ export function createWorkService(storage: StoragePort): WorkPort {
           (run.state === "running" || run.state === "awaiting_approval"))) {
         conflict("Wait for this agent's active run to finish before changing its configuration.");
       }
-      const agent = { ...input, updatedAt: now() };
+      const agent = { ...input, workspaceId: draft.agents.find((agent) => agent.id === input.id)?.workspaceId ?? randomUUID(), updatedAt: now() };
       const index = draft.agents.findIndex((item) => item.id === agent.id);
       if (index === -1) draft.agents.push(agent); else draft.agents[index] = agent;
       return agent;
@@ -56,7 +59,8 @@ export function createWorkService(storage: StoragePort): WorkPort {
         const previous = draft.automations[index];
         const scheduling = input.enabled || previous?.enabled
           ? await runtime.schedule(context, input) : { nextRunAt: null };
-        const automation = { ...input, ...scheduling, updatedAt: now() };
+        const automation = { ...input, workspaceId: draft.agents.find((agent) => agent.id === input.agentId)!.workspaceId,
+          ...scheduling, updatedAt: now() };
         if (input.enabled && !automation.nextRunAt) {
           conflict("The runtime did not confirm a next scheduled run.");
         }
@@ -86,7 +90,7 @@ export function createWorkService(storage: StoragePort): WorkPort {
           agent: { ...structuredClone(agent), approvalPolicy: draft.settings.work.approvalPolicy === "always" ? "always" : agent.approvalPolicy },
           settings: structuredClone(draft.settings),
         }));
-        if (run.id !== runId || run.taskId !== task.id || run.agentId !== agent.id) {
+        if (run.id !== runId || run.taskId !== task.id || run.agentId !== agent.id || run.workspaceId !== agent.workspaceId) {
           conflict("The runtime returned an unrelated run.");
         }
         draft.runs.unshift(run);
@@ -102,7 +106,7 @@ export function createWorkService(storage: StoragePort): WorkPort {
       }
       const cancelled = runSchema.parse(await runtime.cancel(context, structuredClone(current)));
       if (cancelled.id !== id || cancelled.taskId !== current.taskId ||
-          cancelled.agentId !== current.agentId || cancelled.state !== "cancelled") {
+          cancelled.agentId !== current.agentId || cancelled.workspaceId !== current.workspaceId || cancelled.state !== "cancelled") {
         conflict("The runtime did not confirm cancellation of this run.");
       }
       draft.runs[index] = cancelled;

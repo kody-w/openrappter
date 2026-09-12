@@ -40,6 +40,9 @@ export function configuration(input: ComputerConfiguration): ComputerConfigurati
     || !bounded(input.maxOutputBytes, 16_777_216) || !bounded(input.maxArtifactBytes, 1_073_741_824)) {
     throw new ComputerBrokerError("invalid_computer_configuration");
   }
+  if (input.configurationRef !== undefined && !/^[a-f0-9]{64}$/.test(input.configurationRef)) {
+    throw new ComputerBrokerError("invalid_configuration_reference");
+  }
   hostKey(input.hostKey);
   return Object.freeze({ ...input, historyScope: Object.freeze({ ...input.historyScope }) });
 }

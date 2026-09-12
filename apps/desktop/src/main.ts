@@ -8,6 +8,7 @@ import { HostProcess, type OwnedChild } from "./host-process.js";
 import { HostRpc } from "./rpc.js";
 
 app.setName("RAPP Work");
+app.setPath("userData", join(app.getPath("appData"), "RAPP Work"));
 if (!app.isPackaged && process.env.RAPP_WORK_USER_DATA) {
   app.setPath("userData", resolve(process.env.RAPP_WORK_USER_DATA));
 }
@@ -96,7 +97,7 @@ else {
         if (state.state === "offline") rpc.close();
         connectionChanged(state);
       },
-    }, join(app.getPath("userData"), "workspaces"));
+    }, app.getPath("userData"));
     window = new BrowserWindow(windowOptions(join(here, "preload.cjs")));
     window.setTitle("RAPP Work");
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));

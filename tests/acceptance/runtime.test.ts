@@ -6,7 +6,7 @@ import { buildFrame } from '@rapp-work/rapp1';
 import { AgentRuntime } from '@rapp-work/agent-runtime';
 import { ComputerBroker, type ComputerBrokerDependencies } from '@rapp-work/computer-broker';
 import type { ModelProvider } from '@rapp-work/model-provider';
-import { createHost, createLocalServices, ownerPermissions } from '../../apps/host/src/index.js';
+import { createHost, createLocalServices } from '../../apps/host/src/index.js';
 import { computerScope, scopeA, scopeB, workspaceFixture } from './fixture.js';
 
 const execution = vi.hoisted(() => ({ host: 0, home: '', legacyRoots: [] as string[], probes: [] as string[] }));
@@ -91,10 +91,14 @@ describe('clean release runtime acceptance', () => {
     vi.stubEnv('HOME', root);
     execution.home = root;
     execution.legacyRoots = [...new Set(input.sentinels.map(sentinel => path.join(root, sentinel.path.split('/')[0]!)))];
-    const services = createLocalServices({ directory: path.join(root, 'work-data'), token: randomBytes(48).toString('base64url') });
+    const token = randomBytes(48).toString('base64url');
+    const services = createLocalServices({ directory: path.join(root, 'work-data'), token });
     const host = await createHost(services);
     cleanups.push(() => host.close());
-    const snapshot = await services.work.snapshot({ principal: { id: 'desktop-owner', workspaceId: 'local', permissions: ownerPermissions }, requestId: 'startup' });
+    const principal = (await services.security.authenticate(token))!;
+    const snapshot = await services.work.snapshot({ principal, requestId: 'startup' });
+    expect(snapshot.ownerId).toBe(principal.id);
+    expect(snapshot.workspaceId).toBe(principal.workspaceId);
     expect(snapshot.agents).toEqual([]);
     expect(snapshot.tasks).toEqual([]);
     expect(execution.probes).toEqual([]);

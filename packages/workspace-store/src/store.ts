@@ -50,6 +50,10 @@ export interface WorkspaceSnapshot {
   readonly generation: number;
   readonly trust: { readonly classification: 'integrity-only'; readonly source: 'private-store'; readonly factualTruth: false; readonly authorship: false };
 }
+export interface WorkspaceTransaction {
+  scan(): Promise<WorkspaceSnapshot>;
+  compareAndAppend(input: { expectedHeads: WorkspaceHeads; frames: readonly RappFrame[] }): Promise<WorkspaceSnapshot>;
+}
 const snapshots = new WeakSet<object>();
 export function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshot {
   return value !== null && typeof value === 'object' && snapshots.has(value);
@@ -321,7 +325,34 @@ export class AgentWorkspace {
 
   scan(): Promise<WorkspaceSnapshot> { return this.#locked('workspace.read', () => this.#scan()); }
 
-  async compareAndAppend(input: { expectedHeads: WorkspaceHeads; frames: readonly RappFrame[] }): Promise<WorkspaceSnapshot> {
+  async withExclusive<T>(action: (transaction: WorkspaceTransaction) => Promise<T>): Promise<T> {
+    return this.#locked('workspace.read', async () => {
+      let active = true;
+      let pending: Promise<unknown> = Promise.resolve();
+      const enqueue = <R>(operation: () => Promise<R>): Promise<R> => {
+        if (!active) throw new WorkspaceError('transaction-closed', 'Workspace transaction has ended');
+        const result = pending.then(operation);
+        pending = result.catch(() => undefined);
+        return result;
+      };
+      try {
+        return await action({
+          scan: () => enqueue(() => this.#scan()),
+          compareAndAppend: (input) => enqueue(() => this.#append(input)),
+        });
+      } finally {
+        active = false;
+        await pending;
+      }
+    });
+  }
+
+  compareAndAppend(input: { expectedHeads: WorkspaceHeads; frames: readonly RappFrame[] }): Promise<WorkspaceSnapshot> {
+    return this.#locked('workspace.append', () => this.#append(input));
+  }
+
+  async #append(input: { expectedHeads: WorkspaceHeads; frames: readonly RappFrame[] }): Promise<WorkspaceSnapshot> {
+    this.#grant('workspace.append');
     assertOptions(input, ['expectedHeads', 'frames']);
     const expected = validateHeads(input.expectedHeads);
     const frames = arrayItems(input.frames, 256).map((frame) => snapshotJson(frame) as unknown as RappFrame);
@@ -329,7 +360,6 @@ export class AgentWorkspace {
     if (frames.reduce((bytes, frame) => bytes + Buffer.byteLength(canonicalJson(frame)), 0) > 16 * 1024 * 1024) {
       throw new WorkspaceError('batch-size', 'Batch exceeds 16 MiB');
     }
-    return this.#locked('workspace.append', async () => {
       const before = await this.#scan();
       if (canonicalJson(expected) !== canonicalJson(before.heads)) throw new WorkspaceError('cas-conflict', 'Expected heads are stale; no frames were written');
       const manifest = await this.#manifest();
@@ -380,7 +410,6 @@ export class AgentWorkspace {
       } catch (error) {
         throw new CommitError(uncertain ? 'unknown' : 'not-committed', error instanceof Error ? error.message : 'Atomic batch failed');
       }
-    });
   }
 
   async #recover(): Promise<void> {

@@ -125,6 +125,7 @@ export class GitHubCopilotProvider implements ModelProvider {
     if (!transport || typeof transport.complete !== "function") {
       throw new ModelProviderError("missing_copilot_transport");
     }
+
   }
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
@@ -175,3 +176,6 @@ export class GitHubCopilotProvider implements ModelProvider {
     return parseModelResponse(response);
   }
 }
+
+export { CopilotSdkTransport } from "./copilot.js";
+export type { CopilotSdkOptions, ManagedCopilotTransport, ProviderAvailability } from "./copilot.js";

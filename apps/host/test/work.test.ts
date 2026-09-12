@@ -46,7 +46,7 @@ describe("work adapter business boundaries", () => {
       requestId: randomUUID(), title: "Review", instructions: "Review", agentId: agent.id, priority: "normal",
     });
     services.runtime.start = async () => ({
-      id: randomUUID(), taskId: "other-task", agentId: agent.id, state: "completed",
+      id: randomUUID(), taskId: "other-task", agentId: agent.id, workspaceId: task.workspaceId!, state: "completed",
       startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), summary: "Wrong run",
       verification: "not_checked", evidenceIds: [],
     });
@@ -58,11 +58,13 @@ describe("work adapter business boundaries", () => {
     const services = fixture();
     await services.storage.transact(owner.workspaceId, (draft) => {
       draft.runs.push({
-        id: "run", taskId: "task", agentId: agent.id, state: "awaiting_approval",
+        id: "run", taskId: "task", agentId: agent.id, workspaceId: "agent-workspace", state: "awaiting_approval",
         startedAt: new Date().toISOString(), finishedAt: null, summary: "", verification: "not_checked", evidenceIds: [],
       });
       draft.approvals.push({
         id: "approval", runId: "run", taskId: "task", action: "Send report", reason: "External action", risk: "high",
+        agentId: agent.id, workspaceId: "agent-workspace", operationHash: "a".repeat(64),
+        expiresAt: new Date(Date.now() + 60000).toISOString(), consumedBy: null,
         state: "pending", createdAt: new Date().toISOString(), decidedAt: null, decisionReason: "",
       });
     });

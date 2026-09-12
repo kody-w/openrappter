@@ -13,17 +13,23 @@ async function fixture() {
   const sessions: { config: SessionConfig; send: ReturnType<typeof vi.fn>; abort: ReturnType<typeof vi.fn> }[] = [];
   let response = '{"kind":"final","text":"Real transport result"}';
   let tools: unknown[] | null = [];
+  let attemptTool = false;
   const client = {
     start: vi.fn(async () => {}),
     getStatus: vi.fn(async () => ({ version: "1.0.83", protocolVersion: 3 })),
     getAuthStatus: vi.fn(async () => ({ isAuthenticated: true })),
     listModels: vi.fn(async () => [{ id: "test-model", policy: { state: "enabled" } }]),
     createSession: vi.fn(async (config: SessionConfig) => {
-      const send = vi.fn(async () => ({ data: { content: response } }));
+      const listeners = new Map<string, (event: unknown) => void>();
+      const send = vi.fn(async () => {
+        if (attemptTool) listeners.get("tool.execution_start")?.({});
+        return { data: { content: response } };
+      });
       const abort = vi.fn(async () => {});
       sessions.push({ config, send, abort });
       return {
-        on: vi.fn(() => () => {}), sendAndWait: send, abort, disconnect: vi.fn(async () => {}),
+        on: vi.fn((name: string, listener: (event: unknown) => void) => { listeners.set(name, listener); return () => {}; }),
+        sendAndWait: send, abort, disconnect: vi.fn(async () => {}),
         rpc: { tools: {
           initializeAndValidate: vi.fn(async () => ({})),
           getCurrentMetadata: vi.fn(async () => ({ tools })),
@@ -42,7 +48,8 @@ async function fixture() {
     maxOutputTokens: 512, signal: new AbortController().signal,
   });
   return { directory, transport, provider, client, createClient, sessions, request,
-    response(value: string) { response = value; }, tools(value: unknown[] | null) { tools = value; } };
+    response(value: string) { response = value; }, tools(value: unknown[] | null) { tools = value; },
+    attemptTool() { attemptTool = true; } };
 }
 
 describe("documented local Copilot SDK transport", () => {
@@ -89,6 +96,13 @@ describe("documented local Copilot SDK transport", () => {
     await expect(f.provider.complete(f.request())).rejects.toMatchObject({ code: "invalid_response" });
     expect(f.client.deleteSession).toHaveBeenCalledOnce();
   });
+  it("aborts and quarantines a transport that reports a tool attempt", async () => {
+    const f = await fixture(); f.attemptTool();
+    await expect(f.provider.complete(f.request())).rejects.toMatchObject({ code: "provider_tool_attempt" });
+    expect(f.sessions[0]!.abort).toHaveBeenCalledOnce();
+    expect((await f.transport.status()).availability).toBe("unavailable");
+    expect(f.client.deleteSession).toHaveBeenCalledOnce();
+  });
   it("rejects older incompatible runtimes and propagates pre-cancellation without a prompt", async () => {
     const f = await fixture();
     await expect(f.provider.complete({ ...f.request(), signal: AbortSignal.abort() })).rejects.toThrow();
@@ -96,5 +110,28 @@ describe("documented local Copilot SDK transport", () => {
     f.client.getStatus.mockResolvedValue({ version: "1.0.20", protocolVersion: 3 });
     expect(await f.transport.status()).toMatchObject({ availability: "unavailable", authentication: "unverified" });
     expect(f.client.forceStop).toHaveBeenCalledOnce();
+  });
+  it("pins strict schema drafts to Astra max/long context while preserving SDK tool isolation", async () => {
+    const f = await fixture();
+    f.client.listModels.mockResolvedValue([{
+      id: "gpt-6-astra", policy: { state: "enabled" }, supportedReasoningEfforts: ["max"],
+      capabilities: { supports: { reasoningEffort: true }, limits: { max_context_window_tokens: 1_048_576 } },
+    } as never]);
+    f.response('{"reply":"Complete draft"}');
+    const draft = {
+      model: "gpt-6-astra" as const, reasoningEffort: "max" as const, contextTier: "long_context" as const,
+      name: "test_draft", schema: { type: "object", required: ["reply"], additionalProperties: false, properties: { reply: { type: "string" } } },
+      messages: [{ role: "user" as const, content: "Prepare work." }], maxOutputTokens: 512,
+      signal: new AbortController().signal, parse: (value: unknown) => value,
+    };
+    expect(await f.provider.draft(draft)).toEqual({ reply: "Complete draft" });
+    expect(f.sessions[0]!.config).toMatchObject({
+      model: "gpt-6-astra", reasoningEffort: "max", contextTier: "long_context", tools: [], availableTools: [],
+    });
+    expect(JSON.stringify(f.sessions[0]!.send.mock.calls)).toContain("responseSchema");
+    expect(f.client.deleteSession).toHaveBeenCalledOnce();
+    f.client.listModels.mockResolvedValue([{ id: "gpt-6-astra", policy: { state: "enabled" } }]);
+    await expect(f.provider.draft(draft)).rejects.toMatchObject({ code: "copilot_draft_profile_unavailable" });
+    expect(f.client.createSession).toHaveBeenCalledOnce();
   });
 });

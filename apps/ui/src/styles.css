@@ -501,6 +501,13 @@ html[data-density="compact"] .roster-agent { padding-top: 6px; padding-bottom: 6
 .context-detail { font-size: 11px; color: var(--cp-text-muted); line-height: 1.8; margin: 12px 0; overflow-wrap: anywhere; }
 .context-section .text-button { font-size: 10px; }
 .context-section > .button { width: 100%; white-space: normal; text-align: left; font-size: 10px; justify-content: flex-start; }
+.agent-computer .start-agent-computer { min-height: 46px; font-size: 12px; justify-content: center; margin-top: 12px; }
+.shared-computer-label { font-size: 10px; color: var(--cp-text-muted); }
+.computer-scope { display: grid; gap: 11px; margin: 17px 0; font-size: 10px; }
+.computer-scope > div { display: grid; gap: 3px; }
+.computer-scope dt { color: var(--cp-text-muted); }
+.computer-scope dd { overflow-wrap: anywhere; font-weight: 550; }
+.computer-actions { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
 .context-list { display: flex; flex-direction: column; gap: 5px; }
 .context-list button { display: flex; align-items: center; gap: 10px; background: transparent; border: 0; padding: 8px 0; text-align: left; width: 100%; }
 .context-list button:hover { color: var(--cp-accent); }
@@ -511,6 +518,30 @@ html[data-density="compact"] .roster-agent { padding-top: 6px; padding-bottom: 6
 .context-list small { color: var(--cp-text-muted); font-size: 9px; margin-top: 4px; }
 .context-settings { width: 100%; font-size: 11px; }
 .context-footer { color: var(--cp-text-muted); text-align: center; font-size: 9px; margin: 24px 0 0; }
+.workspace-tree .workspace-node-row { display: flex; align-items: flex-start; min-width: 0; }
+.workspace-tree .workspace-entry { flex: 1; min-width: 0; }
+.workspace-tree .tree-toggle { min-width: 24px; width: 24px; padding: 4px; margin-top: 13px; }
+.workspace-sidebar .workspace-tree ul { display: block; }
+.workspace-tree ul ul { margin: 7px 0 12px 10px; padding-left: 9px; border-left: 1px solid var(--cp-border); }
+.lineage-header { padding: 12px 26px; border-bottom: 1px solid var(--cp-border); background: var(--cp-bg-elevated); flex-shrink: 0; }
+.lineage-header nav { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 12px; font-size: 10px; }
+.lineage-header nav > * + *::before { content: "/"; color: var(--cp-text-muted); margin-right: 8px; }
+.lineage-header p { color: var(--cp-text-muted); font-size: 10px; margin-top: 5px; overflow-wrap: anywhere; }
+.lineage-header .text-button { font-size: 10px; min-height: 26px; }
+.proposal-integrity { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; margin: 12px 0; }
+.proposal-integrity > span:last-child, .turn-integrity { color: var(--cp-text-muted); font-size: 10px; line-height: 1.6; }
+.turn-integrity { margin: 8px 0 0 38px; }
+.agent-mentions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 11px; }
+.workspace-organization { border: 1px solid var(--cp-border); border-radius: 12px; background: var(--cp-bg-elevated); padding: 18px; margin: 20px 0; }
+.evolution-receipt { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; color: var(--cp-text-muted); font-size: 10px; margin-bottom: 13px; }
+.evolution-receipt time { margin-left: auto; font-size: 9px; }
+.evolution-references { font-size: 10px; margin-bottom: 15px; }
+.evolution-references summary { cursor: pointer; }
+.organization-sections { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; margin-top: 15px; }
+.organization-sections article { border: 1px solid var(--cp-border); border-radius: 9px; padding: 13px; background: var(--cp-surface); }
+.organization-sections h3 { font-size: 12px; }
+.organization-sections p, .organization-sections li, .organization-sections button { font-size: 11px; margin-top: 8px; overflow-wrap: anywhere; }
+.agent-card .button + .button { margin-top: 8px; }
 .concierge-context { display: flex; flex-direction: column; gap: 20px; padding: 15px 0; }
 .concierge-context h2 { font-size: 20px; letter-spacing: -.4px; font-weight: 570; }
 .concierge-context > p { font-size: 12px; color: var(--cp-text-muted); line-height: 1.8; }

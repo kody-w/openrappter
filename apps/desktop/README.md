@@ -53,9 +53,10 @@ build does not attest to either.
   rejects path/symlink escapes, and supplies a restrictive CSP. The renderer
   cannot make network connections. The theme bootstrap uses a CSP hash.
 * The frozen preload exposes exactly `request`, `hostState`, and `onEvent`.
-  Both preload and main enforce a closed method allowlist and strict parameters.
+  Both preload and main enforce the host's shared `rpcParameterSchemas` closed
+  method allowlist and strict parameters; no separate wire schema is maintained.
   Main accepts requests only from the owned top-level application frame.
-  Business operations and event subscriptions/unsubscriptions carry an explicit
+  Business and recursive agent-workspace operations and event subscriptions/unsubscriptions carry an explicit
   `workspaceId`; only the global concierge accepts `null` where documented.
   Twin requests use the exact host message envelope and bounded human/assistant
   history. Applying/dismissing a proposal uses its canonical ID and hash.
@@ -72,8 +73,9 @@ build does not attest to either.
   Safe startup failure/deadline details are retained, and a late exit from a
   superseded child cannot disconnect its replacement.
 * The production user-data path is explicitly the new RAPP Work directory.
-  One owner, independent durable business catalogs, per-business Twin history,
-  and private child agent execution stores live beneath it.
+  One owner, independent durable business roots, bounded agent-owned child
+  workspaces, frame-derived lineage/Twin history, and private execution stores
+  live beneath it.
   Unpackaged smoke runs can isolate data with
   `RAPP_WORK_USER_DATA`; packaged applications ignore that override.
 
@@ -101,14 +103,18 @@ After building all three apps on macOS arm64:
 npm run test:smoke
 ```
 
-The smoke test requires the multi-workspace/Twin host, launches the actual shell
+The smoke test requires the canonical fractal/Twin host, launches the actual shell
 and bundled host, and verifies the preload/renderer boundary, authenticated
 connection, scoped records, prefilled reviews, workspace switching, settings,
 restart persistence, private file permissions, and owned-process shutdown.
-It seeds **complete reviewed test workspace inputs through the real RPC** rather
-than opening blank UI forms or making a paid model call. Natural-language
+It seeds **complete reviewed test inputs through real canonical RPCs** rather
+than opening blank UI forms or making a paid model call. Prefilled UI edits are
+checked to return to the Twin rather than bypass source verification. Natural-language
 proposal behavior and dictation are separately covered by the UI's injected
 browser tests. The smoke gate does not claim live inference, microphone
 permission dialogs, speech transcription, or guest/VM execution.
+The UI's separate `test:canonical` gate verifies nonzero canonical frames and
+rebuilds all workspace projections from them. Local integrity is never a claim
+of factual truth, authorship, or promotion-grade trust.
 The isolated profile is removed; a screenshot and result JSON remain in the
 ignored `test-results/` directory.

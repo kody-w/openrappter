@@ -134,7 +134,7 @@ export function useDictation({ enabled, onTranscript }: { enabled: boolean; onTr
       setInterim("");
       if (!failed) {
         setState(transcript ? "transcript" : "idle");
-        setDetail(transcript ? `Transcript added: ${transcript}. Review it before sending.` : "No transcript was received. Try again or keep typing.");
+        setDetail(transcript ? `Transcript added: ${transcript}. Untrusted, unsent input; review it before sending.` : "No transcript was received. Try again or keep typing.");
       }
     };
     setInterim(""); setState("requesting"); setDetail("Starting dictation… Allow microphone access if prompted.");

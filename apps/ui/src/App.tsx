@@ -1,20 +1,25 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkClient } from "./client";
 import { Icon } from "./components";
 import { conversationPhase } from "./proposals";
 import { useWorkspaces } from "./useWorkspace";
 import { WorkspaceSession, type TwinIntent } from "./WorkspaceSession";
+import { WorkspaceTree } from "./WorkspaceTree";
+import type { Agent, WorkspaceSummary } from "./model";
 
 export function App({ client }: { client: WorkClient }) {
   const catalog = useWorkspaces(client);
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [intent, setIntent] = useState<TwinIntent | null>(null);
+  const [navigationError, setNavigationError] = useState("");
   const [previews, setPreviews] = useState<Record<string, { content: string; phase: string; revision: number }>>({});
   const ownerKey = `${catalog.catalog?.ownerId ?? "offline"}:${catalog.catalog?.conciergeWorkspaceId ?? "unknown"}`;
+  const navigationGeneration = useRef(0);
+  const currentSelection = useRef(catalog.selectedId);
+  currentSelection.current = catalog.selectedId;
   const workspaces = catalog.catalog?.workspaces ?? [];
   const selected = workspaces.find((item) => item.id === catalog.selectedId) ?? null;
-  const visible = workspaces.filter((item) => `${item.name} ${item.purpose}`.toLowerCase().includes(query.toLowerCase()));
   const onExchange = useCallback((workspaceId: string | null, content: string, phase: string, revision: number) => {
     if (!workspaceId) return;
     const key = `${ownerKey}:${workspaceId}`;
@@ -42,8 +47,30 @@ export function App({ client }: { client: WorkClient }) {
     void Promise.all(Array.from({ length: Math.min(3, records.length) }, worker));
     return () => { active = false; };
   }, [catalog.catalog, catalog.connected, client, onExchange]);
-  const select = (workspaceId: string | null) => { setIntent(null); catalog.select(workspaceId); setMenuOpen(false); };
+  const select = (workspaceId: string | null, available: WorkspaceSummary[] = workspaces) => {
+    if (workspaceId !== null && !available.some((item) => item.id === workspaceId)) {
+      setNavigationError("This workspace is not available under the current lineage policy."); return;
+    }
+    navigationGeneration.current++;
+    setNavigationError(""); setIntent(null); catalog.select(workspaceId); setMenuOpen(false);
+  };
+  const openAgent = async (agent: Agent, parentId: string) => {
+    if (currentSelection.current !== parentId) return;
+    const generation = ++navigationGeneration.current;
+    try {
+      const child = await client.call("agents.openWorkspace", { workspaceId: parentId, id: agent.id });
+      if (currentSelection.current !== parentId || navigationGeneration.current !== generation) return;
+      const result = await catalog.refresh();
+      if (currentSelection.current !== parentId || navigationGeneration.current !== generation) return;
+      if (result?.workspaces.some((item) => item.id === child.id)) select(child.id, result.workspaces);
+      else setNavigationError("This child workspace is not available under the current lineage policy.");
+    } catch (error) {
+      if (currentSelection.current === parentId && navigationGeneration.current === generation)
+        setNavigationError(error instanceof Error ? error.message : "The child workspace could not be opened.");
+    }
+  };
   const newWorkspace = () => {
+    navigationGeneration.current++;
     catalog.select(null); setMenuOpen(false);
     setIntent({ id: crypto.randomUUID(), workspaceId: null, target: "workspace", text: "Create a workspace for " });
   };
@@ -59,20 +86,13 @@ export function App({ client }: { client: WorkClient }) {
       <button className={`concierge-button${catalog.selectedId === null ? " selected" : ""}`} aria-pressed={catalog.selectedId === null} onClick={() => select(null)}>
         <span className="twin-mark" aria-hidden="true"><Icon name="chat" size={19} /></span><span><strong>Concierge Twin</strong><small>A new business starts here</small></span>
       </button>
-      <nav aria-label="Business workspaces" className="workspace-list">
-        {!visible.length && <p className="workspace-empty">{query ? "No workspaces match this search." : catalog.loading ? "Loading your workspaces…" : "Tell the concierge what you want to build. It will draft your first workspace."}</p>}
-        <ul>{visible.map((workspace) => <li key={workspace.id}><button className={`workspace-entry${selected?.id === workspace.id ? " selected" : ""}`}
-          aria-label={`Open workspace ${workspace.name}`} aria-pressed={selected?.id === workspace.id} onClick={() => select(workspace.id)}>
-          <span className="workspace-entry-top"><span className="workspace-avatar" aria-hidden="true">{workspace.name.slice(0, 1).toUpperCase()}</span><strong>{workspace.name}</strong></span>
-          <span className="workspace-exchange">{previews[`${ownerKey}:${workspace.id}`]?.content ?? workspace.purpose}</span>
-          <span className="workspace-entry-status"><span className="connection-dot" aria-hidden="true" />{previews[`${ownerKey}:${workspace.id}`]?.phase ?? (selected?.id === workspace.id ? "Selected workspace" : "Saved workspace")}<span>{previews[`${ownerKey}:${workspace.id}`] ? "Latest exchange" : "Your business context"}</span></span>
-        </button></li>)}</ul>
-      </nav>
+      <WorkspaceTree workspaces={workspaces} selectedId={catalog.selectedId} query={query} previews={previews} ownerKey={ownerKey} select={select} />
       <div className="workspace-sidebar-footer"><div className="connection"><span className={`connection-dot${catalog.connected ? " connected" : ""}`} aria-hidden="true" /><strong>{catalog.connected ? "Local host connected" : catalog.loading ? "Connecting…" : "Host not connected"}</strong></div><p>Separate workspaces. Persistent conversations.<br />You stay in control.</p></div>
     </aside>
     <WorkspaceSession key={`${catalog.catalog?.ownerId ?? "offline"}:${catalog.selectedId ?? "concierge"}`}
       client={client} workspace={selected} workspaceId={catalog.selectedId} online={catalog.connected}
-      connectionError={catalog.error} catalogLoading={catalog.loading} intent={intent} onExchange={onExchange}
+      connectionError={navigationError || catalog.error} catalogLoading={catalog.loading} intent={intent} onExchange={onExchange}
+      workspaces={workspaces} onNavigate={select} onOpenAgent={(agent, parentId) => { void openAgent(agent, parentId); }} onWorkspace={catalog.updateWorkspace}
       onRefreshCatalog={async () => { await catalog.refresh(); }}
       onCreated={async (workspaceId) => {
         const result = await catalog.refresh();

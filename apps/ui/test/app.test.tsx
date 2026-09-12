@@ -3,9 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { DisconnectedClient } from "../src/client";
-import { workspaceInputSchema } from "../src/model";
+import { agentInputSchema, automationInputSchema, taskInputSchema, workspaceInputSchema } from "../src/model";
 import { AgentForm, AutomationForm, SavedTaskForm, SettingsForm, TaskForm, WorkspaceForm } from "../src/forms";
-import { FixtureClient, populatedClient, testAgent, testHostState, testStatus } from "./fixture";
+import { FixtureClient, populatedClient, testHostState, testStatus } from "./fixture";
 
 async function open(client = new FixtureClient()) {
   const rendered = render(<App client={client} />);
@@ -47,15 +47,16 @@ describe("conversation-first business workspaces", () => {
     await say(user, "Create a workspace for retail operations.");
     await user.click(await screen.findByRole("button", { name: "Approve & create workspace" }));
     await screen.findByRole("heading", { name: "Retail studio Twin", level: 1 });
-    expect(client.host.state.catalog.workspaces).toHaveLength(2);
-    expect(new Set(client.host.state.catalog.workspaces.map((item) => item.id)).size).toBe(2);
-    expect(screen.getByRole("navigation", { name: "Business workspaces" }).querySelectorAll("button")).toHaveLength(2);
+    expect(client.host.state.catalog.workspaces.filter((item) => item.ownerType === "human")).toHaveLength(2);
+    expect(new Set(client.host.state.catalog.workspaces.map((item) => item.id)).size).toBe(client.host.state.catalog.workspaces.length);
+    expect(screen.getByRole("button", { name: "Open workspace Finance studio" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open workspace Retail studio" })).toBeVisible();
   });
 
   it.each([
     ["Review supplier invoices tomorrow.", "Task", "Task title", "Review supplier invoices", "Approve & create task"],
-    ["Create an agent for finance reviews.", "Agent", "Agent name", "Finance analyst", "Approve & create agent"],
-    ["Create a daily routine to review invoices at 9am.", "Routine", "Routine name", "Morning finance review", "Approve & create routine"],
+    ["Create an agent for finance reviews.", "Agent", "Agent name", "Finance analyst", "Approve & apply agent"],
+    ["Create a daily routine to review invoices at 9am.", "Routine", "Routine name", "Morning finance review", "Approve & apply routine"],
     ["Change settings to a compact dark theme.", "Settings", "Workspace name", "Finance studio", "Approve & apply settings"],
   ])("drafts and prefills %s", async (message, kind, field, value, action) => {
     const { user, client } = await open();
@@ -103,7 +104,7 @@ describe("conversation-first business workspaces", () => {
     await user.click(dialog.getByRole("button", { name: "Approve & create task" }));
     await waitFor(() => expect(client.workspace.tasks[0]?.title).toBe("Review September invoices"));
     const input = client.calls.find((call) => call.method === "twin.applyProposal")!.params as Record<string, any>;
-    expect(input.editedDraft).toMatchObject({ requestId: client.host.state.conversations.finance!.proposals[0]!.draft!.requestId,
+    expect(input.editedDraft).toMatchObject({ requestId: taskInputSchema.parse(client.host.state.conversations.finance!.proposals[0]!.draft).requestId,
       title: "Review September invoices", agentId: "finance-lead", priority: "high" });
     expect(input.editedDraft.instructions).toContain("Do not send payments");
   });
@@ -169,14 +170,17 @@ describe("conversation-first business workspaces", () => {
     expect(dialog.getByLabelText("Agent name")).toHaveValue("Operations analyst");
     expect(dialog.getByText(/Prefilled from the saved workspace record/)).toBeVisible();
     await user.clear(dialog.getByLabelText("Role")); await user.type(dialog.getByLabelText("Role"), "Procurement");
-    await user.click(dialog.getByRole("button", { name: "Save agent" }));
+    await user.click(dialog.getByRole("button", { name: "Ask Twin to review changes" }));
+    expect(client.workspace.agents[0]?.role).toBe("Finance operations");
+    const proposal = await screen.findByRole("article", { name: "Agent proposal" });
+    expect(within(proposal).getByText("Verified local integrity")).toBeVisible();
+    await user.click(within(proposal).getByRole("button", { name: "Approve & update agent" }));
     await waitFor(() => expect(client.workspace.agents[0]?.role).toBe("Procurement"));
     expect(client.calls.find((call) => call.method === "agents.save")!.params).toMatchObject({ workspaceId: "finance", id: "finance-lead" });
   });
 
-  it("preserves scoped assignment, explicit run start, and cancellation from saved task reviews", async () => {
+  it("keeps saved tasks read-only while preserving explicit scoped run start and cancellation", async () => {
     const client = new FixtureClient();
-    client.workspace.agents.push({ ...testAgent, id: "second-agent", name: "Second analyst", workspaceId: "second-execution" });
     const { user } = await open(client);
     await say(user, "Review supplier invoices.");
     await user.click(await screen.findByRole("button", { name: "Approve & create task" }));
@@ -186,11 +190,12 @@ describe("conversation-first business workspaces", () => {
     const review = within(screen.getByRole("dialog", { name: "Review saved task" }));
     expect(review.getByLabelText("Task title")).toHaveValue("Review supplier invoices");
     expect(review.getByLabelText("Task title")).toHaveAttribute("readonly");
-    expect(review.getByLabelText("Assign to")).toHaveValue("finance-lead");
-    await user.selectOptions(review.getByLabelText("Assign to"), "second-agent");
-    await user.click(review.getByRole("button", { name: "Save assignment" }));
-    await waitFor(() => expect(client.workspace.tasks[0]!.agentId).toBe("second-agent"));
-    expect(client.calls.find((call) => call.method === "work.assignTask")!.params).toMatchObject({ workspaceId: "finance", agentId: "second-agent" });
+    expect(review.getByLabelText("Assign to")).toHaveValue("Operations analyst");
+    expect(review.getByLabelText("Assign to")).toHaveAttribute("readonly");
+    await user.click(review.getByRole("button", { name: "Discuss task changes with Twin" }));
+    expect((composer() as HTMLTextAreaElement).value).toContain("existing task");
+    expect(client.calls.some((call) => call.method === "work.assignTask")).toBe(false);
+    await user.click(tools().getByRole("button", { name: "Tasks" }));
     await user.click(screen.getByRole("button", { name: "Start task" }));
     await waitFor(() => expect(client.workspace.runs[0]!.state).toBe("running"));
     expect(client.workspace.runs[0]!.verification).toBe("not_checked");
@@ -206,19 +211,20 @@ describe("conversation-first business workspaces", () => {
     await say(user, "Create a daily routine to review invoices.");
     await user.click(await screen.findByRole("button", { name: "Approve & create routine" }));
     await within(screen.getByRole("article", { name: "Routine proposal" })).findByText("Applied", { exact: true });
-    client.host.state.status = testStatus(false);
     await user.click(tools().getByRole("button", { name: "Routines" }));
     await user.click(screen.getByRole("button", { name: "Review routine" }));
     const review = within(screen.getByRole("dialog", { name: "Review saved routine" }));
     expect(review.getByLabelText("Routine name")).toHaveValue("Morning finance review");
     expect(review.getByLabelText("Local time")).toHaveValue("09:00");
     await user.click(review.getByLabelText("Enable this routine"));
-    await user.click(review.getByRole("button", { name: "Save routine" }));
-    expect(await review.findByRole("alert")).toHaveTextContent("Scheduling runtime is not configured");
+    await user.click(review.getByRole("button", { name: "Ask Twin to review changes" }));
+    const proposals = await screen.findAllByRole("article", { name: "Routine proposal" });
+    await user.click(within(proposals.at(-1)!).getByRole("button", { name: "Review details" }));
+    client.host.state.status = testStatus(false);
+    const fresh = within(screen.getByRole("dialog", { name: "Review routine proposal" }));
+    await user.click(fresh.getByRole("button", { name: "Approve & apply routine" }));
+    expect(await fresh.findByRole("alert")).toHaveTextContent("Scheduling runtime is not configured");
     expect(client.workspace.automations[0]).toMatchObject({ enabled: false, nextRunAt: null });
-    await user.click(review.getByLabelText("Enable this routine"));
-    await user.click(review.getByRole("button", { name: "Save routine" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Review saved routine" })).not.toBeInTheDocument());
   });
 
   it("refuses an incomplete host draft even if it claims to be ready for review", async () => {
@@ -226,7 +232,7 @@ describe("conversation-first business workspaces", () => {
     client.host.nextDraft = { ...client.host.makeDraft({ workspaceId: "finance", message: "Review invoices.", history: [] }),
       draft: { title: "Incomplete draft" } };
     await say(user, "Review supplier invoices.");
-    await screen.findByRole("article", { name: "Task proposal" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("invalid response");
     expect(screen.queryByRole("button", { name: "Review details" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve & create task" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -351,6 +357,45 @@ describe("blank review sheets are structurally unreachable", () => {
       const result = render(component);
       expect(result.container.querySelector("form")).toBeNull();
       expect(screen.getByRole("alert")).toHaveTextContent("no blank form");
+      result.unmount();
+    }
+  });
+  it("cannot render any create review from complete values alone without its Twin proposal", () => {
+    const client = new FixtureClient();
+    const proposed = (target: "task" | "agent" | "automation" | "workspace") => client.host.makeDraft({
+      workspaceId: target === "workspace" ? null : "finance", target, message: "Draft complete work.", history: [],
+    });
+    const taskDraft = taskInputSchema.parse(proposed("task").draft);
+    const agentDraft = agentInputSchema.parse(proposed("agent").draft);
+    const routineDraft = automationInputSchema.parse(proposed("automation").draft);
+    const workspaceDraft = workspaceInputSchema.parse(proposed("workspace").draft);
+    // @ts-expect-error Complete values are not sufficient provenance for a create review.
+    const task = <TaskForm {...props} draft={taskDraft} agents={client.workspace.agents} />;
+    // @ts-expect-error Complete values are not sufficient provenance for a create review.
+    const agent = <AgentForm {...props} draft={agentDraft} providers={client.host.state.providers} />;
+    // @ts-expect-error Complete values are not sufficient provenance for a create review.
+    const routine = <AutomationForm {...props} draft={routineDraft} agents={client.workspace.agents} />;
+    // @ts-expect-error Settings intake also requires a Twin proposal, not just default preferences.
+    const settings = <SettingsForm {...props} draft={client.workspace.settings} />;
+    // @ts-expect-error Complete values are not sufficient provenance for a create review.
+    const workspace = <WorkspaceForm {...props} draft={workspaceDraft} />;
+    for (const component of [task, agent, routine, settings, workspace]) {
+      const result = render(component);
+      expect(result.container.querySelector("form")).toBeNull();
+      expect(screen.getByRole("alert")).toHaveTextContent("no blank form");
+      result.unmount();
+    }
+  });
+  it("rejects missing, mismatched, incomplete, and unbound proposal provenance", () => {
+    const client = new FixtureClient();
+    const proposal = client.host.makeDraft({ workspaceId: "finance", target: "task", message: "Review invoices.", history: [] });
+    const draft = taskInputSchema.parse(proposal.draft);
+    for (const invalid of [
+      { ...proposal, kind: "agent" as const }, { ...proposal, draft: {} }, { ...proposal, basis: null },
+      { ...proposal, readyForReview: false }, { ...proposal, draft: { ...draft, requestId: crypto.randomUUID() } },
+    ]) {
+      const result = render(<TaskForm {...props} draft={draft} proposal={invalid as unknown as Parameters<typeof TaskForm>[0]["proposal"]} agents={client.workspace.agents} />);
+      expect(result.container.querySelector("form")).toBeNull();
       result.unmount();
     }
   });

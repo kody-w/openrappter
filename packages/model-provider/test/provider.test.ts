@@ -9,6 +9,13 @@ const request = (): ModelRequest => ({
 });
 
 describe("GitHub Copilot provider seam", () => {
+  it("retains the selected Astra max/long profile for ordinary worker completions too", async () => {
+    const complete = vi.fn(async () => ({ kind: "final", text: "Done" }));
+    await new GitHubCopilotProvider({ complete }).complete({ ...request(), model: "gpt-6-astra" });
+    expect(complete).toHaveBeenCalledWith(expect.objectContaining({
+      model: "gpt-6-astra", reasoningEffort: "max", contextTier: "long_context", automaticToolExecution: false,
+    }), expect.any(AbortSignal));
+  });
   it("uses only an explicitly injected transport and never provides tool authority", async () => {
     const complete = vi.fn(async () => ({
       kind: "tool-calls", calls: [{ id: "call-1", name: "guest.exec", input: { argv: ["date"] } }],

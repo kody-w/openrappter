@@ -62,19 +62,52 @@ export function buildEvidenceFrame(input: {
   });
 }
 
+declare const evidenceContextBrand: unique symbol;
+export interface EvidenceContext { readonly [evidenceContextBrand]: true }
+interface EvidenceIndex {
+  body: VerifiedChain;
+  source: VerifiedChain;
+  bodyFrames: Map<string, RappFrame>;
+  sourceFrames: Map<string, RappFrame>;
+}
+const evidenceContexts = new WeakMap<object, EvidenceIndex>();
+
+/** Reuses validated indexes for one exact pair of immutable, scanned chains. */
+export function prepareEvidenceContext(body: VerifiedChain, source: VerifiedChain): EvidenceContext {
+  if (!isVerifiedChain(body) || !isVerifiedChain(source) || body.trust.persistedHead !== 'matched' || source.trust.persistedHead !== 'matched') {
+    throw new TypeError('Evidence requires scanned committed chains');
+  }
+  const seen = new Set<string>();
+  for (const frame of body.frames) {
+    if (frame.payload.schema !== EVIDENCE_SCHEMA) continue;
+    validateEvidencePayload(frame.payload);
+    if (seen.has(frame.payload_hash)) throw new TypeError('Replayed evidence particle');
+    seen.add(frame.payload_hash);
+  }
+  const token = Object.freeze(Object.create(null)) as EvidenceContext;
+  evidenceContexts.set(token, {
+    body, source, bodyFrames: new Map(body.frames.map((frame) => [frame.frame_hash, frame])),
+    sourceFrames: new Map(source.frames.map((frame) => [frame.frame_hash, frame])),
+  });
+  return token;
+}
+
 /** Binds the exact source occurrence; integrity does not certify factual truth. */
 export function verifyEvidenceLink(input: {
   body: VerifiedChain; source: VerifiedChain; sourceFrameHash: string; evidenceFrameHash: string;
   subject: string; eventKind: string; data: JsonObject; requiredReferences?: readonly string[];
-}): RappFrame<EvidencePayload> {
+}, context?: EvidenceContext): RappFrame<EvidencePayload> {
   assertOptions(input, ['body', 'source', 'sourceFrameHash', 'evidenceFrameHash', 'subject', 'eventKind', 'data', 'requiredReferences'],
     ['body', 'source', 'sourceFrameHash', 'evidenceFrameHash', 'subject', 'eventKind', 'data']);
   if (!isVerifiedChain(input.body) || !isVerifiedChain(input.source)
     || input.body.trust.persistedHead !== 'matched' || input.source.trust.persistedHead !== 'matched') {
     throw new TypeError('Evidence requires scanned committed chains');
   }
-  const source = input.source.frames.find((frame) => frame.frame_hash === input.sourceFrameHash);
-  const evidence = input.body.frames.find((frame) => frame.frame_hash === input.evidenceFrameHash);
+  const selection = context ?? prepareEvidenceContext(input.body, input.source);
+  const index = evidenceContexts.get(selection);
+  if (!index || index.body !== input.body || index.source !== input.source) throw new TypeError('Evidence context belongs to different chains');
+  const source = index.sourceFrames.get(input.sourceFrameHash);
+  const evidence = index.bodyFrames.get(input.evidenceFrameHash);
   if (!source || !evidence || evidence.kind !== 'body.pulse'
     || !source.stream_id.startsWith(`${evidence.stream_id}:`) || evidence.utc < source.utc) {
     throw new TypeError('Evidence and source must be present and owned by the same producer');
@@ -92,13 +125,6 @@ export function verifyEvidenceLink(input: {
   }
   for (const hash of [source.payload_hash, source.frame_hash, ...required as string[]]) {
     if (!payload.reference_hashes.includes(hash)) throw new TypeError('Evidence is missing an exact occurrence reference');
-  }
-  const seen = new Set<string>();
-  for (const frame of input.body.frames) {
-    if (frame.payload.schema !== EVIDENCE_SCHEMA) continue;
-    validateEvidencePayload(frame.payload);
-    if (seen.has(frame.payload_hash)) throw new TypeError('Replayed evidence particle');
-    seen.add(frame.payload_hash);
   }
   return evidence as RappFrame<EvidencePayload>;
 }

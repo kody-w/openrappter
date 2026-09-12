@@ -72,7 +72,7 @@ describe("typed desktop and host wire boundary", () => {
     await expect(client.call("twin.message", { workspaceId: "finance", message: "Review invoices.", history: [] })).rejects.toThrow("another workspace");
     const conversation = setup({ workspaceId: "finance", revision: 1, proposals: [], events: [],
       turns: [{ id: crypto.randomUUID(), workspaceId: "other", role: "user", content: "Private", proposalId: null, createdAt: proposal.createdAt }] });
-    await expect(conversation.client.call("twin.conversation", { workspaceId: "finance" })).rejects.toThrow("invalid response");
+    await expect(conversation.client.call("twin.conversation", { workspaceId: "finance" })).rejects.toThrow("another workspace");
   });
   it("does not accept a success-shaped receipt without a complete persisted record", async () => {
     const id = crypto.randomUUID();

@@ -1,21 +1,39 @@
 import { useState, type FormEvent } from "react";
 import { describeCadence } from "./Automations";
 import { Field, FormFooter, StatusBadge } from "./components";
-import { agentInputSchema, automationInputSchema, settingsSchema, taskInputSchema, taskSchema, workspaceInputSchema, type Agent, type AgentInput, type Approval, type AutomationInput, type Provider, type Settings, type Task, type TaskInput, type WorkspaceInput } from "./model";
+import { proposalIntegrity } from "./integrity";
+import { agentDraftSchema, agentInputSchema, automationInputSchema, MAX_INSTRUCTION_CHARS, settingsPatchSchema, settingsReviewSchema, taskInputSchema, taskSchema, twinBasisSchema, twinDraftSchema, workspaceInputSchema, type Agent, type AgentInput, type Approval, type AutomationInput, type Provider, type SettingsReview, type Task, type TaskInput, type TwinDraft, type WorkspaceInput } from "./model";
 
 export type ReviewSource = "twin" | "existing";
-interface ReviewProps<T> {
+interface ReviewValues<T> {
   draft: T;
-  source: ReviewSource;
   onSave: (input: T) => Promise<boolean>;
   busy: boolean;
   error: string;
   onClose: () => void;
 }
+type ReviewProps<T> = ReviewValues<T> & (
+  | { source: "twin"; proposal: TwinDraft }
+  | { source: "existing"; proposal?: never }
+);
+type CreationReviewProps<T> = ReviewValues<T> & { source: "twin"; proposal: TwinDraft };
+function hasReviewSource<T>(props: ReviewProps<T>, kind: TwinDraft["kind"]): boolean {
+  if (props.source === "existing") return true;
+  if (props.source !== "twin") return false;
+  const parsed = twinDraftSchema.safeParse(props.proposal);
+  if (!parsed.success || parsed.data.kind !== kind || !parsed.data.readyForReview || parsed.data.missing.length || !parsed.data.draft) return false;
+  if (proposalIntegrity(parsed.data, parsed.data.workspaceId).state !== "verified") return false;
+  const basis = twinBasisSchema.safeParse(parsed.data.basis);
+  if (!basis.success || basis.data.workspaceId !== parsed.data.workspaceId) return false;
+  const schemas = { workspace: workspaceInputSchema, task: taskInputSchema, agent: agentDraftSchema, automation: automationInputSchema, settings: settingsPatchSchema };
+  if (!(kind in schemas) || !schemas[kind as keyof typeof schemas].safeParse(parsed.data.draft).success) return false;
+  const key = kind === "workspace" || kind === "task" ? "requestId" : kind === "agent" || kind === "automation" ? "id" : null;
+  return !key || (parsed.data.draft as Record<string, unknown>)[key] === (props.draft as Record<string, unknown>)[key];
+}
 export function ReviewNote({ source }: { source: ReviewSource }) {
   return <p className="review-note">{source === "twin"
     ? "Drafted by your Work Twin. Every detail is prefilled. Review or make small edits before applying."
-    : "Prefilled from the saved workspace record. Review or make small edits; nothing changes until you save."}</p>;
+    : "Prefilled from the saved workspace record. Edits return to your Twin for a fresh, verified proposal; this sheet cannot apply changes directly."}</p>;
 }
 function FormError({ error }: { error: string }) {
   return error ? <p className="form-error" role="alert">{error}</p> : null;
@@ -23,8 +41,11 @@ function FormError({ error }: { error: string }) {
 function IncompleteReview() {
   return <p className="form-body form-error" role="alert">This draft is incomplete. Return to your Twin to finish it; no blank form is available.</p>;
 }
-export function TaskForm({ draft, source, agents, onSave, busy, error, onClose }: ReviewProps<TaskInput> & { agents: Agent[] }) {
-  if (!taskInputSchema.safeParse(draft).success) return <IncompleteReview />;
+export function TaskForm(props: CreationReviewProps<TaskInput> & { agents: Agent[] }) {
+  if (props.source !== "twin" || !taskInputSchema.safeParse(props.draft).success || !hasReviewSource(props, "task")) return <IncompleteReview />;
+  return <TaskReview {...props} />;
+}
+function TaskReview({ draft, source, agents, onSave, busy, error, onClose }: CreationReviewProps<TaskInput> & { agents: Agent[] }) {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const fields = new FormData(event.currentTarget);
@@ -52,44 +73,41 @@ export function TaskForm({ draft, source, agents, onSave, busy, error, onClose }
     </div><FormFooter busy={busy} onClose={onClose} label={source === "twin" ? "Approve & create task" : "Save task"} />
   </form>;
 }
-export function SavedTaskForm({ task, agents, assignable, onAssign, busy, error, onClose }: {
-  task: Task; agents: Agent[]; assignable: boolean; onAssign: (agentId: string) => Promise<boolean>;
+export function SavedTaskForm({ task, agents, onDiscuss, busy, error, onClose }: {
+  task: Task; agents: Agent[]; onDiscuss: () => void;
   busy: boolean; error: string; onClose: () => void;
 }) {
-  const [agentId, setAgent] = useState(task?.agentId ?? "");
   if (!taskSchema.safeParse(task).success) return <IncompleteReview />;
-  return <form onSubmit={(event) => {
-    event.preventDefault();
-    if (assignable && agentId) void onAssign(agentId).then((saved) => { if (saved) onClose(); });
-  }}><div className="form-body">
+  return <section><div className="form-body">
     <ReviewNote source="existing" />
     <Field id="saved-task-title" label="Task title"><input id="saved-task-title" value={task.title} readOnly data-autofocus /></Field>
     <Field id="saved-task-instructions" label="Instructions and expected outcome"><textarea id="saved-task-instructions" value={task.instructions} readOnly rows={4} /></Field>
     <div className="form-grid">
       <Field id="saved-task-priority" label="Priority"><input id="saved-task-priority" value={task.priority} readOnly /></Field>
-      <Field id="saved-task-agent" label="Assign to"><select id="saved-task-agent" value={agentId} onChange={(event) => setAgent(event.target.value)} disabled={!assignable}>
-        <option value="">Unassigned</option>{agents.map((agent) => <option key={agent.id} value={agent.id} disabled={!agent.enabled}>{agent.name}{!agent.enabled && " · paused"}</option>)}
-      </select></Field>
+      <Field id="saved-task-agent" label="Assign to"><input id="saved-task-agent" readOnly value={agents.find((agent) => agent.id === task.agentId)?.name ?? "Unassigned"} /></Field>
     </div>
-    <p className="inline-note">{assignable ? "The saved outcome stays unchanged. Assignment can be reviewed before the first run." : "This task already has execution history; its assignment cannot be changed."} To plan a different outcome, return to your Twin.</p>
+    <p className="inline-note">This is a read-only projection of the saved task. Changes return to your Twin for a fresh verified proposal, not an unverified form mutation.</p>
     <FormError error={error} />
   </div><footer className="form-footer"><button type="button" className="button secondary" onClick={onClose} disabled={busy}>Close</button>
-    {assignable && <button type="submit" className="button primary" disabled={busy || !agentId || !agents.some((agent) => agent.id === agentId && agent.enabled)}>{busy ? "Saving…" : "Save assignment"}</button>}
-  </footer></form>;
+    <button type="button" className="button primary" disabled={busy} onClick={onDiscuss}>Discuss task changes with Twin</button>
+  </footer></section>;
 }
-export function AgentForm(props: ReviewProps<AgentInput> & { providers: Provider[] }) {
-  if (!agentInputSchema.safeParse(props.draft).success) return <IncompleteReview />;
+type AgentReviewInput = AgentInput & { suggestedRoutines?: AutomationInput[] };
+export function AgentForm(props: ReviewProps<AgentReviewInput> & { providers: Provider[] }) {
+  const schema = props.source === "twin" ? agentDraftSchema : agentInputSchema;
+  if (!schema.safeParse(props.draft).success || !hasReviewSource(props, "agent")) return <IncompleteReview />;
   return <AgentReview {...props} />;
 }
-function AgentReview({ draft, source, providers, onSave, busy, error, onClose }: ReviewProps<AgentInput> & { providers: Provider[] }) {
+function AgentReview({ draft, source, proposal, providers, onSave, busy, error, onClose }: ReviewProps<AgentReviewInput> & { providers: Provider[] }) {
   const [providerId, setProvider] = useState(draft.providerId ?? "");
   const [model, setModel] = useState(draft.model);
   const provider = providers.find((item) => item.id === providerId);
+  const documentBound = source === "existing" || Boolean(proposal.basis?.instructionDocument);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const fields = new FormData(event.currentTarget);
-    const input: AgentInput = {
-      ...draft, name: String(fields.get("name")), role: String(fields.get("role")), instructions: String(fields.get("instructions")),
+    const input: AgentReviewInput = {
+      ...draft, name: String(fields.get("name")), role: String(fields.get("role")), instructions: documentBound ? draft.instructions : String(fields.get("instructions")),
       providerId: providerId || null, model,
       computerPolicy: fields.get("computerPolicy") as AgentInput["computerPolicy"],
       approvalPolicy: fields.get("approvalPolicy") as AgentInput["approvalPolicy"],
@@ -101,10 +119,13 @@ function AgentReview({ draft, source, providers, onSave, busy, error, onClose }:
     <div className="form-body">
       <ReviewNote source={source} />
       <div className="form-grid">
-        <Field id="agent-name" label="Agent name"><input id="agent-name" name="name" defaultValue={draft.name} required maxLength={160} data-autofocus /></Field>
+        <Field id="agent-name" label="Agent name"><input id="agent-name" name="name" defaultValue={draft.name} required maxLength={160} readOnly={source === "twin" && Boolean(proposal.basis?.instructionDocument)} data-autofocus /></Field>
         <Field id="agent-role" label="Role"><input id="agent-role" name="role" defaultValue={draft.role} maxLength={240} /></Field>
       </div>
-      <Field id="agent-instructions" label="Agent instructions"><textarea id="agent-instructions" name="instructions" defaultValue={draft.instructions} required rows={4} maxLength={16000} /></Field>
+      <Field id="agent-instructions" label="Agent instructions"><textarea id="agent-instructions" name="instructions" defaultValue={draft.instructions} required rows={8} maxLength={MAX_INSTRUCTION_CHARS} readOnly={documentBound} /></Field>
+      {documentBound && <p className="inline-note">{source === "existing"
+        ? "Saved instructions are retained through their verified instructionsRef. Send a revised document to your Twin to change them."
+        : "Your full instruction document is retained verbatim, including locked evidence language. Send a revised document to your Twin to change these instructions."}</p>}
       <div className="form-grid">
         <Field id="agent-provider" label="Provider"><select id="agent-provider" value={providerId} onChange={(event) => {
           setProvider(event.target.value); setModel(providers.find((item) => item.id === event.target.value)?.models[0] ?? "");
@@ -127,12 +148,18 @@ function AgentReview({ draft, source, providers, onSave, busy, error, onClose }:
       </div>
       <p className="field-help">The stricter workspace or agent approval policy applies.</p>
       <label className="checkbox-row"><input type="checkbox" name="enabled" defaultChecked={draft.enabled} />Enable this agent for assignment</label>
+      {Boolean(draft.suggestedRoutines?.length) && <details className="proposal-details"><summary>Suggested routines · disabled drafts</summary>
+        <ul className="starter-routines">{draft.suggestedRoutines!.map((routine) => <li key={routine.id}>
+          <h3>{routine.name}</h3><p>{describeCadence(routine)} · Disabled draft</p>
+          <p><strong>{routine.taskTitle}</strong></p><p className="preserve">{routine.instructions}</p>
+        </li>)}</ul><p className="field-help">Suggestions never enable schedules automatically. Review activation separately with your Twin.</p>
+      </details>}
       <FormError error={error} />
-    </div><FormFooter busy={busy} onClose={onClose} label={source === "twin" ? "Approve & create agent" : "Save agent"} />
+    </div><FormFooter busy={busy} onClose={onClose} label={source === "twin" ? "Approve & apply agent" : "Ask Twin to review changes"} />
   </form>;
 }
 export function AutomationForm(props: ReviewProps<AutomationInput> & { agents: Agent[] }) {
-  if (!automationInputSchema.safeParse(props.draft).success) return <IncompleteReview />;
+  if (!automationInputSchema.safeParse(props.draft).success || !hasReviewSource(props, "automation")) return <IncompleteReview />;
   return <AutomationReview {...props} />;
 }
 function AutomationReview({ draft, source, agents, onSave, busy, error, onClose }: ReviewProps<AutomationInput> & { agents: Agent[] }) {
@@ -178,19 +205,22 @@ function AutomationReview({ draft, source, agents, onSave, busy, error, onClose 
       <label className="checkbox-row"><input type="checkbox" name="enabled" defaultChecked={draft.enabled} />Enable this routine</label>
       <p className="inline-note">Disabled routines remain drafts. Activation and the next run must be confirmed by the scheduling runtime.</p>
       <FormError error={error} />
-    </div><FormFooter busy={busy} onClose={onClose} label={source === "twin" ? "Approve & create routine" : "Save routine"} />
+    </div><FormFooter busy={busy} onClose={onClose} label={source === "twin" ? "Approve & apply routine" : "Ask Twin to review changes"} />
   </form>;
 }
-export function SettingsForm({ draft, source, onSave, busy, error, onClose }: ReviewProps<Settings>) {
-  if (!settingsSchema.safeParse(draft).success) return <IncompleteReview />;
+export function SettingsForm(props: ReviewProps<SettingsReview>) {
+  const { draft, source, onSave, busy, error, onClose } = props;
+  if (!settingsReviewSchema.safeParse(draft).success || !hasReviewSource(props, "settings")) return <IncompleteReview />;
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const fields = new FormData(event.currentTarget);
     if (await onSave({
       workspaceName: String(fields.get("workspaceName")),
-      appearance: { theme: fields.get("theme") as Settings["appearance"]["theme"], density: fields.get("density") as Settings["appearance"]["density"] },
-      work: { defaultPriority: fields.get("defaultPriority") as Settings["work"]["defaultPriority"], approvalPolicy: fields.get("approvalPolicy") as Settings["work"]["approvalPolicy"] },
+      appearance: { theme: fields.get("theme") as SettingsReview["appearance"]["theme"], density: fields.get("density") as SettingsReview["appearance"]["density"] },
+      work: { defaultPriority: fields.get("defaultPriority") as SettingsReview["work"]["defaultPriority"], approvalPolicy: fields.get("approvalPolicy") as SettingsReview["work"]["approvalPolicy"] },
       notifications: { approvals: fields.has("approvals"), completedRuns: fields.has("completedRuns") },
+      ...(draft.computerPolicy ? { computerPolicy: fields.get("computerPolicy") as SettingsReview["computerPolicy"] } : {}),
+      ...(draft.parentAccess ? { parentAccess: fields.get("parentAccess") as SettingsReview["parentAccess"] } : {}),
     })) onClose();
   };
   return <form onSubmit={(event) => { void submit(event); }}><div className="form-body">
@@ -201,14 +231,21 @@ export function SettingsForm({ draft, source, onSave, busy, error, onClose }: Re
       <Field id="settings-density" label="Density"><select id="settings-density" name="density" defaultValue={draft.appearance.density}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></Field>
       <Field id="settings-priority" label="Default task priority"><select id="settings-priority" name="defaultPriority" defaultValue={draft.work.defaultPriority}><option value="normal">Normal</option><option value="high">High</option></select></Field>
       <Field id="settings-policy" label="Require approval"><select id="settings-policy" name="approvalPolicy" defaultValue={draft.work.approvalPolicy}><option value="always">For all actions</option><option value="on-risk">For sensitive actions</option></select></Field>
+      {draft.computerPolicy && <Field id="settings-computer-policy" label="Agent computer policy"><select id="settings-computer-policy" name="computerPolicy" defaultValue={draft.computerPolicy}>
+        <option value="none">No agent computer tools</option><option value="read-only">Read-only guest tools</option><option value="control">Guest control with approval policy</option>
+      </select></Field>}
+      {draft.parentAccess && <Field id="settings-parent-access" label="Parent workspace inspection"><select id="settings-parent-access" name="parentAccess" defaultValue={draft.parentAccess}>
+        <option value="inspect">Parent may inspect</option><option value="none">No parent inspection</option>
+      </select></Field>}
     </div>
     <label className="checkbox-row"><input type="checkbox" name="approvals" defaultChecked={draft.notifications.approvals} />New approval requests</label>
     <label className="checkbox-row"><input type="checkbox" name="completedRuns" defaultChecked={draft.notifications.completedRuns} />Completed runs</label>
     <FormError error={error} />
-  </div><FormFooter busy={busy} onClose={onClose} label={source === "twin" ? "Approve & apply settings" : "Save settings"} /></form>;
+  </div><FormFooter busy={busy} onClose={onClose} label={source === "twin" ? "Approve & apply settings" : "Ask Twin to review changes"} /></form>;
 }
-export function WorkspaceForm({ draft, source, onSave, busy, error, onClose }: ReviewProps<WorkspaceInput>) {
-  if (!workspaceInputSchema.safeParse(draft).success) return <IncompleteReview />;
+export function WorkspaceForm(props: CreationReviewProps<WorkspaceInput>) {
+  const { draft, source, onSave, busy, error, onClose } = props;
+  if (source !== "twin" || !workspaceInputSchema.safeParse(draft).success || !hasReviewSource(props, "workspace")) return <IncompleteReview />;
   return <form onSubmit={(event) => {
     event.preventDefault();
     const fields = new FormData(event.currentTarget);

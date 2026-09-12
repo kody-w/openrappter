@@ -1,21 +1,26 @@
 import { z } from "zod";
+import { proposalIntegrity } from "./integrity";
 import {
-  approvalRecommendationSchema, automationInputSchema, completeAgentDraftSchema, settingsPatchSchema,
-  idSchema, settingsSchema, taskInputSchema, twinBasisSchema, workspaceInputSchema,
-  type AgentInput, type AutomationInput, type Settings, type Snapshot, type TaskInput,
+  agentDraftSchema, approvalRecommendationSchema, automationInputSchema, settingsPatchSchema,
+  MAX_TWIN_HISTORY_BYTES, MAX_TWIN_REQUEST_BYTES, settingsReviewSchema, taskInputSchema, twinBasisSchema, twinDraftSchema, workspaceInputSchema,
+  type AgentDraft, type AutomationInput, type SettingsReview, type Snapshot, type TaskInput,
   type TwinConversation, type TwinDraft, type WorkspaceInput,
 } from "./model";
 
 export type ReviewDraft =
   | { kind: "workspace"; input: WorkspaceInput }
   | { kind: "task"; input: TaskInput }
-  | { kind: "agent"; input: AgentInput }
+  | { kind: "agent"; input: AgentDraft }
   | { kind: "automation"; input: AutomationInput }
-  | { kind: "settings"; input: Settings }
+  | { kind: "settings"; input: SettingsReview }
   | { kind: "approval"; input: z.infer<typeof approvalRecommendationSchema> };
 
-export function prepareProposal(proposal: TwinDraft, workspaceId: string | null, snapshot: Snapshot | null): ReviewDraft | null {
+export function prepareProposal(raw: unknown, workspaceId: string | null, snapshot: Snapshot | null): ReviewDraft | null {
+  const parsed = twinDraftSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const proposal = parsed.data;
   if (proposal.workspaceId !== workspaceId || !proposal.readyForReview || proposal.missing.length || proposal.draft === null) return null;
+  if (proposalIntegrity(proposal, workspaceId).state !== "verified") return null;
   const basis = twinBasisSchema.safeParse(proposal.basis);
   if (!basis.success || basis.data.workspaceId !== workspaceId || snapshot && basis.data.ownerId !== snapshot.ownerId) return null;
   if (proposal.kind === "workspace") {
@@ -29,9 +34,7 @@ export function prepareProposal(proposal: TwinDraft, workspaceId: string | null,
       ? { kind: "task", input: value.data } : null;
   }
   if (proposal.kind === "agent") {
-    const value = completeAgentDraftSchema.extend({
-      providerId: idSchema, model: z.string().trim().min(1).max(160),
-    }).safeParse(proposal.draft);
+    const value = agentDraftSchema.safeParse(proposal.draft);
     return value.success ? { kind: "agent", input: value.data } : null;
   }
   if (proposal.kind === "automation") {
@@ -42,7 +45,7 @@ export function prepareProposal(proposal: TwinDraft, workspaceId: string | null,
   if (proposal.kind === "settings") {
     const value = settingsPatchSchema.safeParse(proposal.draft);
     if (!value.success) return null;
-    const input = settingsSchema.safeParse({
+    const input = settingsReviewSchema.safeParse({
       ...snapshot.settings, ...value.data,
       appearance: { ...snapshot.settings.appearance, ...value.data.appearance },
       work: { ...snapshot.settings.work, ...value.data.work },
@@ -81,9 +84,10 @@ export function proposalHash(proposal: TwinDraft): string | null {
   return basis.success ? basis.data.proposalHash : null;
 }
 export function historyFor(conversation: TwinConversation | null, message = "") {
-  const history = (conversation?.turns ?? []).slice(-24).map(({ role, content }) => ({ role, content }));
+  const history = (conversation?.turns ?? []).slice(-24).filter((turn) => turn.content.length <= 8000)
+    .map(({ role, content }) => ({ role, content }));
   const encoder = new TextEncoder();
-  const budget = Math.min(32 * 1024, 48 * 1024 - encoder.encode(JSON.stringify(message)).byteLength - 512);
+  const budget = Math.min(MAX_TWIN_HISTORY_BYTES, MAX_TWIN_REQUEST_BYTES - encoder.encode(JSON.stringify(message)).byteLength - 512);
   while (history.length && encoder.encode(JSON.stringify(history)).byteLength > budget) history.shift();
   return history;
 }

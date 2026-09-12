@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkClient } from "./client";
-import type { Computer, Diagnostics, Provider, RpcInput, RpcMethod, RpcResult, Snapshot, Status, TwinConversation, WorkspaceList } from "./model";
+import type { Computer, Diagnostics, Provider, RpcInput, RpcMethod, RpcResult, Snapshot, Status, TwinConversation, WorkspaceBreadcrumb, WorkspaceList, WorkspaceSummary } from "./model";
 
 export type Perform = <M extends RpcMethod>(method: M, params: RpcInput<M>, message: string) => Promise<boolean>;
 const messageOf = (error: unknown) => error instanceof Error ? error.message : "The local host could not complete this request.";
@@ -45,11 +45,21 @@ export function useWorkspaces(client: WorkClient) {
     setSelectedId(id);
     if (catalog) try { window.localStorage.setItem(`rapp-work:selected:${catalog.ownerId}:${catalog.conciergeWorkspaceId}`, id ?? "concierge"); } catch { /* Do not prevent workspace switching. */ }
   };
-  return { catalog, selectedId, select, connected, loading, error, refresh };
+  const updateWorkspace = useCallback((workspace: WorkspaceSummary) => {
+    setCatalog((current) => {
+      if (!current || current.ownerId !== workspace.ownerId || !current.workspaces.some((item) => item.id === workspace.id)) return current;
+      const existing = current.workspaces.find((item) => item.id === workspace.id)!;
+      if (existing.revision > workspace.revision || JSON.stringify(existing) === JSON.stringify(workspace)) return current;
+      return { ...current, workspaces: current.workspaces.map((item) => item.id === workspace.id ? workspace : item) };
+    });
+  }, []);
+  return { catalog, selectedId, select, updateWorkspace, connected, loading, error, refresh };
 }
 
 export function useWorkspace(client: WorkClient, workspaceId: string | null, online: boolean) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceSummary | null>(null);
+  const [breadcrumb, setBreadcrumb] = useState<WorkspaceBreadcrumb | null>(null);
   const [conversation, setConversation] = useState<TwinConversation | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -81,6 +91,7 @@ export function useWorkspace(client: WorkClient, workspaceId: string | null, onl
           setError("The host returned another workspace. No data was loaded."); setReady(false); setLoading(false); return;
         }
         setSnapshot(workspace.value.snapshot); setConversation(workspace.value.twin); setComputer(workspace.value.computer);
+        setWorkspace(workspace.value.workspace); setBreadcrumb(workspace.value.breadcrumb);
       } else {
         if (workspace.value.workspaceId !== null) { setError("The concierge conversation has an invalid scope."); setReady(false); setLoading(false); return; }
         setConversation(workspace.value);
@@ -118,7 +129,7 @@ export function useWorkspace(client: WorkClient, workspaceId: string | null, onl
     }
     return () => { disposed = true; clearTimeout(debounce); removers.forEach((remove) => remove()); };
   }, [client, connected, refresh, workspaceId]);
-  const request = useCallback(async <M extends RpcMethod>(method: M, params: RpcInput<M>, message: string): Promise<RpcResult<M> | undefined> => {
+  const request = useCallback(async <M extends RpcMethod>(method: M, params: RpcInput<M>, message: string, onError?: (error: Error) => void): Promise<RpcResult<M> | undefined> => {
     if (inFlight.current || !mounted.current) return;
     if (!connected) { setError("Reconnect to the desktop host before changing work."); return; }
     if (!("workspaceId" in params) || params.workspaceId !== workspaceId) {
@@ -135,9 +146,11 @@ export function useWorkspace(client: WorkClient, workspaceId: string | null, onl
       setNotice(message);
       return result;
     } catch (reason) {
-      if (mounted.current && lifecycle.current === epoch) setError(messageOf(reason));
+      if (mounted.current && lifecycle.current === epoch) {
+        setError(messageOf(reason)); onError?.(reason instanceof Error ? reason : new Error(messageOf(reason)));
+      }
     } finally { inFlight.current = false; if (mounted.current) setBusy(false); }
   }, [client, connected, refresh, workspaceId]);
   const perform: Perform = useCallback(async (method, params, message) => (await request(method, params, message)) !== undefined, [request]);
-  return { snapshot, conversation, status, providers, computer, diagnostics, loading, connected, error, notice, busy, refresh, perform, request };
+  return { workspace, breadcrumb, snapshot, conversation, status, providers, computer, diagnostics, loading, connected, error, notice, busy, refresh, perform, request };
 }

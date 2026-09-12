@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { chooseWorkspace, inspect, installFixture, say } from "./fixture";
+import { inventoryInstructions, lockedInventoryPhrases } from "../test/inventory-instructions";
 
 test("production cold load is honest, local, and free of page errors", async ({ page }) => {
   const errors: string[] = [], requests: string[] = [];
@@ -62,7 +63,7 @@ test("task, agent, routine, and settings proposals apply directly or with small 
   review = page.getByRole("dialog");
   await expect(review.getByLabel("Routine name")).toHaveValue("Morning finance review");
   await expect(review.getByLabel("Time zone (IANA)")).toHaveValue("America/New_York");
-  await review.getByRole("button", { name: "Approve & create routine" }).click();
+  await review.getByRole("button", { name: "Approve & apply routine" }).click();
   await expect(review).toBeHidden();
   await say(page, "Change this workspace's settings to a compact dark theme.");
   await page.getByRole("article", { name: "Settings proposal" }).getByRole("button", { name: "Review details" }).click();
@@ -125,9 +126,121 @@ test("all create controls route into the composer, while saved record reviews ar
   await expect(review.getByLabel("Workspace name")).toHaveValue("Finance studio");
   await expect(review.getByLabel("Theme")).toHaveValue("system");
   await review.getByLabel("Theme").selectOption("light");
-  await review.getByRole("button", { name: "Save settings" }).click();
+  await review.getByRole("button", { name: "Ask Twin to review changes" }).click();
   await expect(review).toBeHidden();
+  const proposal = page.getByRole("article", { name: "Settings proposal" });
+  await expect(proposal.getByText("Verified local integrity", { exact: true })).toBeVisible();
+  await proposal.getByRole("button", { name: "Approve & apply settings" }).click();
   expect(await page.evaluate(() => window.__testHost!.state.workspaces.finance!.settings.appearance.theme)).toBe("light");
+});
+
+test("long pasted instructions retain locked phrases and create a linked child workspace through a verified proposal", async ({ page }) => {
+  await installFixture(page);
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: "Message your Work Twin" });
+  await composer.evaluate((element: HTMLTextAreaElement, text) => {
+    element.focus(); element.setSelectionRange(0, element.value.length);
+    const clipboard = new DataTransfer(); clipboard.setData("text/plain", text);
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }));
+  }, inventoryInstructions);
+  await expect(composer).toHaveValue(inventoryInstructions);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const proposal = page.getByRole("article", { name: "Agent proposal" });
+  await expect(proposal.getByText("Verified local integrity", { exact: true })).toBeVisible();
+  await proposal.getByRole("button", { name: "Review details" }).click();
+  const review = page.getByRole("dialog", { name: "Review agent proposal" });
+  await expect(review.getByLabel("Agent name")).toHaveValue("Inventory Visibility Agent");
+  await expect(review.getByLabel("Agent instructions")).toHaveValue(inventoryInstructions);
+  await expect(review.getByLabel("Agent instructions")).toHaveAttribute("readonly", "");
+  await review.getByRole("button", { name: "Approve & apply agent" }).click();
+  await expect(review).toBeHidden();
+  const agent = await page.evaluate(() => window.__testHost!.state.workspaces.finance!.agents.find((agent) => agent.name === "Inventory Visibility Agent")!);
+  expect(agent.instructions).toBe(inventoryInstructions);
+  for (const phrase of lockedInventoryPhrases) expect(agent.instructions).toContain(phrase);
+  await proposal.getByRole("button", { name: "Open this agent's child workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Inventory Visibility Agent Twin", level: 1 })).toBeVisible();
+  await expect(page.getByRole("main")).toHaveAttribute("data-workspace-depth", "1");
+  await expect(page.getByRole("button", { name: "Start agent computer" })).toBeVisible();
+  await expect(page.getByRole("log")).not.toContainText("# Inventory Visibility Agent");
+  await expect(page.getByRole("navigation", { name: "Workspace breadcrumb" })).toContainText("Finance studio");
+});
+test("raw pasted CRLF and trailing whitespace survive the canonical intake boundary", async ({ page }) => {
+  await installFixture(page);
+  await page.goto("/");
+  const document = inventoryInstructions.replaceAll("\n", "\r\n") + " \t";
+  await page.getByRole("textbox", { name: "Message your Work Twin" }).evaluate((element: HTMLTextAreaElement, value) => {
+    element.focus(); element.setSelectionRange(0, element.value.length);
+    const clipboard = new DataTransfer(); clipboard.setData("text/plain", value);
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }));
+  }, document);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByRole("article", { name: "Agent proposal" })).toBeVisible();
+  expect(await page.evaluate(() => window.__testHost!.state.conversations.finance!.turns[0]!.content)).toBe(document);
+  expect(await page.evaluate(() => {
+    const proposal = window.__testHost!.state.conversations.finance!.proposals[0]!;
+    if (proposal.kind !== "agent") throw new Error("Expected an agent proposal.");
+    return proposal.draft.instructions;
+  })).toBe(document);
+});
+
+test("the same shell drills recursively and shows exact evolution references without enabling suggestions", async ({ page }) => {
+  await installFixture(page);
+  await page.goto("/");
+  await page.getByRole("region", { name: "Child agents" }).getByRole("button", { name: "Open Operations analyst's workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Operations analyst Twin", level: 1 })).toBeVisible();
+  await page.evaluate(() => {
+    window.__testHost!.evolution = {
+      twinSummary: "A scoped evidence workspace", sections: [{ id: "exceptions", title: "Evidence exceptions",
+        description: "This workspace only.", kind: "notes", taskIds: [] }], suggestedRoutines: [], defaultFocus: "work",
+    };
+  });
+  await say(page, "Create an agent for evidence reconciliation.");
+  await expect(page.getByRole("status").filter({ hasText: "Workspace evolved from this conversation" })).toBeVisible();
+  await page.getByText("Canonical evolution references", { exact: true }).click();
+  const refs = await page.evaluate(() => window.__testHost!.state.conversations["finance-execution"]!.events.find((event) => event.kind === "evolution")!.references!);
+  await expect(page.getByText(refs.conversationFrameHash, { exact: true })).toBeVisible();
+  const proposal = page.getByRole("article", { name: "Agent proposal" });
+  await proposal.getByRole("button", { name: "Approve & create agent" }).click();
+  await proposal.getByRole("button", { name: "Open this agent's child workspace" }).click();
+  await expect(page.getByRole("main")).toHaveAttribute("data-workspace-depth", "2");
+  await expect(page.getByRole("heading", { name: "Finance analyst Twin", level: 1 })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Workspace evolved from this conversation" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Back to parent workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Operations analyst Twin", level: 1 })).toBeVisible();
+});
+
+test("unverified and unavailable frame projections never open a mutable review or apply", async ({ page }) => {
+  await installFixture(page);
+  await page.goto("/");
+  for (const state of ["unverified", "unavailable"] as const) {
+    await page.evaluate((state) => {
+      const proposal = window.__testHost!.makeDraft({ workspaceId: "finance", message: "Review invoices.", target: "task", history: [] });
+      proposal.basis!.verification = { state, detail: "Canonical frame verification is not available." };
+      window.__testHost!.nextDraft = proposal;
+    }, state);
+    await say(page, "Review invoices.");
+    const card = page.getByRole("article", { name: "Task proposal" }).last();
+    await expect(card.getByText(state === "unverified" ? "Unverified proposal" : "Verification unavailable", { exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "Review details" })).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Approve & create task" })).toHaveCount(0);
+  }
+  expect(await page.evaluate(() => window.__testHost!.calls.some((call) => call.method === "twin.applyProposal"))).toBe(false);
+});
+
+test("starting the shared computer enables only the selected workspace and never transfers a lease", async ({ page }) => {
+  await installFixture(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Start agent computer" }).click();
+  await expect(page.getByText("Enabled for this workspace", { exact: true })).toBeVisible();
+  await page.getByRole("region", { name: "Child agents" }).getByRole("button", { name: "Open Operations analyst's workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Operations analyst Twin", level: 1 })).toBeVisible();
+  await expect(page.getByText("Not enabled for this workspace", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Start agent computer" }).click();
+  await expect(page.getByText("Enabled for this workspace", { exact: true })).toBeVisible();
+  const leases = await page.evaluate(() => window.__testHost!.computerLeases);
+  expect(leases.map((lease) => lease.workspaceId)).toEqual(["finance", "finance-execution"]);
+  expect(leases[0]!.leaseId).not.toBe(leases[1]!.leaseId);
+  await expect(page.getByText("Display unavailable", { exact: true })).toBeVisible();
 });
 
 test("voice recognition appends only final text to the composer and waits for Send", async ({ page }) => {

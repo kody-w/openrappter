@@ -98,19 +98,32 @@ try {
   await page.getByRole("dialog", { name: "Agents", exact: true }).getByRole("button", { name: "Configure agent" }).click();
   let review = page.getByRole("dialog", { name: "Review saved agent" });
   await expect(review.getByLabel("Agent name")).toHaveValue("Finance smoke analyst");
-  await review.getByLabel("Role").fill("Prefilled local review");
-  await review.getByRole("button", { name: "Save agent", exact: true }).click();
+  await expect(review.getByRole("button", { name: "Ask Twin to review changes" })).toBeVisible();
+  await expect(review.getByLabel("Agent instructions")).toHaveAttribute("readonly", "");
+  await review.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(review).toBeHidden({ timeout: 20000 });
   await page.keyboard.press("Escape");
+  await page.evaluate(async (workspaceId) => {
+    const snapshot = await window.rappWork.request({ method: "work.snapshot", params: { workspaceId } });
+    const { workspaceId: _child, updatedAt: _updated, retiredAt: _retired, ...agent } = snapshot.agents[0];
+    await window.rappWork.request({ method: "agents.save", params: { ...agent, role: "Prefilled local review", workspaceId, parentRevision: snapshot.revision } });
+  }, finance.id);
   await tools.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Review saved settings" }).click();
   review = page.getByRole("dialog", { name: "Review saved settings" });
   await expect(review.getByLabel("Workspace name")).toHaveValue("Finance smoke");
-  await review.getByLabel("Workspace name").fill("Finance persistence");
-  await review.getByLabel("Theme").selectOption("dark");
-  await review.getByRole("button", { name: "Save settings" }).click();
+  await expect(review.getByRole("button", { name: "Ask Twin to review changes" })).toBeVisible();
+  await review.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(review).toBeHidden({ timeout: 20000 });
   await page.keyboard.press("Escape");
+  await page.evaluate(async (workspaceId) => {
+    const snapshot = await window.rappWork.request({ method: "work.snapshot", params: { workspaceId } });
+    await window.rappWork.request({ method: "settings.update", params: {
+      ...snapshot.settings, workspaceName: "Finance persistence",
+      appearance: { ...snapshot.settings.appearance, theme: "dark" }, workspaceId,
+    } });
+  }, finance.id);
+  await page.getByRole("button", { name: "Refresh workspace", exact: true }).click();
   await page.getByRole("button", { name: "Open workspace Retail smoke", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Message your Work Twin" })).toHaveValue("");
   const scopes = await page.evaluate(async ({ financeId, retailId }) => ({
@@ -125,6 +138,15 @@ try {
   expect(scopes.retail.snapshot.agents[0].role).toBe("Local smoke validation");
   expect(scopes.finance.snapshot.runs).toHaveLength(0);
   expect(scopes.finance.snapshot.settings.appearance.theme).toBe("dark");
+  await page.getByRole("button", { name: "Open workspace Finance persistence", exact: true }).click();
+  const childSummary = await page.evaluate(({ workspaceId, id }) => window.rappWork.request({
+    method: "agents.openWorkspace", params: { workspaceId, id },
+  }), { workspaceId: finance.id, id: finance.leadAgentId });
+  await page.getByRole("region", { name: "Child agents" }).getByRole("button", { name: "Open Finance smoke analyst's workspace" }).click();
+  await expect(page.getByRole("heading", { name: childSummary.twin.name, level: 1 })).toBeVisible();
+  await expect(page.getByRole("main")).toHaveAttribute("data-workspace-depth", "1");
+  await expect(page.getByRole("button", { name: "Start agent computer" })).toBeVisible();
+  await page.getByRole("button", { name: "Back to parent workspace" }).click();
   for (const scope of [finance.catalogScope, { agentId: finance.leadAgentId, workspaceId: scopes.finance.snapshot.agents[0].workspaceId }]) {
     const path = join(profile, "workspaces", scope.workspaceId, "identity.json");
     expect((await stat(path)).mode & 0o777).toBe(0o600);
@@ -150,7 +172,7 @@ try {
     product: "RAPP Work", platform: process.platform, architecture: process.arch,
     hostBundleSha256: createHash("sha256").update(await readFile(join(root, "dist", "resources", "host.cjs"))).digest("hex"),
     passed: ["sandboxed preload", "authenticated owned host", "explicit workspace-scoped RPC",
-      "no blank creation forms", "prefilled saved reviews", "two independent durable businesses",
+      "no blank creation forms", "prefilled reviews route edits to verified Twin proposals", "two independent durable businesses and agent children",
       "private catalog and agent identities", "restart persistence", "owned process shutdown", "zero renderer errors"],
     liveInferenceTested: false, microphonePromptTested: false, speechRecognitionTested: false, computerExecutionTested: false,
   };
@@ -161,12 +183,22 @@ try {
     try {
       const page = await application.firstWindow();
       const alerts = await page.locator('[role="alert"]').allTextContents();
+      let replayDiagnostic;
+      try {
+        const { createLocalServices, createHost } = await import("../../host/dist/index.js");
+        const replay = await createHost(createLocalServices({ directory: profile, token: randomUUID().replaceAll("-", "").repeat(2) }));
+        await replay.close();
+        replayDiagnostic = "The same test profile reopened through the public Node host.";
+      } catch (failure) {
+        replayDiagnostic = failure instanceof Error ? failure.stack : String(failure);
+      }
       await page.screenshot({ path: join(results, "desktop-failure.png") });
       await writeFile(join(results, "desktop-failure.json"), JSON.stringify({
         message: String(error), alerts, rendererErrors: errors, body: await page.locator("body").innerText(),
         hostState: await page.evaluate(() => window.rappWork.hostState()),
+        replayDiagnostic,
       }, null, 2));
-      console.error(JSON.stringify({ alerts, rendererErrors: errors }));
+      console.error(JSON.stringify({ alerts, rendererErrors: errors, replayDiagnostic }));
     } catch { /* Keep the original failure if the renderer has already exited. */ }
   }
   throw error;

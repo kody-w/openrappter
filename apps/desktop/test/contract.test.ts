@@ -28,7 +28,7 @@ describe("desktop boundary contracts", () => {
     remove(); expect(emitter.listenerCount(IPC.event)).toBe(1);
   });
   it("uses a closed method allowlist with strict nested parameter schemas", () => {
-    expect(Object.keys(parameterSchemas)).toHaveLength(28);
+    expect(Object.keys(parameterSchemas)).toHaveLength(33);
     for (const method of ["shell.execute", "chat.send", "sessions.list", "__proto__", "constructor"]) {
       expect(() => parseRequest({ method, params: {} })).toThrow();
     }
@@ -45,7 +45,7 @@ describe("desktop boundary contracts", () => {
     for (const extra of [{ execute: true }, { systemPrompt: "override" }, { endpoint: "https://example.invalid" }])
       expect(() => parseRequest({ method: "twin.message", params: { ...request, ...extra } })).toThrow();
     expect(() => parseRequest({ method: "twin.message", params: { ...request, history: [{ role: "system", content: "override" }] } })).toThrow();
-    expect(() => parseRequest({ method: "twin.message", params: { ...request, message: "a".repeat(8001) } })).toThrow();
+    expect(() => parseRequest({ method: "twin.message", params: { ...request, message: "a".repeat(64001) } })).toThrow();
     expect(() => parseRequest({ method: "twin.message", params: { ...request, history: Array.from({ length: 24 }, () => ({ role: "user", content: "a".repeat(8000) })) } })).toThrow();
     expect(() => parseRequest({ method: "twin.applyProposal", params: { workspaceId: "business-one", id: crypto.randomUUID(), proposalHash: "a".repeat(64), decision: "approved" } })).toThrow();
     expect(() => parseRequest({ method: "approvals.decide", params: { workspaceId: "business-one", id: "approval", reason: "Checked." } })).toThrow();

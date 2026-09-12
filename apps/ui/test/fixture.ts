@@ -3,6 +3,7 @@ import {
   serviceNames, snapshotSchema, statusSchema, type Agent, type EventScope, type RpcInput, type RpcMethod, type RpcResult,
   type Snapshot, type TwinConversation, type TwinDraft, type TwinMessageRequest, type WorkspaceInput, type WorkspaceList,
   type Provider, type Computer, type Status, type TwinApplyResult,
+  type WorkspaceSummary, type WorkspaceOrganization,
 } from "../src/model";
 
 export const timestamp = "2026-09-12T12:00:00.000Z";
@@ -32,6 +33,7 @@ export interface TestHostState {
   status: Status;
   providers: Provider[];
   computer: Computer;
+  computerEnabled: string[];
 }
 export function testHostState(names: string[] = ["Finance studio"]): TestHostState {
   const state: TestHostState = {
@@ -42,11 +44,14 @@ export function testHostState(names: string[] = ["Finance studio"]): TestHostSta
       authentication: "authenticated", models: ["test-model"], detail: "Test-only provider. No inference is performed." }],
     computer: { state: "unavailable", detail: "No computer is connected. This test does not exercise a virtual machine.",
       verified: false, verifiedAt: null, evidenceIds: [], capabilities: { view: false, control: false } },
+    computerEnabled: [],
   };
   for (const [index, name] of names.entries()) {
     const id = index === 0 ? "finance" : `business-${index + 1}`;
     state.catalog.workspaces.push({
-      id, ownerId: "test-owner", parentWorkspaceId: "owner-catalog", catalogScope: { agentId: `${id}-catalog`, workspaceId: id },
+      id, ownerId: "test-owner", parentWorkspaceId: null, catalogScope: { agentId: `${id}-catalog`, workspaceId: id },
+      ownerType: "human", ownerAgentId: null, rootWorkspaceId: id, lineage: [id], depth: 0, status: "active", parentAccess: "none",
+      organization: { twinSummary: "", sections: [], suggestedRoutines: [], defaultFocus: "conversation" },
       leadAgentId: `${id}-lead`, name, purpose: `Run ${name} with clear outcomes and reviewed evidence.`,
       twin: { name: `${name} Twin`, instructions: `Help operate ${name}. Draft complete work and require human review.` },
       approvalPolicy: "always", computerPolicy: "none", revision: 0, createdAt: timestamp, updatedAt: timestamp,
@@ -54,6 +59,19 @@ export function testHostState(names: string[] = ["Finance studio"]): TestHostSta
     state.workspaces[id] = testWorkspace(id, name);
     state.workspaces[id]!.agents.push({ ...testAgent, id: `${id}-lead`, workspaceId: `${id}-execution` });
     state.conversations[id] = { workspaceId: id, revision: 7, turns: [], proposals: [], events: [] };
+    const owner = state.workspaces[id]!.agents[0]!;
+    const childId = owner.workspaceId;
+    state.catalog.workspaces.push({
+      ...state.catalog.workspaces.find((workspace) => workspace.id === id)!,
+      id: childId, name: owner.name, parentWorkspaceId: id, ownerType: "agent", ownerAgentId: owner.id,
+      rootWorkspaceId: id, lineage: [id, childId], depth: 1, status: owner.enabled ? "active" : "paused", parentAccess: "inspect",
+      organization: { twinSummary: "", sections: [], suggestedRoutines: [], defaultFocus: "conversation" },
+      catalogScope: { agentId: owner.id, workspaceId: childId }, leadAgentId: owner.id,
+      twin: { name: `${owner.name} Twin`, instructions: "Draft work for this agent-owned workspace." },
+    });
+    state.workspaces[childId] = testWorkspace(childId, owner.name);
+    state.workspaces[childId]!.agents.push(structuredClone(owner));
+    state.conversations[childId] = { workspaceId: childId, revision: 7, turns: [], proposals: [], events: [] };
   }
   return state;
 }
@@ -66,6 +84,20 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
   const listeners = new Set<(event: unknown) => void>();
   const subscriptions = new Map<string, string>();
   const now = () => new Date().toISOString();
+  const hex = () => `${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "")}`;
+  const verification = (workspaceId: string | null) => {
+    const sourceFrameHash = hex(), evidenceFrameHash = hex(), publicationFrameHash = hex();
+    return { state: "verified" as const, sourceFrameHash, evidenceFrameHash, publicationFrameHash,
+      workspaceId, sourceWorkspaceId: workspaceId ?? state.catalog.conciergeWorkspaceId,
+      heads: { body: publicationFrameHash, memory: sourceFrameHash, swarm: null },
+      trust: { classification: "integrity-only" as const, factualTruth: false as const, authorship: false as const, promotionGrade: false as const } };
+  };
+  const metadata = (id: string) => {
+    const value = state.catalog.workspaces.find((workspace) => workspace.id === id);
+    if (!value) throw new Error("Unknown workspace metadata.");
+    return value;
+  };
+  const emptyOrganization = (): WorkspaceOrganization => ({ twinSummary: "", sections: [], suggestedRoutines: [], defaultFocus: "conversation" });
   const conversation = (workspaceId: string | null) => {
     const value = state.conversations[workspaceId ?? "concierge"];
     if (!value || value.workspaceId !== workspaceId) throw new Error("Unknown conversation scope.");
@@ -75,6 +107,43 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
     const value = state.workspaces[id];
     if (!value) throw new Error("Unknown workspace.");
     return value;
+  };
+  const inspectComputer = (id: string | null): Computer => {
+    const selected = state.catalog.workspaces.find((item) => item.id === id);
+    const lease = state.computer.lease;
+    const own = lease?.workspaceId === id && id !== null;
+    return structuredClone({
+      ...state.computer,
+      workspace: selected ? { id: selected.id, enabled: state.computer.state === "running" && state.computerEnabled.includes(selected.id),
+        computerPolicy: selected.computerPolicy, approvalPolicy: selected.approvalPolicy } : null,
+      lease: lease ? own || lease.state === "idle" || lease.state === "unresolved" ? lease : {
+        state: "other-workspace", id: null, workspaceId: null, agentId: null, agentWorkspaceId: null, operation: lease.operation,
+      } : { state: "idle", id: null, workspaceId: null, agentId: null, agentWorkspaceId: null, operation: null },
+      display: state.computer.display ?? { state: "unavailable", detail: "Test broker is headless. No display stream is available." },
+    });
+  };
+  const addChild = (parent: WorkspaceSummary, owner: Agent) => {
+    if (parent.depth >= 4 || state.catalog.workspaces.filter((workspace) => workspace.parentWorkspaceId === parent.id).length >= 32)
+      throw new Error("Workspace recursion or child limit reached.");
+    if (state.workspaces[owner.workspaceId]) return metadata(owner.workspaceId);
+    const child: WorkspaceSummary = {
+      id: owner.workspaceId, ownerId: parent.ownerId, parentWorkspaceId: parent.id, ownerType: "agent", ownerAgentId: owner.id,
+      rootWorkspaceId: parent.rootWorkspaceId, lineage: [...parent.lineage, owner.workspaceId], depth: parent.depth + 1,
+      status: owner.enabled ? "active" : "paused", parentAccess: "inspect", organization: emptyOrganization(),
+      name: owner.name, purpose: `Dedicated work for ${owner.name}.`,
+      twin: { name: `${owner.name} Twin`, instructions: "Draft complete scoped work and preserve exact instructions." },
+      catalogScope: { agentId: owner.id, workspaceId: owner.workspaceId }, leadAgentId: owner.id,
+      approvalPolicy: owner.approvalPolicy, computerPolicy: owner.computerPolicy, revision: 0, createdAt: now(), updatedAt: now(),
+    };
+    const snapshot: Snapshot = {
+      ownerId: parent.ownerId, workspaceId: child.id, revision: 0, agents: [structuredClone(owner)],
+      tasks: [], runs: [], approvals: [], artifacts: [], automations: [],
+      settings: { workspaceName: child.name, appearance: { theme: "system", density: "comfortable" },
+        work: { defaultPriority: "normal", approvalPolicy: child.approvalPolicy }, notifications: { approvals: true, completedRuns: true } },
+    };
+    state.catalog.workspaces.push(child); state.workspaces[child.id] = snapshot;
+    state.conversations[child.id] = { workspaceId: child.id, revision: 0, turns: [], proposals: [], events: [] };
+    return child;
   };
   const persist = (workspaceId: string | null) => {
     if (install) localStorage.setItem(storageKey, JSON.stringify(state));
@@ -102,8 +171,9 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
   };
   const createWorkspace = (input: WorkspaceInput) => {
     const id = `business-${crypto.randomUUID()}`;
-    const summary = {
-      id, ownerId: state.catalog.ownerId, parentWorkspaceId: state.catalog.conciergeWorkspaceId,
+    const summary: WorkspaceSummary = {
+      id, ownerId: state.catalog.ownerId, parentWorkspaceId: null, ownerType: "human", ownerAgentId: null,
+      rootWorkspaceId: id, lineage: [id], depth: 0, status: "active", parentAccess: input.parentAccess ?? "none", organization: emptyOrganization(),
       catalogScope: { agentId: `catalog-${input.leadAgent.id}`, workspaceId: id }, leadAgentId: input.leadAgent.id,
       name: input.name, purpose: input.purpose, twin: input.twin, approvalPolicy: input.approvalPolicy,
       computerPolicy: input.computerPolicy, revision: 0, createdAt: now(), updatedAt: now(),
@@ -122,6 +192,7 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
         work: { defaultPriority: "normal", approvalPolicy: input.approvalPolicy }, notifications: { approvals: true, completedRuns: true } },
     };
     state.conversations[id] = { workspaceId: id, revision: 0, turns: [], proposals: [], events: [] };
+    addChild(summary, state.workspaces[id]!.agents[0]!);
     persist(null);
     return summary;
   };
@@ -129,9 +200,12 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
     const current = conversation(input.workspaceId);
     const selected = input.workspaceId ? workspace(input.workspaceId) : null;
     const text = input.message.toLowerCase();
+    const editIndex = input.message.indexOf("\nRequested reviewed values:\n");
+    const edited = editIndex >= 0 ? JSON.parse(input.message.slice(editIndex + "\nRequested reviewed values:\n".length)) as Record<string, any> : null;
+    const document = /^#\s+Inventory Visibility Agent\s+—\s+Manual Global Instructions/m.test(input.message);
     let kind: TwinDraft["kind"] = input.workspaceId === null ? "workspace"
       : input.target && input.target !== "auto" && input.target !== "workspace" ? input.target
-      : /approval|approve|deny/.test(text) ? "approval"
+      : document ? "agent" : /approval|approve|deny/.test(text) ? "approval"
       : /settings|theme|dark|density/.test(text) ? "settings"
       : /routine|every day|daily|schedule/.test(text) ? "automation"
       : /agent|analyst/.test(text) ? "agent" : "task";
@@ -150,17 +224,27 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
         agentId: selected!.agents[0]?.id ?? null, priority: /urgent|high priority/.test(text) ? "high" : "normal" };
       summary = "Draft an invoice review with clear evidence and no payment authority.";
     } else if (kind === "agent") {
-      draft = { id: crypto.randomUUID(), name: "Finance analyst", role: "Invoice and procurement review",
-        instructions: "Review supplier invoices and cite source evidence. Never initiate payments. Escalate exceptions to the owner.",
-        providerId: "test-provider", model: "test-model", computerPolicy: "none", approvalPolicy: "always", enabled: true };
-      summary = "Add a finance analyst with explicit responsibilities and safe defaults.";
+      const existing = edited ? selected!.agents.find((agent) => agent.id === edited.id) : undefined;
+      const agentId = existing?.id ?? crypto.randomUUID();
+      const provider = state.providers.find((item) => item.configured && item.availability === "ready" && item.models.length)!;
+      draft = { id: agentId, name: edited?.name ?? (document ? "Inventory Visibility Agent" : "Finance analyst"),
+        role: edited?.role ?? (document ? "Inventory visibility and evidence reconciliation" : "Invoice and procurement review"),
+        instructions: document ? input.message : existing?.instructions ?? "Review supplier invoices and cite source evidence. Never initiate payments. Escalate exceptions to the owner.",
+        providerId: edited?.providerId ?? provider.id, model: edited?.model ?? provider.models[0],
+        computerPolicy: edited?.computerPolicy ?? "none", approvalPolicy: edited?.approvalPolicy ?? "always", enabled: edited?.enabled ?? true,
+        ...(document ? { suggestedRoutines: [{ id: crypto.randomUUID(), name: "Inventory exception review",
+          taskTitle: "Review inventory evidence exceptions", instructions: "Review only approved inventory evidence. Keep missing quantities UNKNOWN.",
+          agentId, cadence: { kind: "daily", at: "09:00", timezone: "UTC" }, enabled: false }] } : {}),
+      };
+      summary = document ? "Create Inventory Visibility Agent using the full instruction document and verified model options."
+        : "Add a finance analyst with explicit responsibilities and safe defaults.";
     } else if (kind === "automation") {
-      draft = { id: crypto.randomUUID(), name: "Morning finance review", taskTitle: "Review daily invoice exceptions",
+      draft = edited ?? { id: crypto.randomUUID(), name: "Morning finance review", taskTitle: "Review daily invoice exceptions",
         instructions: "Review new invoices, retain evidence, and report exceptions only.", agentId: selected!.agents[0]!.id,
         cadence: { kind: "daily", at: "09:00", timezone: "America/New_York" }, enabled: false };
       summary = "Save a daily 9am finance review as a disabled routine for review.";
     } else if (kind === "settings") {
-      draft = { appearance: { theme: "dark", density: "compact" } };
+      draft = edited ?? { appearance: { theme: "dark", density: "compact" } };
       summary = "Use a compact dark workspace while preserving your other settings.";
     } else {
       const approval = selected!.approvals[0]!;
@@ -173,12 +257,17 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
       confidence: 0.93, readyForReview: kind !== "clarification", missing,
       basis: { schema: "rapp-work/twin-basis/1", ownerId: state.catalog.ownerId, workspaceId: input.workspaceId,
         revision: current.revision + 1, heads: [{ scope: { agentId: "test-catalog", workspaceId: input.workspaceId ?? "owner-catalog" },
-          heads: { body: null, memory: null, swarm: null } }], optionsHash: "b".repeat(64), proposalHash: "a".repeat(64) },
-      createdAt: now() };
+          heads: { body: null, memory: null, swarm: null } }], optionsHash: "b".repeat(64), proposalHash: "a".repeat(64),
+        verification: verification(input.workspaceId),
+        ...(document ? { instructionDocument: { turnId: crypto.randomUUID(), contentHash: "d".repeat(64) } } : {}) },
+      createdAt: now() } as TwinDraft;
   };
   const host = {
     state, calls, subscriptions, listeners, makeDraft,
-    nextDraft: null as TwinDraft | null,
+    computerLeases: [] as { workspaceId: string; leaseId: string }[],
+    nextDraft: null as unknown,
+    evolution: null as WorkspaceOrganization | null,
+    failChildCreation: false,
     failure: "" as string,
     content: '{"source":"Injected test evidence","result":"Review required"}',
     connection(value: HostState) { for (const listener of listeners) listener({ type: "host", ...value }); },
@@ -190,14 +279,51 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
       const id = input.workspaceId as string | null;
       switch (method) {
         case "system.status": return structuredClone(state.status);
-        case "workspaces.list": return structuredClone(state.catalog);
+        case "workspaces.list": return structuredClone({ ...state.catalog, workspaces: [...state.catalog.workspaces].sort((a, b) => a.depth - b.depth) });
         case "workspaces.create": return createWorkspace(input as WorkspaceInput);
-        case "workspaces.open": return structuredClone({ workspace: state.catalog.workspaces.find((item) => item.id === id),
-          snapshot: workspace(id!), twin: conversation(id), routines: workspace(id!).automations, computer: state.computer });
+        case "workspaces.open": return structuredClone({ workspace: metadata(id!),
+          snapshot: workspace(id!), twin: conversation(id), routines: workspace(id!).automations, computer: inspectComputer(id),
+          breadcrumb: { workspaceId: id, ancestors: metadata(id!).lineage.map((ancestor) => {
+            const node = metadata(ancestor); return { id: node.id, name: node.name, ownerType: node.ownerType, ownerAgentId: node.ownerAgentId, depth: node.depth };
+          }) } });
+        case "workspaces.children": return structuredClone({ parent: metadata(id!), children: state.catalog.workspaces.filter((item) => item.parentWorkspaceId === id) });
+        case "workspaces.breadcrumb": return { workspaceId: id, ancestors: metadata(id!).lineage.map((ancestor) => {
+          const node = metadata(ancestor); return { id: node.id, name: node.name, ownerType: node.ownerType, ownerAgentId: node.ownerAgentId, depth: node.depth };
+        }) };
+        case "workspaces.tree": {
+          const nodes = state.catalog.workspaces.filter((workspace) => id === null || workspace.lineage.includes(id));
+          return { maxDepth: 4, roots: nodes.filter((workspace) => workspace.parentWorkspaceId === null || !nodes.some((node) => node.id === workspace.parentWorkspaceId)).map((workspace) => workspace.id),
+            nodes: nodes.map((workspace) => ({ workspace, children: nodes.filter((child) => child.parentWorkspaceId === workspace.id).map((child) => child.id) })) };
+        }
+        case "agents.openWorkspace": {
+          const agent = workspace(id!).agents.find((agent) => agent.id === input.id);
+          if (!agent || metadata(agent.workspaceId).parentWorkspaceId !== id) throw new Error("Agent workspace is not in this authorized parent.");
+          return structuredClone(metadata(agent.workspaceId));
+        }
         case "work.snapshot": return structuredClone(workspace(id!));
         case "twin.conversation": return structuredClone(conversation(id));
         case "providers.list": return structuredClone(state.providers);
-        case "computer.inspect": return structuredClone(state.computer);
+        case "computer.inspect": return inspectComputer(id);
+        case "computer.start": {
+          workspace(id!);
+          if (state.computer.state === "unresolved" || state.computer.lease?.state === "unresolved") throw new Error("The computer lease is unresolved.");
+          if (state.computer.lease?.state === "held" && state.computer.lease.workspaceId !== id) throw new Error("Another workspace holds the computer lease.");
+          host.computerLeases.push({ workspaceId: id!, leaseId: crypto.randomUUID() });
+          state.computer = { ...state.computer, state: "running", verified: true, verifiedAt: now(), evidenceIds: ["test-broker-start"],
+            capabilities: { view: true, control: true }, detail: "Injected ComputerBroker provision/start completed for one shared Omarchy VM.",
+            lease: { state: "idle", id: null, workspaceId: null, agentId: null, agentWorkspaceId: null, operation: null } };
+          if (!state.computerEnabled.includes(id!)) state.computerEnabled.push(id!);
+          for (const item of state.catalog.workspaces) persist(item.id);
+          return inspectComputer(id);
+        }
+        case "computer.stop": {
+          workspace(id!);
+          host.computerLeases.push({ workspaceId: id!, leaseId: crypto.randomUUID() });
+          state.computer = { ...state.computer, state: "stopped", verified: false, verifiedAt: null };
+          state.computerEnabled = [];
+          for (const item of state.catalog.workspaces) persist(item.id);
+          return inspectComputer(id);
+        }
         case "diagnostics.get": return { capturedAt: now(), entries: [] };
         case "events.subscribe": {
           const subscriptionId = crypto.randomUUID(); subscriptions.set(subscriptionId, id!);
@@ -208,17 +334,28 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
           if (host.failure) throw new Error(host.failure);
           const current = conversation(id);
           if (input.contextRevision !== undefined && input.contextRevision !== current.revision) throw new Error("The workspace context changed. Refresh it before continuing.");
-          const proposal = host.nextDraft ?? makeDraft(input as TwinMessageRequest); host.nextDraft = null;
-          current.turns.push({ id: crypto.randomUUID(), workspaceId: id, role: "user", content: input.message, proposalId: null, createdAt: now() },
-            { id: crypto.randomUUID(), workspaceId: id, role: "assistant", content: proposal.assistantMessage, proposalId: proposal.id, createdAt: now() });
-          current.proposals.push(proposal); current.revision += 2; persist(id); return structuredClone(proposal);
+          const proposal = (host.nextDraft ?? makeDraft(input as TwinMessageRequest)) as TwinDraft; host.nextDraft = null;
+          const document = proposal.basis?.instructionDocument as { turnId: string } | undefined;
+          const userVerification = verification(id);
+          current.turns.push({ id: document?.turnId ?? crypto.randomUUID(), workspaceId: id, role: "user", content: input.message, proposalId: null, createdAt: now(), verification: userVerification },
+            { id: crypto.randomUUID(), workspaceId: id, role: "assistant", content: proposal.assistantMessage, proposalId: proposal.id, createdAt: now(), verification: verification(id) });
+          current.proposals.push(proposal); current.revision += 2;
+          if (host.evolution && id && proposal.basis?.verification?.state === "verified") {
+            metadata(id).organization = structuredClone(host.evolution); metadata(id).revision++;
+            current.events.push({ id: crypto.randomUUID(), workspaceId: id, proposalId: proposal.id, kind: "evolution",
+              actorId: state.catalog.ownerId, detail: "Workspace evolved from this conversation", createdAt: now(),
+              references: { conversationFrameHash: userVerification.sourceFrameHash,
+                proposalFrameHash: proposal.basis.verification.sourceFrameHash, proposalHash: proposal.basis.proposalHash,
+                evolutionFrameHash: hex() } });
+          }
+          persist(id); return structuredClone(proposal);
         }
         case "twin.dismissProposal": event(id, input.id, "dismiss", input.reason); return structuredClone(conversation(id));
         case "twin.applyProposal": {
           if (state.receipts[input.id]) return structuredClone(state.receipts[input.id]);
           const current = conversation(id);
           const proposal = current.proposals.find((item) => item.id === input.id)!;
-          if (!proposal || !proposal.readyForReview || proposal.kind === "approval" || proposal.kind === "clarification") throw new Error("Only complete non-approval proposals can be applied.");
+          if (!proposal || !proposal.readyForReview || proposal.kind === "approval" || proposal.basis?.verification?.state !== "verified") throw new Error("Only complete, verified non-approval proposals can be applied.");
           if (current.events.some((item) => item.proposalId === proposal.id && item.kind === "dismiss")) throw new Error("This proposal has been dismissed.");
           if (proposal.basis?.proposalHash !== input.proposalHash) throw new Error("Proposal hash mismatch.");
           if (current.revision !== Number(proposal.basis?.revision) + 1) throw new Error("This proposal is stale. Ask the Twin for a new draft.");
@@ -231,7 +368,12 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
               workspaceId: id, ...saved, ...draft, appearance: { ...saved.appearance, ...draft.appearance },
               work: { ...saved.work, ...draft.work }, notifications: { ...saved.notifications, ...draft.notifications },
             } });
-          } else result = await host.request({ method: proposal.kind === "task" ? "work.createTask" : proposal.kind === "agent" ? "agents.save" : "automations.save", params: { ...draft, workspaceId: id } });
+          } else if (proposal.kind === "agent") {
+            const { suggestedRoutines = [], ...agent } = draft;
+            const saved = await host.request({ method: "agents.save", params: { ...agent, workspaceId: id } }) as Agent;
+            result = { agent: saved, workspace: structuredClone(metadata(saved.workspaceId)) };
+            for (const routine of suggestedRoutines) await host.request({ method: "automations.save", params: { ...routine, workspaceId: saved.workspaceId } });
+          } else result = await host.request({ method: proposal.kind === "task" ? "work.createTask" : "automations.save", params: { ...draft, workspaceId: id } });
           const receipt: TwinApplyResult = { id: proposal.id, workspaceId: id, kind: proposal.kind, status: "applied", result: result as Record<string, unknown>, createdAt: now() };
           state.receipts[proposal.id] = receipt; event(id, proposal.id, "accept", "Owner accepted the draft."); return structuredClone(receipt);
         }
@@ -240,8 +382,25 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
           const { workspaceId: _binding, ...fields } = input;
           const agent = { ...fields, workspaceId: selected.agents.find((item) => item.id === fields.id)?.workspaceId ?? `execution-${fields.id}`, updatedAt: now() } as Agent;
           const index = selected.agents.findIndex((item) => item.id === agent.id);
-          if (index >= 0) selected.agents[index] = agent; else selected.agents.push(agent);
+          if (index >= 0) {
+            if (selected.agents[index]?.retiredAt) throw new Error("A retired agent cannot be reassigned.");
+            selected.agents[index] = agent;
+            const child = metadata(agent.workspaceId);
+            child.name = agent.name; child.status = agent.enabled ? "active" : "paused"; child.revision++;
+            const childSnapshot = workspace(agent.workspaceId);
+            childSnapshot.agents = childSnapshot.agents.map((item) => item.id === agent.id ? structuredClone(agent) : item);
+          } else {
+            if (host.failChildCreation) throw new Error("Atomic child workspace creation failed.");
+            addChild(metadata(id!), agent);
+            selected.agents.push(agent);
+          }
           selected.revision++; persist(id); return structuredClone(agent);
+        }
+        case "agents.retire": {
+          const agent = workspace(id!).agents.find((item) => item.id === input.id);
+          if (!agent) throw new Error("Unknown agent.");
+          agent.enabled = false; agent.retiredAt = now(); metadata(agent.workspaceId).status = "archived";
+          persist(id); return structuredClone(agent);
         }
         case "work.createTask": {
           const selected = workspace(id!);
@@ -268,9 +427,11 @@ export function createTestHost({ seed, install = false }: { seed: TestHostState;
           selected.revision++; persist(id); return structuredClone(automation);
         }
         case "settings.update": {
-          const selected = workspace(id!); const { workspaceId: _binding, ...fields } = input;
+          const selected = workspace(id!); const { workspaceId: _binding, computerPolicy, parentAccess, ...fields } = input;
           selected.settings = fields as Snapshot["settings"]; selected.revision++;
-          state.catalog.workspaces.find((item) => item.id === id)!.name = selected.settings.workspaceName;
+          metadata(id!).name = selected.settings.workspaceName; metadata(id!).revision++;
+          if (computerPolicy) metadata(id!).computerPolicy = computerPolicy;
+          if (parentAccess) metadata(id!).parentAccess = parentAccess;
           persist(id); return structuredClone(selected.settings);
         }
         case "approvals.decide": {
@@ -308,10 +469,15 @@ export class FixtureClient implements WorkClient {
   readonly bridge: DesktopBridge;
   private client: BridgeClient;
   messageGate: Promise<void> | null = null;
+  computerGate: Promise<void> | null = null;
   constructor(seed = testHostState()) {
     this.host = createTestHost({ seed });
     this.bridge = {
-      request: async (input) => { if (input.method === "twin.message" && this.messageGate) await this.messageGate; return this.host.request(input); },
+      request: async (input) => {
+        if (input.method === "twin.message" && this.messageGate) await this.messageGate;
+        if (input.method === "computer.start" && this.computerGate) await this.computerGate;
+        return this.host.request(input);
+      },
       hostState: this.host.hostState, onEvent: this.host.onEvent,
     };
     this.client = new BridgeClient(this.bridge);

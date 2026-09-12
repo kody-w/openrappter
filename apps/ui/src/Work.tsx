@@ -9,9 +9,11 @@ interface Props {
   connected: boolean; busy: boolean; perform: Perform; newTask: () => void;
   askTwin: (message: string) => void;
   reviewTask: (task: Task) => void;
+  executionAllowed?: boolean;
   review: (approval: Approval) => void; openArtifact: (artifact: Artifact) => void;
 }
-export function Work({ snapshot, status, computer, connected, busy, perform, newTask, askTwin, reviewTask, review, openArtifact }: Props) {
+export function Work({ snapshot, status, computer: reportedComputer, connected, busy, perform, newTask, askTwin, reviewTask, review, openArtifact, executionAllowed = true }: Props) {
+  const computer = reportedComputer?.workspace?.id === snapshot.workspaceId ? reportedComputer : null;
   const [tab, setTab] = useState<WorkTab>("tasks");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -26,8 +28,9 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
   const selected = tasks.find((task) => task.id === selectedId) ?? tasks[0];
   const selectedAgent = snapshot.agents.find((agent) => agent.id === selected?.agentId);
   const agentReady = Boolean(selectedAgent?.enabled && selectedAgent.providerId && selectedAgent.model
-    && (selectedAgent.computerPolicy === "none" || computer?.state === "running" && computer.verified));
-  const canExecute = connected && status?.checks.runtime.state === "ready" && status.checks.provider.state === "ready";
+    && (selectedAgent.computerPolicy === "none" || computer?.state === "running" && computer.verified
+      && computer.workspace?.id === snapshot.workspaceId && computer.workspace.enabled && computer.workspace.computerPolicy !== "none"));
+  const canExecute = connected && executionAllowed && status?.checks.runtime.state === "ready" && status.checks.provider.state === "ready";
   return <>
     <section className="metrics" aria-label="Work overview">
       <div><span className="metric-icon"><Icon name="work" /></span><dl><dt>Active work</dt><dd>{active.length}<span>tasks</span></dd></dl></div>
@@ -123,9 +126,9 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
             </dl>
             <p className="inline-note">A connected service must report real computer state and evidence. Agent access is governed by its configuration and approval policy.</p>
             <div className="row wrap">
-              <button className="button primary" disabled={!connected || busy || computer?.state !== "stopped" || !computer.capabilities.control || status?.checks.computer.state !== "ready"}
+              <button className="button primary" disabled={!connected || !executionAllowed || busy || computer?.state !== "stopped" || !computer.capabilities.control || status?.checks.computer.state !== "ready"}
                 onClick={() => { void perform("computer.start", { workspaceId: snapshot.workspaceId }, "Computer start response received. Review the service-reported state."); }}>Start computer</button>
-              <button className="button secondary" disabled={!connected || busy || computer?.state !== "running" || !computer.capabilities.control}
+              <button className="button secondary" disabled={!connected || !executionAllowed || busy || computer?.state !== "running" || !computer.capabilities.control || !computer.workspace?.enabled}
                 onClick={() => { void perform("computer.stop", { workspaceId: snapshot.workspaceId }, "Computer stop response received."); }}>Stop computer</button>
             </div>
           </section>

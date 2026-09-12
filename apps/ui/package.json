@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:canonical": "npm --prefix ../host run build && vitest run --config vitest.canonical.config.ts"
   },
   "dependencies": {
     "react": "^19.2.0",

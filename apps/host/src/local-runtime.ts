@@ -12,6 +12,8 @@ import { conflict, HostError, unavailable } from "./errors.js";
 import { agentScope, commandKey, digestBytes, LocalWork } from "./local-work.js";
 import { committed, digest, json, LocalPersistence, proofReceipt } from "./persistence.js";
 import { LocalComputer } from "./local-computer.js";
+import { nextSchedule } from "./cadence.js";
+export { nextSchedule } from "./cadence.js";
 
 const relativePath = z.string().min(1).max(512).refine((value) =>
   !value.startsWith("/") && !/[\\%\u0000-\u001f\u007f]/.test(value)
@@ -27,6 +29,7 @@ interface Active {
   readonly controller: AbortController;
   readonly agent: Agent;
   readonly task: Task;
+  readonly workspaceId: string;
   run: Run;
   promise: Promise<void>;
 }
@@ -56,7 +59,8 @@ export class LocalRuntime implements RuntimePort {
     return { state: "ready" as const, detail: "Bounded per-agent runtimes with canonical model/tool history and cancellation." };
   }
   async start(context: RequestContext, input: { runId: string; task: Task; agent: Agent; settings: Settings }): Promise<Run> {
-    this.work.assertContext(context);
+    const business = this.work.assertContext(context);
+    this.persistence.assertExecutionScope(agentScope(input.agent), business.workspaceId);
     if (this.closed || this.active.size >= 4) conflict("The bounded runtime is busy.");
     if (!input.agent.enabled || input.task.agentId !== input.agent.id || input.task.workspaceId !== input.agent.workspaceId) {
       conflict("An enabled agent in this task's own workspace is required.");
@@ -64,12 +68,15 @@ export class LocalRuntime implements RuntimePort {
     if ([...this.active.values()].some((item) => item.agent.workspaceId === input.agent.workspaceId)) conflict("This agent already has an active run.");
     if (input.agent.computerPolicy !== "none") {
       const computer = await this.computer.inspect(context);
-      if (computer.state !== "running" || !computer.verified) unavailable("The agent's verified Omarchy computer");
+      if (computer.state !== "running" || !computer.verified || computer.workspace?.id !== business.workspaceId || !computer.workspace?.enabled) {
+        unavailable("This workspace's enabled, verified Omarchy computer");
+      }
     }
     const scope = agentScope(input.agent);
     const p = this.persistence;
     const active: Active = {
       controller: new AbortController(), agent: structuredClone(input.agent), task: structuredClone(input.task),
+      workspaceId: business.workspaceId,
       run: {
         id: input.runId, taskId: input.task.id, agentId: input.agent.id, workspaceId: input.agent.workspaceId,
         state: "running", startedAt: new Date().toISOString(), finishedAt: null,
@@ -144,6 +151,12 @@ export class LocalRuntime implements RuntimePort {
     execution: { argv: string[]; cwd: string; timeoutMs: number; readOnly: boolean },
   ): Promise<EffectOutcome> {
     const p = this.persistence, scope = agentScope(active.agent);
+    const inherited = this.work.lineagePolicy(active.workspaceId);
+    const rank = { none: 0, "read-only": 1, control: 2 };
+    if (!p.activeLineage(active.workspaceId) || !p.activeLineage(scope.workspaceId)
+      || rank[active.agent.computerPolicy] > rank[inherited.computerPolicy]) {
+      return noEffect("denied", "workspace_lineage_policy_changed");
+    }
     const approvalRequired = active.agent.approvalPolicy === "always" || !execution.readOnly;
     const request: OperationRequest = {
       schema: "rapp-work/operation/1", operation_id: context.commandHash,
@@ -180,7 +193,7 @@ export class LocalRuntime implements RuntimePort {
     });
     if (context.signal.aborted) return noEffect("cancelled", "cancelled_before_guest");
     const claims = p.security.consumePermit(permit, request);
-    const result = await this.computer.execute(claims, scope, execution, context, active.task.id, active.run.id);
+    const result = await this.computer.execute(claims, scope, execution, context, active.task.id, active.run.id, active.workspaceId);
     const outcome = await p.appendSecurity(scope, capability, {
       type: "outcome.recorded", agent_id: scope.agentId, workspace_id: scope.workspaceId,
       task_id: active.task.id, run_id: active.run.id, intent_id: context.commandHash,
@@ -231,7 +244,9 @@ export class LocalRuntime implements RuntimePort {
     }
   }
   async decide(context: RequestContext, input: { approval: Approval; decision: "approved" | "denied"; reason: string }): Promise<void> {
-    this.work.assertContext(context);
+    const business = this.work.assertContext(context);
+    this.work.assertOwner(context);
+    this.persistence.assertExecutionScope({ agentId: input.approval.agentId, workspaceId: input.approval.workspaceId }, business.workspaceId);
     const approval = approvalSchema.parse(input.approval);
     const waiter = this.waiting.get(approval.id);
     if (!waiter || waiter.active.run.id !== approval.runId || waiter.active.agent.id !== approval.agentId
@@ -254,7 +269,8 @@ export class LocalRuntime implements RuntimePort {
     waiter!.resolve(input.decision);
   }
   async cancel(context: RequestContext, run: Run): Promise<Run> {
-    this.work.assertContext(context);
+    const business = this.work.assertContext(context);
+    this.persistence.assertExecutionScope({ agentId: run.agentId, workspaceId: run.workspaceId }, business.workspaceId);
     if (run.state === "cancelled" || run.state === "unresolved") return run;
     const active = this.active.get(run.id);
     if (!active || active.agent.id !== run.agentId || active.agent.workspaceId !== run.workspaceId) conflict("This run is not active in this workspace.");
@@ -317,24 +333,26 @@ export class LocalRuntime implements RuntimePort {
     if (this.closed) throw new HostError(-32011, "Runtime is closing.");
     return { nextRunAt: automation.enabled ? nextSchedule(automation, Date.now()).toISOString() : null };
   }
-  private ownerContext(requestId: string): RequestContext {
-    const owner = this.persistence.owner;
-    return { principal: { id: owner.id, workspaceId: owner.catalog.workspaceId, permissions: [] }, requestId };
+  private ownerContext(requestId: string, workspaceId: string): RequestContext {
+    return { principal: this.persistence.humanPrincipal(), requestId, workspaceId };
   }
   async activateScheduling(provider: ProviderPort): Promise<void> {
     if (this.scheduleTimer || this.closed) return;
     this.scheduleProvider = provider;
     const now = Date.now();
-    const current = await this.work.snapshot(this.ownerContext("schedule-startup"));
-    for (const automation of current.automations.filter((item) => item.enabled && item.nextRunAt && Date.parse(item.nextRunAt) <= now)) {
-      committed(await this.persistence.commit({ agentId: automation.agentId, workspaceId: automation.workspaceId },
-        `automation/missed/${automation.id}/${automation.nextRunAt}`, "host.automation.missed",
-        { id: automation.id, missedAt: automation.nextRunAt }, async () => ({
-          status: "succeeded", value: { skipped: true }, receipts: [{ kind: "no-effect", reason: "missed_while_host_offline" }],
-          events: [{ type: "ui.automation.saved", automation: json({
-            ...automation, nextRunAt: nextSchedule(automation, now).toISOString(), updatedAt: new Date().toISOString(),
-          }) }],
-        })));
+    for (const workspaceId of this.persistence.businessIds()) {
+      if (!this.persistence.activeLineage(workspaceId)) continue;
+      const current = await this.work.snapshot(this.ownerContext("schedule-startup", workspaceId));
+      for (const automation of current.automations.filter((item) => item.originWorkspaceId === workspaceId && item.enabled && item.nextRunAt && Date.parse(item.nextRunAt) <= now)) {
+        committed(await this.persistence.commit({ agentId: automation.agentId, workspaceId: automation.workspaceId },
+          `automation/missed/${automation.id}/${automation.nextRunAt}`, "host.automation.missed",
+          { id: automation.id, missedAt: automation.nextRunAt }, async () => ({
+            status: "succeeded", value: { skipped: true }, receipts: [{ kind: "no-effect", reason: "missed_while_host_offline" }],
+            events: [{ type: "ui.automation.saved", automation: json({
+              ...automation, nextRunAt: nextSchedule(automation, now).toISOString(), updatedAt: new Date().toISOString(),
+            }) }],
+          })));
+      }
     }
     this.scheduleTimer = setInterval(() => { void this.tickSchedules().catch(() => {}); }, 15_000);
     this.scheduleTimer.unref();
@@ -344,44 +362,48 @@ export class LocalRuntime implements RuntimePort {
     if (this.scheduling) return this.scheduling;
     this.scheduling = (async () => {
       const p = this.persistence;
-      const snapshot = await this.work.snapshot(this.ownerContext("schedule-scan"));
-      for (const automation of snapshot.automations.filter((item) => item.enabled && item.nextRunAt && Date.parse(item.nextRunAt) <= now)) {
-        if (this.closed) return;
-        const scope = { agentId: automation.agentId, workspaceId: automation.workspaceId };
-        const key = `automation/fire/${automation.id}/${automation.nextRunAt}`;
-        const hex = digest(key);
-        const taskId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-        const context = this.ownerContext(key);
-        const fired = await p.commit(scope, key, "host.automation.fire", { automation: json(automation), taskId },
-          async (): Promise<EffectOutcome> => {
-            const task = await this.work.createTask(context, {
-              requestId: taskId, title: automation.taskTitle, instructions: automation.instructions,
-              agentId: automation.agentId, priority: "normal",
-            });
-            let run: Run | undefined;
-            try { run = await this.work.startRun(context, task.id, this, this.scheduleProvider!); }
-            catch (error) {
-              if (!(error instanceof HostError) || ![-32009, -32011].includes(error.code)) throw error;
-            }
-            const history = await p.read(scope);
-            const receipt = history.commands.find((item) => item.state === "committed"
-              && item.command.operation === "task.create" && item.command.resources.some((resource) => resource.kind === "task" && resource.id === task.id));
-            if (receipt?.state !== "committed") throw new Error("Scheduled task has no canonical creation proof.");
-            return {
-              status: "succeeded", value: { taskId: task.id, runId: run?.id ?? null },
-              receipts: [proofReceipt(receipt), { kind: run ? "scheduled-run-accepted" : "schedule-paused", runId: run?.id ?? null }],
-              events: [{ type: "ui.automation.saved", automation: json({
-                ...automation, enabled: Boolean(run), nextRunAt: run ? nextSchedule(automation, now).toISOString() : null,
-                updatedAt: new Date().toISOString(),
-              }) }],
-            };
-          }, [{ kind: "task", id: taskId }]);
-        if (fired.state === "unresolved") {
-          committed(await p.commit(scope, `automation/quarantine/${digest(key)}`, "host.automation.quarantine",
-            { id: automation.id, commandHash: fired.commandHash }, async () => ({
-              status: "succeeded", value: { paused: true }, receipts: [{ kind: "no-replay", commandHash: fired.commandHash }],
-              events: [{ type: "ui.automation.saved", automation: json({ ...automation, enabled: false, nextRunAt: null }) }],
-            })));
+      for (const workspaceId of p.businessIds()) {
+        if (!p.activeLineage(workspaceId)) continue;
+        const snapshot = await this.work.snapshot(this.ownerContext("schedule-scan", workspaceId));
+        for (const automation of snapshot.automations.filter((item) => item.originWorkspaceId === workspaceId && item.enabled && item.nextRunAt && Date.parse(item.nextRunAt) <= now)) {
+          if (this.closed) return;
+          const scope = { agentId: automation.agentId, workspaceId: automation.workspaceId };
+          const key = `automation/fire/${automation.id}/${automation.nextRunAt}`;
+          const hex = digest(key);
+          const taskId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+          const context = this.ownerContext(key, workspaceId);
+          const fired = await p.commit(scope, key, "host.automation.fire", { automation: json(automation), taskId },
+            async (): Promise<EffectOutcome> => {
+              const task = await this.work.createTask(context, {
+                requestId: taskId, title: automation.taskTitle, instructions: automation.instructions,
+                agentId: automation.agentId, priority: "normal",
+              });
+              let run: Run | undefined;
+              try { run = await this.work.startRun(context, task.id, this, this.scheduleProvider!); }
+              catch (error) {
+                if (!(error instanceof HostError) || ![-32009, -32011].includes(error.code)) throw error;
+              }
+              const history = await p.read(scope);
+              const receipt = history.commands.find((item) => item.state === "committed"
+                && item.command.operation === "task.create" && item.command.resources.some((resource) => resource.kind === "task" && resource.id === task.id));
+              if (receipt?.state !== "committed") throw new Error("Scheduled task has no canonical creation proof.");
+              return {
+                status: "succeeded", value: { taskId: task.id, runId: run?.id ?? null },
+                receipts: [proofReceipt(receipt), { kind: run ? "scheduled-run-accepted" : "schedule-paused", runId: run?.id ?? null }],
+                events: [{ type: "ui.automation.saved", automation: json({
+                  ...automation, enabled: Boolean(run), nextRunAt: run ? nextSchedule(automation, now).toISOString() : null,
+                  updatedAt: new Date().toISOString(),
+                }) }, { type: "routine.fired", id: automation.id, taskId: task.id, runId: run?.id ?? null,
+                  workspaceId, agentWorkspaceId: scope.workspaceId, scheduledAt: automation.nextRunAt }],
+              };
+            }, [{ kind: "task", id: taskId }]);
+          if (fired.state === "unresolved") {
+            committed(await p.commit(scope, `automation/quarantine/${digest(key)}`, "host.automation.quarantine",
+              { id: automation.id, commandHash: fired.commandHash }, async () => ({
+                status: "succeeded", value: { paused: true }, receipts: [{ kind: "no-replay", commandHash: fired.commandHash }],
+                events: [{ type: "ui.automation.saved", automation: json({ ...automation, enabled: false, nextRunAt: null }) }],
+              })));
+          }
         }
       }
     })();
@@ -395,18 +417,4 @@ export class LocalRuntime implements RuntimePort {
     for (const item of this.active.values()) item.controller.abort("host_shutdown");
     await this.drain();
   }
-}
-
-export function nextSchedule(automation: AutomationInput, after: number): Date {
-  const cadence = automation.cadence;
-  if (cadence.kind === "interval") return new Date(after + cadence.minutes * 60_000);
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: cadence.timezone, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-  });
-  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  for (let time = Math.floor(after / 60_000) * 60_000 + 60_000; time <= after + 8 * 86_400_000; time += 60_000) {
-    const parts = Object.fromEntries(formatter.formatToParts(time).map((part) => [part.type, part.value]));
-    if (`${parts.hour}:${parts.minute}` === cadence.at && (cadence.kind === "daily" || parts.weekday === weekdays[cadence.weekday])) return new Date(time);
-  }
-  throw new Error("No bounded schedule occurrence.");
 }

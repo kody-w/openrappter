@@ -25,11 +25,18 @@ describe("durable local composition", () => {
   it("has empty canonical production state, a real runtime and an explicitly unavailable computer", async () => {
     const services = createLocalServices({ directory: join(directory, "local"), token });
     host = await createHost(services);
-    const context = { principal: (await services.security.authenticate(token))!, requestId: "test" };
-    expect((await services.work.snapshot(context)).agents).toEqual([]);
+    const context = { principal: (await services.security.authenticate(token))!, requestId: "test", workspaceId: null as string | null };
+    expect((await services.work.listWorkspaces(context)).workspaces).toEqual([]);
+    await expect(services.work.snapshot(context)).rejects.toThrow("Select an authorized business workspace.");
     expect((await services.runtime.check()).state).toBe("ready");
     expect(await services.computer.inspect(context)).toMatchObject({ state: "unavailable", verified: false, evidenceIds: [] });
-    await services.work.saveAgent(context, { ...agent, providerId: "github-copilot" });
+    const business = await services.work.createWorkspace(context, {
+      requestId: randomUUID(), name: "Local work", purpose: "Persist reviewed local work.",
+      twin: { name: "Local Twin", instructions: "Draft complete work for human review." },
+      leadAgent: { ...agent, providerId: "github-copilot" }, starterTask: null, starterRoutines: [],
+      approvalPolicy: "always", computerPolicy: "none",
+    });
+    context.workspaceId = business.id;
     const automation = await services.work.saveAutomation(context, {
       id: "schedule", name: "Review", taskTitle: "Review", instructions: "Review actual inputs",
       agentId: agent.id, cadence: { kind: "daily", at: "09:00", timezone: "UTC" }, enabled: true,

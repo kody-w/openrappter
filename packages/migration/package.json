@@ -1,0 +1,14 @@
+{
+  "name": "@rapp-work/migration",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "lint": "tsc --noEmit --pretty false --noUnusedLocals --noUnusedParameters",
+    "test": "vitest run"
+  }
+}

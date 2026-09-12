@@ -98,7 +98,7 @@ export class LocalComputer implements ComputerPort {
     } catch { return { state: "unavailable" as const, detail: "The pinned Omarchy configuration, local image, SSH identity, or Tart could not be verified." }; }
   }
   async inspect(context: RequestContext): Promise<Computer> {
-    this.work.assertContext(context);
+    this.work.contextScope(context);
     const health = await this.check();
     if (health.state !== "ready") return missing(health.detail);
     try {
@@ -177,12 +177,12 @@ export class LocalComputer implements ComputerPort {
   start(context: RequestContext): Promise<Computer> { return this.control(context, "start"); }
   stop(context: RequestContext): Promise<Computer> { return this.control(context, "stop"); }
   private async control(context: RequestContext, action: "start" | "stop"): Promise<Computer> {
-    this.work.assertContext(context);
+    const scope = this.work.assertContext(context);
     if ((await this.check()).state !== "ready") return unavailable("The configured local computer");
     const p = this.persistence;
     const taskId = "computer-control", runId = digest(context.requestId).slice(0, 32);
-    committed(await p.commit(p.owner.catalog, commandKey(`computer/${action}`, context), `host.computer.${action}`, { action },
-      async (effect) => this.lease(p.owner.catalog, taskId, runId, effect, async (capability, lease) => {
+    committed(await p.commit(scope, commandKey(`computer/${action}`, context), `host.computer.${action}`, { action },
+      async (effect) => this.lease(scope, taskId, runId, effect, async (capability, lease) => {
         if (action === "start") {
           this.receiptCommit(await this.broker!.provision(capability, lease, this.request(effect, taskId, runId, "provision")));
           return this.broker!.start(capability, lease, this.request(effect, taskId, runId, "start"));
@@ -220,7 +220,7 @@ export class LocalComputer implements ComputerPort {
     if (!this.configured) return;
     const owner = this.persistence.owner;
     const context: RequestContext = {
-      principal: { id: owner.id, workspaceId: owner.catalog.workspaceId, permissions: [] }, requestId: randomUUID(),
+      principal: { id: owner.id, workspaceId: owner.catalog.workspaceId, permissions: [] }, requestId: randomUUID(), workspaceId: null,
     };
     const observed = await this.inspect(context);
     if (observed.state === "running") {

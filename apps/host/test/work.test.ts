@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { agent, fixture, owner } from "./fixture.js";
 import { automationInputSchema, computerSchema, runSchema } from "../src/contracts.js";
-const context = { principal: owner, requestId: "test" };
+const context = { principal: owner, requestId: "test", workspaceId: owner.workspaceId };
 describe("work adapter business boundaries", () => {
   it("can assign queued tasks but cannot reassign an active run", async () => {
     const services = fixture();

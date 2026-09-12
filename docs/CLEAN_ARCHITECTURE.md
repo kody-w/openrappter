@@ -54,6 +54,11 @@ surface.
 ## Ownership
 
 - A **Principal** is the authenticated local human or trusted host component.
+- The owner's **ConciergeWorkspace** owns the catalog of businesses and global
+  workspace-creation conversations. It is not a default work execution scope.
+- A **BusinessWorkspace** has one canonical catalog scope, one Twin identity,
+  explicit purpose/policies, and independent child agent workspaces. Its ID
+  equals its catalog workspace ID, not an agent workspace ID.
 - An **Agent** is a persistent worker definition and policy.
 - An **AgentWorkspace** is the agent's sole durable state owner.
 - A **Task** belongs to one agent and one workspace.
@@ -63,6 +68,35 @@ surface.
 
 Caller-supplied IDs locate resources; they never grant authority. Every service
 receives a scoped capability created after authorization.
+Business parent ownership is recovered from verified catalog/bootstrap and
+agent-registration commands, never inferred from a supplied resource ID.
+Normal Work RPCs require an explicit authorized business binding.
+
+## Conversation and review
+
+The human expresses intent, not a set of blank form values. The Twin receives
+bounded conversation and verified workspace options, asks only necessary
+follow-ups, and generates complete strict drafts. The model transport uses a
+fresh tool-free Copilot SDK session with GPT-6 Astra, max reasoning and
+`long_context`, without a model/provider fallback.
+
+User/assistant turns, proposals, acceptances and dismissals are canonical
+Work commands in the owning catalog. Global creation conversations remain in
+the concierge. A model output is untrusted until its discriminant, complete
+draft and every availability-dependent choice pass validation.
+
+Review binds a proposal hash to canonical heads and verified option inventory.
+Acceptance reauthorizes the target action and calls the same Work APIs as an
+explicit human edit. An interleaved write during drafting, changed child
+heads, or changed availability invalidates the basis. Approval recommendations
+cannot decide; the exact human `approvals.decide` command remains necessary.
+
+Workspace creation stages and verifies the business catalog, Twin identity,
+lead definition and optional starter work/routines, then publishes one
+verified owner-catalog entry. This is atomic **publication**, not a claim of a
+cross-directory filesystem transaction. Failure before publication leaves
+inaccessible staged scopes and an unresolved intent; restart never remints or
+automatically replays them.
 
 ## Canonical transition
 

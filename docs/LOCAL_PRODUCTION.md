@@ -6,7 +6,8 @@ tests can explicitly override the directory with `RAPP_WORK_USER_DATA`.
 
 The application directory contains one owner identity, one `workspaces/` store,
 an owner-process lock, provider state and optional computer configuration. The
-owner catalog, computer history and each saved agent have different workspaces.
+owner concierge/catalog, each business catalog, computer history and each saved
+agent have different workspaces.
 RPC IDs are locators, never capabilities. RAPP/1 integrity/read-back verification
 does not attest to a model's factual accuracy.
 
@@ -40,6 +41,21 @@ the RAPP Work runtime can authorize and execute those proposals.
 The transport checks authentication/catalog status, validates bounded output,
 supports cancellation and deletes its own finished session. Unsupported APIs,
 missing auth, invalid JSON and isolation-check failures are explicit errors.
+
+The conversation-first Work Twin requires the authenticated **GPT-6 Astra**
+model with advertised **max** reasoning support. Every draft explicitly
+requests **long_context**. Unsupported model/profile/session configuration is
+an error, not a fallback to another model or a fabricated assistant reply.
+Provider readiness includes this required Twin profile.
+
+Use `workspaces.list` to discover authorized business catalogs and
+`workspaces.open` to retrieve a selected workspace snapshot, Twin history,
+routines and computer state. Start a new-business conversation with
+`twin.message` and `workspaceId: null`; normal Work requests must instead
+include an authorized business `workspaceId`. No server-global selection is
+inferred. Accepting a strict proposal uses canonical Work APIs, never tools
+inside Copilot. The current host RPC integration is documented in
+[the host contract](../apps/host/README.md); this change does not replace the UI.
 
 Supported API documentation:
 

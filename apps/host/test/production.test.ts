@@ -131,7 +131,7 @@ describe("filesystem-backed production composition", () => {
     const reopened = await setup({ directory: f.directory });
     expect(reopened.services.persistence.owner).toEqual(owner);
     const snapshot = await reopened.services.work.snapshot(reopened.context());
-    expect(snapshot.agents[0]!.workspaceId).toBe(agent.workspaceId);
+    expect(snapshot.agents.find((item) => item.id === agent.id)!.workspaceId).toBe(agent.workspaceId);
     expect(snapshot.runs[0]!).toMatchObject({ id: run.id, state: "completed" });
     await reopened.services.work.createTask(reopened.context(), input);
     await reopened.services.work.startRun({ ...reopened.context(), requestId: runContext.requestId }, task.id, reopened.services.runtime, reopened.services.provider);

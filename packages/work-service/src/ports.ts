@@ -170,6 +170,6 @@ export interface WorkServicePort {
     capability: object,
     command: WorkCommand,
     effect: AuthorizedEffect,
-    options?: { readonly signal?: AbortSignal },
+    options?: { readonly signal?: AbortSignal; readonly expectedHeads?: Heads },
   ): Promise<WorkCommitResult>;
 }

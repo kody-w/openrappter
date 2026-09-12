@@ -40,6 +40,23 @@ export interface ModelProvider {
   complete(request: ModelRequest): Promise<ModelResponse>;
 }
 
+export const ASTRA_MODEL_PROFILE = Object.freeze({
+  model: "gpt-6-astra", reasoningEffort: "max", contextTier: "long_context",
+} as const);
+
+export interface StructuredDraftRequest<T> {
+  readonly model: "gpt-6-astra";
+  readonly reasoningEffort: "max";
+  readonly contextTier: "long_context";
+  readonly messages: readonly { readonly role: "system" | "user" | "assistant"; readonly content: string }[];
+  readonly name: string;
+  readonly schema: JsonObject;
+  readonly maxOutputTokens: number;
+  readonly signal: AbortSignal;
+  /** Local strict validator; this function is never sent to the SDK. */
+  readonly parse: (value: unknown) => T;
+}
+
 /** The SDK/HTTP driver must return proposals, never run a proposed tool itself. */
 export interface CopilotTransport {
   complete(
@@ -49,6 +66,9 @@ export interface CopilotTransport {
       readonly tools: readonly ToolDescription[];
       readonly maxOutputTokens: number;
       readonly automaticToolExecution: false;
+      readonly structuredOutput?: { readonly name: string; readonly schema: JsonObject; readonly strict: true };
+      readonly reasoningEffort?: "max";
+      readonly contextTier?: "long_context";
     },
     signal: AbortSignal,
   ): Promise<unknown>;
@@ -125,7 +145,34 @@ export class GitHubCopilotProvider implements ModelProvider {
     if (!transport || typeof transport.complete !== "function") {
       throw new ModelProviderError("missing_copilot_transport");
     }
+  }
 
+  async draft<T>(request: StructuredDraftRequest<T>): Promise<T> {
+    request.signal.throwIfAborted();
+    if (request.model !== "gpt-6-astra" || request.reasoningEffort !== "max" || request.contextTier !== "long_context"
+      || !name(request.name) || typeof request.parse !== "function"
+      || !record(request.schema) || !json(request.schema) || JSON.stringify(request.schema).length > 65_536
+      || !Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens < 1 || request.maxOutputTokens > 16_384
+      || !Array.isArray(request.messages) || request.messages.length < 1 || request.messages.length > 50
+      || !json(request.messages) || JSON.stringify(request.messages).length > 262_144
+      || !request.messages.every((message) => record(message)
+        && Object.keys(message).every((key) => key === "role" || key === "content")
+        && typeof message.role === "string" && ["system", "user", "assistant"].includes(message.role) && typeof message.content === "string")) {
+      throw new ModelProviderError("invalid_draft_request");
+    }
+    const response = await this.transport.complete({
+      model: request.model, reasoningEffort: request.reasoningEffort, contextTier: request.contextTier,
+      messages: structuredClone(request.messages) as unknown as StructuredDraftRequest<T>["messages"], tools: [], automaticToolExecution: false,
+      maxOutputTokens: request.maxOutputTokens,
+      structuredOutput: { name: request.name, schema: structuredClone(request.schema), strict: true },
+    }, request.signal);
+    request.signal.throwIfAborted();
+    if (!record(response) || !json(response)
+      || JSON.stringify(response).length > Math.min(131_072, request.maxOutputTokens * 8)) {
+      throw new ModelProviderError("invalid_structured_output");
+    }
+    try { return request.parse(structuredClone(response)); }
+    catch { throw new ModelProviderError("invalid_structured_output"); }
   }
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
@@ -167,6 +214,7 @@ export class GitHubCopilotProvider implements ModelProvider {
     // Whitelisting fields prevents capabilities or tool executors reaching the provider.
     const response = await this.transport.complete({
       model: request.model,
+      ...(request.model === ASTRA_MODEL_PROFILE.model ? ASTRA_MODEL_PROFILE : {}),
       messages,
       tools,
       maxOutputTokens: request.maxOutputTokens,

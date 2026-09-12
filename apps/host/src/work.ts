@@ -4,15 +4,23 @@ import {
   type AgentInput, type AutomationInput, type Check, type Settings, type TaskInput,
 } from "./contracts.js";
 import type { ProjectionStoragePort, ProviderPort, RequestContext, RuntimePort, WorkPort } from "./ports.js";
-import { conflict, notFound, unavailable } from "./errors.js";
+import { conflict, notFound, unavailable, HostError } from "./errors.js";
 
 export function createWorkService(storage: ProjectionStoragePort): WorkPort {
   const now = () => new Date().toISOString();
+  const scope = (context: RequestContext): string => {
+    if (typeof context.workspaceId !== "string") throw new HostError(-32003, "Select a business workspace explicitly.");
+    return context.workspaceId;
+  };
   return {
+    async listWorkspaces() { return unavailable("Canonical workspace catalog"); },
+    async createWorkspace() { return unavailable("Canonical workspace creation"); },
+    async updateWorkspace() { return unavailable("Canonical workspace updates"); },
+    async workspace() { return unavailable("Canonical workspace identity"); },
     subscribe: () => () => {},
     async check(): Promise<Check> { return storage.check(); },
-    snapshot: ({ principal }) => storage.read(principal.workspaceId),
-    createTask: (context, raw: TaskInput) => storage.transact(context.principal.workspaceId, (draft) => {
+    snapshot: (context) => storage.read(scope(context)),
+    createTask: (context, raw: TaskInput) => storage.transact(scope(context), (draft) => {
       const input = taskInputSchema.parse(raw);
       const previous = draft.tasks.find((item) => item.id === input.requestId);
       if (previous) {
@@ -29,7 +37,7 @@ export function createWorkService(storage: ProjectionStoragePort): WorkPort {
       draft.tasks.unshift(task);
       return task;
     }),
-    assignTask: (context, input) => storage.transact(context.principal.workspaceId, (draft) => {
+    assignTask: (context, input) => storage.transact(scope(context), (draft) => {
       const task = draft.tasks.find((item) => item.id === input.id) ?? notFound();
       if (!["queued", "failed", "cancelled"].includes(task.state)) conflict("Only inactive tasks can be reassigned.");
       if (!draft.agents.some((agent) => agent.id === input.agentId && agent.enabled)) conflict("Choose an enabled agent.");
@@ -38,7 +46,7 @@ export function createWorkService(storage: ProjectionStoragePort): WorkPort {
       task.updatedAt = now();
       return task;
     }),
-    saveAgent: (context, raw: AgentInput) => storage.transact(context.principal.workspaceId, (draft) => {
+    saveAgent: (context, raw: AgentInput) => storage.transact(scope(context), (draft) => {
       const input = agentInputSchema.parse(raw);
       if (draft.runs.some((run) => run.agentId === input.id &&
           (run.state === "running" || run.state === "awaiting_approval"))) {
@@ -50,7 +58,7 @@ export function createWorkService(storage: ProjectionStoragePort): WorkPort {
       return agent;
     }),
     saveAutomation: (context, raw: AutomationInput, runtime: RuntimePort) =>
-      storage.transact(context.principal.workspaceId, async (draft) => {
+      storage.transact(scope(context), async (draft) => {
         const input = automationInputSchema.parse(raw);
         if (!draft.agents.some((agent) => agent.id === input.agentId && (!input.enabled || agent.enabled))) {
           conflict("Choose an available agent for this schedule.");
@@ -67,12 +75,12 @@ export function createWorkService(storage: ProjectionStoragePort): WorkPort {
         if (index === -1) draft.automations.push(automation); else draft.automations[index] = automation;
         return automation;
       }),
-    updateSettings: (context, input: Settings) => storage.transact(context.principal.workspaceId, (draft) => {
+    updateSettings: (context, input: Settings) => storage.transact(scope(context), (draft) => {
       draft.settings = settingsSchema.parse(input);
       return draft.settings;
     }),
     startRun: (context: RequestContext, id: string, runtime: RuntimePort, provider: ProviderPort) =>
-      storage.transact(context.principal.workspaceId, async (draft) => {
+      storage.transact(scope(context), async (draft) => {
         const task = draft.tasks.find((item) => item.id === id) ?? notFound();
         if (task.state !== "queued" && task.state !== "failed" && task.state !== "cancelled") {
           conflict("This task cannot be started in its current state.");
@@ -98,7 +106,7 @@ export function createWorkService(storage: ProjectionStoragePort): WorkPort {
         task.updatedAt = now();
         return run;
       }),
-    cancelRun: (context, id, runtime) => storage.transact(context.principal.workspaceId, async (draft) => {
+    cancelRun: (context, id, runtime) => storage.transact(scope(context), async (draft) => {
       const index = draft.runs.findIndex((run) => run.id === id);
       const current = draft.runs[index] ?? notFound();
       if (current.state !== "running" && current.state !== "awaiting_approval") {
@@ -115,7 +123,7 @@ export function createWorkService(storage: ProjectionStoragePort): WorkPort {
       task.updatedAt = now();
       return cancelled;
     }),
-    decideApproval: (context, input, runtime) => storage.transact(context.principal.workspaceId, async (draft) => {
+    decideApproval: (context, input, runtime) => storage.transact(scope(context), async (draft) => {
       const approval = draft.approvals.find((item) => item.id === input.id) ?? notFound();
       if (approval.state !== "pending") conflict("This approval has already been decided.");
       const run = draft.runs.find((item) => item.id === approval.runId) ?? notFound();

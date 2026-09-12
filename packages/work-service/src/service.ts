@@ -1,5 +1,5 @@
 import type {
-  AuthorizedEffect, CanonicalPort, CommitJournal, EffectOutcome, JsonObject, JsonValue,
+  AuthorizedEffect, CanonicalPort, CommitJournal, EffectOutcome, Heads, JsonObject, JsonValue,
   ProjectionReducer, VerifiedFrame, VerifiedHistory, VerifiedProjection, WorkAuthorizationPort,
   WorkCommand, WorkCommitResult, WorkServicePort, WorkSnapshot, WorkspaceHistoryPort, WorkspaceScope,
 } from "./ports.js";
@@ -58,7 +58,7 @@ export class WorkService implements WorkServicePort {
     capability: object,
     input: WorkCommand,
     effect: AuthorizedEffect,
-    options: { readonly signal?: AbortSignal } = {},
+    options: { readonly signal?: AbortSignal; readonly expectedHeads?: Heads } = {},
   ): Promise<WorkCommitResult> {
     const command = jsonCopy(input);
     validateCommand(command);
@@ -66,6 +66,7 @@ export class WorkService implements WorkServicePort {
     const commandHash = canonical.digest(command as unknown as JsonValue);
     if (!text(commandHash)) throw new WorkServiceError("invalid_digest");
     const signal = options.signal ?? new AbortController().signal;
+    const expectedHeads = options.expectedHeads === undefined ? undefined : jsonCopy(options.expectedHeads);
     signal.throwIfAborted();
     await authorization.authorizeRead(capability, command.scope);
     const prepared = await history.withExclusive(capability, command.scope, async (journal) => {
@@ -80,6 +81,8 @@ export class WorkService implements WorkServicePort {
         if (previous.commandHash !== commandHash) throw new WorkServiceError("idempotency_conflict");
         return { ...previous, replayed: true };
       }
+      if (expectedHeads && canonical.digest(expectedHeads as JsonValue)
+        !== canonical.digest(current.heads as JsonValue)) throw new WorkServiceError("stale_heads");
       signal.throwIfAborted();
       try {
         const appended = await this.appendAndScan(journal, current, {

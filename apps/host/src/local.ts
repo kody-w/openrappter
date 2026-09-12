@@ -12,6 +12,7 @@ import { commandKey, LocalWork } from "./local-work.js";
 import { LocalRuntime } from "./local-runtime.js";
 import { LocalComputer } from "./local-computer.js";
 import type { FixedCommandTransport } from "./computer-drivers.js";
+import { LocalTwin } from "./twin.js";
 
 export const ownerPermissions: readonly Permission[] = [
   "work:read", "work:write", "agents:read", "agents:write", "automations:read", "automations:write",
@@ -31,6 +32,10 @@ export function tokenSecurity(token: string, principal: Principal): SecurityPort
     async authorize(identity, permission) {
       return identity.id === owner.id && identity.workspaceId === owner.workspaceId &&
         owner.permissions.includes(permission);
+    },
+    async authorizeWorkspace(identity, workspaceId, permission) {
+      return identity.id === owner.id && identity.workspaceId === owner.workspaceId
+        && owner.permissions.includes(permission) && (workspaceId === null || workspaceId === owner.workspaceId);
     },
   };
 }
@@ -56,7 +61,7 @@ export function createLocalServices(options: LocalServiceOptions): HostServices 
   const owner = (): Principal => ({
     id: persistence.owner.id, workspaceId: persistence.owner.catalog.workspaceId, permissions: ownerPermissions,
   });
-  const services: HostServices & { persistence: LocalPersistence; runtime: LocalRuntime; work: LocalWork } = {
+  const services: Omit<HostServices, "twin"> & { persistence: LocalPersistence; runtime: LocalRuntime; work: LocalWork } = {
     persistence, work, runtime, computer,
     storage: {
       initialize: async () => { await work.initialize(); await runtime.activateScheduling(services.provider); },
@@ -70,6 +75,11 @@ export function createLocalServices(options: LocalServiceOptions): HostServices 
         return principal.id === expected.id && principal.workspaceId === expected.workspaceId
           && expected.permissions.includes(permission);
       },
+      async authorizeWorkspace(principal, workspaceId, permission) {
+        const expected = owner();
+        return principal.id === expected.id && principal.workspaceId === expected.workspaceId
+          && expected.permissions.includes(permission) && (workspaceId === null || persistence.ownsBusiness(workspaceId));
+      },
     },
     provider: {
       async check() {
@@ -78,7 +88,7 @@ export function createLocalServices(options: LocalServiceOptions): HostServices 
           detail: status.detail };
       },
       async list(context) {
-        work.assertContext(context);
+        work.contextScope(context);
         const status = await transport.status();
         return [providerSchema.parse({
           id: "github-copilot", name: "GitHub Copilot", ...status,
@@ -91,7 +101,7 @@ export function createLocalServices(options: LocalServiceOptions): HostServices 
           conflict("Use the supported copilot-cli connection. Credentials are managed by Copilot CLI, never an RPC field.");
         }
         const provider = (await this.list(context))[0]!;
-        const saved = committed(await persistence.commit(persistence.owner.catalog, commandKey("provider/configure", context),
+        const saved = committed(await persistence.commit(work.assertContext(context), commandKey("provider/configure", context),
           "host.provider.configure", input, async () => ({
             status: "succeeded", value: json(provider), receipts: [{ kind: "provider-status", authentication: provider.authentication }],
             events: [{ type: "provider.configured", provider: json(provider) }],
@@ -103,7 +113,7 @@ export function createLocalServices(options: LocalServiceOptions): HostServices 
     diagnostics: {
       async check() { return { state: "ready", detail: "Bounded, payload-free host diagnostics." }; },
       async snapshot(context) {
-        work.assertContext(context);
+        work.contextScope(context);
         return {
           capturedAt: new Date().toISOString(),
           entries: diagnosticStore.snapshot().map((entry) => ({
@@ -117,5 +127,5 @@ export function createLocalServices(options: LocalServiceOptions): HostServices 
       },
     },
   };
-  return services;
+  return { ...services, twin: new LocalTwin(persistence, work, transport, services.provider, computer, runtime, services.security) };
 }

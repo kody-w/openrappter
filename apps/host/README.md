@@ -23,13 +23,14 @@ The build produces the typed library in `dist/` and a self-contained Node bundle
 
 | Port | Responsibility |
 | --- | --- |
-| `storage` | Canonical store initialization, owner-catalog reads, health |
+| `storage` | Canonical store initialization, business-catalog reads, health |
 | `security` | Bearer authentication, principal/workspace identity, per-action authorization |
 | `work` | Roster, tasks, runs, approvals, artifact content, schedules, typed settings |
 | `runtime` | Actual execution, cancellation, approval delivery, schedule reconciliation |
 | `provider` | Configured model inventory and secure connection references |
 | `computer` | Actual computer state, capabilities, lifecycle, verification evidence |
 | `diagnostics` | Bounded reports and payload-free failure records |
+| `twin` | Strict conversational drafting, canonical turns/proposals, reviewed Work API application |
 
 Types are exported from `src/ports.ts`; runtime wire schemas are in
 `src/contracts.ts`. Missing ports or methods fail startup. Each port must report
@@ -38,8 +39,10 @@ its own readiness. The host never turns a missing adapter into a success.
 `createLocalServices` binds the workspace store, RAPP/1 scanner, security
 authority, work service, agent runtime, Copilot SDK and computer broker. A
 private `owner.json` mints one local owner; one `workspaces/` store contains
-the owner catalog, separate computer history, and independently minted agent
-workspaces. The catalog only locates per-agent state. Tasks, runs, approvals,
+the owner concierge/catalog, one catalog/Twin scope per business, separate
+computer history, and independently minted child agent workspaces. Each
+catalog only locates its own children; verified parent ownership is required
+before capability issuance. Tasks, runs, approvals,
 settings, schedules and artifact registrations are rebuilt from scanned frames,
 not JSON snapshot files. A process-owned filesystem lock excludes another host
 from the same application data directory.
@@ -72,6 +75,106 @@ The production storage port has no snapshot-mutation hook. All writes go through
 the canonical work service; `ProjectionStoragePort` is reserved for explicit
 injected record-store compositions and test fixtures.
 
+## Conversation first
+
+Humans speak or type intent. The Twin generates and fills out structured work;
+it never presents a blank form as the normal workflow. It asks only necessary
+follow-ups, returns a complete reviewable draft, and accepts small human edits
+or dismissal. The low-level Work APIs remain explicit reviewed-edit APIs, not
+a requirement for humans to fill fields themselves.
+
+`twin.message` uses this shared wire request:
+
+```ts
+type TwinMessageRequest = {
+  workspaceId: string | null; // null is the owner concierge, never implicit
+  message: string;
+  target?: "auto" | "workspace" | "task" | "agent" | "automation" | "settings" | "approval";
+  history: { role: "user" | "assistant"; content: string }[];
+  contextRevision?: number;
+};
+```
+
+For example, start with `{ workspaceId: null, message: "Set up my consulting
+business with an operations lead and a weekly review", history: [],
+target: "workspace" }`. No form values or fabricated provider defaults are
+needed from the human.
+
+The result is the shared `TwinDraft`:
+
+```ts
+type TwinDraft = {
+  id: string;
+  workspaceId: string | null;
+  kind: "workspace" | "task" | "agent" | "automation" | "settings" | "approval" | "clarification";
+  assistantMessage: string;
+  summary: string;
+  confidence: number;
+  readyForReview: boolean;
+  missing: string[];
+  draft: object | null;
+  basis: object | null;
+  createdAt: string;
+};
+```
+
+The exported runtime schema is stricter than this integration sketch: ready
+proposals have the complete kind-specific draft and no missing fields;
+clarifications have `readyForReview: false`, nonempty `missing`, and
+`draft: null`. Workspace drafts include name, purpose, Twin identity and
+instructions, a complete lead agent, nullable starter task, up to eight starter
+routines, and explicit approval/computer policies. Settings drafts are
+nonempty, strictly validated patches.
+
+Only verified, authorized context options and server-allocated new identifiers
+can appear in availability/ownership-dependent fields. Global context contains
+business summaries, not other businesses' conversations or task contents.
+Business context contains only that business's agents, work and approvals.
+Supplied history is untrusted conversation data, never authority, and is not
+re-persisted as if the supplied assistant turns were canonical.
+
+Limits: 24 supplied history entries, 8,000 characters per message/turn, and
+48 KiB per serialized message request. Provider prompts/schemas and responses
+have separate bounds. Snapshot conversations return the latest 500 turns,
+250 proposals and 500 lifecycle events; older canonical history remains
+durable. A stale `contextRevision` rejects the message before recording a turn.
+
+User turns are committed before drafting. Assistant turns and proposals share
+a verified model-command outcome/evidence triple. Invalid output/unavailability
+persists an error event, not a fake assistant response. Uncertain model
+intents are never replayed after restart.
+
+### Accept, edit, dismiss
+
+Send `twin.applyProposal` with `{ workspaceId, id, proposalHash }`, where
+`proposalHash` is `draft.basis.proposalHash`. Optional `editedDraft` supplies
+the complete revised kind-specific object, not a metadata/authority override.
+Review edits cannot change a proposal's resource identity.
+The host loads the canonical proposal, verifies its hash, owner, current
+catalog/child heads and current option inventory, reauthorizes the target
+action, and calls the same `createWorkspace`, `createTask`, `saveAgent`,
+`saveAutomation` or `updateSettings` Work API as reviewed manual edits.
+Retries return the original committed acceptance; changed retries conflict.
+
+An interleaved catalog write during model generation also invalidates a
+proposal, even if provider/computer availability later looks unchanged.
+There is no automatic task start, guest execution, approval decision, or
+computer provisioning in this path. An enabled routine is an explicitly
+reviewed schedule and still obeys the normal runtime/approval policy.
+
+Approval drafts are recommendations only: applying one is rejected. The human
+must explicitly call `approvals.decide` with the exact approval ID, decision
+and reason; existing scope, expiry, active-run and consumption checks apply.
+`twin.dismissProposal` takes `{ workspaceId, id, proposalHash, reason? }`.
+Accepted or unresolved applications cannot be dismissed as unapplied.
+
+Workspace creation commits and scans all bootstrap state before publishing
+one owner-catalog entry linking the business bootstrap evidence. This gives
+atomic visibility, not a cross-directory transaction claim. Failed/uncertain
+creation leaves staged scopes inaccessible, returns unresolved, and cannot
+be automatically reminted. Complete published businesses and conversations
+are reconstructed after restart from frames, not a selected-workspace cache.
+
 ## Transport contract
 
 The listener is always `127.0.0.1` (an ephemeral port by default). It validates
@@ -82,7 +185,8 @@ No wildcard or opaque origins are accepted.
 * `GET /rpc` with a WebSocket upgrade: the same request/response protocol.
 * `GET /healthz`: authenticated process liveness.
 * `GET /readyz`: authenticated aggregate service health; HTTP 503 unless **all**
-  required services report ready.
+  required services report ready. The provider check also includes Twin
+  readiness for the required Astra max profile.
 
 All operational requests and upgrades require `Authorization: Bearer …`.
 Explicit-origin CORS preflight is the sole unauthenticated transport response
@@ -102,14 +206,33 @@ not returned or recorded.
 
 | Area | Methods |
 | --- | --- |
+| Business catalog | `workspaces.list`, `workspaces.create`, `workspaces.update`, `workspaces.open` |
+| Twin | `twin.message`, `twin.conversation`, `twin.applyProposal`, `twin.dismissProposal` |
 | Work | `work.snapshot`, `work.createTask`, `work.assignTask`, `runs.start`, `runs.cancel`, `approvals.decide`, `artifacts.read` |
 | Agents | `agents.save` |
 | Automations | `automations.save` |
 | Settings/services | `settings.update`, `providers.list`, `providers.configure`, `computer.inspect`, `computer.start`, `computer.stop`, `system.status`, `diagnostics.get` |
 | Events | `events.read`, `events.subscribe`, `events.unsubscribe` |
 
+Every normal Work, agent, run, approval, artifact, automation, settings,
+computer-control and event RPC requires `workspaceId` alongside its other
+parameters. For example, `work.snapshot` takes `{ workspaceId }`, and
+`work.createTask` takes `{ workspaceId, ...TaskInput }`. Omission is invalid;
+the owner catalog or an agent-workspace ID cannot substitute for a business
+binding. Authorization checks the principal and the business separately.
+There is no process-global selected workspace.
+
+`workspaces.list` takes `{}` and returns `{ ownerId, conciergeWorkspaceId,
+workspaces: WorkspaceSummary[] }`. `workspaces.create` takes the complete
+strict `WorkspaceInput` in the owner concierge. `workspaces.update` takes
+`{ workspaceId, ...WorkspaceDetails }`. `workspaces.open` takes
+`{ workspaceId }` and returns `{ workspace, snapshot, twin, routines, computer }`
+for the selected business. `twin.conversation`, `providers.list`,
+`computer.inspect` and `diagnostics.get` allow an **explicit** null binding for
+concierge context; normal Work mutations do not.
+
 The aggregate snapshot requires all four area read grants. Its `ownerId` and
-`workspaceId` identify the owner and catalog; every agent, assigned task, run,
+`workspaceId` identify the owner and selected business catalog; every agent, assigned task, run,
 approval, artifact and automation carries its actual agent workspace ID.
 An unassigned draft has a null agent/workspace pair. The UI imports the same
 pure DTO schemas rather than maintaining a second set.
@@ -136,12 +259,17 @@ in the renderer manufactures run completion or computer verification.
 
 ## Test coverage
 
-Tests bind real HTTP/WebSocket loopback sockets with injected services and cover
+ with injected services and cover
 authentication, origin/rebinding protection, strict schemas, authorization,
 readiness, replay scope/retention/revocation, subscriptions, storage persistence,
 business invariants and unavailable services. Production integration tests use
 real filesystem persistence with fake Copilot/Tart/SSH transports, including
 two-agent isolation, approval consumption, read-only execution, cancellation,
-scheduled execution, restart, uncertain outcomes and UI DTO alignment.
+scheduled execution, restart, uncertain outcomes and shared DTO alignment.
+Twin coverage includes business isolation, all proposal kinds, clarifications,
+review edits, canonical conversation scans, partial-bootstrap publication
+failure, hash/head/inventory staleness, concurrent accepts, missing bindings,
+provider failure, strict exact-option validation, and recommendations that
+cannot consume approvals.
 `npm run test:bundle` additionally boots the actual bundled host twice and scans
 its persisted frames. Test profiles are app-local and removed.

@@ -19,9 +19,10 @@ import {
   WorkService, type AuthorizedEffect, type AuthorizedEffectContext, type CommittedCommand,
   type Heads, type JsonValue, type WorkCommand, type WorkCommitResult, type WorkServicePort,
   type WorkspaceScope,
+  type WorkSnapshot,
 } from "@rapp-work/work-service";
 import { HostError } from "./errors.js";
-import { idSchema, type Area, type WorkEvent } from "./contracts.js";
+import { idSchema, workspaceSummarySchema, type Area, type WorkEvent } from "./contracts.js";
 
 const scopeSchema = z.strictObject({ agentId: idSchema, workspaceId: idSchema });
 const ownerSchema = z.strictObject({
@@ -35,7 +36,7 @@ export const headHashes = (heads: WorkspaceHeads): Heads => ({
   body: heads.body?.frame_hash ?? null, memory: heads.memory?.frame_hash ?? null,
   swarm: heads.swarm?.frame_hash ?? null,
 });
-export function committed(result: WorkCommitResult): CommittedCommand {
+export function committed(result: WorkCommitResult | WorkSnapshot["commands"][number]): CommittedCommand {
   if (result.state !== "committed") throw new HostError(-32012, "Persistence or execution is unresolved. This operation will not be replayed.");
   if (result.status !== "succeeded") throw new HostError(-32009, `The operation was ${result.status}.`);
   return result;
@@ -62,6 +63,9 @@ export class LocalPersistence {
   private principal!: OwnerPrincipal;
   private identity!: LocalOwner;
   private readonly scopes = new Map<string, WorkspaceScope>();
+  private readonly parents = new Map<string, string | null>();
+  private readonly businesses = new Map<string, WorkspaceScope>();
+  private readonly published = new Set<string>();
   private readonly generations = new Map<string, number>();
   private readonly permits = new WeakMap<object, EffectPermit>();
   private readonly listeners = new Set<(workspaceId: string, event: WorkEvent) => void>();
@@ -166,7 +170,7 @@ export class LocalPersistence {
           permit.entered = true;
           return effect(context);
         }, options);
-        if (result.state === "committed" && !result.replayed) this.changed("work", this.entity(command));
+        if (result.state === "committed" && !result.replayed) this.changed("work", this.entity(command), command.scope);
         return result;
       },
     };
@@ -212,24 +216,107 @@ export class LocalPersistence {
     for (const scope of [this.identity.catalog, this.identity.computer]) {
       await this.store.create(await this.capability(scope), { owner: this.identity.id, slug: scope.agentId });
     }
+    await this.refreshCatalog();
+  }
+  async refreshCatalog(): Promise<void> {
     for (const command of (await this.read(this.identity.catalog)).commands) {
       if (command.state !== "committed" || command.status !== "succeeded") continue;
       for (const event of command.events) {
-        if (event.type === "catalog.agent") this.register(scopeSchema.parse(event.scope));
+        if (event.type !== "catalog.workspace") continue;
+        const workspace = workspaceSummarySchema.parse(event.workspace);
+        if (workspace.ownerId !== this.identity.id || workspace.parentWorkspaceId !== this.identity.catalog.workspaceId) {
+          throw new Error("A business catalog belongs to a different owner.");
+        }
+        this.registerBusiness(workspace.catalogScope);
+        const history = await this.read(workspace.catalogScope);
+        const bootstrap = history.commands.find((entry) => entry.state === "committed" && entry.status === "succeeded"
+          && entry.command.operation === "host.workspace.bootstrap"
+          && command.receipts.some((receipt) => receipt.kind === "canonical-commit"
+            && receipt.workspaceId === workspace.id && receipt.evidenceRef === entry.proof.evidenceRef
+            && receipt.intentRef === entry.proof.intentRef && receipt.outcomeRef === entry.proof.outcomeRef));
+        if (!bootstrap || bootstrap.state !== "committed" || !bootstrap.events.some((item) =>
+          item.type === "workspace.saved" && digest(item.workspace) === digest(workspace))
+          || !bootstrap.events.some((item) => item.type === "twin.identity.saved"
+            && item.parentWorkspaceId === workspace.id && digest(item.identity) === digest(workspace.twin))) {
+          throw new Error("A business requires a verified complete bootstrap, not just a catalog locator.");
+        }
+        for (const entry of history.commands) {
+          if (entry.state !== "committed" || entry.status !== "succeeded") continue;
+          for (const item of entry.events) {
+            if (item.type === "catalog.agent") {
+              if (item.parentWorkspaceId !== workspace.id) throw new Error("Agent parent ownership differs.");
+              this.register(scopeSchema.parse(item.scope), workspace.id);
+            }
+          }
+        }
+        const lead = this.scopes.get(workspace.leadAgentId);
+        if (!lead || this.parents.get(lead.workspaceId) !== workspace.id) throw new Error("The business has no independent lead workspace.");
+        const linked = new Map<string, WorkSnapshot>();
+        for (const receipt of bootstrap.receipts) {
+          if (receipt.kind !== "canonical-commit") throw new Error("Bootstrap effects require canonical child proofs.");
+          const scope = [...this.scopes.values()].find((item) => item.workspaceId === receipt.workspaceId);
+          if (!scope) throw new Error("A bootstrap child workspace is missing.");
+          this.assertChild(scope, workspace.id);
+          const child = linked.get(scope.workspaceId) ?? await this.read(scope);
+          linked.set(scope.workspaceId, child);
+          if (!child.commands.some((entry) => entry.state === "committed" && entry.status === "succeeded"
+            && entry.proof.evidenceRef === receipt.evidenceRef && entry.proof.intentRef === receipt.intentRef
+            && entry.proof.outcomeRef === receipt.outcomeRef)) {
+            this.published.delete(workspace.id);
+            throw new Error("The complete bootstrap child evidence could not be verified.");
+          }
+        }
+        const leadHistory = linked.get(lead.workspaceId);
+        if (!leadHistory) throw new Error("The lead definition is not linked by bootstrap evidence.");
+        if (!leadHistory.commands.some((entry) => entry.state === "committed" && entry.status === "succeeded"
+          && entry.events.some((item) => item.type === "ui.agent.saved"))) throw new Error("The lead definition has no canonical evidence.");
+        this.published.add(workspace.id);
       }
     }
   }
-  register(scope: WorkspaceScope): void {
+  register(scope: WorkspaceScope, parentWorkspaceId: string | null = null): void {
     scopeSchema.parse(scope);
     const existing = this.scopes.get(scope.agentId);
     if (existing && existing.workspaceId !== scope.workspaceId) throw new Error("An agent cannot change its minted workspace.");
     if ([...this.scopes.values()].some((item) => item.workspaceId === scope.workspaceId && item.agentId !== scope.agentId)) {
       throw new Error("A workspace has exactly one state owner.");
     }
+    if (this.parents.has(scope.workspaceId) && this.parents.get(scope.workspaceId) !== parentWorkspaceId) {
+      throw new Error("A workspace cannot change its parent ownership.");
+    }
     this.scopes.set(scope.agentId, Object.freeze({ ...scope }));
+    this.parents.set(scope.workspaceId, parentWorkspaceId);
   }
-  async mint(scope: WorkspaceScope): Promise<void> {
-    this.register(scope);
+  private registerBusiness(scope: WorkspaceScope): void {
+    this.register(scope, this.identity.catalog.workspaceId);
+    this.businesses.set(scope.workspaceId, Object.freeze({ ...scope }));
+  }
+  ownsBusiness(workspaceId: string): boolean { return this.published.has(workspaceId); }
+  businessScope(workspaceId: string): WorkspaceScope {
+    if (!this.ownsBusiness(workspaceId)) throw new HostError(-32003, "This business workspace is not authorized.");
+    return { ...this.businesses.get(workspaceId)! };
+  }
+  businessIds(): string[] { return [...this.published].sort(); }
+  parentBusiness(scope: WorkspaceScope): string | null {
+    if (this.scopes.get(scope.agentId)?.workspaceId !== scope.workspaceId) throw new Error("Unknown workspace scope.");
+    if (this.businesses.has(scope.workspaceId)) return scope.workspaceId;
+    const parent = this.parents.get(scope.workspaceId);
+    return parent && this.businesses.has(parent) ? parent : null;
+  }
+  assertChild(scope: WorkspaceScope, workspaceId: string): void {
+    if (this.scopes.get(scope.agentId)?.workspaceId !== scope.workspaceId
+      || this.parents.get(scope.workspaceId) !== workspaceId || this.businesses.has(scope.workspaceId)) {
+      throw new HostError(-32003, "This agent workspace does not belong to the selected business.");
+    }
+  }
+  hasAgent(agentId: string): boolean { return this.scopes.has(agentId); }
+  async mintBusiness(scope: WorkspaceScope): Promise<void> {
+    this.registerBusiness(scope);
+    await this.store.create(await this.capability(scope), { owner: this.identity.id, slug: `business-${randomUUID()}` });
+  }
+  async mint(scope: WorkspaceScope, parentWorkspaceId: string): Promise<void> {
+    if (!this.businesses.has(parentWorkspaceId)) throw new Error("An agent requires a minted business parent.");
+    this.register(scope, parentWorkspaceId);
     await this.store.create(await this.capability(scope), { owner: this.identity.id, slug: `agent-${randomUUID()}` });
   }
   async capability(scope: WorkspaceScope, resources: readonly string[] = []): Promise<Capability> {
@@ -255,14 +342,14 @@ export class LocalPersistence {
   revision(scope: WorkspaceScope): number { return this.generations.get(scope.workspaceId) ?? 0; }
   async commit(
     scope: WorkspaceScope, key: string, operation: string, payload: unknown, effect: AuthorizedEffect,
-    resources: WorkCommand["resources"] = [], signal?: AbortSignal,
+    resources: WorkCommand["resources"] = [], signal?: AbortSignal, expectedHeads?: Heads,
   ): Promise<WorkCommitResult> {
     const selected = [
       { kind: "agent" as const, id: scope.agentId }, { kind: "workspace" as const, id: scope.workspaceId }, ...resources,
     ];
     return this.work.commit(await this.capability(scope, selected.map((item) => `${item.kind}:${item.id}`)), {
       scope, idempotencyKey: key, operation, payload: json(payload), resources: selected,
-    }, effect, signal ? { signal } : {});
+    }, effect, { ...(signal ? { signal } : {}), ...(expectedHeads ? { expectedHeads } : {}) });
   }
   utc(snapshot: WorkspaceSnapshot): string {
     return new Date(Math.max(Date.now(), ...Object.values(snapshot.heads).map((head) => head ? Date.parse(head.utc) : 0))).toISOString();
@@ -309,11 +396,11 @@ export class LocalPersistence {
   subscribe(listener: (workspaceId: string, event: WorkEvent) => void): () => void {
     this.listeners.add(listener); return () => { this.listeners.delete(listener); };
   }
-  changed(area: Area, entityId: string): void {
+  changed(area: Area, entityId: string, scope: WorkspaceScope): void {
     if (!this.opened || this.closed) return;
     const event: WorkEvent = { id: randomUUID(), area, entityId, kind: "updated", at: new Date().toISOString() };
     for (const listener of this.listeners) {
-      try { listener(this.identity.catalog.workspaceId, event); } catch { /* A projection listener cannot change canonical commit status. */ }
+      try { listener(this.parentBusiness(scope) ?? this.identity.catalog.workspaceId, event); } catch { /* A projection listener cannot change canonical commit status. */ }
     }
   }
   private entity(command: WorkCommand): string {

@@ -2,12 +2,14 @@ import type {
   Agent, AgentInput, Approval, Artifact, Automation, AutomationInput, Check,
   Computer, Diagnostics, Provider, Run, Settings, Snapshot, Task, TaskInput,
   WorkEvent,
+  WorkspaceInput, WorkspaceDetails, WorkspaceSummary, WorkspaceList,
+  TwinMessageRequest, TwinDraft, TwinConversation, TwinApplyRequest, TwinApplyResult, TwinDismissRequest,
 } from "./contracts.js";
 
 export type Permission = `${"work" | "agents" | "automations" | "settings"}:${"read" | "write"}`
   | "runtime:execute" | "computer:read" | "computer:control" | "diagnostics:read" | "events:read";
 export interface Principal { id: string; workspaceId: string; permissions: readonly Permission[] }
-export interface RequestContext { principal: Principal; requestId: string }
+export interface RequestContext { principal: Principal; requestId: string; workspaceId?: string | null }
 export interface ServicePort {
   check(): Promise<Check>;
   close?(): Promise<void>;
@@ -22,6 +24,7 @@ export interface ProjectionStoragePort extends StoragePort {
 export interface SecurityPort extends ServicePort {
   authenticate(bearer: string): Promise<Principal | null>;
   authorize(principal: Principal, permission: Permission): Promise<boolean>;
+  authorizeWorkspace(principal: Principal, workspaceId: string | null, permission: Permission): Promise<boolean>;
 }
 export interface RuntimePort extends ServicePort {
   start(context: RequestContext, input: { runId: string; task: Task; agent: Agent; settings: Settings }): Promise<Run>;
@@ -43,6 +46,10 @@ export interface DiagnosticsPort extends ServicePort {
   record(event: { code: string; method: string }): void;
 }
 export interface WorkPort extends ServicePort {
+  listWorkspaces(context: RequestContext): Promise<WorkspaceList>;
+  createWorkspace(context: RequestContext, input: WorkspaceInput): Promise<WorkspaceSummary>;
+  updateWorkspace(context: RequestContext, input: WorkspaceDetails): Promise<WorkspaceSummary>;
+  workspace(context: RequestContext): Promise<WorkspaceSummary>;
   subscribe(listener: (workspaceId: string, event: WorkEvent) => void): () => void;
   snapshot(context: RequestContext): Promise<Snapshot>;
   createTask(context: RequestContext, input: TaskInput): Promise<Task>;
@@ -56,6 +63,13 @@ export interface WorkPort extends ServicePort {
   readArtifact(context: RequestContext, id: string): Promise<{ artifact: Artifact; content: string }>;
 }
 
+export interface TwinPort extends ServicePort {
+  message(context: RequestContext, input: TwinMessageRequest): Promise<TwinDraft>;
+  conversation(context: RequestContext): Promise<TwinConversation>;
+  applyProposal(context: RequestContext, input: TwinApplyRequest): Promise<TwinApplyResult>;
+  dismissProposal(context: RequestContext, input: TwinDismissRequest): Promise<TwinConversation>;
+}
+
 // No optional services: an unavailable adapter must explicitly report that state.
 export interface HostServices {
   storage: StoragePort;
@@ -65,4 +79,5 @@ export interface HostServices {
   provider: ProviderPort;
   computer: ComputerPort;
   diagnostics: DiagnosticsPort;
+  twin: TwinPort;
 }

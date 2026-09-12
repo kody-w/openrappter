@@ -6,6 +6,14 @@ RAPP Work is a desktop workspace for persistent agents, assigned work,
 reviewable approvals, and evidence-backed results. It supports **macOS on Apple
 Silicon**. Node.js 22.12 or newer is required for source development.
 
+The host is conversation-first and supports multiple business workspaces. A
+human describes intent; the Work Twin fills out a complete structured draft or
+asks a necessary follow-up. The human reviews, makes small edits, and accepts
+or dismisses it. Blank forms are not the normal workflow. Workspace creation
+starts in the owner's concierge; each business has its own Twin conversation,
+catalog, agents, work and routines. See the [host RPC contract](apps/host/README.md)
+for integration; this host change does not update the desktop or UI.
+
 ## The product
 
 - **Work** — tasks, runs, approvals, results, and their evidence.

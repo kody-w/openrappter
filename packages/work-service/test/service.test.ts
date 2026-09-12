@@ -37,6 +37,23 @@ describe("WorkService canonical orchestration", () => {
     expect(effect).toHaveBeenCalledTimes(1);
   });
 
+  it("compares expected heads under the command lock before writing an intent or executing", async () => {
+    const { service, capability, store } = fixture();
+    const heads = (await service.read(capability, scope)).heads;
+    await service.commit(capability, command("changed"), async () => success());
+    const count = store.frames().length;
+    const effect = vi.fn(async () => success());
+    await expect(service.commit(capability, command("stale"), effect, { expectedHeads: heads }))
+      .rejects.toMatchObject({ code: "stale_heads" });
+    expect(effect).not.toHaveBeenCalled();
+    expect(store.frames()).toHaveLength(count);
+    const current = (await service.read(capability, scope)).heads;
+    expect(await service.commit(capability, command("fresh"), effect, { expectedHeads: current })).toMatchObject({ state: "committed" });
+    expect(await service.commit(capability, command("fresh"), effect, { expectedHeads: heads }))
+      .toMatchObject({ state: "committed", replayed: true });
+    expect(effect).toHaveBeenCalledOnce();
+  });
+
   it("serializes concurrent service instances on the workspace lock", async () => {
     const { service, createService, capability } = fixture();
     const effect = vi.fn(async () => { await Promise.resolve(); return success(); });

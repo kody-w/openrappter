@@ -9,8 +9,8 @@
   "scripts": {
     "build": "npm --prefix ../host run build && npm --prefix ../ui run build && tsc -p tsconfig.build.json && node scripts/build-shell.mjs && node scripts/stage.mjs",
     "start": "electron .",
-    "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit",
+    "typecheck": "npm --prefix ../host run build && tsc --noEmit",
+    "lint": "npm --prefix ../host run build && tsc --noEmit",
     "test": "vitest run",
     "test:smoke": "node test/smoke.mjs",
     "package": "npm run build && electron-builder --mac --arm64",

@@ -6,9 +6,9 @@
   "description": "Conversation-first, multi-workspace RAPP Work.",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit",
+    "build": "npm --prefix ../host run build && tsc --noEmit && vite build",
+    "typecheck": "npm --prefix ../host run build && tsc --noEmit",
+    "lint": "npm --prefix ../host run build && tsc --noEmit",
     "test": "vitest run",
     "test:browser": "playwright test",
     "test:canonical": "npm --prefix ../host run build && vitest run --config vitest.canonical.config.ts"

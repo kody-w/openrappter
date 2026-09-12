@@ -23,6 +23,8 @@ artifact requests, and subscriptions. Late results cannot enter another scope.
 Only the selected workspace ID is a browser preference, namespaced by owner and
 catalog. Conversations, tree structure, routines, and proposals have no parallel
 renderer JSON authority.
+Failed action messages remain visible through background refreshes; a live
+state update never turns a rejected mutation into an apparent success.
 
 ## Complete, verified proposals — not form intake
 

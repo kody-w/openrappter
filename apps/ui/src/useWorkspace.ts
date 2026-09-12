@@ -68,6 +68,7 @@ export function useWorkspace(client: WorkClient, workspaceId: string | null, onl
   const [loading, setLoading] = useState(true);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const generation = useRef(0);
@@ -131,13 +132,13 @@ export function useWorkspace(client: WorkClient, workspaceId: string | null, onl
   }, [client, connected, refresh, workspaceId]);
   const request = useCallback(async <M extends RpcMethod>(method: M, params: RpcInput<M>, message: string, onError?: (error: Error) => void): Promise<RpcResult<M> | undefined> => {
     if (inFlight.current || !mounted.current) return;
-    if (!connected) { setError("Reconnect to the desktop host before changing work."); return; }
+    if (!connected) { setActionError("Reconnect to the desktop host before changing work."); return; }
     if (!("workspaceId" in params) || params.workspaceId !== workspaceId) {
-      setError("This action does not belong to the selected workspace."); return;
+      setActionError("This action does not belong to the selected workspace."); return;
     }
     inFlight.current = true;
     const epoch = lifecycle.current;
-    setBusy(true); setNotice(""); setError("");
+    setBusy(true); setNotice(""); setActionError("");
     try {
       const result = await client.call(method, params);
       if (!mounted.current || lifecycle.current !== epoch) return;
@@ -147,10 +148,10 @@ export function useWorkspace(client: WorkClient, workspaceId: string | null, onl
       return result;
     } catch (reason) {
       if (mounted.current && lifecycle.current === epoch) {
-        setError(messageOf(reason)); onError?.(reason instanceof Error ? reason : new Error(messageOf(reason)));
+        setActionError(messageOf(reason)); onError?.(reason instanceof Error ? reason : new Error(messageOf(reason)));
       }
     } finally { inFlight.current = false; if (mounted.current) setBusy(false); }
   }, [client, connected, refresh, workspaceId]);
   const perform: Perform = useCallback(async (method, params, message) => (await request(method, params, message)) !== undefined, [request]);
-  return { workspace, breadcrumb, snapshot, conversation, status, providers, computer, diagnostics, loading, connected, error, notice, busy, refresh, perform, request };
+  return { workspace, breadcrumb, snapshot, conversation, status, providers, computer, diagnostics, loading, connected, error: actionError || error, notice, busy, refresh, perform, request };
 }

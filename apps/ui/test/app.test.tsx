@@ -225,6 +225,15 @@ describe("conversation-first business workspaces", () => {
     await user.click(fresh.getByRole("button", { name: "Approve & apply routine" }));
     expect(await fresh.findByRole("alert")).toHaveTextContent("Scheduling runtime is not configured");
     expect(client.workspace.automations[0]).toMatchObject({ enabled: false, nextRunAt: null });
+    const reads = client.calls.filter((call) => call.method === "workspaces.open").length;
+    client.workspace.automations[0]!.name = "Routine refreshed while awaiting review";
+    act(() => {
+      for (const [subscriptionId, workspaceId] of client.host.subscriptions) if (workspaceId === "finance")
+        for (const listener of client.host.listeners) listener({ type: "events", subscriptionId, events: [], cursor: "refreshed-after-failure" });
+    });
+    await waitFor(() => expect(client.calls.filter((call) => call.method === "workspaces.open").length).toBeGreaterThan(reads));
+    await screen.findByText("Routine refreshed while awaiting review");
+    expect(fresh.getByRole("alert")).toHaveTextContent("Scheduling runtime is not configured");
   });
 
   it("refuses an incomplete host draft even if it claims to be ready for review", async () => {

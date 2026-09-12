@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ASTRA_MODEL_PROFILE, GitHubCopilotProvider, ModelProviderError, type JsonObject, type ManagedCopilotTransport } from "@rapp-work/model-provider";
 import type { CommittedCommand, EffectOutcome, WorkspaceScope } from "@rapp-work/work-service";
 import {
-  computerSchema, providerSchema, settingsSchema, twinApplyRequestSchema, twinApplyResultSchema,
+  computerSchema, providerSchema, settingsSchema, twinApplyRequestSchema, twinApplyResultSchema, twinAgentApplyResultSchema,
   twinBasisSchema, twinConversationSchema, twinDismissRequestSchema, twinDraftSchema, twinEventSchema,
   twinMessageRequestSchema, twinProposalSchema, twinTurnSchema,
   twinModelResponseSchema, MAX_WORKSPACE_AGENTS, MAX_WORKSPACE_DEPTH, type WorkspaceOrganization,
@@ -563,7 +563,7 @@ export class LocalTwin implements TwinPort {
         const receipt = (await this.persistence.read(resultScope)).commands.filter((entry) =>
           entry.state === "committed" && entry.status === "succeeded" && entry.command.operation === operation).at(-1);
         if (!receipt || receipt.state !== "committed") throw new Error("Applied work has no canonical proof.");
-        const value = twinApplyResultSchema.parse({
+        const value = (proposal.kind === "agent" ? twinAgentApplyResultSchema : twinApplyResultSchema).parse({
           id: draft.id, workspaceId: input.workspaceId, kind: proposal.kind, status: "applied", result,
           createdAt: new Date().toISOString(),
         });

@@ -36,6 +36,15 @@ Types are exported from `src/ports.ts`; runtime wire schemas are in
 `src/contracts.ts`. Missing ports or methods fail startup. Each port must report
 its own readiness. The host never turns a missing adapter into a success.
 
+Renderer integrations should import the browser-safe **`@rapp-work/host/contracts`**
+subpath, not the host's Node composition entry point. It exports the exact runtime
+schemas and inferred DTOs without starting services or importing the SDK. See the
+[UI integration contract](../../docs/UI_INTEGRATION_CONTRACT.md) for complete
+lineage, proposal verification/evolution, child-workspace results, computer lease
+semantics, real-host acceptance seams, and the existing UI/desktop branch overlap.
+`npm run test:contracts --workspace @rapp-work/host` verifies the built public
+subpath can bundle for a browser without host runtime modules.
+
 `createLocalServices` binds the workspace store, RAPP/1 scanner, security
 authority, work service, agent runtime, Copilot SDK and computer broker. A
 private `owner.json` mints one local owner; one `workspaces/` store contains

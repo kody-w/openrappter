@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { isVerifiedChain } from "@rapp-work/rapp1";
+import { computerDisplaySchema, computerLeaseSchema, computerWorkspaceSchema } from "../src/contracts.js";
 import { agentInput, productionFixture, workspaceInput } from "./production-fixture.js";
 
 type Fixture = Awaited<ReturnType<typeof productionFixture>>;
@@ -24,6 +25,9 @@ describe("workspace-scoped shared agent computer", () => {
     await cloning;
     try {
       const own = await f.services.computer.inspect(f.context(a.id));
+      expect(computerWorkspaceSchema.parse(own.workspace).id).toBe(a.id);
+      expect(computerLeaseSchema.parse(own.lease).workspaceId).toBe(a.id);
+      expect(computerDisplaySchema.parse(own.display).state).toBe("unavailable");
       expect(own).toMatchObject({ state: "starting", verified: false,
         workspace: { id: a.id, enabled: false, approvalPolicy: "always" },
         lease: { state: "held", workspaceId: a.id, agentId: a.catalogScope.agentId, operation: "starting" },

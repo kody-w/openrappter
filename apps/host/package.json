@@ -1,0 +1,23 @@
+{
+  "name": "@rapp-work/host",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "RAPP Work authenticated local application host.",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && esbuild src/entry.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/host.cjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": { "ws": "^8.18.3", "zod": "^4.1.12" },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2"
+  }
+}

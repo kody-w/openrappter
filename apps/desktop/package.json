@@ -1,0 +1,50 @@
+{
+  "name": "@rapp-work/desktop",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "RAPP Work for macOS Apple silicon.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.cjs && node scripts/stage.mjs",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:smoke": "node test/smoke.mjs",
+    "package": "npm run build && electron-builder --mac --arm64",
+    "package:dir": "npm run build && electron-builder --mac --arm64 --dir"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": { "ws": "^8.18.3", "zod": "^4.1.12" },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^22.19.0",
+    "@types/ws": "^8.18.1",
+    "electron": "^39.8.0",
+    "electron-builder": "^26.8.0",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2"
+  },
+  "build": {
+    "appId": "com.rapp.work",
+    "productName": "RAPP Work",
+    "artifactName": "RAPP-Work-${version}-${arch}.${ext}",
+    "directories": { "output": "release" },
+    "files": ["dist/*.js", "dist/*.cjs", "assets/icon.png", "assets/tray.png", "package.json"],
+    "extraResources": [
+      { "from": "dist/resources/host.cjs", "to": "host/host.cjs" },
+      { "from": "dist/resources/ui", "to": "ui" }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.icns",
+      "hardenedRuntime": true,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist",
+      "target": [{ "target": "dmg", "arch": ["arm64"] }, { "target": "zip", "arch": ["arm64"] }]
+    },
+    "dmg": { "title": "RAPP Work" }
+  }
+}

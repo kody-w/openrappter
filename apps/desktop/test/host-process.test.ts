@@ -93,4 +93,27 @@ describe("owned host lifecycle", () => {
     expect(host.state.state).toBe("offline");
     expect(host.state.detail).toContain("Refresh to restart");
   });
+  it("preserves a safe startup failure instead of hiding it behind a termination event", async () => {
+    const { host, child } = setup();
+    const pending = host.start();
+    const rejected = expect(pending).rejects.toThrow("could not be authenticated");
+    child.emit("message", { type: "failed", code: "HOST_START_FAILED" });
+    await rejected;
+    expect(host.state.detail).toContain("could not load its saved workspace state");
+    expect(host.state.detail).toContain("No data was reset");
+    expect(child.killed).toBe(true);
+  });
+  it("does not let a late exit from a superseded child disconnect a fresh owned host", async () => {
+    const old = new Child(), current = new Child();
+    const spawn = vi.fn().mockReturnValueOnce(old).mockReturnValueOnce(current);
+    const host = new HostProcess({ spawn, probe: async () => true, forceKill: () => {}, stateChanged: () => {} }, "apps/desktop/.test-scratch/late-exit");
+    const first = host.start();
+    const rejected = expect(first).rejects.toThrow();
+    old.emit("message", { type: "failed", code: "HOST_START_FAILED" }); await rejected;
+    const second = host.start(); current.emit("message", ready()); const lease = await second;
+    old.emit("exit", 1);
+    expect(host.state.state).toBe("online");
+    expect(await host.start()).toBe(lease);
+    const stop = host.stop(); current.emit("exit", 0); await stop;
+  });
 });

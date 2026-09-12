@@ -1,72 +1,138 @@
-# RAPP Work workspace
+# RAPP Work — conversation first
 
-A React/TypeScript desktop workspace with exactly four primary areas:
+People speak or type to their **Work Twin**. The Twin fills in the details.
+Creating work never opens a blank form.
 
-* **Work:** task creation/assignment, run history/cancellation, scoped approvals,
-  artifacts and evidence, and service-reported local computer state.
-* **Agents:** a persistent sidebar roster and editable responsibility, model,
-  computer-access, and approval configuration.
-* **Automations:** daily, weekly, and interval schedules, including explicit
-  drafts, time zones, and runtime-confirmed activation.
-* **Settings:** typed workspace/appearance/notification preferences, provider
-  connection references, approval policy, and diagnostics.
+## Workspace shell
 
-There is no production sample data, direct network connection, filesystem access,
-credential input, or arbitrary Electron IPC. The browser build starts in an
-honest disconnected state unless given a `WorkClient`.
+- **Left:** searchable, durable business workspaces, their latest available Twin
+  exchange and its saved state (reply pending, needs input, applied, dismissed),
+  and a concierge for creating another workspace.
+  A business workspace is not an agent or an agent's execution directory.
+- **Center:** that workspace's persistent conversation, follow-up questions,
+  structured proposal cards, and a text/voice composer.
+- **Right:** service-reported local computer/screen availability, routines,
+  agents, tasks, and human approval needs. Shortcuts seed the conversation;
+  they do not silently send messages or create records.
 
-## Injection boundary
+Tasks, Agents, Routines, and Settings are secondary inspectors. Every create
+control seeds and focuses the Twin. Editing a saved agent, routine, or setting
+opens a prefilled review. Proposal cards can apply directly or open **Review
+details**, clearly labeled as drafted by the Twin. Incomplete or malformed
+proposals cannot open a form or apply. Settings patches are merged with the
+saved settings to make a complete review without resetting unrelated choices.
+Saved tasks also have a prefilled review: their outcome stays immutable, while
+assignment can be edited before the first run. Run start and cancellation remain
+explicit, scoped controls in the inspector.
 
-`App` accepts the structural `WorkClient` interface in `src/client.ts`. The
-production `BridgeClient` uses only the preload's `request`, `hostState`, and
-`onEvent` functions. `src/model.ts` validates every input and response at runtime.
-It imports the host's pure DTO schemas; no host implementation or Node
-dependencies enter the renderer. Agent and assigned-work DTOs carry the actual
-independently minted workspace ID. Uncertain outcomes remain visibly unresolved.
+Approval proposals are recommendations only. Neither applying a proposal nor
+submitting a form can approve an action. **Approve action** and **Deny action**
+are separate, explicit human controls bound to the existing approval and exact
+operation.
 
-The host is authoritative for records and settings. Event subscriptions trigger
-snapshot refreshes, are cleaned on disconnect, and never create synthetic runs.
-Last-loaded work is identified as stale and mutation controls are disabled when
-disconnected. Computer “running” and “verified” are separate service assertions;
-missing services cannot become a successful result.
+## Host boundary and persistence
 
-## Interaction and accessibility
+`App` accepts `WorkClient`; production uses only the frozen preload's `request`,
+`hostState`, and `onEvent`. There is no renderer filesystem access, direct
+network connection, arbitrary IPC, credential entry, sample business data, or
+renderer-side language-model/keyword simulation.
 
-The layout has keyboard-operable navigation and tabs, named form controls,
-native modal dialogs with explicit focus containment/restoration, a skip link,
-live error/status announcements, reduced-motion support, and responsive
-375px–desktop layouts. Both light and dark themes use locally defined design
-tokens; no external fonts or assets are loaded. Appearance and density are saved
-through typed settings, not a renderer-only preference cache.
+`src/model.ts` and `src/twin-contract.ts` validate wire data. The latter mirrors
+the host's pure business/Twin DTOs so the UI branch can be built independently.
+The ordinary work DTOs are imported from the host's pure contract module.
+UI/preload parity tests guard the closed RPC allowlist and request shapes.
 
-## Build and tests
+The exact Twin message envelope is:
 
-From `apps/ui`:
-
-```sh
-npm ci --workspaces=false
-npm run typecheck
-npm test
-npm run build
+```ts
+type TwinMessageRequest = {
+  workspaceId: string | null;
+  message: string;
+  target?: "auto" | "workspace" | "task" | "agent" | "automation" | "settings" | "approval";
+  history: { role: "user" | "assistant"; content: string }[];
+  contextRevision?: number;
+};
+type TwinDraft = {
+  id: string;
+  workspaceId: string | null;
+  kind: "workspace" | "task" | "agent" | "automation" | "settings" | "approval" | "clarification";
+  assistantMessage: string;
+  summary: string;
+  confidence: number;
+  readyForReview: boolean;
+  missing: string[];
+  draft: object | null;
+  basis: object | null;
+  createdAt: string;
+};
 ```
 
-To install the browser and run acceptance checks while keeping browser scratch
-data and downloads inside the application:
+- `workspaces.list {}` returns the owner catalog.
+- `workspaces.open { workspaceId }` returns the business, snapshot, conversation,
+  routines, and computer report.
+- `twin.conversation { workspaceId }` loads canonical history. `null` means the
+  global concierge, not the first business.
+- `twin.message` returns a proposal, never a successful mutation. It sends at
+  most 24 history turns, an 8,000-character message, and the conversation's
+  context revision within the host's 48 KiB bound.
+- `twin.applyProposal { workspaceId, id, proposalHash, editedDraft? }` applies a
+  complete, hash-bound draft. The host remains authoritative for stale-context
+  rejection, current options, idempotency, permissions, and mutation receipts.
+- `twin.dismissProposal { workspaceId, id, proposalHash, reason }` durably
+  dismisses a proposal without creating work.
+- All workspace operations include a **top-level** `workspaceId`. In particular,
+  event subscriptions use `{ workspaceId, scope: { area, entityId? } }` and
+  unsubscriptions retain that workspace binding.
+
+Conversations, proposal dispositions, and entities are host-owned. Only the
+last selected workspace is a browser preference, namespaced by owner/catalog.
+Changing workspaces unmounts composer, dictation, editors, artifact requests,
+and subscriptions. Late results cannot enter another conversation. Offline
+records are explicitly stale and cannot be mutated. No legacy/single-workspace
+fallback maps agents onto business workspaces.
+
+## Dictation and accessibility
+
+Speech uses `SpeechRecognition` / `webkitSpeechRecognition` only after a
+microphone-button click. There are explicit starting, listening, interim,
+transcript, error, and unavailable states. Only recognized **final** text is
+appended, and it is never sent automatically. Stopping, hiding/blurring the
+document, opening an inspector, disconnecting, switching workspaces, or
+unmounting ends capture and ignores late callbacks.
+
+The browser's speech service may process audio online and is not guaranteed
+to work in Chromium/Electron. A visible text fallback remains available; no
+transcription is fabricated. Electron grants only foreground, owned,
+top-level app-document audio permission. See the desktop permission tests.
+
+Keyboard-accessible navigation, native focus-contained dialogs, skip links,
+live status/error announcements, reduced motion, both themes, and responsive
+375px–desktop layouts are covered by browser accessibility checks.
+
+## Gates
+
+From the repository root, restore the existing lockfile if needed with `npm ci`.
+Then:
 
 ```sh
-mkdir -p .test-scratch
-export TMPDIR="$PWD/.test-scratch"
-export PLAYWRIGHT_BROWSERS_PATH="$PWD/node_modules/.cache/ms-playwright"
-./node_modules/.bin/playwright install chromium
-npm run test:browser
+npm --prefix apps/ui run typecheck
+npm --prefix apps/ui test
+npm --prefix apps/ui run build
+
+mkdir -p apps/ui/.test-scratch
+export TMPDIR="$PWD/apps/ui/.test-scratch"
+export PLAYWRIGHT_BROWSERS_PATH="$PWD/apps/ui/node_modules/.cache/ms-playwright"
+npm exec --workspace @rapp-work/ui -- playwright install chromium
+npm --prefix apps/ui run test:browser
 ```
 
-The browser suite serves the **production build**, checks a real disconnected
-cold load, exercises the main workflow twice, tests persistence through an
-injected test bridge, approvals, artifacts, schedules, provider references,
-diagnostics, keyboard focus, and WCAG checks in both themes at 1360px and 375px.
-Screenshots/traces are app-local in ignored `test-results/`. Fixtures exist only
-under `test/` and `e2e/`; they are never bundled into production.
+Browser tests use the **production build** and a test-only, durable injected
+bridge. They cover natural-language workspace creation, all proposal kinds,
+questions, direct apply, prefilled edits, dismissal, explicit approvals, voice
+and unavailable speech, switching/isolation/races, keyboard focus, cold
+disconnection, and WCAG checks at 1360px and 375px in both themes. Screenshots
+and traces are under ignored `test-results/`.
 
-The browser tests do not verify a real execution runtime or virtual machine.
-Actual Electron/host persistence is covered by the desktop smoke test.
+Those fixtures do not attest to live inference, a real microphone/speech
+service, or a running VM. Actual shell, host, scoping, and local persistence
+are exercised by the desktop smoke gate after integrating the Twin host.

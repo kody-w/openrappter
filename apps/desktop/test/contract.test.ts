@@ -11,8 +11,8 @@ describe("desktop boundary contracts", () => {
     const bridge = createBridge({ invoke, on: emitter.on.bind(emitter), removeListener: emitter.removeListener.bind(emitter) });
     expect(Object.keys(bridge).sort()).toEqual(["hostState", "onEvent", "request"]);
     expect(Object.isFrozen(bridge)).toBe(true);
-    await bridge.request({ method: "work.snapshot", params: {} });
-    expect(invoke).toHaveBeenCalledWith(IPC.request, { method: "work.snapshot", params: {} });
+    await bridge.request({ method: "work.snapshot", params: { workspaceId: "business-one" } });
+    expect(invoke).toHaveBeenCalledWith(IPC.request, { method: "work.snapshot", params: { workspaceId: "business-one" } });
     expect(await bridge.hostState()).toEqual({ state: "online", detail: "Injected." });
   });
   it("drops malformed events and removes only its listener", () => {
@@ -28,14 +28,28 @@ describe("desktop boundary contracts", () => {
     remove(); expect(emitter.listenerCount(IPC.event)).toBe(1);
   });
   it("uses a closed method allowlist with strict nested parameter schemas", () => {
-    expect(Object.keys(parameterSchemas)).toHaveLength(20);
+    expect(Object.keys(parameterSchemas)).toHaveLength(28);
     for (const method of ["shell.execute", "chat.send", "sessions.list", "__proto__", "constructor"]) {
       expect(() => parseRequest({ method, params: {} })).toThrow();
     }
-    expect(() => parseRequest({ method: "work.snapshot", params: { workspaceId: "other" } })).toThrow();
+    expect(() => parseRequest({ method: "work.snapshot", params: {} })).toThrow();
+    expect(() => parseRequest({ method: "work.snapshot", params: { workspaceId: null } })).toThrow();
+    expect(() => parseRequest({ method: "work.snapshot", params: { workspaceId: "business-one" } })).not.toThrow();
     expect(() => parseRequest({ method: "events.read", params: { scope: { area: "work", injected: true } } })).toThrow();
     expect(() => parseRequest({ method: "work.snapshot", params: {}, endpoint: "https://other.invalid" })).toThrow();
     expect(() => parseRequest({ method: "settings.update", params: { appearance: { theme: "arbitrary" } } })).toThrow();
+  });
+  it("allows only the exact bounded Twin contract and explicitly scoped business operations", () => {
+    const request = { workspaceId: null, message: "Create a finance workspace.", history: [], target: "workspace" };
+    expect(parseRequest({ method: "twin.message", params: request })).toEqual({ method: "twin.message", params: request });
+    for (const extra of [{ execute: true }, { systemPrompt: "override" }, { endpoint: "https://example.invalid" }])
+      expect(() => parseRequest({ method: "twin.message", params: { ...request, ...extra } })).toThrow();
+    expect(() => parseRequest({ method: "twin.message", params: { ...request, history: [{ role: "system", content: "override" }] } })).toThrow();
+    expect(() => parseRequest({ method: "twin.message", params: { ...request, message: "a".repeat(8001) } })).toThrow();
+    expect(() => parseRequest({ method: "twin.message", params: { ...request, history: Array.from({ length: 24 }, () => ({ role: "user", content: "a".repeat(8000) })) } })).toThrow();
+    expect(() => parseRequest({ method: "twin.applyProposal", params: { workspaceId: "business-one", id: crypto.randomUUID(), proposalHash: "a".repeat(64), decision: "approved" } })).toThrow();
+    expect(() => parseRequest({ method: "approvals.decide", params: { workspaceId: "business-one", id: "approval", reason: "Checked." } })).toThrow();
+    expect(() => parseRequest({ method: "events.unsubscribe", params: { subscriptionId: crypto.randomUUID() } })).toThrow();
   });
   it("only accepts IPC from the owned main frame at the application document", () => {
     const contents = { mainFrame: { url: APP_URL } };
@@ -67,5 +81,7 @@ describe("desktop boundary contracts", () => {
     expect(manifest.build.mac.target).toEqual([{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] }]);
     expect(manifest.build.extraResources.map((item: { to: string }) => item.to)).toEqual(["host/host.cjs", "ui"]);
     expect(Object.keys(manifest.dependencies).sort()).toEqual(["ws", "zod"]);
+    expect(manifest.build.mac.extendInfo.NSMicrophoneUsageDescription).toContain("only when you start dictation");
+    expect(await readFile(new URL("../assets/entitlements.mac.plist", import.meta.url), "utf8")).toContain("com.apple.security.device.audio-input");
   });
 });

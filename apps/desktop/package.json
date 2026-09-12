@@ -44,6 +44,9 @@
       "hardenedRuntime": true,
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "RAPP Work uses your microphone only when you start dictation to your Work Twin. Review the transcript before sending."
+      },
       "target": [{ "target": "dmg", "arch": ["arm64"] }, { "target": "zip", "arch": ["arm64"] }]
     },
     "dmg": { "title": "RAPP Work" }

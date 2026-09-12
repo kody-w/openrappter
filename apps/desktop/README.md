@@ -1,6 +1,6 @@
 # RAPP Work for macOS
 
-One Electron application for **macOS arm64**, one workspace window, one tray,
+One Electron application for **macOS arm64**, one multi-workspace window, one tray,
 and one owned host utility process. It does not attach to an existing daemon.
 No secondary window/bar, voice-model payload, or non-Node runtime is shipped.
 
@@ -42,13 +42,26 @@ build does not attest to either.
 ## Desktop boundary
 
 * Sandboxed, context-isolated renderer; Node integration, webviews, development
-  tools, new windows, renderer downloads, and browser permissions are disabled.
+  tools, new windows, renderer downloads, and general browser permissions are disabled.
+  The only media exception is microphone audio requested by the **owned,
+  focused, visible, top-level `rapp-work://app/index.html` document**. Both
+  permission checks and requests reject subframes, foreign windows, remote
+  documents, camera/display capture, missing media type, and background access.
+  macOS microphone consent is requested only from that trusted request path;
+  the bundle declares `NSMicrophoneUsageDescription` and audio-input entitlement.
 * The secure `rapp-work://app/index.html` protocol serves only app resources,
   rejects path/symlink escapes, and supplies a restrictive CSP. The renderer
   cannot make network connections. The theme bootstrap uses a CSP hash.
 * The frozen preload exposes exactly `request`, `hostState`, and `onEvent`.
   Both preload and main enforce a closed method allowlist and strict parameters.
   Main accepts requests only from the owned top-level application frame.
+  Business operations and event subscriptions/unsubscriptions carry an explicit
+  `workspaceId`; only the global concierge accepts `null` where documented.
+  Twin requests use the exact host message envelope and bounded human/assistant
+  history. Applying/dismissing a proposal uses its canonical ID and hash.
+  Approval recommendations cannot become approval decisions through that API.
+  Model drafting has a bounded 200-second transport deadline; ordinary requests
+  retain the shorter 30-second deadline. Timed-out mutations are not replayed.
 * Main generates a fresh secret, sends it over private parent/child IPC, validates
   a versioned readiness handshake, and performs an authenticated health probe.
   Credentials, endpoints, arbitrary IPC channels, filesystem paths, and shell
@@ -56,8 +69,11 @@ build does not attest to either.
 * Startup is bounded. Concurrent starts share one process. Unexpected exit
   invalidates the lease; Refresh can start a new owned host. Closing the window
   hides it in the tray; explicit Quit stops the owned process, forcibly if needed.
+  Safe startup failure/deadline details are retained, and a late exit from a
+  superseded child cannot disconnect its replacement.
 * The production user-data path is explicitly the new RAPP Work directory.
-  One owner and a canonical per-agent workspace store live beneath it.
+  One owner, independent durable business catalogs, per-business Twin history,
+  and private child agent execution stores live beneath it.
   Unpackaged smoke runs can isolate data with
   `RAPP_WORK_USER_DATA`; packaged applications ignore that override.
 
@@ -65,9 +81,17 @@ Host connection does not mean provider/computer readiness. The composition
 uses real public-package adapters and reports missing authentication,
 configuration or image explicitly. See [setup](../../docs/LOCAL_PRODUCTION.md).
 
+Voice uses the browser's SpeechRecognition implementation, if available. It may
+use an online browser speech service; it is not an offline transcription
+promise. The UI starts capture only from an explicit button click, displays
+listening/results/errors, appends only final transcripts for review, and stops
+on blur, hiding, workspace switching, inspector opening, disconnect, or unmount.
+It never auto-sends a transcript or records in the background. Unsupported or
+denied speech has a text fallback and is not reported as successful.
+
 ## Tests
 
-`npm test` runs contract, preload, resource-boundary, real WebSocket, and
+`npm test` runs contract, preload, trusted microphone permission, resource-boundary, real WebSocket, and
 injected-process lifecycle tests without launching Electron or depending on
 other packages.
 
@@ -77,11 +101,14 @@ After building all three apps on macOS arm64:
 npm run test:smoke
 ```
 
-The smoke test launches the actual Electron shell and bundled host, verifies the
-preload/renderer boundary and authenticated connection, creates real local agent
-and task records, changes typed settings, restarts the app, checks persistence
-and private permissions, and ensures the owned host does not survive Quit.
-It verifies runtime availability, while the isolated profile's provider setup
-and computer remain unavailable; it does not perform model/guest work.
+The smoke test requires the multi-workspace/Twin host, launches the actual shell
+and bundled host, and verifies the preload/renderer boundary, authenticated
+connection, scoped records, prefilled reviews, workspace switching, settings,
+restart persistence, private file permissions, and owned-process shutdown.
+It seeds **complete reviewed test workspace inputs through the real RPC** rather
+than opening blank UI forms or making a paid model call. Natural-language
+proposal behavior and dictation are separately covered by the UI's injected
+browser tests. The smoke gate does not claim live inference, microphone
+permission dialogs, speech transcription, or guest/VM execution.
 The isolated profile is removed; a screenshot and result JSON remain in the
 ignored `test-results/` directory.

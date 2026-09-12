@@ -27,13 +27,23 @@ export class BridgeClient implements WorkClient {
   async call<M extends RpcMethod>(method: M, params: RpcInput<M>): Promise<RpcResult<M>> {
     const contract = rpcContracts[method];
     const input = contract.input.safeParse(params);
-    if (!input.success) throw new Error("Please check the form fields and try again.");
+    if (!input.success) throw new Error("This request is incomplete or invalid. Ask your Twin to finish the draft.");
     const raw = await this.bridge.request({ method, params: input.data });
     const output = contract.output.safeParse(raw);
     if (!output.success) throw new Error("The host returned an invalid response. Refresh diagnostics before continuing.");
+    const scoped = input.data as { workspaceId?: string | null };
+    if (method === "twin.message" || method === "twin.conversation" || method === "twin.dismissProposal" || method === "twin.applyProposal" || method === "work.snapshot") {
+      if ((output.data as { workspaceId: string | null }).workspaceId !== scoped.workspaceId)
+        throw new Error("The host response belongs to another workspace.");
+    }
+    if (method === "workspaces.open" && (output.data as { workspace: { id: string } }).workspace.id !== scoped.workspaceId)
+      throw new Error("The host response belongs to another workspace.");
+    if (method === "twin.applyProposal" && (output.data as { id: string }).id !== (input.data as unknown as { id: string }).id)
+      throw new Error("The host returned a receipt for a different proposal.");
     return output.data as RpcResult<M>;
   }
   async subscribe(scope: EventScope, changed: () => void): Promise<() => void> {
+    const { workspaceId, ...area } = scope;
     let subscriptionId: string | undefined;
     const queued = new Set<string>();
     const remove = this.bridge.onEvent((raw) => {
@@ -43,12 +53,12 @@ export class BridgeClient implements WorkClient {
       else if (parsed.data.subscriptionId === subscriptionId) changed();
     });
     try {
-      const subscription = await this.call("events.subscribe", { scope, limit: 200 });
+      const subscription = await this.call("events.subscribe", { workspaceId, scope: area, limit: 200 });
       subscriptionId = subscription.subscriptionId;
       if (subscription.events.length || queued.has(subscriptionId)) changed();
       return () => {
         remove();
-        void this.call("events.unsubscribe", { subscriptionId: subscription.subscriptionId }).catch(() => {});
+        void this.call("events.unsubscribe", { workspaceId, subscriptionId: subscription.subscriptionId }).catch(() => {});
       };
     } catch (error) { remove(); throw error; }
   }

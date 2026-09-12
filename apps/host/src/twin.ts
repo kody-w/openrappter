@@ -6,6 +6,7 @@ import {
   computerSchema, providerSchema, settingsSchema, twinApplyRequestSchema, twinApplyResultSchema,
   twinBasisSchema, twinConversationSchema, twinDismissRequestSchema, twinDraftSchema, twinEventSchema,
   twinMessageRequestSchema, twinProposalSchema, twinTurnSchema,
+  twinModelResponseSchema, MAX_WORKSPACE_AGENTS, MAX_WORKSPACE_DEPTH, type WorkspaceOrganization,
   type AgentInput, type Computer, type Provider, type Snapshot, type TwinApplyRequest, type TwinApplyResult,
   type TwinBasis, type TwinConversation, type TwinDismissRequest, type TwinDraft, type TwinEvent,
   type TwinMessageRequest, type TwinProposal, type TwinTurn, type WorkspaceSummary,
@@ -34,8 +35,12 @@ const SYSTEM = [
   "Preserve document restrictions: default to no computer tools, always require approval, respect disabled/manual-only instructions, and leave suggested routines disabled for separate review.",
   "Agent proposals may include complete suggestedRoutines. Use allocated routine IDs and that agent's ID; never enable suggestions automatically.",
   "A settings proposal may change computerPolicy only using availableComputerPolicies; this never overrides an agent's own restrictions.",
+  "Every agent owns one dedicated child workspace of this same product. Creating an agent creates that child atomically. Respect supplied lineage and remaining depth/agent limits.",
+  "The current owning agent's definition is managed in its parent. Never act as a parent or sibling, and do not propose an expansion beyond inherited capabilities.",
+  "You may include an evolution object to organize INTERNAL workspace content: Twin summary, task/notes/routine sections, disabled routine suggestions, and default focus.",
+  "Internal evolution is applied from this conversation without a form. It cannot change providers, tools, approvals, computer actions, enabled schedules or external effects. Use only supplied task/agent IDs.",
 ].join("\n");
-const modelSchema = JSON.parse(JSON.stringify(z.toJSONSchema(twinProposalSchema, { io: "input" }))) as JsonObject;
+const modelSchema = JSON.parse(JSON.stringify(z.toJSONSchema(twinModelResponseSchema, { io: "input" }))) as JsonObject;
 const ranks = { none: 0, "read-only": 1, control: 2 };
 const readPermissions: readonly Permission[] = ["work:read", "agents:read", "automations:read", "settings:read", "computer:read"];
 const kindPermissions: Record<Exclude<TwinProposal["kind"], "clarification">, readonly Permission[]> = {
@@ -54,6 +59,9 @@ const allocations = (id: string) => ({
 type Allocations = ReturnType<typeof allocations>;
 interface Options {
   workspace: WorkspaceSummary | null;
+  lineage: Pick<WorkspaceSummary, "id" | "name" | "ownerType" | "ownerAgentId" | "status" | "computerPolicy" | "approvalPolicy">[];
+  ownerAgent: Snapshot["agents"][number] | null;
+  limits: { maxDepth: number; depth: number; remainingDepth: number; remainingAgents: number };
   catalog: { id: string; name: string; purpose: string }[];
   agents: Pick<Snapshot["agents"][number], "id" | "name" | "role" | "enabled" | "providerId" | "model" | "computerPolicy" | "approvalPolicy">[];
   tasks: Pick<Snapshot["tasks"][number], "id" | "title" | "agentId" | "state">[];
@@ -70,6 +78,11 @@ interface Options {
   };
 }
 interface Capture { revision: number; heads: TwinBasis["heads"]; options: Options }
+function optionsHash(options: Options): string {
+  if (!options.workspace) return digest(options);
+  const { organization: _organization, revision: _revision, updatedAt: _updatedAt, ...workspace } = options.workspace;
+  return digest({ ...options, workspace });
+}
 function proposalHash(draft: TwinDraft): string {
   if (!draft.basis) throw new HostError(-32009, "The proposal has no canonical basis.");
   const { proposalHash: _hash, ...basis } = draft.basis;
@@ -156,9 +169,11 @@ export class LocalTwin implements TwinPort {
       context.workspaceId === null ? null : this.work.workspace(context),
       context.workspaceId === null ? this.work.listWorkspaces(context) : null,
     ]);
-    const scopes = [scope, ...(snapshot?.agents ?? []).map(agentScope)];
+    const lineage = workspace ? workspace.lineage.map((id) => p.workspaceInfo(id)) : [];
+    const scopes = [...new Map([scope, ...lineage.map((item) => item.catalogScope), ...(snapshot?.agents ?? []).map(agentScope)]
+      .map((scope) => [scope.workspaceId, scope])).values()];
     const heads = await Promise.all(scopes.map(async (selected) => ({ scope: selected, heads: (await p.read(selected)).heads })));
-    const maximumPolicy = workspace?.computerPolicy ?? "control";
+    const maximumPolicy = workspace ? this.work.lineagePolicy(workspace.id).computerPolicy : "control";
     const workspaceEnabled = context.workspaceId === null || computer.workspace?.enabled === true;
     const computerPolicies: AgentInput["computerPolicy"][] = ["none"];
     if (workspaceEnabled && computer.state === "running" && computer.verified && computer.capabilities.view && ranks[maximumPolicy] >= 1) computerPolicies.push("read-only");
@@ -175,6 +190,12 @@ export class LocalTwin implements TwinPort {
       revision: snapshot?.revision ?? p.revision(scope), heads,
       options: {
         workspace: workspace ? { ...workspace, revision: 0 } : null,
+        lineage: lineage.map(({ id, name, ownerType, ownerAgentId, status, computerPolicy, approvalPolicy }) =>
+          ({ id, name, ownerType, ownerAgentId, status, computerPolicy, approvalPolicy })),
+        ownerAgent: snapshot?.agents.find((agent) => agent.id === workspace?.ownerAgentId) ?? null,
+        limits: { maxDepth: MAX_WORKSPACE_DEPTH, depth: workspace?.depth ?? 0,
+          remainingDepth: workspace ? MAX_WORKSPACE_DEPTH - workspace.depth : MAX_WORKSPACE_DEPTH,
+          remainingAgents: workspace ? MAX_WORKSPACE_AGENTS - p.childrenOf(workspace.id).length : MAX_WORKSPACE_AGENTS },
         catalog: catalog?.workspaces.slice(0, 100).map(({ id, name, purpose }) => ({ id, name, purpose: purpose.slice(0, 240) })) ?? [],
         agents: snapshot?.agents.slice(0, 200).map(({ id, name, role, enabled, providerId, model, computerPolicy, approvalPolicy }) =>
           ({ id, name, role, enabled, providerId, model, computerPolicy, approvalPolicy })) ?? [],
@@ -194,7 +215,7 @@ export class LocalTwin implements TwinPort {
       },
     };
   }
-  private validate(proposal: TwinProposal, options: Options, ids: Allocations, target: TwinMessageRequest["target"] = "auto"): void {
+  private validate(proposal: TwinProposal, options: Options, ids: Allocations, target: TwinMessageRequest["target"] = "auto", agentActor = false): void {
     const invalid = () => { throw new ModelProviderError("invalid_structured_output"); };
     if (proposal.kind === "clarification") return;
     if (target !== "auto" && target !== proposal.kind) invalid();
@@ -204,6 +225,11 @@ export class LocalTwin implements TwinPort {
         || !options.allowed.computerPolicies.includes(agent.computerPolicy)
         || (!creating && agent.id !== ids.agentId && !options.agents.some((item) => item.id === agent.id))
         || (creating && agent.id !== ids.agentId)) invalid();
+      if (!creating && agent.id === options.workspace?.ownerAgentId) invalid();
+      if (!creating && agent.id === ids.agentId && (options.limits.remainingDepth <= 0 || options.limits.remainingAgents <= 0)) invalid();
+      if (agentActor && (!options.ownerAgent || agent.providerId !== options.ownerAgent.providerId || agent.model !== options.ownerAgent.model
+        || ranks[agent.computerPolicy] > ranks[options.ownerAgent.computerPolicy]
+        || (options.ownerAgent.approvalPolicy === "always" && agent.approvalPolicy !== "always"))) invalid();
     };
     const ownedAgent = (id: string) => {
       const agent = options.agents.find((item) => item.id === id);
@@ -242,6 +268,13 @@ export class LocalTwin implements TwinPort {
       case "settings":
         if (proposal.draft.computerPolicy && !options.allowed.availableComputerPolicies.includes(proposal.draft.computerPolicy)) invalid();
         break;
+    }
+  }
+  private validateEvolution(evolution: WorkspaceOrganization, options: Options, ids: Allocations): void {
+    if (!options.workspace || evolution.sections.some((section) => section.taskIds.some((id) => !options.tasks.some((task) => task.id === id)))
+      || evolution.suggestedRoutines.some((routine) => routine.enabled || !options.agents.some((agent) => agent.id === routine.agentId)
+        || (!ids.routineIds.includes(routine.id) && !options.workspace!.organization.suggestedRoutines.some((item) => item.id === routine.id)))) {
+      throw new ModelProviderError("invalid_structured_output");
     }
   }
   private async previousMessage(scope: WorkspaceScope, key: string, input: TwinMessageRequest): Promise<TwinDraft | null> {
@@ -295,7 +328,7 @@ export class LocalTwin implements TwinPort {
             if (!captured.options.allowed.providerModels.some((choice) => choice.providerId === "github-copilot")) {
               throw new ModelProviderError("copilot_draft_profile_unavailable");
             }
-            const proposal = await this.model.draft({
+            const response = await this.model.draft({
               ...TWIN_MODEL, name: "rapp_work_twin_proposal", schema: modelSchema, maxOutputTokens: 12_000,
               signal: controller.signal,
               messages: [
@@ -314,15 +347,18 @@ export class LocalTwin implements TwinPort {
                 }) },
               ],
               parse: (value) => {
-                const parsed = twinProposalSchema.parse(value);
+                const { evolution, ...raw } = twinModelResponseSchema.parse(value);
+                const parsed = twinProposalSchema.parse(raw);
                 const proposal = document ? bindInstructionDocument(parsed, document) : parsed;
-                this.validate(proposal, captured.options, ids, input.target);
-                return proposal;
+                this.validate(proposal, captured.options, ids, input.target, context.principal.kind === "agent");
+                if (evolution) this.validateEvolution(evolution, captured.options, ids);
+                return { proposal, evolution };
               },
             });
+            const { proposal, evolution } = response;
             const basis = twinBasisSchema.parse({
-              schema: "rapp-work/twin-basis/1", ownerId: context.principal.id, workspaceId: input.workspaceId,
-              revision: captured.revision, heads: captured.heads, optionsHash: digest(captured.options), proposalHash: "0".repeat(64),
+              schema: "rapp-work/twin-basis/1", ownerId: p.owner.id, workspaceId: input.workspaceId,
+              revision: captured.revision, heads: captured.heads, optionsHash: optionsHash(captured.options), proposalHash: "0".repeat(64),
               ...(document ? { instructionDocument: { turnId: document.turnId, contentHash: document.contentHash } } : {}),
             });
             const draft = twinDraftSchema.parse({ ...proposal, id, workspaceId: input.workspaceId, basis, createdAt: new Date().toISOString() });
@@ -336,6 +372,11 @@ export class LocalTwin implements TwinPort {
                 { type: "twin.turn", turn: json(assistant) },
                 { type: "twin.proposal", proposal: json(draft) },
                 { type: "twin.event", event: json(this.event(context, id, "proposal", proposal.summary)) },
+                ...(evolution ? [
+                  { type: "workspace.evolved", workspaceId: input.workspaceId, organization: json(evolution),
+                    proposalId: id, actorId: context.principal.id, at: draft.createdAt },
+                  { type: "twin.event", event: json(this.event(context, id, "evolution", "Workspace evolved from this conversation")) },
+                ] : []),
               ],
             };
           } catch (error) {
@@ -364,7 +405,7 @@ export class LocalTwin implements TwinPort {
     if (!command || command.state !== "committed") return notFound();
     const draft = twinDraftSchema.parse(command.value);
     this.assertBinding(context, draft.workspaceId);
-    if (!draft.basis || draft.basis.ownerId !== context.principal.id || draft.basis.workspaceId !== context.workspaceId
+    if (!draft.basis || draft.basis.ownerId !== this.persistence.owner.id || draft.basis.workspaceId !== context.workspaceId
       || draft.basis.proposalHash !== hash || proposalHash(draft) !== hash) {
       conflict("The proposal hash or owner basis does not match the canonical draft.");
     }
@@ -372,7 +413,7 @@ export class LocalTwin implements TwinPort {
   }
   private async assertFresh(context: RequestContext, draft: TwinDraft, source: CommittedCommand): Promise<Capture> {
     const captured = await this.capture(context);
-    if (!draft.basis || captured.heads.length !== draft.basis.heads.length || digest(captured.options) !== draft.basis.optionsHash) {
+    if (!draft.basis || captured.heads.length !== draft.basis.heads.length || optionsHash(captured.options) !== draft.basis.optionsHash) {
       throw new HostError(-32015, "The proposal's verified context changed. Ask the Twin for an updated draft.");
     }
     for (const current of captured.heads) {
@@ -432,7 +473,7 @@ export class LocalTwin implements TwinPort {
         try { bindInstructionDocument(proposal, document!); }
         catch { throw new HostError(-32602, "Document instructions and restrictions must be retained verbatim. Submit a revised document to change them."); }
       }
-      try { this.validate(proposal, captured.options, allocations(draft.id)); }
+      try { this.validate(proposal, captured.options, allocations(draft.id), "auto", context.principal.kind === "agent"); }
       catch { throw new HostError(-32602, "Edits must be complete and use exactly the current verified options."); }
       if (proposal.kind === "agent" && proposal.draft.suggestedRoutines?.length) await this.authorize(context, ["automations:write"]);
       if (proposal.kind === "approval" || proposal.kind === "clarification") conflict("This proposal cannot execute a decision.");
@@ -451,7 +492,8 @@ export class LocalTwin implements TwinPort {
             operation = "host.task.create"; break;
           case "agent": {
             const { suggestedRoutines = [], ...agent } = proposal.draft;
-            result = await this.work.saveAgent(actionContext, agent);
+            const savedAgent = await this.work.saveAgent(actionContext, agent);
+            result = { agent: savedAgent, workspace: await this.work.agentWorkspace(actionContext, savedAgent.id) };
             for (const routine of suggestedRoutines) {
               await this.work.saveAutomation({ ...actionContext, requestId: `${actionContext.requestId}/${routine.id}` }, routine, this.runtime);
               const agentWorkspace = agentScope((await this.work.snapshot(actionContext)).agents.find((item) => item.id === agent.id)!);
@@ -469,16 +511,17 @@ export class LocalTwin implements TwinPort {
           }
           case "settings": {
             const settings = (await this.work.snapshot(actionContext)).settings;
-            const { computerPolicy, ...patch } = proposal.draft;
+            const { computerPolicy, parentAccess, ...patch } = proposal.draft;
             result = await this.work.updateSettings(actionContext, settingsSchema.parse({
               ...settings, ...patch, appearance: { ...settings.appearance, ...patch.appearance },
               work: { ...settings.work, ...patch.work }, notifications: { ...settings.notifications, ...patch.notifications },
             }));
-            if (computerPolicy !== undefined) {
+            if (computerPolicy !== undefined || parentAccess !== undefined) {
               const workspace = await this.work.workspace(actionContext);
               await this.work.updateWorkspace(actionContext, {
                 name: workspace.name, purpose: workspace.purpose, twin: workspace.twin,
-                approvalPolicy: workspace.approvalPolicy, computerPolicy,
+                approvalPolicy: workspace.approvalPolicy, computerPolicy: computerPolicy ?? workspace.computerPolicy,
+                parentAccess: parentAccess ?? workspace.parentAccess,
               });
               const updated = (await this.persistence.read(scope)).commands.filter((entry) =>
                 entry.state === "committed" && entry.command.operation === "host.workspace.update").at(-1);

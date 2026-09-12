@@ -28,7 +28,7 @@ describe("desktop boundary contracts", () => {
     remove(); expect(emitter.listenerCount(IPC.event)).toBe(1);
   });
   it("uses a closed method allowlist with strict nested parameter schemas", () => {
-    expect(Object.keys(parameterSchemas)).toHaveLength(28);
+    expect(Object.keys(parameterSchemas)).toHaveLength(33);
     for (const method of ["shell.execute", "chat.send", "sessions.list", "__proto__", "constructor"]) {
       expect(() => parseRequest({ method, params: {} })).toThrow();
     }

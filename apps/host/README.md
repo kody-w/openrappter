@@ -77,6 +77,53 @@ injected record-store compositions and test fixtures.
 
 ## Conversation first
 
+### Recursive workspace ownership
+
+A human business root has `parentWorkspaceId: null`, `ownerType: "human"`,
+`ownerAgentId: null`, `rootWorkspaceId` equal to its ID, and depth zero.
+Every agent is published atomically with exactly one dedicated child workspace.
+The child's catalog scope is the agent's existing private workspace identity,
+not another app or a second storage identity. Its owner type is `agent`, its
+`ownerAgentId` is fixed, and its lineage is the parent's exact lineage plus its
+own ID. Maximum depth is **4**, with **32** direct agents/children and **1,000**
+workspaces in the catalog. A child workspace does not create another starter
+agent automatically; its owning agent is its default executor.
+
+Each level owns its own Twin conversation, settings, internal organization,
+task registry, routines, runs and evidence. A parent sees its delegated work,
+not unrelated tasks or conversations created internally by a child. The
+owner's root credential may navigate its tree. Agent credentials are
+host-issued, opaque, ephemeral identities rooted in one exact lineage;
+serialized/copied IDs cannot mint an identity. Agents may mutate their own
+workspace and create bounded sub-agents without expanding their provider,
+model, tools or approval policy. Parent inspection follows every child's
+`parentAccess` policy (`inspect` or `none`); sibling and ancestor access is
+denied. Read-only descendant capabilities cannot append or climb to a parent.
+
+`createLocalServices().createAgentSession(parentContext, agentId)` is a trusted
+host integration seam, not a renderer RPC. It checks the exact parent grant
+before issuing a scoped bearer identity. Retirement or an inactive ancestor
+revokes that identity. `agents.retire` disables the agent and archives its
+mint-once workspace; descendants become inactive and identities are never
+reassigned. Active/unresolved runs must be resolved before retirement.
+
+`agents.save` and `agents.retire` accept an optional `parentRevision`; stale
+parent bases fail before new writes. `twin.applyProposal` also checks the
+ancestor heads and returns `{ agent, workspace }` for an agent proposal.
+Partial creation remains unpublished and unresolved, never an orphan
+agent/workspace that can be opened by guessing its ID.
+
+### Internal evolution
+
+The strict model response may include an optional `evolution` object containing
+only a Twin summary, bounded task/notes/routine sections, **disabled** routine
+suggestions, and a default focus. Task and agent references must come from the
+selected workspace's verified context. The same canonical message outcome
+records `workspace.evolved` and an `evolution` receipt; no extra form or approval
+is needed for this internal organization. Unknown fields, provider/tool
+expansion, computer actions, enabled schedules and approval decisions are not
+part of this schema and still require their normal gates.
+
 Humans speak or type intent. The Twin generates and fills out structured work;
 it never presents a blank form as the normal workflow. It asks only necessary
 follow-ups, returns a complete reviewable draft, and accepts small human edits
@@ -225,6 +272,7 @@ not returned or recorded.
 | Area | Methods |
 | --- | --- |
 | Business catalog | `workspaces.list`, `workspaces.create`, `workspaces.update`, `workspaces.open` |
+| Hierarchy | `workspaces.tree`, `workspaces.children`, `workspaces.breadcrumb`, `agents.openWorkspace`, `agents.retire` |
 | Twin | `twin.message`, `twin.conversation`, `twin.applyProposal`, `twin.dismissProposal` |
 | Work | `work.snapshot`, `work.createTask`, `work.assignTask`, `runs.start`, `runs.cancel`, `approvals.decide`, `artifacts.read` |
 | Agents | `agents.save` |
@@ -245,7 +293,11 @@ workspaces: WorkspaceSummary[] }`. `workspaces.create` takes the complete
 strict `WorkspaceInput` in the owner concierge. `workspaces.update` takes
 `{ workspaceId, ...WorkspaceDetails }`. `workspaces.open` takes
 `{ workspaceId }` and returns `{ workspace, snapshot, twin, routines, computer }`
-for the selected business. `twin.conversation`, `providers.list`,
+for the selected workspace, plus its verified `breadcrumb`. `workspaces.list`
+returns the hierarchy in parent-before-child order; `workspaces.children`
+returns direct visible children, and `workspaces.tree` returns bounded nodes
+with explicit child IDs. `agents.openWorkspace` resolves an agent within the
+selected parent rather than treating its ID as authority. `twin.conversation`, `providers.list`,
 `computer.inspect` and `diagnostics.get` allow an **explicit** null binding for
 concierge context; normal Work mutations do not.
 

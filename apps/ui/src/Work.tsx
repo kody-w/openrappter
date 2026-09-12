@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Avatar, Badge, Empty, formatDate, Icon, Modal, StatusBadge, TabPanel, Tabs } from "./components";
-import type { Approval, Artifact, Computer, Run, Snapshot, Status } from "./model";
+import type { Agent, Approval, Artifact, Computer, Run, Snapshot, Status } from "./model";
 import type { Perform } from "./useWorkspace";
 
 export type WorkTab = "tasks" | "runs" | "approvals" | "artifacts";
@@ -8,8 +8,10 @@ interface Props {
   snapshot: Snapshot; status: Status | null; computer: Computer | null;
   connected: boolean; busy: boolean; perform: Perform; newTask: () => void;
   review: (approval: Approval) => void; openArtifact: (artifact: Artifact) => void;
+  openAgent: (agent: Agent) => void;
+  executionAllowed: boolean;
 }
-export function Work({ snapshot, status, computer, connected, busy, perform, newTask, review, openArtifact }: Props) {
+export function Work({ snapshot, status, computer, connected, busy, perform, newTask, review, openArtifact, openAgent, executionAllowed }: Props) {
   const [tab, setTab] = useState<WorkTab>("tasks");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -26,7 +28,7 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
   const agentReady = Boolean(selectedAgent?.enabled && selectedAgent.providerId && selectedAgent.model
     && (selectedAgent.computerPolicy === "none" || computer?.state === "running" && computer.verified
       && computer.workspace?.id === snapshot.workspaceId && computer.workspace.enabled));
-  const canExecute = connected && status?.checks.runtime.state === "ready" && status.checks.provider.state === "ready";
+  const canExecute = executionAllowed && connected && status?.checks.runtime.state === "ready" && status.checks.provider.state === "ready";
   return <>
     <section className="metrics" aria-label="Work overview">
       <div><span className="metric-icon"><Icon name="work" /></span><dl><dt>Active work</dt><dd>{active.length}<span>tasks</span></dd></dl></div>
@@ -60,7 +62,7 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
               <div className="row between"><span className="eyebrow">Task detail</span><StatusBadge state={selected.state} /></div>
               <h2>{selected.title}</h2><p className="preserve">{selected.instructions}</p>
               <dl className="metadata">
-                <div><dt>Assigned to</dt><dd>{snapshot.agents.find((agent) => agent.id === selected.agentId)?.name ?? "Unassigned"}</dd></div>
+                <div><dt>Assigned to</dt><dd>{selectedAgent ? <button className="text-button" disabled={!connected} onClick={() => openAgent(selectedAgent)}>{selectedAgent.name}</button> : "Unassigned"}</dd></div>
                 <div><dt>Agent workspace</dt><dd className="mono">{selected.workspaceId ?? "Minted when assigned"}</dd></div>
                 <div><dt>Created</dt><dd>{formatDate(selected.createdAt)}</dd></div>
                 <div><dt>Priority</dt><dd>{selected.priority === "high" ? "High" : "Normal"}</dd></div>

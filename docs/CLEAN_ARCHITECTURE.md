@@ -61,6 +61,11 @@ surface.
   equals its catalog workspace ID, not an agent workspace ID.
 - An **Agent** is a persistent worker definition and policy.
 - An **AgentWorkspace** is the agent's sole durable state owner.
+- It is also that agent's dedicated recursive workspace: the same Twin,
+  conversation, work, routines, evidence and computer panel. Each workspace
+  records a mint-once owner, parent, root, lineage and depth. Roots are human
+  owned; children are agent owned. Depth is capped at four and direct agents at
+  32, without automatically creating another starter agent at each level.
 - A **Task** belongs to one agent and one workspace.
 - A **Run** is one execution attempt for a task.
 - The **Computer** is one shared host-owned Omarchy VM with its own canonical
@@ -70,7 +75,11 @@ Caller-supplied IDs locate resources; they never grant authority. Every service
 receives a scoped capability created after authorization.
 Business parent ownership is recovered from verified catalog/bootstrap and
 agent-registration commands, never inferred from a supplied resource ID.
-Normal Work RPCs require an explicit authorized business binding.
+Normal Work RPCs require an explicit authorized workspace binding. Agent
+identities are host-issued and lineage-bound; copying IDs or principal fields
+does not create authority. Sibling and ancestor access is denied, while parent
+inspection must satisfy every child's policy. Retirement archives the owning
+workspace and makes its descendant lineage inactive without reassigning it.
 
 ## Conversation and review
 
@@ -84,6 +93,10 @@ User/assistant turns, proposals, acceptances and dismissals are canonical
 Work commands in the owning catalog. Global creation conversations remain in
 the concierge. A model output is untrusted until its discriminant, complete
 draft and every availability-dependent choice pass validation.
+Optional internal evolution can update only a bounded Twin summary, sections,
+disabled routine suggestions and default focus. Its canonical receipt belongs
+to the same conversation and workspace. External effects, active schedules,
+provider/tool expansion, approval decisions and computer actions remain gated.
 
 Review binds a proposal hash to canonical heads and verified option inventory.
 Acceptance reauthorizes the target action and calls the same Work APIs as an

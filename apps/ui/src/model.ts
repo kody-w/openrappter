@@ -4,6 +4,7 @@ import {
   eventPageSchema, providerSchema, rpcParameterSchemas, runSchema, settingsSchema, snapshotSchema, statusSchema,
   taskSchema, twinApplyResultSchema, twinConversationSchema, twinDraftSchema, workspaceListSchema,
   workspaceOpenSchema, workspaceSummarySchema,
+  workspaceChildrenSchema, workspaceTreeSchema, workspaceBreadcrumbSchema,
 } from "../../host/src/contracts.js";
 
 export * from "../../host/src/contracts.js";
@@ -17,10 +18,15 @@ export const rpcContracts = {
   "workspaces.create": contract("workspaces.create", workspaceSummarySchema),
   "workspaces.open": contract("workspaces.open", workspaceOpenSchema),
   "workspaces.update": contract("workspaces.update", workspaceSummarySchema),
+  "workspaces.children": contract("workspaces.children", workspaceChildrenSchema),
+  "workspaces.tree": contract("workspaces.tree", workspaceTreeSchema),
+  "workspaces.breadcrumb": contract("workspaces.breadcrumb", workspaceBreadcrumbSchema),
   "work.snapshot": contract("work.snapshot", snapshotSchema),
   "work.createTask": contract("work.createTask", taskSchema),
   "work.assignTask": contract("work.assignTask", taskSchema),
   "agents.save": contract("agents.save", agentSchema),
+  "agents.openWorkspace": contract("agents.openWorkspace", workspaceSummarySchema),
+  "agents.retire": contract("agents.retire", agentSchema),
   "runs.start": contract("runs.start", runSchema),
   "runs.cancel": contract("runs.cancel", runSchema),
   "approvals.decide": contract("approvals.decide", approvalSchema),

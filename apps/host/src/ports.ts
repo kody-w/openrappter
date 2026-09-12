@@ -3,13 +3,23 @@ import type {
   Computer, Diagnostics, Provider, Run, Settings, Snapshot, Task, TaskInput,
   WorkEvent,
   WorkspaceInput, WorkspaceDetails, WorkspaceSummary, WorkspaceList,
+  WorkspaceChildren, WorkspaceTree, WorkspaceBreadcrumb,
   TwinMessageRequest, TwinDraft, TwinConversation, TwinApplyRequest, TwinApplyResult, TwinDismissRequest,
 } from "./contracts.js";
 
 export type Permission = `${"work" | "agents" | "automations" | "settings"}:${"read" | "write"}`
   | "runtime:execute" | "computer:read" | "computer:control" | "diagnostics:read" | "events:read";
-export interface Principal { id: string; workspaceId: string; permissions: readonly Permission[] }
-export interface RequestContext { principal: Principal; requestId: string; workspaceId?: string | null }
+export const OWNER_PERMISSIONS: readonly Permission[] = [
+  "work:read", "work:write", "agents:read", "agents:write", "automations:read", "automations:write",
+  "settings:read", "settings:write", "runtime:execute", "computer:read", "computer:control", "diagnostics:read", "events:read",
+];
+export interface Principal {
+  id: string; workspaceId: string; permissions: readonly Permission[];
+  kind?: "human" | "agent"; agentId?: string;
+}
+export interface RequestContext {
+  principal: Principal; requestId: string; workspaceId?: string | null; parentRevision?: number;
+}
 export interface ServicePort {
   check(): Promise<Check>;
   close?(): Promise<void>;
@@ -50,6 +60,11 @@ export interface WorkPort extends ServicePort {
   createWorkspace(context: RequestContext, input: WorkspaceInput): Promise<WorkspaceSummary>;
   updateWorkspace(context: RequestContext, input: WorkspaceDetails): Promise<WorkspaceSummary>;
   workspace(context: RequestContext): Promise<WorkspaceSummary>;
+  children(context: RequestContext): Promise<WorkspaceChildren>;
+  tree(context: RequestContext): Promise<WorkspaceTree>;
+  breadcrumb(context: RequestContext): Promise<WorkspaceBreadcrumb>;
+  agentWorkspace(context: RequestContext, id: string): Promise<WorkspaceSummary>;
+  retireAgent(context: RequestContext, id: string): Promise<Agent>;
   subscribe(listener: (workspaceId: string, event: WorkEvent) => void): () => void;
   snapshot(context: RequestContext): Promise<Snapshot>;
   createTask(context: RequestContext, input: TaskInput): Promise<Task>;

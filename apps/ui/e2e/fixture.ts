@@ -36,12 +36,14 @@ export async function installFixture(page: Page, populated = false) {
       if (stored) {
         const saved = JSON.parse(stored);
         client.workspaces = new Map(saved.workspaces); client.conversations = new Map(saved.conversations);
+        client.metadata = new Map(saved.metadata);
         client.workspace = client.workspaces.values().next().value;
         client.machineState = saved.machineState; client.enabled = new Set(saved.enabled);
       } else client.addWorkspace("second-workspace", "Borealis");
       client.propose = (request: any) => {
+        client.evolution = null;
         const workspace = client.workspaces.get(request.workspaceId);
-        const baseAgent = { id: crypto.randomUUID(), name: "Procurement reviewer", role: "Procurement",
+        const baseAgent = { id: crypto.randomUUID(), name: request.message.includes("nested") ? "Nested reviewer" : "Procurement reviewer", role: "Procurement",
           instructions: request.message, providerId: "github-copilot", model: "gpt-6-astra",
           computerPolicy: "none", approvalPolicy: "always", enabled: true, suggestedRoutines: [] };
         if (request.target === "workspace") {
@@ -53,11 +55,20 @@ export async function installFixture(page: Page, populated = false) {
         if (request.target === "agent" || request.message.startsWith("# Inventory")) {
           const document = request.message.startsWith("# Inventory");
           const proposal = fixtures.draftFor("agent", {
-            ...baseAgent, name: document ? "Inventory Visibility Agent" : "Procurement reviewer",
+            ...baseAgent, name: document ? "Inventory Visibility Agent" : baseAgent.name,
             enabled: !document,
           }, request.workspaceId);
           if (document) proposal.basis.instructionDocument = { turnId: crypto.randomUUID(), contentHash: "c".repeat(64) };
           return proposal;
+        }
+        if (request.message.includes("organize internally")) {
+          client.evolution = { twinSummary: "Organized internal evidence.", sections: [{
+            id: "evidence-notes", title: "Conversation evidence section", kind: "notes", description: "Only this selected workspace.", taskIds: [],
+          }], suggestedRoutines: [], defaultFocus: "conversation" };
+          const basis = fixtures.draftFor("task", { requestId: crypto.randomUUID(), title: "Review", instructions: "Review.",
+            agentId: workspace.agents[0]?.id ?? null, priority: "normal" }, request.workspaceId);
+          return { ...basis, kind: "clarification", readyForReview: false, missing: ["source"], draft: null,
+            assistantMessage: "The workspace is organized. Which source should I review?" };
         }
         if (request.target === "automation") return fixtures.draftFor("automation", {
           id: crypto.randomUUID(), name: "Weekly finance review", taskTitle: "Review weekly exceptions",
@@ -95,6 +106,7 @@ export async function installFixture(page: Page, populated = false) {
         const result = await client.call(method, params);
         localStorage.setItem(storageKey, JSON.stringify({
           workspaces: [...client.workspaces], conversations: [...client.conversations],
+          metadata: [...client.metadata],
           machineState: client.machineState, enabled: [...client.enabled],
         }));
         return result;

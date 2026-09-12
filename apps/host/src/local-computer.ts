@@ -181,6 +181,7 @@ export class LocalComputer implements ComputerPort {
   private lease(
     owner: WorkspaceScope, taskId: string, runId: string, context: AuthorizedEffectContext,
     action: (capability: object, lease: ComputerLease) => Promise<ComputerReceipt>,
+    workspaceId: string,
   ): Promise<EffectOutcome> {
     let began = false, cancelled = context.signal.aborted;
     const noEffect = (status: "denied" | "cancelled", reason: string): EffectOutcome => ({
@@ -196,8 +197,8 @@ export class LocalComputer implements ComputerPort {
       const health = await this.check();
       if (cancelled || context.signal.aborted) return noEffect("cancelled", "cancelled_before_computer_lease");
       if (health.state !== "ready") return noEffect("denied", "computer_recovery_required");
-      const businessWorkspaceId = this.persistence.parentBusiness(owner);
-      if (!businessWorkspaceId) throw new Error("Computer work requires a business-owned scope.");
+      this.persistence.assertExecutionScope(owner, workspaceId);
+      const businessWorkspaceId = workspaceId;
       began = true; this.leaseActive = true; this.operationGeneration++;
       this.activeOperation = {
         scope: owner, businessWorkspaceId, leaseId: null,
@@ -239,7 +240,11 @@ export class LocalComputer implements ComputerPort {
   start(context: RequestContext): Promise<Computer> { return this.control(context, "start"); }
   stop(context: RequestContext): Promise<Computer> { return this.control(context, "stop"); }
   private async control(context: RequestContext, action: "start" | "stop"): Promise<Computer> {
-    const scope = this.work.assertContext(context);
+    this.work.assertOwner(context);
+    const scope = this.work.assertContext(context, "computer:control");
+    if (action === "start" && !this.persistence.activeLineage(scope.workspaceId)) {
+      throw new HostError(-32009, "A paused or archived workspace lineage cannot start computer actions.");
+    }
     if ((await this.check()).state !== "ready") return unavailable("The configured local computer");
     const p = this.persistence;
     const taskId = "computer-control", runId = digest(context.requestId).slice(0, 32);
@@ -256,7 +261,7 @@ export class LocalComputer implements ComputerPort {
           return started;
         }
         return this.broker!.stop(capability, lease, this.request(effect, taskId, runId, "stop"));
-        });
+        }, scope.workspaceId);
         return {
           ...outcome,
           events: [...outcome.events, ...(action === "start" && outcome.status === "succeeded" && evidenceRef ? [{
@@ -269,7 +274,7 @@ export class LocalComputer implements ComputerPort {
   }
   async execute(
     claims: PermitClaims, scope: WorkspaceScope, input: { argv: string[]; cwd: string; timeoutMs: number; readOnly: boolean },
-    context: AuthorizedEffectContext, taskId: string, runId: string,
+    context: AuthorizedEffectContext, taskId: string, runId: string, workspaceId: string,
   ): Promise<EffectOutcome> {
     if ((await this.check()).state !== "ready") throw new Error("The computer is unavailable.");
     if (claims.executionLocation !== "guest" || claims.computer !== "omarchy"
@@ -289,9 +294,9 @@ export class LocalComputer implements ComputerPort {
     });
     try {
       return await this.lease(scope, taskId, runId, context, async (capability, lease) => {
-        const businessWorkspaceId = this.persistence.parentBusiness(scope);
-        if (!businessWorkspaceId) throw new Error("Unknown computer workspace owner.");
-        const principal = { id: this.persistence.owner.id, workspaceId: this.persistence.owner.catalog.workspaceId, permissions: [] };
+        this.persistence.assertExecutionScope(scope, workspaceId);
+        const businessWorkspaceId = workspaceId;
+        const principal = this.persistence.humanPrincipal();
         const state = await this.inspect({ principal, workspaceId: businessWorkspaceId, requestId: `computer-check-${runId}` });
         if (!state.workspace?.enabled) return {
           state: "committed", computerId: "omarchy",
@@ -301,17 +306,16 @@ export class LocalComputer implements ComputerPort {
               receipts: [{ kind: "no-effect" }], events: [] }))), replayed: false },
         };
         return this.broker!.execute(capability, lease, { ...this.request(context, taskId, runId, "execute"), ...input });
-      });
+      }, workspaceId);
     } finally { this.approved.delete(scope.workspaceId); }
   }
   async close(): Promise<void> {
     if (!this.configured) return;
     await this.operations;
-    const owner = this.persistence.owner;
     const workspaceId = this.persistence.businessIds()[0];
     if (!workspaceId) return;
     const context: RequestContext = {
-      principal: { id: owner.id, workspaceId: owner.catalog.workspaceId, permissions: [] }, requestId: randomUUID(), workspaceId,
+      principal: this.persistence.humanPrincipal(), requestId: randomUUID(), workspaceId,
     };
     const observed = await this.inspect(context);
     if (observed.state === "running") {

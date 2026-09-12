@@ -36,7 +36,7 @@ export const agentInputSchema = z.strictObject({
   approvalPolicy: z.enum(["always", "on-risk"]),
   enabled: z.boolean(),
 });
-export const agentSchema = agentInputSchema.extend({ workspaceId: idSchema, updatedAt: dateSchema });
+export const agentSchema = agentInputSchema.extend({ workspaceId: idSchema, updatedAt: dateSchema, retiredAt: dateSchema.nullable().optional() });
 export const taskInputSchema = z.strictObject({
   requestId: z.uuid(),
   title: textSchema,
@@ -119,6 +119,7 @@ export const automationInputSchema = z.strictObject({
 });
 export const automationSchema = automationInputSchema.extend({
   workspaceId: idSchema,
+  originWorkspaceId: idSchema.optional(),
   updatedAt: dateSchema,
   nextRunAt: dateSchema.nullable(),
 });
@@ -268,6 +269,9 @@ export type WorkEvent = z.infer<typeof eventSchema>;
 export type EventPage = z.infer<typeof eventPageSchema>;
 
 export const workspaceScopeSchema = z.strictObject({ agentId: idSchema, workspaceId: idSchema });
+export const MAX_WORKSPACE_DEPTH = 4;
+export const MAX_WORKSPACE_AGENTS = 32;
+export const MAX_WORKSPACES = 1000;
 export const workspaceBindingSchema = z.strictObject({ workspaceId: idSchema });
 export const conciergeBindingSchema = z.strictObject({ workspaceId: idSchema.nullable() });
 export const twinIdentitySchema = z.strictObject({
@@ -280,6 +284,21 @@ export const workspaceDetailsSchema = z.strictObject({
   twin: twinIdentitySchema,
   approvalPolicy: z.enum(["always", "on-risk"]),
   computerPolicy: z.enum(["none", "read-only", "control"]),
+  parentAccess: z.enum(["inspect", "none"]).optional(),
+});
+export const workspaceOrganizationSchema = z.strictObject({
+  twinSummary: z.string().max(2000),
+  sections: z.array(z.strictObject({
+    id: idSchema, title: textSchema, description: z.string().max(1000),
+    kind: z.enum(["tasks", "notes", "routines"]), taskIds: z.array(idSchema).max(100),
+  })).max(8),
+  suggestedRoutines: z.array(automationInputSchema.extend({ enabled: z.literal(false) })).max(8),
+  defaultFocus: z.enum(["conversation", "work", "agents", "automations", "settings"]),
+}).refine((organization) => new Set(organization.sections.map((section) => section.id)).size === organization.sections.length
+  && new Set(organization.suggestedRoutines.map((routine) => routine.id)).size === organization.suggestedRoutines.length,
+  "Internal organization identifiers must be unique.");
+export const emptyOrganization = () => workspaceOrganizationSchema.parse({
+  twinSummary: "", sections: [], suggestedRoutines: [], defaultFocus: "conversation",
 });
 const leadAgentSchema = agentInputSchema.extend({
   role: z.string().trim().min(1).max(240),
@@ -313,18 +332,53 @@ export const workspaceInputSchema = workspaceDetailsSchema.extend({
 export const workspaceSummarySchema = workspaceDetailsSchema.extend({
   id: idSchema,
   ownerId: idSchema,
-  parentWorkspaceId: idSchema,
+  parentWorkspaceId: idSchema.nullable(),
+  ownerType: z.enum(["human", "agent"]),
+  ownerAgentId: idSchema.nullable(),
+  rootWorkspaceId: idSchema,
+  lineage: z.array(idSchema).min(1).max(MAX_WORKSPACE_DEPTH + 1),
+  depth: z.number().int().min(0).max(MAX_WORKSPACE_DEPTH),
+  status: z.enum(["active", "paused", "archived"]),
+  parentAccess: z.enum(["inspect", "none"]),
+  organization: workspaceOrganizationSchema,
   catalogScope: workspaceScopeSchema,
   leadAgentId: idSchema,
   revision: z.number().int().nonnegative(),
   createdAt: dateSchema,
   updatedAt: dateSchema,
-}).refine((workspace) => workspace.id === workspace.catalogScope.workspaceId
-  && workspace.id !== workspace.parentWorkspaceId, "A business has exactly one independent catalog.");
+}).superRefine((workspace, context) => {
+  if (workspace.id !== workspace.catalogScope.workspaceId || workspace.id === workspace.parentWorkspaceId
+    || workspace.lineage.length !== workspace.depth + 1 || workspace.lineage.at(-1) !== workspace.id
+    || workspace.lineage[0] !== workspace.rootWorkspaceId || new Set(workspace.lineage).size !== workspace.lineage.length
+    || (workspace.depth === 0
+      ? workspace.parentWorkspaceId !== null || workspace.rootWorkspaceId !== workspace.id || workspace.ownerType !== "human" || workspace.ownerAgentId !== null
+      : workspace.parentWorkspaceId !== workspace.lineage.at(-2) || workspace.ownerType !== "agent"
+        || workspace.ownerAgentId !== workspace.catalogScope.agentId)) {
+    context.addIssue({ code: "custom", message: "Workspace ownership and immutable bounded lineage must agree." });
+  }
+});
 export const workspaceListSchema = z.strictObject({
   ownerId: idSchema,
   conciergeWorkspaceId: idSchema,
-  workspaces: z.array(workspaceSummarySchema).max(1000),
+  workspaces: z.array(workspaceSummarySchema).max(MAX_WORKSPACES),
+});
+export const workspaceChildrenSchema = z.strictObject({
+  parent: workspaceSummarySchema,
+  children: z.array(workspaceSummarySchema).max(MAX_WORKSPACE_AGENTS),
+});
+export const workspaceTreeSchema = z.strictObject({
+  maxDepth: z.literal(MAX_WORKSPACE_DEPTH),
+  roots: z.array(idSchema).max(MAX_WORKSPACES),
+  nodes: z.array(z.strictObject({
+    workspace: workspaceSummarySchema, children: z.array(idSchema).max(MAX_WORKSPACE_AGENTS),
+  })).max(MAX_WORKSPACES),
+});
+export const workspaceBreadcrumbSchema = z.strictObject({
+  workspaceId: idSchema,
+  ancestors: z.array(z.strictObject({
+    id: idSchema, name: textSchema, ownerType: z.enum(["human", "agent"]),
+    ownerAgentId: idSchema.nullable(), depth: z.number().int().min(0).max(MAX_WORKSPACE_DEPTH),
+  })).min(1).max(MAX_WORKSPACE_DEPTH + 1),
 });
 export const settingsPatchSchema = z.strictObject({
   workspaceName: textSchema.optional(),
@@ -332,6 +386,7 @@ export const settingsPatchSchema = z.strictObject({
   work: settingsSchema.shape.work.partial().optional(),
   notifications: settingsSchema.shape.notifications.partial().optional(),
   computerPolicy: z.enum(["none", "read-only", "control"]).optional(),
+  parentAccess: z.enum(["inspect", "none"]).optional(),
 }).refine((patch) => Object.values(patch).some((value) =>
   typeof value === "string" || (value !== undefined && Object.keys(value).length > 0)), "Specify a meaningful settings change.");
 export const approvalRecommendationSchema = z.strictObject({
@@ -390,6 +445,16 @@ export const twinProposalSchema = z.discriminatedUnion("kind", [
     draft: z.null(),
   }),
 ]);
+const evolutionField = { evolution: workspaceOrganizationSchema.optional() };
+export const twinModelResponseSchema = z.discriminatedUnion("kind", [
+  twinProposalSchema.options[0].extend(evolutionField),
+  twinProposalSchema.options[1].extend(evolutionField),
+  twinProposalSchema.options[2].extend(evolutionField),
+  twinProposalSchema.options[3].extend(evolutionField),
+  twinProposalSchema.options[4].extend(evolutionField),
+  twinProposalSchema.options[5].extend(evolutionField),
+  twinProposalSchema.options[6].extend(evolutionField),
+]);
 export const twinHeadsSchema = z.strictObject({
   body: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   memory: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
@@ -425,7 +490,7 @@ export const twinTurnSchema = z.strictObject({
 });
 export const twinEventSchema = z.strictObject({
   id: z.uuid(), workspaceId: idSchema.nullable(), proposalId: z.uuid().nullable(),
-  kind: z.enum(["proposal", "accept", "dismiss", "error"]), actorId: idSchema,
+  kind: z.enum(["proposal", "accept", "dismiss", "error", "evolution"]), actorId: idSchema,
   detail: z.string().max(2000), createdAt: dateSchema,
 });
 export const twinConversationSchema = z.strictObject({
@@ -454,12 +519,17 @@ export const workspaceOpenSchema = z.strictObject({
   twin: twinConversationSchema,
   routines: z.array(automationSchema).max(1000),
   computer: computerSchema,
+  breadcrumb: workspaceBreadcrumbSchema,
 });
 export type WorkspaceInput = z.infer<typeof workspaceInputSchema>;
 export type WorkspaceDetails = z.infer<typeof workspaceDetailsSchema>;
 export type WorkspaceSummary = z.infer<typeof workspaceSummarySchema>;
 export type WorkspaceList = z.infer<typeof workspaceListSchema>;
 export type WorkspaceOpen = z.infer<typeof workspaceOpenSchema>;
+export type WorkspaceOrganization = z.infer<typeof workspaceOrganizationSchema>;
+export type WorkspaceChildren = z.infer<typeof workspaceChildrenSchema>;
+export type WorkspaceTree = z.infer<typeof workspaceTreeSchema>;
+export type WorkspaceBreadcrumb = z.infer<typeof workspaceBreadcrumbSchema>;
 export type TwinMessageRequest = z.infer<typeof twinMessageRequestSchema>;
 export type TwinProposal = z.infer<typeof twinProposalSchema>;
 export type TwinDraft = z.infer<typeof twinDraftSchema>;
@@ -480,10 +550,15 @@ export const rpcParameterSchemas = {
   "workspaces.create": workspaceInputSchema,
   "workspaces.open": workspaceBindingSchema,
   "workspaces.update": bound(workspaceDetailsSchema),
+  "workspaces.children": workspaceBindingSchema,
+  "workspaces.tree": conciergeBindingSchema,
+  "workspaces.breadcrumb": workspaceBindingSchema,
   "work.snapshot": workspaceBindingSchema,
   "work.createTask": bound(taskInputSchema),
   "work.assignTask": bound(z.strictObject({ id: idSchema, agentId: idSchema })),
-  "agents.save": bound(agentInputSchema),
+  "agents.save": bound(agentInputSchema.extend({ parentRevision: z.number().int().nonnegative().optional() })),
+  "agents.openWorkspace": bound(entityParamsSchema),
+  "agents.retire": bound(entityParamsSchema.extend({ parentRevision: z.number().int().nonnegative().optional() })),
   "runs.start": bound(entityParamsSchema), "runs.cancel": bound(entityParamsSchema),
   "approvals.decide": bound(approvalDecisionSchema), "artifacts.read": bound(entityParamsSchema),
   "automations.save": bound(automationInputSchema), "settings.update": bound(settingsSchema),

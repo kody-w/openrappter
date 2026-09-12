@@ -38,6 +38,22 @@ and pending-response ownership. Late responses from another workspace cannot
 replace the selected view or transfer a lease. The desktop's preload and main
 process share the same pure RPC parameter schemas as the host.
 
+The selector renders the workspace hierarchy. Every agent card and recognized
+agent mention opens that agent's dedicated child workspace in the exact same
+three-column shell. The header identifies **You** or the owning agent, parent,
+depth and effective status; breadcrumbs and Back to parent return through the
+verified lineage. A confirmed agent proposal opens its automatically created
+child. The owning agent is identified in the header rather than recursively
+listed as its own sub-agent.
+
+Conversation-generated sections and disabled routine suggestions are displayed
+with a subtle **Workspace evolved from this conversation** receipt. They are
+not active schedules. Task/routine views, proposal editors, computer state and
+conversation input are scoped to the current workspace. Late voice-transcript
+or action callbacks captured in another workspace are discarded. A remembered
+selection is only a locator preference and is checked against the current
+authorized catalog before use.
+
 ## Intent, then review
 
 New workspace, agent, task, routine and settings actions focus the Twin's

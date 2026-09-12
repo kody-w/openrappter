@@ -3,6 +3,7 @@ import {
   statusSchema, taskInputSchema, twinDraftSchema, workspaceInputSchema, workspaceSummarySchema,
   type Computer, type RpcInput, type RpcMethod, type RpcResult, type Snapshot, type TwinConversation, type TwinDraft,
   type TwinMessageRequest, type TwinProposal, type WorkspaceSummary,
+  emptyOrganization, type WorkspaceOrganization,
 } from "../src/model";
 import type { HostState, WorkClient } from "../src/client";
 
@@ -28,14 +29,16 @@ export function testStatus(ready = false) {
     }])),
   });
 }
-export function summaryFor(snapshot: Snapshot): WorkspaceSummary {
+export function summaryFor(snapshot: Snapshot, identity: Partial<WorkspaceSummary> = {}): WorkspaceSummary {
   return workspaceSummarySchema.parse({
-    id: snapshot.workspaceId, ownerId: snapshot.ownerId, parentWorkspaceId: "test-concierge",
+    id: snapshot.workspaceId, ownerId: snapshot.ownerId, parentWorkspaceId: null,
+    ownerType: "human", ownerAgentId: null, rootWorkspaceId: snapshot.workspaceId,
+    lineage: [snapshot.workspaceId], depth: 0, status: "active", parentAccess: "none", organization: emptyOrganization(),
     catalogScope: { workspaceId: snapshot.workspaceId, agentId: `twin-${snapshot.workspaceId}` },
     name: snapshot.settings.workspaceName, purpose: `Work for ${snapshot.settings.workspaceName}.`,
     twin: { name: `${snapshot.settings.workspaceName} Twin`, instructions: "Generate complete drafts for human review." },
     leadAgentId: snapshot.agents[0]?.id ?? "test-lead", approvalPolicy: snapshot.settings.work.approvalPolicy,
-    computerPolicy: "control", revision: snapshot.revision, createdAt: timestamp, updatedAt: timestamp,
+    computerPolicy: "control", revision: snapshot.revision, createdAt: timestamp, updatedAt: timestamp, ...identity,
   });
 }
 const emptyConversation = (workspaceId: string | null): TwinConversation => ({ workspaceId, revision: 0, turns: [], proposals: [], events: [] });
@@ -53,6 +56,7 @@ export function draftFor(kind: Exclude<TwinProposal["kind"], "clarification">, d
 export class FixtureClient implements WorkClient {
   workspace = testWorkspace();
   workspaces = new Map<string, Snapshot>([[this.workspace.workspaceId, this.workspace]]);
+  metadata = new Map<string, WorkspaceSummary>([[this.workspace.workspaceId, summaryFor(this.workspace)]]);
   conversations = new Map<string | null, TwinConversation>([[null, emptyConversation(null)], [this.workspace.workspaceId, emptyConversation(this.workspace.workspaceId)]]);
   status = testStatus();
   calls: { method: string; params: unknown }[] = [];
@@ -64,8 +68,19 @@ export class FixtureClient implements WorkClient {
   enabled = new Set<string>();
   activeLease: { workspaceId: string; id: string } | null = null;
   startGate: Promise<void> | undefined;
-  addWorkspace(id: string, name: string) {
+  evolution: WorkspaceOrganization | null = null;
+  summary(snapshot: Snapshot) {
+    return summaryFor(snapshot, { ...this.metadata.get(snapshot.workspaceId), name: snapshot.settings.workspaceName, revision: snapshot.revision });
+  }
+  addWorkspace(id: string, name: string, parent?: WorkspaceSummary, owner?: Snapshot["agents"][number]) {
     const snapshot = testWorkspace(id, name); this.workspaces.set(id, snapshot); this.conversations.set(id, emptyConversation(id));
+    this.metadata.set(id, summaryFor(snapshot, parent && owner ? {
+      parentWorkspaceId: parent.id, ownerType: "agent", ownerAgentId: owner.id, rootWorkspaceId: parent.rootWorkspaceId,
+      lineage: [...parent.lineage, id], depth: parent.depth + 1, status: owner.enabled ? "active" : "paused",
+      parentAccess: "inspect", catalogScope: { agentId: owner.id, workspaceId: id }, leadAgentId: owner.id,
+      computerPolicy: owner.computerPolicy,
+    } : {}));
+    if (owner) snapshot.agents.push(owner);
     return snapshot;
   }
   computer(workspaceId: string | null): Computer {
@@ -89,7 +104,14 @@ export class FixtureClient implements WorkClient {
     const input = agentInputSchema.parse(raw);
     const agent = { ...input, workspaceId: snapshot.agents.find((item) => item.id === input.id)?.workspaceId ?? crypto.randomUUID(), updatedAt: timestamp };
     const index = snapshot.agents.findIndex((item) => item.id === input.id);
-    if (index === -1) snapshot.agents.push(agent); else snapshot.agents[index] = agent;
+    if (index === -1) {
+      snapshot.agents.push(agent);
+      this.addWorkspace(agent.workspaceId, agent.name, this.summary(snapshot), agent);
+    } else {
+      snapshot.agents[index] = agent;
+      const child = this.workspaces.get(agent.workspaceId);
+      if (child) child.agents = child.agents.map((item) => item.id === agent.id ? agent : item);
+    }
     return agent;
   }
   private saveRoutine(snapshot: Snapshot, raw: unknown) {
@@ -102,6 +124,11 @@ export class FixtureClient implements WorkClient {
     return routine;
   }
   async call<M extends RpcMethod>(method: M, params: RpcInput<M>): Promise<RpcResult<M>> {
+    if (method === "workspaces.list") for (const current of this.workspaces.values()) {
+      for (const agent of current.agents) if (agent.workspaceId !== current.workspaceId && !this.workspaces.has(agent.workspaceId)) {
+        this.addWorkspace(agent.workspaceId, agent.name, this.summary(current), agent);
+      }
+    }
     this.calls.push({ method, params: structuredClone(params) });
     const fields = rpcContracts[method].input.parse(params) as Record<string, unknown>;
     const workspaceId = fields.workspaceId as string | null | undefined;
@@ -112,9 +139,30 @@ export class FixtureClient implements WorkClient {
     let result: unknown;
     switch (method) {
       case "system.status": result = this.status; break;
-      case "workspaces.list": result = { ownerId: "test-owner", conciergeWorkspaceId: "test-concierge", workspaces: [...this.workspaces.values()].map(summaryFor) }; break;
-      case "workspaces.open": result = { workspace: summaryFor(snapshot!), snapshot: structuredClone(snapshot!), twin: structuredClone(conversation),
-        routines: snapshot!.automations, computer: this.computer(workspaceId!) }; break;
+      case "workspaces.list": {
+        const all = [...this.workspaces.values()].map((item) => this.summary(item));
+        const ordered: WorkspaceSummary[] = [];
+        const append = (parent: string | null) => {
+          for (const item of all.filter((item) => item.parentWorkspaceId === parent)) { ordered.push(item); append(item.id); }
+        };
+        append(null);
+        result = { ownerId: "test-owner", conciergeWorkspaceId: "test-concierge", workspaces: ordered }; break;
+      }
+      case "workspaces.open": {
+        const workspace = this.summary(snapshot!);
+        result = { workspace, snapshot: structuredClone(snapshot!), twin: structuredClone(conversation),
+          routines: snapshot!.automations, computer: this.computer(workspaceId!),
+          breadcrumb: { workspaceId, ancestors: workspace.lineage.map((id) => {
+            const item = this.summary(this.workspaces.get(id)!);
+            return { id, name: item.name, depth: item.depth, ownerType: item.ownerType, ownerAgentId: item.ownerAgentId };
+          }) } };
+        break;
+      }
+      case "agents.openWorkspace": {
+        const agent = snapshot!.agents.find((agent) => agent.id === data.id);
+        if (!agent) throw new Error("Agent not in selected workspace.");
+        result = this.summary(this.workspaces.get(agent.workspaceId)!); break;
+      }
       case "work.snapshot": result = structuredClone(snapshot); break;
       case "twin.conversation": result = structuredClone(conversation); break;
       case "providers.list": result = this.status.ready ? [{ id: "github-copilot", name: "Injected Copilot", configured: true,
@@ -141,6 +189,12 @@ export class FixtureClient implements WorkClient {
           { id: crypto.randomUUID(), workspaceId: workspaceId!, role: "assistant", content: proposal.assistantMessage, proposalId: proposal.id, createdAt: timestamp });
         conversation.proposals.push(proposal);
         conversation.events.push({ id: crypto.randomUUID(), workspaceId: workspaceId!, kind: "proposal", actorId: "test-owner", proposalId: proposal.id, detail: proposal.summary, createdAt: timestamp });
+        if (this.evolution && snapshot) {
+          const current = this.summary(snapshot);
+          this.metadata.set(snapshot.workspaceId, { ...current, organization: structuredClone(this.evolution) });
+          conversation.events.push({ id: crypto.randomUUID(), workspaceId: workspaceId!, kind: "evolution", actorId: "test-owner",
+            proposalId: proposal.id, detail: "Workspace evolved from this conversation", createdAt: timestamp });
+        }
         conversation.revision++; result = proposal; break;
       }
       case "twin.dismissProposal": conversation.events.push({ id: crypto.randomUUID(), workspaceId: workspaceId!, kind: "dismiss",
@@ -153,7 +207,8 @@ export class FixtureClient implements WorkClient {
         switch (proposal.kind) {
           case "agent": {
             const { suggestedRoutines, ...input } = draft;
-            applied = this.saveAgent(snapshot!, input);
+            const agent = this.saveAgent(snapshot!, input);
+            applied = { agent, workspace: this.summary(this.workspaces.get(agent.workspaceId)!) };
             if (Array.isArray(suggestedRoutines)) for (const routine of suggestedRoutines) this.saveRoutine(snapshot!, routine);
             break;
           }
@@ -165,7 +220,7 @@ export class FixtureClient implements WorkClient {
           }
           case "automation": applied = this.saveRoutine(snapshot!, draft); break;
           case "settings": {
-            const { computerPolicy: _computerPolicy, ...patch } = draft;
+            const { computerPolicy: _computerPolicy, parentAccess: _parentAccess, ...patch } = draft;
             snapshot!.settings = settingsSchema.parse({ ...snapshot!.settings, ...patch });
             applied = snapshot!.settings; break;
           }
@@ -173,7 +228,7 @@ export class FixtureClient implements WorkClient {
             const input = workspaceInputSchema.parse(draft), id = `business-${crypto.randomUUID()}`;
             const created = this.addWorkspace(id, input.name);
             this.saveAgent(created, input.leadAgent);
-            applied = summaryFor(created); break;
+            applied = this.summary(created); break;
           }
           default: throw new Error("No applicable draft.");
         }
@@ -182,7 +237,10 @@ export class FixtureClient implements WorkClient {
         result = { id: proposal.id, workspaceId: proposal.workspaceId, kind: proposal.kind, status: "applied", result: applied, createdAt: timestamp };
         break;
       }
-      case "agents.save": result = this.saveAgent(snapshot!, data); break;
+      case "agents.save": {
+        const { parentRevision: _revision, ...input } = data;
+        result = this.saveAgent(snapshot!, input); break;
+      }
       case "automations.save": result = this.saveRoutine(snapshot!, data); break;
       case "work.assignTask": {
         const task = snapshot!.tasks.find((item) => item.id === data.id)!;

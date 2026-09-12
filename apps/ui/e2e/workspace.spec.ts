@@ -49,7 +49,7 @@ test("conversation, complete review, work execution and settings survive reload 
   await page.getByRole("button", { name: "Approve draft" }).click();
   await page.reload();
   await expect(page.getByRole("button", { name: "Open Procurement operations", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Review Procurement reviewer", exact: true })).toBeVisible();
+  await expect(page.getByText(/Owner: Procurement reviewer/)).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -107,6 +107,32 @@ test("human approvals, artifact text and keyboard review focus remain usable", a
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Review complete draft" })).toBeFocused();
+});
+
+test("agent workspaces recurse in one shell and internal evolution stays on the selected branch", async ({ page }) => {
+  await installFixture(page); await page.goto("/");
+  await navigate(page, "Agents");
+  await page.getByRole("button", { name: "New agent", exact: true }).click();
+  await propose(page, "Create a procurement reviewer.");
+  await page.getByRole("button", { name: "Approve draft" }).click();
+  await expect(page.getByText(/Owner: Procurement reviewer/)).toBeVisible();
+  await navigate(page, "Agents");
+  await page.getByRole("button", { name: "New agent", exact: true }).click();
+  await propose(page, "Create a nested evidence reviewer.");
+  await page.getByRole("button", { name: "Approve draft" }).click();
+  await expect(page.getByText(/Owner: Nested reviewer/)).toBeVisible();
+  await expect(page.getByText(/Depth 2/)).toBeVisible();
+  await expect(page.locator('[data-layout="three-column-twin"]')).toHaveCount(1);
+  await page.getByLabel("Your intent or full instruction document").fill("Please organize internally around evidence.");
+  await page.getByRole("button", { name: "Send intent" }).click();
+  await expect(page.getByText("Workspace evolved from this conversation", { exact: false })).toBeVisible();
+  await expect(page.getByText("Conversation evidence section", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back to parent" }).click();
+  await expect(page.getByText(/Owner: Procurement reviewer/)).toBeVisible();
+  await expect(page.getByText("Conversation evidence section", { exact: true })).toHaveCount(0);
+  await navigate(page, "Agents");
+  await page.getByRole("button", { name: "Open agent workspace" }).click();
+  await expect(page.getByText("Conversation evidence section", { exact: true })).toBeVisible();
 });
 
 for (const width of [1360, 375]) for (const theme of ["light", "dark"]) {

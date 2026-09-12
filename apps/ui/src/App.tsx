@@ -10,6 +10,7 @@ import { Settings } from "./Settings";
 import { TwinConversation, type IntentSeed } from "./TwinConversation";
 import { useWorkspace } from "./useWorkspace";
 import { Work } from "./Work";
+import { WorkspaceOrganization } from "./WorkspaceOrganization";
 
 const areas: { id: Area; label: string; icon: IconName }[] = [
   { id: "work", label: "Work", icon: "work" }, { id: "agents", label: "Agents", icon: "agents" },
@@ -23,7 +24,7 @@ type Editor =
 const currentArea = (): Area => areas.find((area) => `#${area.id}` === window.location.hash)?.id ?? "work";
 export function App({ client }: { client: WorkClient }) {
   const state = useWorkspace(client);
-  const { snapshot, workspace, selectedId, workspaces, conversation, status, providers, computer,
+  const { snapshot, workspace, breadcrumb, selectedId, workspaces, conversation, status, providers, computer,
     diagnostics, loading, connected, error, notice, busy, refresh, perform } = state;
   const [area, setArea] = useState<Area>(currentArea);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -33,6 +34,8 @@ export function App({ client }: { client: WorkClient }) {
   const [artifactLoading, setArtifactLoading] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const artifactRequest = useRef(0);
+  const areaByWorkspace = useRef(new Map<string | null, Area>());
+  const focusedWorkspace = useRef<string | null>(null);
   const active = areas.find((item) => item.id === area)!;
   useEffect(() => {
     const route = () => { setArea(currentArea()); setMenuOpen(false); };
@@ -43,6 +46,12 @@ export function App({ client }: { client: WorkClient }) {
   useEffect(() => {
     setEditor(null); setArtifact(null); setArtifactLoading(false); artifactRequest.current++;
   }, [selectedId]);
+  useEffect(() => {
+    if (!workspace || focusedWorkspace.current === workspace.id) return;
+    focusedWorkspace.current = workspace.id;
+    const focus = workspace.organization.defaultFocus;
+    setArea(areaByWorkspace.current.get(workspace.id) ?? (focus === "conversation" ? "work" : focus));
+  }, [workspace]);
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
@@ -55,7 +64,10 @@ export function App({ client }: { client: WorkClient }) {
     apply(); media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [snapshot?.settings.appearance.theme, snapshot?.settings.appearance.density]);
-  const navigate = (next: Area) => { window.location.hash = next; setArea(next); setMenuOpen(false); };
+  const navigate = (next: Area) => {
+    areaByWorkspace.current.set(selectedId, next);
+    window.location.hash = next; setArea(next); setMenuOpen(false);
+  };
   const intent = (target: TwinMessageRequest["target"], message = "", id = selectedId) => {
     if (id !== selectedId) state.selectWorkspace(id);
     setEditor(null); setSeed((previous) => ({ id: (previous?.id ?? 0) + 1, workspaceId: id, target, message }));
@@ -92,16 +104,27 @@ export function App({ client }: { client: WorkClient }) {
     } finally { if (state.isCurrent(workspaceId) && request === artifactRequest.current) setArtifactLoading(false); }
   };
   const selectedName = workspace?.name ?? workspaces.find((item) => item.id === selectedId)?.name ?? "Owner concierge";
+  const directAgents = snapshot?.agents.filter((agent) => agent.id !== workspace?.ownerAgentId) ?? [];
+  const ownerAgent = snapshot?.agents.find((agent) => agent.id === workspace?.ownerAgentId);
+  const effectiveStatus = (item: NonNullable<typeof workspace>) => item.lineage.some((id) => workspaces.find((node) => node.id === id)?.status === "archived")
+    ? "archived" as const : item.lineage.some((id) => workspaces.find((node) => node.id === id)?.status === "paused") ? "paused" as const : item.status;
+  const currentStatus = workspace ? effectiveStatus(workspace) : null;
+  const archived = currentStatus === "archived";
+  const canCreateAgent = Boolean(workspace && workspace.depth < 4 && directAgents.length < 32 && !archived);
   return <div className="app-shell twin-shell" data-layout="three-column-twin">
     <a className="skip-link" href="#main-content">Skip to workspace</a>
     <div className="mobile-bar"><span className="brand"><span className="brand-mark">RW</span>RAPP Work</span>
       <button className="icon-button" aria-label="Toggle navigation" aria-expanded={menuOpen} aria-controls="app-sidebar" onClick={() => setMenuOpen(!menuOpen)}><Icon name="menu" /></button></div>
     <aside className={`sidebar${menuOpen ? " is-open" : ""}`} id="app-sidebar" aria-label="Workspace sidebar">
       <div className="brand desktop-brand"><span className="brand-mark" aria-hidden="true">RW</span><div>RAPP Work<span className="brand-tagline">Intent. Review. Evidence.</span></div></div>
-      <section className="workspace-catalog" aria-label="Business workspaces">
+      <section className="workspace-catalog" aria-label="Workspace hierarchy">
         <button className="workspace-choice" aria-pressed={selectedId === null} onClick={() => selectWorkspace(null)}>Owner concierge</button>
         {workspaces.map((item) => <button key={item.id} className="workspace-choice" aria-label={`Open ${item.name}`}
-          aria-pressed={selectedId === item.id} onClick={() => selectWorkspace(item.id)}>{item.name}</button>)}
+          style={{ paddingInlineStart: 12 + item.depth * 14 }} data-depth={item.depth}
+          aria-pressed={selectedId === item.id} onClick={() => selectWorkspace(item.id)}>
+          {item.depth > 0 && <span aria-hidden="true">↳ </span>}{item.name}
+          <small>{item.ownerType === "human" ? "You" : "Agent workspace"} · {effectiveStatus(item)}</small>
+        </button>)}
         <button className="button secondary" disabled={!connected} onClick={() => intent("workspace", "", null)}><Icon name="plus" size={16} />New workspace</button>
       </section>
       <nav aria-label="Primary navigation"><ul>{areas.map((item) => <li key={item.id}>
@@ -109,23 +132,31 @@ export function App({ client }: { client: WorkClient }) {
           onClick={(event) => { event.preventDefault(); navigate(item.id); }}><Icon name={item.icon} /><span>{item.label}</span></a>
       </li>)}</ul></nav>
       <section className="roster" aria-labelledby="roster-title"><div className="roster-heading"><h2 id="roster-title">Your agents</h2>
-        <button className="icon-button" aria-label="Add an agent conversationally" disabled={!connected || !workspace}
+        <button className="icon-button" aria-label="Add an agent conversationally" disabled={!connected || !canCreateAgent}
           onClick={() => intent("agent")}><Icon name="plus" size={16} /></button></div>
-        {!snapshot?.agents.length ? <p className="roster-empty">Describe the role or paste its complete instruction document. The Twin prepares the configuration.</p> :
-          <ul>{snapshot.agents.map((agent) => <li key={agent.id}><button className="roster-agent" aria-label={`Review ${agent.name}`} disabled={!connected}
-            onClick={() => setEditor({ kind: "agent", workspaceId: snapshot.workspaceId, existing: agent })}>
-            <Avatar name={agent.name} small /><span className="min-zero"><strong>{agent.name}</strong><small>{agentAvailability(agent, providers, snapshot)}</small></span>
+        {!directAgents.length ? <p className="roster-empty">Describe a sub-agent or paste its instructions. Every confirmed agent gets its own child workspace.</p> :
+          <ul>{directAgents.map((agent) => <li key={agent.id}><button className="roster-agent" aria-label={`Open ${agent.name}'s workspace`} disabled={!connected}
+            onClick={() => { void state.openAgentWorkspace(agent); }}>
+            <Avatar name={agent.name} small /><span className="min-zero"><strong>{agent.name}</strong><small>{agentAvailability(agent, providers, snapshot!)}</small></span>
           </button></li>)}</ul>}
       </section>
       <div className="sidebar-bottom"><div className="connection"><span className={`connection-dot${connected ? " connected" : ""}`} /><strong>{connected ? "Host connected" : loading ? "Connecting to host" : "Host not connected"}</strong></div>
         <p>Connections and execution readiness are reported, never assumed.</p></div>
     </aside>
     <main id="main-content" className="main" tabIndex={-1}>
-      <header className="page-header"><div><p className="breadcrumb">{selectedName}<span>/</span>{active.label}</p>
+      <header className="page-header"><div>
+        <nav className="workspace-breadcrumbs" aria-label="Workspace breadcrumb">
+          {breadcrumb?.ancestors.map((item) => item.id === selectedId ? <strong key={item.id} aria-current="page">{item.name}</strong>
+            : <button key={item.id} className="text-button" onClick={() => selectWorkspace(item.id)}>{item.name}</button>) ?? <span>Owner concierge</span>}
+        </nav>
+        <p className="breadcrumb">{selectedName}<span>/</span>{active.label}</p>
+        {workspace && <p className="workspace-owner">Owner: {workspace.ownerType === "human" ? "You" : ownerAgent?.name ?? workspace.name}
+          {" · "}Parent: {breadcrumb?.ancestors.at(-2)?.name ?? "Top-level business"}{" · "}Depth {workspace.depth}{" · "}{currentStatus}</p>}
         <h1 ref={heading} tabIndex={-1}>{active.label}</h1><p className="page-description">Speak or type intent. Your Twin drafts; you decide.</p></div>
         <div className="header-actions"><button className="button secondary" aria-label="Refresh workspace" disabled={loading || busy}
           onClick={() => { void refresh(); }}><Icon name="refresh" size={16} /></button>
-          <button className="button primary" disabled={!connected || busy || (selectedId === null && area !== "work")}
+          {workspace?.parentWorkspaceId && <button className="button secondary" onClick={() => selectWorkspace(workspace.parentWorkspaceId)}>Back to parent</button>}
+          <button className="button primary" disabled={!connected || busy || archived || (area === "agents" && !canCreateAgent) || (selectedId === null && area !== "work")}
             onClick={() => intent(selectedId === null ? "workspace" : area === "work" ? "task" : area === "agents" ? "agent" : area === "automations" ? "automation" : "settings")}>
             <Icon name="plus" size={16} />{area === "settings" ? "Discuss settings" : selectedId === null ? "Describe a workspace" : area === "work" ? "New task" : area === "agents" ? "New agent" : "New routine"}
           </button></div>
@@ -138,15 +169,20 @@ export function App({ client }: { client: WorkClient }) {
           action={<button className="button secondary" onClick={() => { void refresh(); }}>Try connecting again</button>}>
           The desktop host is required. No sample work or AI fallback is loaded.</Empty></div>}
         <TwinConversation key={selectedId ?? "concierge"} workspaceId={selectedId} name={workspace?.twin.name ?? "RAPP Work Twin"}
-          conversation={conversation} connected={connected && !loading} busy={busy} seed={seed} send={state.sendMessage}
+          conversation={conversation} connected={connected && !loading && !archived} busy={busy} seed={seed} send={state.sendMessage}
+          agents={snapshot?.agents ?? []} openAgent={(agent) => { void state.openAgentWorkspace(agent); }}
           review={review} dismiss={(proposal) => { void state.dismissProposal(proposal); }} />
         {!status?.ready && providers.map((provider) => !provider.configured && <p className="inline-note" key={provider.id}>{provider.detail}</p>)}
+        {workspace && snapshot && <WorkspaceOrganization workspace={workspace} snapshot={snapshot} conversation={conversation}
+          discussRoutine={(routine) => intent("automation", `Prepare a new complete routine proposal from this disabled suggestion, using a newly allocated ID:\n${JSON.stringify(routine)}`)} />}
         {snapshot && <section className="workspace-activity" aria-label="Selected workspace records" aria-busy={busy}>
           {!connected && <p className="inline-note">Showing the last loaded workspace. Actions are disabled until the host reconnects.</p>}
-          {area === "work" && <Work key={snapshot.workspaceId} snapshot={snapshot} status={status} computer={computer} connected={connected} busy={busy}
+          {area === "work" && <Work key={snapshot.workspaceId} snapshot={snapshot} status={status} computer={computer} connected={connected && !archived} busy={busy}
+            executionAllowed={currentStatus === "active"}
             perform={perform} newTask={() => intent("task")} review={(approval) => setEditor({ kind: "approval", workspaceId: snapshot.workspaceId, approval })}
-            openArtifact={(item) => { void openArtifact(item); }} />}
-          {area === "agents" && <Agents snapshot={snapshot} providers={providers} connected={connected} create={() => intent("agent")}
+            openArtifact={(item) => { void openArtifact(item); }} openAgent={(agent) => { void state.openAgentWorkspace(agent); }} />}
+          {area === "agents" && <Agents snapshot={{ ...snapshot, agents: directAgents }} providers={providers} connected={connected && !archived} create={() => intent("agent")}
+            open={(agent) => { void state.openAgentWorkspace(agent); }}
             edit={(existing) => setEditor({ kind: "agent", workspaceId: snapshot.workspaceId, existing })} />}
           {area === "automations" && <Automations snapshot={snapshot} connected={connected} create={() => intent("automation")}
             edit={(existing) => setEditor({ kind: "automation", workspaceId: snapshot.workspaceId, existing })} />}
@@ -156,13 +192,13 @@ export function App({ client }: { client: WorkClient }) {
         <footer className="workspace-footer"><span>RAPP Work</span><span>Conversation first. Evidence by default.</span></footer>
       </div>
     </main>
-    <ComputerPanel workspace={workspace} snapshot={snapshot} computer={computer} connected={connected && !loading} busy={busy}
+    <ComputerPanel workspace={workspace && currentStatus ? { ...workspace, status: currentStatus } : workspace} snapshot={snapshot} computer={computer} connected={connected && !loading && !archived} busy={busy}
       starting={state.pending === "computer.start"} perform={perform}
       discuss={() => intent("settings", "Review the computer access policy for this workspace and keep explicit approvals.")} />
     {editor?.workspaceId === selectedId && editor.kind === "proposal" && <ProposalReview proposal={editor.proposal} workspace={workspace} snapshot={snapshot}
       busy={busy} error={error} onClose={() => setEditor(null)} apply={state.applyProposal} />}
     {editor?.workspaceId === selectedId && (editor.kind === "agent" || editor.kind === "automation") && snapshot &&
-      <ExistingReview kind={editor.kind} existing={editor.existing} snapshot={snapshot} busy={busy} error={error} onClose={() => setEditor(null)} perform={perform} />}
+      <ExistingReview key={editor.existing.id} kind={editor.kind} existing={editor.existing} snapshot={snapshot} busy={busy} error={error} onClose={() => setEditor(null)} perform={perform} />}
     {editor?.workspaceId === selectedId && editor.kind === "approval" && <ApprovalForm approval={editor.approval} recommendation={editor.recommendation}
       perform={perform} busy={busy} error={error} onClose={() => setEditor(null)} />}
     {artifact?.workspaceId === selectedId && <Modal title={artifact.item.name} onClose={() => setArtifact(null)} busy={artifactLoading}>

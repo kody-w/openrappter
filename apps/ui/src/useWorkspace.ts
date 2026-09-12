@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkClient } from "./client";
 import {
   workspaceSummarySchema, type Computer, type Diagnostics, type Provider, type RpcInput, type RpcMethod,
-  type Snapshot, type Status, type TwinConversation, type TwinDraft, type TwinMessageRequest, type WorkspaceSummary,
+  type Agent, type Snapshot, type Status, type TwinConversation, type TwinDraft, type TwinMessageRequest, type WorkspaceSummary, type WorkspaceBreadcrumb,
 } from "./model";
 
 export type Perform = <M extends RpcMethod>(method: M, params: Omit<RpcInput<M>, "workspaceId">, message: string) => Promise<boolean>;
@@ -10,6 +10,7 @@ export function useWorkspace(client: WorkClient) {
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceSummary | null>(null);
+  const [breadcrumb, setBreadcrumb] = useState<WorkspaceBreadcrumb | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [conversation, setConversation] = useState<TwinConversation | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
@@ -33,7 +34,11 @@ export function useWorkspace(client: WorkClient) {
     try {
       const catalog = await client.call("workspaces.list", {});
       if (!mounted.current || current !== generation.current) return;
-      let id = selection.current === undefined ? catalog.workspaces[0]?.id ?? null : selection.current;
+      let remembered: string | null = null;
+      try { remembered = sessionStorage.getItem("rapp-work.selected-workspace"); } catch { /* Selection is only a locator preference. */ }
+      let id = selection.current === undefined
+        ? remembered === "" ? null : catalog.workspaces.find((item) => item.id === remembered)?.id ?? catalog.workspaces[0]?.id ?? null
+        : selection.current;
       if (id !== null && !catalog.workspaces.some((item) => item.id === id)) id = null;
       if (selection.current !== id) selectionEpoch.current++;
       selection.current = id; setSelectedId(id); setWorkspaces(catalog.workspaces);
@@ -50,9 +55,10 @@ export function useWorkspace(client: WorkClient) {
           throw new Error("The host returned a different workspace.");
         }
         setWorkspace(opened.value.workspace); setSnapshot(opened.value.snapshot);
+        setBreadcrumb(opened.value.breadcrumb);
         setConversation(opened.value.twin); setComputer(opened.value.computer);
       } else if (id === null && history.status === "fulfilled" && history.value) {
-        setWorkspace(null); setSnapshot(null); setConversation(history.value);
+        setWorkspace(null); setSnapshot(null); setBreadcrumb(null); setConversation(history.value);
         setComputer(machine.status === "fulfilled" ? machine.value : null);
       } else throw opened.status === "rejected" ? opened.reason : new Error("Workspace conversation could not be loaded.");
       setStatus(health.status === "fulfilled" ? health.value : null);
@@ -68,9 +74,10 @@ export function useWorkspace(client: WorkClient) {
     }
   }, [client]);
   const selectWorkspace = useCallback((id: string | null) => {
+    try { sessionStorage.setItem("rapp-work.selected-workspace", id ?? ""); } catch { /* The authorized refresh still determines access. */ }
     selection.current = id; selectionEpoch.current++; generation.current++; operation.current++;
     inFlight.current = false; setPending(null); setSelectedId(id);
-    setWorkspace(null); setSnapshot(null); setConversation(null); setComputer(null);
+    setWorkspace(null); setSnapshot(null); setBreadcrumb(null); setConversation(null); setComputer(null);
     setProviders([]); setDiagnostics(null); setError(""); setNotice(""); setLoading(true);
     void refresh();
   }, [refresh]);
@@ -125,18 +132,20 @@ export function useWorkspace(client: WorkClient) {
     }
   }, [connected, refresh]);
   const perform: Perform = useCallback(async (method, params, message) => {
-    const workspaceId = selection.current;
+    const workspaceId = selectedId;
+    if (selection.current !== workspaceId) return false;
     if (typeof workspaceId !== "string") { setError("Select a business workspace for this action."); return false; }
     return await run(method, () => client.call(method, { ...params, workspaceId } as RpcInput<typeof method>), message) !== undefined;
-  }, [client, run]);
+  }, [client, run, selectedId]);
   const sendMessage = useCallback(async (message: string, target: TwinMessageRequest["target"]) => {
-    const workspaceId = selection.current ?? null;
+    const workspaceId = selectedId;
+    if (selection.current !== workspaceId) return undefined;
     const history = (conversation?.turns ?? []).slice(-6).filter((turn) => turn.content.length <= 3000)
       .map(({ role, content }) => ({ role, content }));
     return run("twin.message", () => client.call("twin.message", {
       workspaceId, message, history, target: target ?? "auto",
-    }), "The Twin has responded. Nothing is applied until you approve a complete draft.");
-  }, [client, conversation, run]);
+    }), "The Twin has responded. Internal organization may evolve; external work still requires review.");
+  }, [client, conversation, run, selectedId]);
   const applyProposal = useCallback(async (draft: TwinDraft, editedDraft?: Record<string, unknown>) => {
     if (selection.current !== draft.workspaceId || !draft.basis || !draft.readyForReview) return false;
     const result = await run("twin.applyProposal", () => client.call("twin.applyProposal", {
@@ -144,6 +153,11 @@ export function useWorkspace(client: WorkClient) {
       ...(editedDraft ? { editedDraft } : {}),
     }), "Reviewed draft applied through the canonical Work service.");
     if (result?.kind === "workspace") selectWorkspace(workspaceSummarySchema.parse(result.result).id);
+    if (result?.kind === "agent") {
+      const child = workspaceSummarySchema.parse(result.result.workspace);
+      if (child.parentWorkspaceId !== draft.workspaceId || child.ownerType !== "agent") throw new Error("The child workspace does not match the reviewed parent.");
+      selectWorkspace(child.id);
+    }
     return result !== undefined;
   }, [client, run, selectWorkspace]);
   const dismissProposal = useCallback(async (draft: TwinDraft) => {
@@ -152,9 +166,23 @@ export function useWorkspace(client: WorkClient) {
       workspaceId: draft.workspaceId, id: draft.id, proposalHash: draft.basis!.proposalHash, reason: "Dismissed after review.",
     }), "Draft dismissed without applying it.") !== undefined;
   }, [client, run]);
+  const openAgentWorkspace = useCallback(async (agent: Agent) => {
+    const parent = selectedId, epoch = selectionEpoch.current;
+    if (!parent || selection.current !== parent || agent.workspaceId === parent) return;
+    try {
+      const child = await client.call("agents.openWorkspace", { workspaceId: parent, id: agent.id });
+      if (!mounted.current || epoch !== selectionEpoch.current || selection.current !== parent) return;
+      if (child.parentWorkspaceId !== parent || child.ownerAgentId !== agent.id || child.id !== agent.workspaceId) {
+        throw new Error("The agent's dedicated workspace identity changed.");
+      }
+      selectWorkspace(child.id);
+    } catch (error) {
+      if (mounted.current && epoch === selectionEpoch.current) setError(error instanceof Error ? error.message : "The agent workspace could not be opened.");
+    }
+  }, [client, selectedId, selectWorkspace]);
   return {
-    workspaces, selectedId, workspace, snapshot, conversation, status, providers, computer, diagnostics,
+    workspaces, selectedId, workspace, breadcrumb, snapshot, conversation, status, providers, computer, diagnostics,
     loading, connected, error, notice, busy: pending !== null, pending,
-    refresh, perform, selectWorkspace, sendMessage, applyProposal, dismissProposal, isCurrent,
+    refresh, perform, selectWorkspace, sendMessage, applyProposal, dismissProposal, openAgentWorkspace, isCurrent,
   };
 }

@@ -101,7 +101,7 @@ try {
   await quitAndCheck();
   page = await launch();
   await expect(page.getByRole("heading", { name: "Validate a local work record", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Review Local smoke analyst" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Local smoke analyst's workspace" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start task", exact: true })).toBeDisabled();
   await quitAndCheck();
   expect(errors).toEqual([]);

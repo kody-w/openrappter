@@ -79,9 +79,9 @@ describe("conversation-first canonical Twin", () => {
     const accepted = await f.rpc("twin.applyProposal", applyInput(draft));
     expect(accepted.error).toBeUndefined();
     const catalog = workspaceListSchema.parse((await f.rpc("workspaces.list")).result);
-    expect(catalog.workspaces).toHaveLength(1);
+    expect(catalog.workspaces).toHaveLength(2);
     const workspace = catalog.workspaces[0]!;
-    expect(workspace).toMatchObject({ name: "Orion finance", parentWorkspaceId: f.services.persistence.owner.catalog.workspaceId });
+    expect(workspace).toMatchObject({ name: "Orion finance", parentWorkspaceId: null, ownerType: "human", depth: 0 });
     const opened = workspaceOpenSchema.parse((await f.rpc("workspaces.open", { workspaceId: workspace.id })).result);
     expect(opened.snapshot.agents).toHaveLength(1);
     expect(opened.snapshot.agents[0]!.workspaceId).not.toBe(workspace.id);
@@ -99,7 +99,7 @@ describe("conversation-first canonical Twin", () => {
       expect(isVerifiedChain(scanned.streams.body)).toBe(true);
       scannedFrames += scanned.streams.body.frames.length;
     }
-    expect(scannedFrames).toBe(27);
+    expect(scannedFrames).toBe(30);
     const bootstrap = (await p.read(workspace.catalogScope)).commands.find((command) => command.command.operation === "host.workspace.bootstrap");
     expect(bootstrap).toMatchObject({ state: "committed", status: "succeeded" });
     expect(f.copilot.complete).toHaveBeenCalledOnce();
@@ -143,7 +143,8 @@ describe("conversation-first canonical Twin", () => {
     const foreignAgent = snapshotB.agents[0]!;
     const { workspaceId: _agentWorkspace, updatedAt: _updated, ...input } = foreignAgent;
     await expect(f.services.work.saveAgent(f.context(a.id), input)).rejects.toMatchObject({ code: -32003 });
-    for (const workspaceId of [foreignAgent.workspaceId, f.services.persistence.owner.catalog.workspaceId, "guessed-business"]) {
+    expect((await f.rawRpc("work.snapshot", { workspaceId: foreignAgent.workspaceId })).error).toBeUndefined();
+    for (const workspaceId of [f.services.persistence.owner.catalog.workspaceId, "guessed-business"]) {
       expect((await f.rawRpc("work.snapshot", { workspaceId })).error?.code).toBe(-32003);
     }
     const page = await f.rpc("events.read", { workspaceId: a.id, scope: { area: "work" } });

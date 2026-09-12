@@ -97,6 +97,7 @@ function ReviewFields({ kind, initial, document, busy, error, onClose, submit, l
         {select(["work", "approvalPolicy"], "Require approval", ["always", "on-risk"])}
         {checkbox(["notifications", "approvals"], "New approval requests")}{checkbox(["notifications", "completedRuns"], "Completed runs")}
         {draft.computerPolicy !== undefined && <p>Proposed computer policy: {String(draft.computerPolicy)}</p>}
+        {draft.parentAccess !== undefined && <p>Proposed parent inspection policy: {String(draft.parentAccess)}</p>}
       </>}
       {(error || localError) && <p className="form-error" role="alert">{localError || error}</p>}
     </div><FormFooter busy={busy} onClose={onClose} label={label} />
@@ -140,6 +141,7 @@ export function ExistingReview({ kind, existing, snapshot, busy, error, onClose,
   kind: "agent" | "automation"; existing: unknown; snapshot: Snapshot; busy: boolean; error: string;
   onClose: () => void; perform: Perform;
 }) {
+  const [parentRevision] = useState(snapshot.revision);
   const parsed = kind === "agent" ? agentSchema.safeParse(existing) : automationSchema.safeParse(existing);
   const records = kind === "agent" ? snapshot.agents : snapshot.automations;
   if (!parsed.success || !records.some((item) => item.id === parsed.data.id && item.workspaceId === parsed.data.workspaceId)) {
@@ -148,10 +150,12 @@ export function ExistingReview({ kind, existing, snapshot, busy, error, onClose,
   const { workspaceId: _workspaceId, updatedAt: _updatedAt, ...rest } = parsed.data;
   const initial = { ...rest } as Record<string, unknown>;
   delete initial.nextRunAt;
+  delete initial.originWorkspaceId;
+  delete initial.retiredAt;
   return <Modal title={`Review existing ${kind === "automation" ? "routine" : "agent"}`} onClose={onClose} busy={busy}>
     <ReviewFields kind={kind} initial={initial} document={false} busy={busy} error={error} onClose={onClose}
       label="Save reviewed changes" submit={async (value) => kind === "agent"
-        ? perform("agents.save", agentInputSchema.parse(value), "Existing agent updated.")
+        ? perform("agents.save", { ...agentInputSchema.parse(value), parentRevision }, "Existing agent updated.")
         : perform("automations.save", automationInputSchema.parse(value), "Existing routine updated.")} />
   </Modal>;
 }

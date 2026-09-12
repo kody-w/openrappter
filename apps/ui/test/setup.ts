@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
-afterEach(() => { cleanup(); window.location.hash = ""; });
+afterEach(() => { cleanup(); window.location.hash = ""; sessionStorage.clear(); });
 Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: vi.fn().mockImplementation((query: string) => ({

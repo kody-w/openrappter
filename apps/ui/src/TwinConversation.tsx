@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Badge, Icon, formatDate } from "./components";
-import { MAX_INSTRUCTION_CHARS, type TwinConversation as Conversation, type TwinDraft, type TwinMessageRequest } from "./model";
+import { MAX_INSTRUCTION_CHARS, type Agent, type TwinConversation as Conversation, type TwinDraft, type TwinMessageRequest } from "./model";
 
 export interface IntentSeed { id: number; workspaceId: string | null; target: TwinMessageRequest["target"]; message: string }
-export function TwinConversation({ workspaceId, name, conversation, connected, busy, seed, send, review, dismiss }: {
+export function TwinConversation({ workspaceId, name, conversation, connected, busy, seed, send, review, dismiss, agents, openAgent }: {
   workspaceId: string | null; name: string; conversation: Conversation | null; connected: boolean; busy: boolean;
   seed: IntentSeed | null; send: (message: string, target: TwinMessageRequest["target"]) => Promise<TwinDraft | undefined>;
   review: (proposal: TwinDraft) => void; dismiss: (proposal: TwinDraft) => void;
+  agents: Agent[]; openAgent: (agent: Agent) => void;
 }) {
   const [message, setMessage] = useState("");
   const [target, setTarget] = useState<TwinMessageRequest["target"]>(workspaceId === null ? "workspace" : "auto");
@@ -40,6 +41,10 @@ export function TwinConversation({ workspaceId, name, conversation, connected, b
         return <article className={`conversation-turn ${turn.role}`} key={turn.id}>
           <div className="row between"><strong>{turn.role === "user" ? "You" : name}</strong><time dateTime={turn.createdAt}>{formatDate(turn.createdAt)}</time></div>
           <div className={`turn-content preserve${turn.content.length > 4000 ? " long-document" : ""}`} tabIndex={turn.content.length > 4000 ? 0 : undefined}>{turn.content}</div>
+          {turn.role === "assistant" && agents.some((agent) => turn.content.includes(agent.name)) && <div className="row wrap" aria-label="Agent workspaces mentioned">
+            {agents.filter((agent) => turn.content.includes(agent.name)).map((agent) => <button key={agent.id} className="text-button"
+              disabled={!connected} onClick={() => openAgent(agent)}>Open {agent.name}'s workspace</button>)}
+          </div>}
           {proposal && <div className="proposal-card" data-proposal-id={proposal.id}>
             <div className="row between"><Badge>{proposal.kind === "clarification" ? "Necessary follow-up" : proposal.kind === "approval" ? "Recommendation only" : "Complete draft"}</Badge>
               {status && <Badge tone={status === "accept" ? "positive" : "neutral"}>{status === "accept" ? "Applied" : "Dismissed"}</Badge>}</div>

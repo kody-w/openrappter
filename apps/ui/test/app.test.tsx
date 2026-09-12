@@ -1,10 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { DisconnectedClient } from "../src/client";
 import { ProposalReview } from "../src/forms";
-import { twinDraftSchema } from "../src/model";
+import { emptyOrganization, twinDraftSchema } from "../src/model";
+import { useWorkspace } from "../src/useWorkspace";
 import { draftFor, FixtureClient, populatedClient, summaryFor, testAgent, testStatus } from "./fixture";
 import { inventoryVisibilityInstructions } from "../../../tests/fixtures/instruction-documents";
 
@@ -87,8 +88,9 @@ describe("conversation-first three-column workspace", () => {
     await user.click(dialog.getByRole("button", { name: "Approve draft" }));
     await waitFor(() => expect(client.workspace.agents[0]?.role).toBe("Procurement coordination"));
     expect(client.calls.some((call) => call.method === "agents.save")).toBe(false);
-    await user.click(primary().getByRole("link", { name: "Automations" }));
-    await user.click(screen.getByRole("button", { name: "Review Procurement analyst" }));
+    await user.click(screen.getByRole("button", { name: "Back to parent" }));
+    await user.click(primary().getByRole("link", { name: "Agents" }));
+    await user.click(screen.getByRole("button", { name: "Review agent definition" }));
     dialog = within(screen.getByRole("dialog", { name: "Review existing agent" }));
     expect(dialog.getByLabelText("Role")).toHaveValue("Procurement coordination");
     await user.click(dialog.getByRole("button", { name: "Save reviewed changes" }));
@@ -114,7 +116,7 @@ describe("conversation-first three-column workspace", () => {
     expect(screen.getByLabelText("Lead agent name")).toHaveValue("Orion lead");
     await user.click(screen.getByRole("button", { name: "Approve draft" }));
     await waitFor(() => expect(panel().getByText("Scoped to Orion")).toBeVisible());
-    expect(client.workspaces.size).toBe(2);
+    expect(client.workspaces.size).toBe(3);
     expect(client.calls.some((call) => call.method === "workspaces.create")).toBe(false);
   });
 
@@ -277,5 +279,79 @@ describe("conversation-first three-column workspace", () => {
     expect(await screen.findByRole("heading", { name: "Connect your local workspace" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Send intent" })).toBeDisabled();
     expect(panel().getByRole("button", { name: "Start agent computer" })).toBeDisabled();
+  });
+
+  it("drills recursively into confirmed agent workspaces using the same shell, hierarchy, owner header and breadcrumbs", async () => {
+    const client = new FixtureClient(); client.status = testStatus(true);
+    client.propose = (request) => draftFor("agent", agentInput(request.message.includes("specialist") ? "Evidence specialist" : "Research lead"), request.workspaceId);
+    const { user } = await open(client);
+    await user.click(primary().getByRole("link", { name: "Agents" }));
+    await user.click(screen.getByRole("button", { name: "New agent" }));
+    await send(user, "Create a research lead.");
+    await user.click(screen.getByRole("button", { name: "Review complete draft" }));
+    await user.click(screen.getByRole("button", { name: "Approve draft" }));
+    await waitFor(() => expect(screen.getByText(/Owner: Research lead/)).toBeVisible());
+    expect(screen.getByText(/Parent: Operations/)).toBeVisible();
+    const lead = client.workspace.agents[0]!;
+    expect(panel().getByText("Scoped to Research lead")).toBeVisible();
+    await user.click(primary().getByRole("link", { name: "Agents" }));
+    await user.click(screen.getByRole("button", { name: "New agent" }));
+    await send(user, "Create an evidence specialist sub-agent.");
+    await user.click(screen.getByRole("button", { name: "Review complete draft" }));
+    await user.click(screen.getByRole("button", { name: "Approve draft" }));
+    await waitFor(() => expect(screen.getByText(/Owner: Evidence specialist/)).toBeVisible());
+    expect(screen.getByText(/Depth 2/)).toBeVisible();
+    expect(document.querySelectorAll('[data-layout="three-column-twin"]')).toHaveLength(1);
+    await user.click(within(screen.getByRole("navigation", { name: "Workspace breadcrumb" })).getByRole("button", { name: "Research lead" }));
+    await waitFor(() => expect(panel().getByText("Scoped to Research lead")).toBeVisible());
+    await user.click(primary().getByRole("link", { name: "Agents" }));
+    await user.click(screen.getByRole("button", { name: "Open agent workspace" }));
+    await waitFor(() => expect(panel().getByText("Scoped to Evidence specialist")).toBeVisible());
+    expect(client.calls.find((call) => call.method === "agents.openWorkspace")?.params).toMatchObject({ workspaceId: lead.workspaceId });
+  });
+
+  it("shows scoped internal evolution receipts and suggested routines without creating a form or enabling a schedule", async () => {
+    const client = new FixtureClient(); client.status = testStatus(true); client.workspace.agents.push(testAgent);
+    client.addWorkspace("second-workspace", "Borealis");
+    client.evolution = {
+      ...emptyOrganization(), twinSummary: "Organized Alpha evidence.",
+      sections: [{ id: "alpha-notes", title: "Alpha evidence notes", kind: "notes", description: "Only this workspace's evidence.", taskIds: [] }],
+      suggestedRoutines: [{ id: "suggestion", name: "Suggested evidence review", taskTitle: "Review evidence", instructions: "Review only supplied evidence.",
+        agentId: testAgent.id, cadence: { kind: "interval", minutes: 60 }, enabled: false }],
+    };
+    client.propose = (request) => twinDraftSchema.parse({
+      ...draftFor("task", { requestId: crypto.randomUUID(), title: "Review", instructions: "Review evidence.", agentId: testAgent.id, priority: "normal" }, request.workspaceId),
+      kind: "clarification", readyForReview: false, draft: null, missing: ["source"], assistantMessage: "I organized your workspace. Which source should I review?",
+    });
+    const { user } = await open(client);
+    await user.type(composer(), "Organize my evidence workspace.");
+    await user.click(screen.getByRole("button", { name: "Send intent" }));
+    await screen.findByText("Workspace evolved from this conversation");
+    expect(screen.getByText("Alpha evidence notes")).toBeVisible();
+    expect(screen.getByText("Suggestion only")).toBeVisible();
+    expect(client.workspace.automations).toEqual([]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open Borealis" }));
+    await waitFor(() => expect(panel().getByText("Scoped to Borealis")).toBeVisible());
+    expect(screen.queryByText("Alpha evidence notes")).not.toBeInTheDocument();
+    expect(screen.queryByText("Workspace evolved from this conversation")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open Operations" }));
+    await screen.findByText("Alpha evidence notes");
+  });
+
+  it("drops late voice/transcript and action callbacks captured in another workspace", async () => {
+    const client = new FixtureClient(); client.status = testStatus(true); client.addWorkspace("second-workspace", "Borealis");
+    const hook = renderHook(() => useWorkspace(client));
+    await waitFor(() => expect(hook.result.current.selectedId).toBe("test-workspace"));
+    await waitFor(() => expect(hook.result.current.connected).toBe(true));
+    const voiceTranscript = hook.result.current.sendMessage;
+    const oldAction = hook.result.current.perform;
+    act(() => hook.result.current.selectWorkspace("second-workspace"));
+    await waitFor(() => expect(hook.result.current.workspace?.id).toBe("second-workspace"));
+    await act(async () => {
+      expect(await voiceTranscript("Late transcript from Operations.", "task")).toBeUndefined();
+      expect(await oldAction("computer.start", {}, "Wrong workspace")).toBe(false);
+    });
+    expect(client.calls.some((call) => call.method === "twin.message" || call.method === "computer.start")).toBe(false);
   });
 });

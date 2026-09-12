@@ -11,7 +11,7 @@ export function ComputerPanel({ workspace, snapshot, computer, connected, busy, 
   const state = machine?.state ?? "unavailable";
   const lease = machine?.lease;
   const held = lease?.state === "held";
-  const blocked = !connected || !scoped || busy || !machine?.capabilities.control
+  const blocked = !connected || !scoped || busy || workspace?.status !== "active" || !machine?.capabilities.control
     || !["stopped", "running"].includes(state) || lease?.state === "other-workspace" || held;
   const agent = snapshot?.agents.find((item) => item.id === lease?.agentId);
   return <aside className="computer-panel" aria-label="Agent computer panel" tabIndex={0} data-workspace-id={workspace?.id ?? "concierge"}>

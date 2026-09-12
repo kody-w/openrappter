@@ -13,6 +13,7 @@ const MAX_BODY = MAX_RPC_BYTES;
 const MAX_BUFFER = 34 * 1024 * 1024;
 const principalSchema = z.strictObject({
   id: idSchema, workspaceId: idSchema,
+  kind: z.enum(["human", "agent"]).optional(), agentId: idSchema.optional(),
   permissions: z.array(z.enum([
     "work:read", "work:write", "agents:read", "agents:write", "automations:read", "automations:write",
     "settings:read", "settings:write", "runtime:execute", "computer:read", "computer:control", "diagnostics:read", "events:read",
@@ -21,7 +22,8 @@ const principalSchema = z.strictObject({
 const required: Record<keyof HostServices, readonly string[]> = {
   storage: ["initialize", "read"],
   security: ["authenticate", "authorize", "authorizeWorkspace"],
-  work: ["listWorkspaces", "createWorkspace", "updateWorkspace", "workspace", "subscribe", "snapshot", "createTask", "assignTask", "saveAgent", "saveAutomation", "updateSettings", "startRun", "cancelRun", "decideApproval", "readArtifact"],
+  work: ["listWorkspaces", "createWorkspace", "updateWorkspace", "workspace", "children", "tree", "breadcrumb", "agentWorkspace", "retireAgent",
+    "subscribe", "snapshot", "createTask", "assignTask", "saveAgent", "saveAutomation", "updateSettings", "startRun", "cancelRun", "decideApproval", "readArtifact"],
   runtime: ["start", "cancel", "decide", "schedule"],
   provider: ["list", "configure"], computer: ["inspect", "start", "stop"], diagnostics: ["snapshot", "record"],
   twin: ["message", "conversation", "applyProposal", "dismissProposal"],
@@ -62,8 +64,9 @@ export async function createHost(services: HostServices, options: HostOptions = 
     const authorization = request.headers.authorization;
     if (!authorization?.startsWith("Bearer ") || authorization.length > 263 ||
         request.rawHeaders.filter((header, index) => index % 2 === 0 && header.toLowerCase() === "authorization").length !== 1) return null;
-    const parsed = principalSchema.safeParse(await services.security.authenticate(authorization.slice(7)));
-    return parsed.success ? parsed.data : null;
+    const identity = await services.security.authenticate(authorization.slice(7));
+    const parsed = principalSchema.safeParse(identity);
+    return parsed.success ? identity : null;
   };
   const reply = (response: ServerResponse, code: number, body: unknown) => {
     if (!response.writableEnded && !response.destroyed) {

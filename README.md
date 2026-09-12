@@ -16,6 +16,13 @@ for integration. The three-column UI keeps workspace context on the left,
 conversation and complete reviews in the center, and the shared agent computer
 on the right. Paste full instruction documents without re-entering their fields.
 
+Workspaces are recursive: every agent owns one mint-once child workspace with
+the same conversation, work, routines, evidence and computer panel. Drill into
+an agent to work there, use breadcrumbs to return, and create sub-agents through
+reviewed Twin intent. Lineage is bounded to depth four and 32 agents per
+workspace. Safe internal organization can evolve from a conversation; external
+actions and approval decisions remain gated.
+
 ## The product
 
 - **Work** — tasks, runs, approvals, results, and their evidence.

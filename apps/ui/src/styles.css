@@ -34,6 +34,15 @@
 .workspace-catalog { display: grid; gap: 8px; }
 .workspace-choice { min-height: 44px; padding: 10px 12px; text-align: left; overflow-wrap: anywhere; background: var(--cp-surface); }
 .workspace-choice[aria-pressed="true"] { border-color: var(--cp-accent); background: var(--cp-accent-soft); font-weight: 650; }
+.workspace-choice small { display: block; font-size: 10px; color: var(--cp-text); font-weight: 400; }
+.workspace-breadcrumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12px; margin-bottom: 8px; }
+.workspace-breadcrumbs > * + *::before { content: "›"; margin-right: 8px; color: var(--cp-text-muted); }
+.workspace-owner { color: var(--cp-text); font-size: 12px; margin-bottom: 10px; }
+.workspace-organization { display: grid; gap: 14px; margin: 20px 0; }
+.evolution-receipt { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--cp-text); font-size: 12px; }
+.organization-sections { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.organization-sections article { border: 1px solid var(--cp-border); border-radius: 12px; background: var(--cp-surface); padding: 16px; display: grid; gap: 10px; }
+.organization-sections p, .organization-sections li { font-size: 12px; overflow-wrap: anywhere; }
 .twin-conversation { border: 1px solid var(--cp-border); border-radius: 16px; background: var(--cp-surface); overflow: hidden; margin-bottom: 24px; }
 .twin-heading { padding: 20px 22px 12px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
 .twin-heading h2 { margin-top: 5px; overflow-wrap: anywhere; }

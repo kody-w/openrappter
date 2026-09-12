@@ -9,8 +9,8 @@ export function agentAvailability(agent: Agent, providers: Provider[], snapshot:
   if (!provider?.configured || !provider.models.includes(agent.model)) return "Needs provider";
   return "Configured";
 }
-export function Agents({ snapshot, providers, edit, create, connected }: {
-  snapshot: Snapshot; providers: Provider[]; edit: (agent: Agent) => void; create: () => void; connected: boolean;
+export function Agents({ snapshot, providers, edit, create, open, connected }: {
+  snapshot: Snapshot; providers: Provider[]; edit: (agent: Agent) => void; create: () => void; open: (agent: Agent) => void; connected: boolean;
 }) {
   const [query, setQuery] = useState("");
   const agents = snapshot.agents.filter((agent) => `${agent.name} ${agent.role}`.toLowerCase().includes(query.toLowerCase()));
@@ -24,7 +24,8 @@ export function Agents({ snapshot, providers, edit, create, connected }: {
       <h3>{agent.name}</h3><p className="muted">{agent.role || "No role specified"}</p><p className="clamp agent-instructions">{agent.instructions || "No instructions configured."}</p>
       <p className="mono small-text" title="This agent's independently minted workspace">{agent.workspaceId}</p>
       <dl className="metadata compact"><div><dt>Model</dt><dd>{agent.model || "Not connected"}</dd></div><div><dt>Computer</dt><dd>{agent.computerPolicy === "none" ? "No access" : agent.computerPolicy === "read-only" ? "Read-only" : "Controlled access"}</dd></div><div><dt>Approval</dt><dd>{agent.approvalPolicy === "always" ? "Always required" : "Sensitive actions"}</dd></div></dl>
-      <button className="button secondary" disabled={!connected} onClick={() => edit(agent)}>Configure agent<Icon name="arrow" size={16} /></button>
+      <button className="button primary" disabled={!connected} onClick={() => open(agent)}>Open agent workspace<Icon name="arrow" size={16} /></button>
+      <button className="text-button" disabled={!connected || Boolean(agent.retiredAt)} onClick={() => edit(agent)}>Review agent definition</button>
     </article>)}</div>}
   </section>;
 }

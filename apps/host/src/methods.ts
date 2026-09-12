@@ -9,6 +9,7 @@ import {
   conciergeBindingSchema, twinApplyRequestSchema, twinApplyResultSchema, twinConversationSchema,
   twinDismissRequestSchema, twinDraftSchema, twinMessageRequestSchema,
   workspaceDetailsSchema, workspaceInputSchema, workspaceListSchema, workspaceOpenSchema, workspaceSummarySchema,
+  workspaceChildrenSchema, workspaceTreeSchema, workspaceBreadcrumbSchema,
 } from "./contracts.js";
 import type { HostServices, Permission, RequestContext } from "./ports.js";
 import { HostError } from "./errors.js";
@@ -110,17 +111,22 @@ export function createMethods(services: HostServices, journal: EventJournal): Ma
   scoped("workspaces.update", "settings:write", workspaceDetailsSchema, workspaceSummarySchema,
     (input, context) => services.work.updateWorkspace(context, input),
     { area: "settings", entity: (workspace) => workspace.id, kind: "updated" });
+  scoped("workspaces.children", "work:read", emptySchema, workspaceChildrenSchema, (_, context) => services.work.children(context));
+  scoped("workspaces.breadcrumb", "work:read", emptySchema, workspaceBreadcrumbSchema, (_, context) => services.work.breadcrumb(context));
+  add("workspaces.tree", "work:read", conciergeBindingSchema, workspaceTreeSchema,
+    async (input, context) => services.work.tree(await bind(context, input.workspaceId, "work:read")));
   scoped("workspaces.open", "work:read", emptySchema, workspaceOpenSchema, async (_, context) => {
     await aggregateRead(context);
     if (!await services.security.authorize(context.principal, "computer:read")) throw new HostError(-32003, "Permission denied.");
     await bind(context, context.workspaceId!, "computer:read");
-    const [workspace, snapshot, twin, computer] = await Promise.all([
+    const [workspace, snapshot, twin, computer, breadcrumb] = await Promise.all([
       services.work.workspace(context), services.work.snapshot(context), services.twin.conversation(context), services.computer.inspect(context),
+      services.work.breadcrumb(context),
     ]);
     if (workspace.id !== context.workspaceId || snapshot.workspaceId !== context.workspaceId || twin.workspaceId !== context.workspaceId) {
       throw new Error("Service scope mismatch.");
     }
-    return { workspace, snapshot, twin, routines: snapshot.automations, computer };
+    return { workspace, snapshot, twin, routines: snapshot.automations, computer, breadcrumb };
   });
   scoped("work.snapshot", "work:read", emptySchema, snapshotSchema, async (_, context) => {
     await aggregateRead(context);
@@ -134,8 +140,13 @@ export function createMethods(services: HostServices, journal: EventJournal): Ma
   scoped("work.assignTask", "work:write", z.strictObject({ id: idSchema, agentId: idSchema }), taskSchema,
     (input, context) => services.work.assignTask(context, input),
     { area: "work", entity: (task) => task.id, kind: "updated" });
-  scoped("agents.save", "agents:write", agentInputSchema, agentSchema,
-    (input, context) => services.work.saveAgent(context, input),
+  scoped("agents.save", "agents:write", agentInputSchema.extend({ parentRevision: z.number().int().nonnegative().optional() }), agentSchema,
+    ({ parentRevision, ...input }, context) => services.work.saveAgent({ ...context, ...(parentRevision !== undefined ? { parentRevision } : {}) }, input),
+    { area: "agents", entity: (agent) => agent.id, kind: "updated" });
+  scoped("agents.openWorkspace", "agents:read", entityParamsSchema, workspaceSummarySchema,
+    ({ id }, context) => services.work.agentWorkspace(context, id));
+  scoped("agents.retire", "agents:write", entityParamsSchema.extend({ parentRevision: z.number().int().nonnegative().optional() }), agentSchema,
+    ({ id, parentRevision }, context) => services.work.retireAgent({ ...context, ...(parentRevision !== undefined ? { parentRevision } : {}) }, id),
     { area: "agents", entity: (agent) => agent.id, kind: "updated" });
   scoped("runs.start", "runtime:execute", entityParamsSchema, runSchema,
     async ({ id }, context) => {

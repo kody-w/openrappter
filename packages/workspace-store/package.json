@@ -1,0 +1,20 @@
+{
+  "name": "@rapp-work/workspace-store",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "dependencies": {
+    "@rapp-work/rapp1": "2.0.0",
+    "@rapp-work/security": "2.0.0"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json && tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build",
+    "test": "vitest run tests"
+  },
+  "engines": { "node": ">=22" }
+}

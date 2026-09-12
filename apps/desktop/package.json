@@ -6,7 +6,7 @@
   "description": "RAPP Work for macOS Apple silicon.",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.cjs && node scripts/stage.mjs",
+    "build": "npm --prefix ../host run build && npm --prefix ../ui run build && tsc -p tsconfig.build.json && esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.cjs && node scripts/stage.mjs",
     "start": "electron .",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",

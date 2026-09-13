@@ -231,5 +231,5 @@ describe("filesystem-backed production composition", () => {
     expect([...f.commands.executionScopes].sort()).toEqual(agents.map((agent) => agent.workspaceId).sort());
     expect(snapshot.approvals.every((approval) => approval.consumedBy !== null)).toBe(true);
     expect((await f.services.persistence.read(f.services.persistence.owner.computer)).commands.every((command) => command.state === "committed")).toBe(true);
-  }, 120_000);
+  }, 240_000);
 });

@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  quality:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -26,4 +26,51 @@ jobs:
         run: test "$(uname -m)" = arm64
       - run: npm ci
       - run: node scripts/check-legacy-absence.mjs
-      - run: npm run typecheck && npm run lint && npm test && npm run build
+      - run: npm run typecheck && npm run lint
+      - name: Test non-host workspaces
+        run: |
+          for workspace in apps/* packages/*; do
+            if [ "$workspace" != "apps/host" ] && [ -f "$workspace/package.json" ]; then
+              npm --prefix "$workspace" run test --if-present
+            fi
+          done
+      - run: npm run build
+
+  host-tests:
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: production
+            files: test/production.test.ts
+          - name: twin
+            files: test/twin.test.ts
+          - name: hierarchy-lifecycle
+            files: test/recursive-workspaces.test.ts test/canonical-lifecycle.test.ts
+          - name: remaining
+            files: test/computer-workspaces.test.ts test/instruction-document.test.ts test/projection-ownership.test.ts test/storage.test.ts test/transport.test.ts test/work.test.ts test/ui-contract.test.ts test/events.test.ts
+    name: host-tests (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Require Apple Silicon
+        run: test "$(uname -m)" = arm64
+      - run: npm ci
+      - run: npm --workspace @rapp-work/host run build:services
+      - run: npm --workspace @rapp-work/host test -- --run ${{ matrix.files }}
+
+  check:
+    if: always()
+    needs: [quality, host-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every CI shard
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          HOST_TESTS_RESULT: ${{ needs.host-tests.result }}
+        run: test "$QUALITY_RESULT" = success && test "$HOST_TESTS_RESULT" = success

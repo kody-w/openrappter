@@ -101,6 +101,7 @@ export class LocalRuntime implements RuntimePort {
       const engine = new AgentRuntime({
         work: p.work, provider: new GitHubCopilotProvider(this.transport),
         tools: [this.tool("guest.read", active), this.tool("guest.execute", active)],
+        cancellationGraceMs: 30_000,
         limits: { maxConcurrentRuns: 1, maxConcurrentTools: 1, maxStepsPerRun: 12,
           maxToolCallsPerRun: 12, maxDurationMs: 300_000, maxOutputTokens: 8192 },
       });

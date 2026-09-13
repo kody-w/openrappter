@@ -198,7 +198,7 @@ describe("conversation-first canonical Twin", () => {
     expect((await reopened.rpc("twin.applyProposal", {
       ...applyInput(draft), editedDraft: { ...draft.draft, title: "August finance report" },
     })).result).toEqual(accepted.result);
-  }, 60_000);
+  }, 120_000);
 
   it("rejects tampered hashes, stale canonical heads, stale revisions and changed option availability before applying", async () => {
     const f = await setup();

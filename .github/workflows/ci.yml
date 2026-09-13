@@ -61,7 +61,7 @@ jobs:
       - name: Require Apple Silicon
         run: test "$(uname -m)" = arm64
       - run: npm ci
-      - run: npm --workspace @rapp-work/host run build:services
+      - run: npm --workspace @rapp-work/host run build
       - run: npm --workspace @rapp-work/host test -- --run ${{ matrix.files }}
 
   check:

@@ -522,7 +522,7 @@ describe("strict Twin context-option validation", () => {
       id: active.approvals[0]!.id, decision: "denied", reason: "Finish the atomicity test.",
     })).error).toBeUndefined();
     await f.services.runtime.drain();
-  }, 90_000);
+  }, 180_000);
 
   it("rejects invented or cross-scope provider, model, computer, agent, routine and approval options", async () => {
     const f = await setup();

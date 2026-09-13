@@ -5,6 +5,7 @@ import { requireThat } from './errors.js';
 import { projectBot, reference, type PublicTurn } from './projection.js';
 import type { RootSnapshot, StoreSnapshot } from './repository.js';
 import type { ModelProvider } from './spine.js';
+import { publicationData } from './ai-contract.js';
 
 const SCHEMA = 'rapp-work.next/collaboration/1';
 export interface PublicPerspective extends JsonObject {
@@ -198,7 +199,7 @@ export class Collaboration {
     });
     const syntheses = own.streams.memory.filter(f => f.payload.event === 'collaboration.synthesized'
       && authorized.has(String(workEvent(f.payload).data.requestWave)));
-    const ordinary = own.streams.memory.filter(f => ['turn.user', 'turn.assistant'].includes(String(f.payload.event)));
+    const ordinary = own.streams.memory.filter(f => ['turn.user', 'turn.assistant', 'client.conversation'].includes(String(f.payload.event)));
     const selected = await this.bots.repository.orderSelection(new Set([...requests, ...echoes, ...syntheses, ...ordinary].map(f => f.frame_hash)));
     return selected.map(frame => {
       const data = frame.kind.startsWith('memory.') ? workEvent(frame.payload).data : frame.payload;
@@ -207,6 +208,9 @@ export class Collaboration {
         : frame.kind === 'swarm.echo' ? (() => {
           const p = publicPerspective(data.public);
           return [p.summary, ...p.disagreements.map(d => `Disagreement: ${d}`), ...p.unknowns.map(u => `Unknown: ${u}`)].join('\n');
+        })() : frame.payload.event === 'client.conversation' ? (() => {
+          const p = publicationData('conversation', data);
+          return `[${p.actor.name} / ${p.actor.provider}] ${String(p.content.text)}`;
         })() : String(data.text);
       return { role, speaker: role === 'user' ? 'human' : String(frame.payload.root),
         text: publicText, source: reference(frame), replyTo: typeof data.requestWave === 'string' ? data.requestWave : null };

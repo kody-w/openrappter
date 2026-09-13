@@ -1,4 +1,32 @@
-# Verified headless milestone
+# Verified headless milestones
+
+## Provider-neutral projection extension
+
+The complete new-core run now passes **65 tests** (18 provider-neutral additions
+plus 47 previous tests), strict typecheck/build and all canonical gates.
+`scripts/ai-projection-proof.mjs` scans **25 signed emitted frames** for one root
+with six provider labels plus separate observer/resolver clients. The exact
+rev-15 checker reports `COMPLIANT`, no findings, and verifies sixteen authority
+frames. The previous 38-frame signed headless scenario remains unchanged.
+
+New tests include real MCP/stdio child processes, another process's canonical
+updates, root/capability authentication, distinct attribution, no secret/native
+memory merge, closed-reference validation, refused executable hints with work
+retained, concurrent view conflicts, explicit resolution, rate/byte bounds,
+slow output, reconnect/replay, credential revocation and a tiny disposable
+render-model consumer. The provider-neutral proof makes **zero model calls**.
+
+The single generic RAPP Work Bot skill passes validation and is installed
+byte-identically at `~/.copilot/skills/rapp-work-bot/SKILL.md`. Installation is
+limited to that explicitly requested instruction file: no credential, MCP
+configuration, live root, provider profile or Mirror Mode change.
+
+The API's attribution is root-signed scoped-capability attribution, not vendor
+or native client-key non-repudiation. The fixture endpoint bootstrap is not
+production signer custody. MCP and native stdio are implemented; no HTTP/
+WebSocket listener or product UI is claimed.
+
+## Original headless milestone evidence
 
 This is verified **synthetic headless behavior with fail-closed production
 bindings**, not a production cutover or live inference claim.
@@ -58,4 +86,5 @@ daemon. Whole-store rollback and hostile same-UID mutation require independent
 signed checkpoints/enforced isolation before production.
 
 No push, merge, publication, dependency installation, application installation,
-live-profile mutation or UI implementation was performed.
+live bot/provider profile mutation or UI implementation was performed. The
+subsequent generic skill installation is the narrow explicit exception above.

@@ -32,3 +32,17 @@ must not implement its own planner, registry, provider routing, durable message
 history, scheduling authority, capability loader, approval policy or deletion.
 It must not promote a carried integrity flag or source hash into execution
 permission. Mutations remain exact headless commands and canonical successors.
+
+## Provider-neutral AI-driven extension
+
+`rapp-work.ai-projection/1` is the authenticated provider-neutral projection
+contract, described in [AI_PROJECTION_API.md](AI_PROJECTION_API.md). It preserves
+the underlying canonical root and adds structured client attribution, public
+activity/evidence/attention, explicit multi-head view conflicts and bounded
+cursor events. The older owner-facing `projection.get` remains available; it is
+not the credentialed multi-client transport.
+
+The UI must subscribe and transform around canonical AI work, rather than turn
+these fields into a parallel control plane. A test-only render-model reducer
+proves real-time transitions, conflict visibility and restart equivalence.
+The UI implementation is still deferred.

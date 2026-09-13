@@ -7,6 +7,20 @@ shell tool, second Brainstem runtime, or deletion API here.
 This directory is deliberately **not** added to the legacy npm workspaces or
 release package. The old product remains intact pending the new cutover gates.
 
+## Provider-neutral AI-driven projection
+
+The core also exposes an authenticated, provider-neutral publication API:
+Copilot, Claude, Hermes, Scout, Grokbot and future AI hosts use one
+[portable RAPP Work Bot skill](skills/rapp-work-bot/SKILL.md) with an independently
+issued capability for the same root GUID. Public work and closed declarative
+view hints are canonical frames, not UI state. Concurrent clients retain
+explicit view conflicts; bounded MCP/stdio subscriptions support cursor replay
+and resync. No model, renderer, native profile or HTTP listener is started by
+publication. Only a tiny test consumer exists.
+
+See [the API/authority contract](docs/AI_PROJECTION_API.md) and
+[binding milestones](docs/MILESTONES.md).
+
 ## Development
 
 Node 22.12+; pinned development dependencies and Copilot SDK are declared in this

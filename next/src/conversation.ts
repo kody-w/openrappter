@@ -7,15 +7,21 @@ import { orient, projectBot, reference, type BotProjection } from './projection.
 import type { RootSnapshot } from './repository.js';
 import { applyScopedActions, foldState, permittedScopes, validateEvidence, validateResolutions } from './state.js';
 import type { ModelProvider } from './spine.js';
+import { publicationData } from './ai-contract.js';
 
 export function canonicalContext(root: RootSnapshot, scope = 'root'): JsonObject {
   const state = foldState(root);
   const permitted = permittedScopes(state.scopes, scope);
   const turns = root.streams.memory.filter(frame => {
     const e = workEvent(frame.payload);
-    return permitted.has(e.scope) && ['turn.user', 'turn.assistant'].includes(e.event);
-  }).slice(-20).map(frame => ({ role: frame.payload.event === 'turn.user' ? 'user' : 'assistant',
-    text: String(workEvent(frame.payload).data.text), source: reference(frame) }));
+    return permitted.has(e.scope) && ['turn.user', 'turn.assistant', 'client.conversation'].includes(e.event);
+  }).slice(-20).map(frame => {
+    const data = workEvent(frame.payload).data;
+    const client = frame.payload.event === 'client.conversation' ? publicationData('conversation', data) : null;
+    return { role: frame.payload.event === 'turn.user' ? 'user' : 'assistant',
+      text: client ? `[${client.actor.name} / ${client.actor.provider}] ${String(client.content.text)}` : String(data.text),
+      source: reference(frame) };
+  });
   const discovery = root.streams.memory.filter(f => f.payload.event === 'discovery.recorded' && permitted.has(String(f.payload.scope)))
     .slice(-4).map(f => ({ source: reference(f), pointers: workEvent(f.payload).data.pointers! }));
   return {

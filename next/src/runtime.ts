@@ -13,6 +13,7 @@ import { ExternalActions, type ExternalEffectPort } from './effects.js';
 import { LocalHive, type CanonicalHivePort } from './hive.js';
 import { RootedEgg } from './egg.js';
 import { Refusal, requireThat } from './errors.js';
+import { AiProjectionApi } from './ai-api.js';
 
 export interface RuntimeOptions extends RepositoryOptions {
   brainstem?: BrainstemBinding;
@@ -34,6 +35,7 @@ export class HeadlessRuntime {
   readonly effects: ExternalActions;
   readonly hive: LocalHive;
   readonly egg: RootedEgg;
+  readonly ai: AiProjectionApi;
   private constructor(readonly bots: Bots, readonly options: RuntimeOptions) {
     const provider = options.provider ?? new UnavailableProvider();
     this.conversation = new Conversation(bots, provider);
@@ -44,6 +46,7 @@ export class HeadlessRuntime {
     this.effects = new ExternalActions(bots, options.effects);
     this.hive = new LocalHive(bots, options.hive);
     this.egg = new RootedEgg(bots);
+    this.ai = new AiProjectionApi(bots);
   }
 
   static async open(options: RuntimeOptions): Promise<HeadlessRuntime> {
@@ -159,6 +162,12 @@ export class HeadlessRuntime {
       case 'hive.consent':
         check(['peer', 'room', 'objectWave', 'mode'], ['root']);
         return this.hive.consent(root(), text(p.peer, 260), text(p.room, 100), text(p.objectWave, 64), p.mode as 'allow' | 'revoke', operationId);
+      case 'clients.grant':
+        check(['grant'], ['root']);
+        return this.ai.authority.grant(root(), p.grant, operationId);
+      case 'clients.revoke':
+        check(['client', 'reason'], ['root']);
+        return this.ai.authority.revoke(root(), text(p.client, 260), text(p.reason, 300), operationId);
       default:
         throw new Refusal('method-unavailable', 'No such headless method is authorized. There is no delete, host-shell, provider-switch or native-store-write API.');
     }

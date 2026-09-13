@@ -7,6 +7,11 @@ The old `apps/`, all non-adopted `packages/`, existing contracts and release
 scripts remain unchanged. The only root housekeeping change makes
 `node_modules` symlinks as well as directories ignorable; no package is installed.
 
+The follow-up requirement explicitly authorizes installing the single generic
+RAPP Work Bot skill. That narrow instruction-file installation does not install
+an application, dependency, live root, MCP configuration or credential, and is
+separate from Mirror Mode.
+
 The old implementation must **not** be deleted, replaced, merged, published or
 installed as part of this milestone. No live profile has been read into a test,
 transformed, adopted or written.
@@ -29,6 +34,11 @@ transformed, adopted or written.
 | Failure/concurrency | Provider/channel outages, non-cooperative cancellation, lost acknowledgements, signed response substitution, concurrent writers, idempotency, correction dependencies |
 | Private transport | Default-off production adapter; synthetic contact, outage recap, retry and idempotency tests |
 | Domain/Hive | Missing canonical adoption fails closed; no Egg transformation, inference-based classifier, unsigned sharing or identity merge |
+| Provider-neutral publication | Copilot/Claude/Hermes/Scout/Grokbot/future labels publish through identical authenticated root APIs; zero model calls and no native-memory import |
+| Closed projection | Exact existing-scope/reference validation; no HTML/JS/CSS, DOM selectors, coordinates or executable UI; unsupported hints retain useful work |
+| Concurrent AI clients | Root-signed client attribution, explicit causal view heads and conflicts; no identity spoofing or last-writer overwrite |
+| Real-time subscriber | Bounded MCP/stdio events, queue bytes/count, rate, replay cursor, reconnect/resync and read-only test-consumer transformations |
+| Portable skill | One validated byte-identical instruction file, separate from Mirror Mode; exact setup/capabilities, no embedded credential or authority |
 
 `npm --prefix next run check` runs the complete new-core gates. The E2E proof
 uses explicit synthetic adapters and creates two independently signed root bots;
@@ -78,6 +88,11 @@ new headless-core gates. No installation or visual implementation was performed.
 7. Qualify an independent `next/` release constitution and artifact allowlist.
    Retain external anti-rollback checkpoints and recover interrupted writes
    explicitly. Same-UID hostile mutation is outside the in-process trust model.
+8. Qualify the operator-owned production AI publication endpoint before giving
+   real clients credentials. The packaged fixture bootstrap is not root signer
+   custody. The restricted MCP surface must remain separate from local owner
+   administration; any future loopback/WebSocket adapter must preserve these
+   same bounds, authentication and canonical semantics.
 
 ## Migration must be a separate reviewed outcome
 

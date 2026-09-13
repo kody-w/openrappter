@@ -25,6 +25,10 @@ The old code remains reference evidence until cutover is qualified.
 | iMessage is always on or infers recipients/permissions | Default-off transport, explicit local binding, canonical delivery/recap |
 | A zero-frame checker pass or mocked UI screenshot counts as parity | Nonzero exact reference verification, real CLI processes, deterministic restart and bounded-effect tests |
 | Relaxing the old release ban to declare the replacement shippable | Preserve legacy gates, qualify the new release boundary separately |
+| A fixed UI drives the agent, or only one provider can publish the experience | Any authorized AI host publishes canonical work and bounded declarative projection intents through one portable skill |
+| AI supplies HTML/JS/CSS, DOM selectors, coordinates or executable components | Closed enum/reference hints validated against authorized canonical state |
+| Latest client silently wins focus/layout or mixes native memory | Explicit causal view heads, attributed public work, visible conflicts and separate resolution authority |
+| Subscriber state, reconnect cache or skill text becomes authority | Disposable bounded event stream reconstructed from canonical frames; exact root capability remains mandatory |
 
 Prototype principles retained: bounded historical discovery, root GUID honesty,
 canonical public transcript provenance, observer non-mutation, same-byte Egg

@@ -17,6 +17,39 @@ outbound ports: Copilot SDK, shared Brainstem, estate pointers,
                explicit external effects, private channels, canonical Hive
 ```
 
+## Core requirement: provider-neutral AI-driven projections
+
+The experience is driven by the AI's work, not a fixed renderer workflow.
+Copilot, Claude, Hermes, Scout, Grokbot and future hosts receive one portable
+`skills/rapp-work-bot/SKILL.md` and connect to the **same canonical root GUID**.
+An authenticated MCP/stdio publication layer accepts public conversation,
+activity, evidence, attention and closed focus/layout/card/progress intents.
+The built-in Copilot inference adapter is separate; publication never starts a
+model, switches providers, or imports a client's private memory.
+
+This layer composes existing signed `memory.chat-turn`, `memory.tool-call` and
+`memory.save` frames. Its client grants, scopes, attribution, causal parents,
+idempotency and conflicts are canonical data; there is no parallel UI state.
+Credential instructions grant nothing. Root-backed signatures attest a verified
+scoped client capability, not an invented vendor/person signature.
+
+The accepted view vocabulary contains only canonical references and closed
+enums. No HTML/JS/CSS, executable components, DOM selectors or coordinates enter
+the view contract. Concurrent view heads remain visible conflicts; consuming
+another client's head requires separate resolution authority. Unsupported hints
+cannot discard an otherwise valid work publication.
+
+The future UI is a disposable subscriber to bounded canonical cursor events.
+Queues, connection identity and cursors in memory are transport bookkeeping,
+not durable authority. Reconnect replays frames or explicitly requests resync,
+and a fresh view reconstructs identically without a model call. A tiny test
+render-model consumer proves transforms; it is not product UI.
+
+See [AI projection API](AI_PROJECTION_API.md) and
+[milestones](MILESTONES.md). The implemented transports are MCP stdio and native
+stdio events; no loopback HTTP/WebSocket listener or host configuration is
+silently installed.
+
 `next/` is a new root, not a compatibility extension of the app. There is one
 trusted TypeScript core. Adapters cannot authorize themselves. Only
 `src/canonical.ts` crosses into `packages/rapp1/dist/index.js`; it adopts wire,

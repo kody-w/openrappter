@@ -3,6 +3,7 @@ import { PROJECTION_SCHEMA, object, text, workEvent, type Scope } from './contra
 import type { RootSnapshot } from './repository.js';
 import { requireThat } from './errors.js';
 import { foldState } from './state.js';
+import { publicationData } from './ai-contract.js';
 
 export interface PublicTurn extends JsonObject {
   role: 'user' | 'assistant';
@@ -58,6 +59,10 @@ export function projectBot(root: RootSnapshot): BotProjection {
       result.turns.push({ role, speaker: role === 'user' ? 'human' : root.definition.root,
         text: text(data.text), source: reference(frame), replyTo: typeof data.replyTo === 'string' ? data.replyTo : null });
       if (typeof data.replyTo === 'string') settled.add(data.replyTo);
+    } else if (event.event === 'client.conversation') {
+      const p = publicationData('conversation', data);
+      result.turns.push({ role: 'assistant', speaker: root.definition.root,
+        text: `[${p.actor.name} / ${p.actor.provider}] ${String(p.content.text)}`, source: reference(frame), replyTo: null });
     } else {
       result.outcomes.push({ event: event.event, scope: event.scope, data, source: reference(frame), corrected: state.corrected.has(frame.frame_hash) });
       if (typeof data.replyTo === 'string') settled.add(data.replyTo);

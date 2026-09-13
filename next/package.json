@@ -1,6 +1,6 @@
 {
   "name": "@rapp-work/next",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Autonomous Agent First: isolated canonical headless core",
@@ -10,7 +10,7 @@
     "typecheck": "tsc -b ../packages/rapp1 --force && tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs",
     "check": "npm run typecheck && npm test && npm run gates",
-    "gates": "node scripts/gates.mjs && node scripts/e2e.mjs",
+    "gates": "node scripts/gates.mjs && node scripts/e2e.mjs && node scripts/ai-projection-proof.mjs",
     "start": "node dist/cli.js"
   },
   "dependencies": {

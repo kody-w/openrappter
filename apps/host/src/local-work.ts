@@ -35,6 +35,39 @@ export function definitionFor(agent: Agent): AgentDefinition {
 }
 const succeeded = (commands: readonly ({ state: string } | CommittedCommand)[]): CommittedCommand[] =>
   commands.filter((entry): entry is CommittedCommand => entry.state === "committed" && (entry as CommittedCommand).status === "succeeded");
+const scopeFrom = (value: unknown): WorkspaceScope => {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || typeof (value as { agentId?: unknown }).agentId !== "string"
+    || typeof (value as { workspaceId?: unknown }).workspaceId !== "string") {
+    throw new Error("Catalog record has no workspace scope.");
+  }
+  return {
+    agentId: (value as { agentId: string }).agentId,
+    workspaceId: (value as { workspaceId: string }).workspaceId,
+  };
+};
+const linkedRecord = (
+  publisher: CommittedCommand,
+  history: readonly CommittedCommand[],
+  scope: WorkspaceScope,
+  eventType: "ui.task.saved" | "ui.automation.saved",
+  id: string,
+): JsonObject | null => {
+  const receipts = publisher.receipts.filter((receipt) =>
+    receipt.kind === "canonical-commit" && receipt.workspaceId === scope.workspaceId);
+  if (!receipts.length) return null;
+  const records = receipts.flatMap((receipt) => history
+    .filter((command) => command.command.scope.agentId === scope.agentId
+      && command.command.scope.workspaceId === scope.workspaceId
+      && command.proof.intentRef === receipt.intentRef
+      && command.proof.outcomeRef === receipt.outcomeRef
+      && command.proof.evidenceRef === receipt.evidenceRef)
+    .flatMap((command) => command.events.filter((event) =>
+      event.type === eventType
+      && String((event[eventType === "ui.task.saved" ? "task" : "automation"] as JsonObject)?.id) === id)));
+  if (records.length !== 1) throw new Error("Catalog record is not linked to one exact canonical source.");
+  return records[0]!;
+};
 
 /** Human-facing projections are rebuilt from each agent's own verified commands. */
 export class LocalWork implements WorkPort, StoragePort {
@@ -122,23 +155,13 @@ export class LocalWork implements WorkPort, StoragePort {
     const workspace = p.workspaceInfo(workspaceId);
     const catalog = await p.read(business);
     const agents = new Map<string, WorkspaceScope>();
-    const tasks = new Map<string, WorkspaceScope>();
-    const routines = new Map<string, WorkspaceScope>();
     const result = emptyWorkspace(workspaceId);
     result.ownerId = owner.id;
     for (const command of succeeded(catalog.commands)) for (const event of command.events) {
       if (event.type === "catalog.agent") {
-        const scope = event.scope as unknown as WorkspaceScope;
+        const scope = scopeFrom(event.scope);
         if (event.parentWorkspaceId !== workspaceId) throw new Error("Agent parent ownership differs.");
         p.register(scope, workspaceId); p.assertChild(scope, workspaceId); agents.set(scope.agentId, scope);
-      } else if (event.type === "catalog.task") {
-        if (event.parentWorkspaceId !== workspaceId) throw new Error("Task parent ownership differs.");
-        tasks.set(String(event.id), event.scope as unknown as WorkspaceScope);
-      } else if (event.type === "catalog.task.removed") {
-        tasks.delete(String(event.id));
-      } else if (event.type === "catalog.automation") {
-        if (event.parentWorkspaceId !== workspaceId) throw new Error("Routine parent ownership differs.");
-        routines.set(String(event.id), event.scope as unknown as WorkspaceScope);
       } else if (event.type === "ui.settings.saved") result.settings = settingsSchema.parse(event.settings);
     }
     const taskValues = new Map<string, Task>();
@@ -149,6 +172,38 @@ export class LocalWork implements WorkPort, StoragePort {
     const streams = await Promise.all([business, ...agents.values()].map(async (scope) => ({
       scope, history: scope.workspaceId === workspaceId ? catalog : await p.read(scope),
     })));
+    const histories = new Map(streams.map(({ scope, history }) => [scope.workspaceId, succeeded(history.commands)]));
+    const tasks = new Map<string, WorkspaceScope>();
+    const routines = new Map<string, WorkspaceScope>();
+    for (const command of succeeded(catalog.commands)) for (const event of command.events) {
+      if (event.type === "catalog.task") {
+        if (event.parentWorkspaceId !== workspaceId) throw new Error("Task parent ownership differs.");
+        const id = String(event.id), scope = scopeFrom(event.scope);
+        const history = histories.get(scope.workspaceId);
+        if (!history) throw new Error("Task source is outside the selected workspace catalog.");
+        const source = linkedRecord(command, history, scope, "ui.task.saved", id);
+        if (!source) continue;
+        const task = taskSchema.parse(source.task);
+        if (task.agentId !== null) this.assertAgentOwner(scope, task.agentId, task.workspaceId!);
+        else if (scope.workspaceId !== workspaceId || task.workspaceId !== null) throw new Error("Unowned task.");
+        tasks.set(id, scope);
+        taskValues.set(id, task);
+      } else if (event.type === "catalog.automation") {
+        if (event.parentWorkspaceId !== workspaceId) throw new Error("Routine parent ownership differs.");
+        const id = String(event.id), scope = scopeFrom(event.scope);
+        const history = histories.get(scope.workspaceId);
+        if (!history) throw new Error("Routine source is outside the selected workspace catalog.");
+        const source = linkedRecord(command, history, scope, "ui.automation.saved", id);
+        if (!source) continue;
+        const automation = automationSchema.parse(source.automation);
+        this.assertAgentOwner(scope, automation.agentId, automation.workspaceId);
+        if (automation.originWorkspaceId !== undefined && automation.originWorkspaceId !== workspaceId) {
+          throw new Error("Routine origin ownership differs.");
+        }
+        routines.set(id, scope);
+        automationValues.set(id, { ...automation, originWorkspaceId: workspaceId });
+      }
+    }
     for (const { scope, history } of streams) {
       result.revision += p.revision(scope);
       for (const command of succeeded(history.commands)) for (const event of command.events) {
@@ -159,11 +214,6 @@ export class LocalWork implements WorkPort, StoragePort {
             const previous = result.agents.findIndex((item) => item.id === agent.id);
             if (previous < 0) result.agents.push(agent); else result.agents[previous] = agent;
           }
-        } else if (event.type === "ui.task.saved") {
-          const task = taskSchema.parse(event.task);
-          if (task.agentId !== null) this.assertAgentOwner(scope, task.agentId, task.workspaceId!);
-          else if (scope.workspaceId !== workspaceId || task.workspaceId !== null) throw new Error("Unowned task.");
-          if (tasks.get(task.id)?.workspaceId === scope.workspaceId) taskValues.set(task.id, task);
         } else if (event.type === "ui.run.saved") {
           const run = runSchema.parse(event.run); this.assertAgentOwner(scope, run.agentId, run.workspaceId);
           if (tasks.get(run.taskId)?.workspaceId === scope.workspaceId) runValues.set(run.id, run);
@@ -176,9 +226,15 @@ export class LocalWork implements WorkPort, StoragePort {
           this.assertAgentOwner(scope, artifact.agentId, artifact.workspaceId);
           if (tasks.get(artifact.taskId)?.workspaceId === scope.workspaceId) artifactValues.set(artifact.id, artifact);
         } else if (event.type === "ui.automation.saved") {
-          const automation = automationSchema.parse(event.automation);
+          const raw = event.automation as JsonObject | undefined;
+          if (!raw || typeof raw.id !== "string") continue;
+          const origin = routines.get(raw.id);
+          if (!origin || origin.workspaceId !== scope.workspaceId
+            || (raw.originWorkspaceId !== undefined && raw.originWorkspaceId !== workspaceId)
+            || (raw.originWorkspaceId === undefined && scope.workspaceId !== workspaceId)) continue;
+          const automation = automationSchema.parse(raw);
           this.assertAgentOwner(scope, automation.agentId, automation.workspaceId);
-          if (routines.get(automation.id)?.workspaceId === scope.workspaceId) automationValues.set(automation.id, automation);
+          automationValues.set(automation.id, { ...automation, originWorkspaceId: workspaceId });
         }
       }
       const selected = [...approvalValues.values()].filter((item) => item.workspaceId === scope.workspaceId);

@@ -281,17 +281,22 @@ describe("conversation-first canonical Twin", () => {
     const f = await setup();
     const p = f.services.persistence;
     const scope = agentScope((await f.services.work.snapshot(f.context())).agents[0]!);
-    const original = p.read.bind(p);
-    const read = vi.spyOn(p, "read").mockImplementation(async (selected) => {
-      const snapshot = await original(selected);
+    const source = Reflect.get(p, "service") as typeof p.work;
+    const original = source.read.bind(source);
+    const read = vi.spyOn(source, "read").mockImplementation(async (capability, selected) => {
+      const snapshot = await original(capability, selected);
       return selected.workspaceId === scope.workspaceId
         ? { ...snapshot, commands: snapshot.commands.filter((command) => command.command.operation !== "host.agent.definition") }
         : snapshot;
     });
     try {
+      p.clearProjectionCaches();
       await expect(f.services.work.listWorkspaces(f.catalogContext())).rejects.toThrow("bootstrap child evidence");
       expect(await f.services.security.authorizeWorkspace(f.context().principal, f.workspace!.id, "work:read")).toBe(false);
-    } finally { read.mockRestore(); }
+    } finally {
+      read.mockRestore();
+      p.clearProjectionCaches();
+    }
     await p.refreshCatalog();
     expect(p.ownsBusiness(f.workspace!.id)).toBe(true);
   }, 25_000);

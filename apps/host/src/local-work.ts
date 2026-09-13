@@ -415,21 +415,29 @@ export class LocalWork implements WorkPort, StoragePort {
       }
     }, true);
   }
+  private async prepareWorkspaceUpdate(context: RequestContext, raw: WorkspaceDetails) {
+    const input = workspaceDetailsSchema.parse(raw);
+    const current = await this.workspace(context);
+    const snapshot = await this.snapshot(context);
+    const rank = { none: 0, "read-only": 1, control: 2 };
+    if (current.parentWorkspaceId && rank[input.computerPolicy] > rank[this.lineagePolicy(current.parentWorkspaceId).computerPolicy]) {
+      conflict("A child workspace cannot exceed its ancestor computer policy.");
+    }
+    if (snapshot.runs.some((run) => ["running", "awaiting_approval", "unresolved"].includes(run.state)
+      && rank[snapshot.agents.find((agent) => agent.id === run.agentId)!.computerPolicy] > rank[input.computerPolicy])) {
+      conflict("Resolve active work before reducing its computer policy.");
+    }
+    const workspace = workspaceSummarySchema.parse({ ...current, ...input, updatedAt: new Date().toISOString() });
+    return { input, current, snapshot, workspace };
+  }
+  preflightWorkspaceUpdate(context: RequestContext, raw: WorkspaceDetails): Promise<void> {
+    this.assertOwner(context);
+    return this.serialized(context, async () => { await this.prepareWorkspaceUpdate(context, raw); }, "settings:write");
+  }
   updateWorkspace(context: RequestContext, raw: WorkspaceDetails): Promise<WorkspaceSummary> {
     this.assertOwner(context);
     return this.serialized(context, async () => {
-      const input = workspaceDetailsSchema.parse(raw);
-      const current = await this.workspace(context);
-      const snapshot = await this.snapshot(context);
-      const rank = { none: 0, "read-only": 1, control: 2 };
-      if (current.parentWorkspaceId && rank[input.computerPolicy] > rank[this.lineagePolicy(current.parentWorkspaceId).computerPolicy]) {
-        conflict("A child workspace cannot exceed its ancestor computer policy.");
-      }
-      if (snapshot.runs.some((run) => ["running", "awaiting_approval", "unresolved"].includes(run.state)
-        && rank[snapshot.agents.find((agent) => agent.id === run.agentId)!.computerPolicy] > rank[input.computerPolicy])) {
-        conflict("Resolve active work before reducing its computer policy.");
-      }
-      const workspace = { ...current, ...input, updatedAt: new Date().toISOString() };
+      const { input, current, snapshot, workspace } = await this.prepareWorkspaceUpdate(context, raw);
       committed(await this.persistence.commit(this.assertContext(context), commandKey("workspace/update", context),
         "host.workspace.update", input, async (): Promise<EffectOutcome> => ({
           status: "succeeded", value: json(workspace), receipts: [{ kind: "workspace-updated" }],
@@ -578,12 +586,13 @@ export class LocalWork implements WorkPort, StoragePort {
     }));
     return taskSchema.parse(result.value);
   });
-  updateSettings(context: RequestContext, input: Settings): Promise<Settings> {
+  updateSettings(context: RequestContext, input: Settings, workspaceUpdate?: WorkspaceDetails): Promise<Settings> {
     this.assertOwner(context);
     return this.serialized(context, async () => {
       const settings = settingsSchema.parse(input);
+      if (workspaceUpdate) await this.prepareWorkspaceUpdate(context, workspaceUpdate);
       const workspace = await this.workspace(context);
-      return settingsSchema.parse(committed(await this.persistence.commit(this.assertContext(context),
+      const updated = settingsSchema.parse(committed(await this.persistence.commit(this.assertContext(context),
         commandKey("settings/update", context), "host.settings.update", settings, async (): Promise<EffectOutcome> => ({
           status: "succeeded", value: json(settings), receipts: [{ kind: "settings-updated" }],
           events: [
@@ -592,6 +601,8 @@ export class LocalWork implements WorkPort, StoragePort {
               approvalPolicy: settings.work.approvalPolicy, updatedAt: new Date().toISOString() }) },
           ],
         }))).value);
+      if (workspaceUpdate) await this.updateWorkspace(context, workspaceUpdate);
+      return updated;
     }, "settings:write");
   }
   startRun(context: RequestContext, id: string, runtime: RuntimePort, provider: ProviderPort): Promise<Run> {

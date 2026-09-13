@@ -7,9 +7,9 @@ import {
   twinBasisSchema, twinConversationSchema, twinDismissRequestSchema, twinDraftSchema, twinEventSchema,
   twinMessageRequestSchema, twinProposalSchema, twinTurnSchema,
   twinModelResponseSchema, MAX_WORKSPACE_AGENTS, MAX_WORKSPACE_DEPTH, type WorkspaceOrganization,
-  type AgentInput, type Computer, type Provider, type Snapshot, type TwinApplyRequest, type TwinApplyResult,
+  type AgentInput, type Computer, type Provider, type Settings, type Snapshot, type TwinApplyRequest, type TwinApplyResult,
   type TwinBasis, type TwinConversation, type TwinDismissRequest, type TwinDraft, type TwinEvent,
-  type TwinMessageRequest, type TwinProposal, type TwinTurn, type WorkspaceSummary,
+  type TwinMessageRequest, type TwinProposal, type TwinTurn, type WorkspaceDetails, type WorkspaceSummary,
   type FrameVerification,
 } from "./contracts.js";
 import type { ComputerPort, Permission, ProviderPort, RequestContext, RuntimePort, SecurityPort, TwinPort } from "./ports.js";
@@ -192,14 +192,18 @@ export class LocalTwin implements TwinPort {
     const scopes = [...new Map([scope, ...lineage.map((item) => item.catalogScope), ...(snapshot?.agents ?? []).map(agentScope)]
       .map((scope) => [scope.workspaceId, scope])).values()];
     const heads = await Promise.all(scopes.map(async (selected) => ({ scope: selected, heads: (await p.read(selected)).heads })));
-    const maximumPolicy = workspace ? this.work.lineagePolicy(workspace.id).computerPolicy : "control";
+    const agentMaximumPolicy = workspace ? this.work.lineagePolicy(workspace.id).computerPolicy : "control";
+    const workspaceMaximumPolicy = workspace?.parentWorkspaceId
+      ? this.work.lineagePolicy(workspace.parentWorkspaceId).computerPolicy : "control";
     const workspaceEnabled = context.workspaceId === null || computer.workspace?.enabled === true;
     const computerPolicies: AgentInput["computerPolicy"][] = ["none"];
-    if (workspaceEnabled && computer.state === "running" && computer.verified && computer.capabilities.view && ranks[maximumPolicy] >= 1) computerPolicies.push("read-only");
-    if (workspaceEnabled && computer.state === "running" && computer.verified && computer.capabilities.control && ranks[maximumPolicy] >= 2) computerPolicies.push("control");
+    if (workspaceEnabled && computer.state === "running" && computer.verified && computer.capabilities.view && ranks[agentMaximumPolicy] >= 1) computerPolicies.push("read-only");
+    if (workspaceEnabled && computer.state === "running" && computer.verified && computer.capabilities.control && ranks[agentMaximumPolicy] >= 2) computerPolicies.push("control");
     const availableComputerPolicies: AgentInput["computerPolicy"][] = ["none"];
-    if (workspaceEnabled && computer.state === "running" && computer.verified && computer.capabilities.view) availableComputerPolicies.push("read-only");
-    if (workspaceEnabled && computer.state === "running" && computer.verified && computer.capabilities.control) availableComputerPolicies.push("control");
+    if (workspaceEnabled && computer.state === "running" && computer.verified && computer.capabilities.view
+      && ranks[workspaceMaximumPolicy] >= 1) availableComputerPolicies.push("read-only");
+    if (workspaceEnabled && computer.state === "running" && computer.verified && computer.capabilities.control
+      && ranks[workspaceMaximumPolicy] >= 2) availableComputerPolicies.push("control");
     const providerModels = providers.flatMap((provider) =>
       provider.configured && provider.availability === "ready" && provider.authentication === "authenticated"
       && provider.models.includes(TWIN_MODEL.model)
@@ -506,6 +510,26 @@ export class LocalTwin implements TwinPort {
       if (proposal.kind === "agent" && proposal.draft.suggestedRoutines?.length) await this.authorize(context, ["automations:write"]);
       if (proposal.kind === "approval" || proposal.kind === "clarification") conflict("This proposal cannot execute a decision.");
       const actionContext = { ...context, requestId: `twin-apply-${draft.id}` };
+      let settingsUpdate: { settings: Settings; workspace: WorkspaceDetails | null } | null = null;
+      if (proposal.kind === "settings") {
+        const settings = (await this.work.snapshot(actionContext)).settings;
+        const workspace = await this.work.workspace(actionContext);
+        const { computerPolicy, parentAccess, ...patch } = proposal.draft;
+        const updatedSettings = settingsSchema.parse({
+          ...settings, ...patch, appearance: { ...settings.appearance, ...patch.appearance },
+          work: { ...settings.work, ...patch.work }, notifications: { ...settings.notifications, ...patch.notifications },
+        });
+        const workspaceUpdate = {
+          name: updatedSettings.workspaceName, purpose: workspace.purpose, twin: workspace.twin,
+          approvalPolicy: updatedSettings.work.approvalPolicy, computerPolicy: computerPolicy ?? workspace.computerPolicy,
+          parentAccess: parentAccess ?? workspace.parentAccess,
+        };
+        await this.work.preflightWorkspaceUpdate(actionContext, workspaceUpdate);
+        settingsUpdate = {
+          settings: updatedSettings,
+          workspace: computerPolicy !== undefined || parentAccess !== undefined ? workspaceUpdate : null,
+        };
+      }
       const applied = await this.persistence.commit(scope, key, "twin.apply", input, async () => {
         let result: unknown;
         let resultScope = scope;
@@ -538,19 +562,9 @@ export class LocalTwin implements TwinPort {
             operation = "host.automation.save"; break;
           }
           case "settings": {
-            const settings = (await this.work.snapshot(actionContext)).settings;
-            const { computerPolicy, parentAccess, ...patch } = proposal.draft;
-            result = await this.work.updateSettings(actionContext, settingsSchema.parse({
-              ...settings, ...patch, appearance: { ...settings.appearance, ...patch.appearance },
-              work: { ...settings.work, ...patch.work }, notifications: { ...settings.notifications, ...patch.notifications },
-            }));
-            if (computerPolicy !== undefined || parentAccess !== undefined) {
-              const workspace = await this.work.workspace(actionContext);
-              await this.work.updateWorkspace(actionContext, {
-                name: workspace.name, purpose: workspace.purpose, twin: workspace.twin,
-                approvalPolicy: workspace.approvalPolicy, computerPolicy: computerPolicy ?? workspace.computerPolicy,
-                parentAccess: parentAccess ?? workspace.parentAccess,
-              });
+            if (!settingsUpdate) throw new Error("Settings proposal has no preflighted update.");
+            result = await this.work.updateSettings(actionContext, settingsUpdate.settings, settingsUpdate.workspace ?? undefined);
+            if (settingsUpdate.workspace) {
               const updated = (await this.persistence.read(scope)).commands.filter((entry) =>
                 entry.state === "committed" && entry.command.operation === "host.workspace.update").at(-1);
               if (!updated || updated.state !== "committed") throw new Error("Workspace policy has no canonical proof.");

@@ -398,7 +398,10 @@ a capability or a held lease. Every later agent tool acquires a fresh
 agent-workspace lease and rechecks business enablement. A shared stop invalidates
 earlier enablement. Existing agent restrictions, workspace computer policy and
 exact human approvals still apply. To change the access ceiling, ask the Twin
-for a reviewed `settings` patch with `computerPolicy`.
+for a reviewed `settings` patch with `computerPolicy`. The verified choices are
+bounded by both live computer capabilities and the ancestor policy ceiling.
+Workspace policy constraints are preflighted before settings or metadata are
+written, so a rejected policy cannot partially apply an otherwise valid patch.
 
 Computer DTOs report `unavailable`, `starting`, `running`, `stopped` or
 `unresolved`, scoped enablement/policy, actual active lease/agent, and display

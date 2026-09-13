@@ -23,6 +23,10 @@ interface Prompt {
     workspace: { id: string; name: string } | null;
     agents: { id: string; enabled: boolean }[];
     approvals: { id: string; operationHash: string }[];
+    allowed: {
+      computerPolicies: ("none" | "read-only" | "control")[];
+      availableComputerPolicies: ("none" | "read-only" | "control")[];
+    };
   };
 }
 const ready = (kind: Exclude<TwinProposal["kind"], "clarification">, draft: unknown) => ({
@@ -407,6 +411,114 @@ describe("conversation-first canonical Twin", () => {
 });
 
 describe("strict Twin context-option validation", () => {
+  it("rejects child settings above the inherited computer maximum without applying ordinary settings", async () => {
+    const f = await setup({ computer: true });
+    const root = await f.services.work.workspace(f.context());
+    await f.services.work.updateWorkspace(f.context(), {
+      name: root.name, purpose: root.purpose, twin: root.twin,
+      approvalPolicy: root.approvalPolicy, computerPolicy: "none", parentAccess: root.parentAccess,
+    });
+    const owner = await f.services.work.saveAgent(f.context(), {
+      ...workspaceInput("Restricted child", "restricted-child").leadAgent,
+      model: "gpt-6-astra", computerPolicy: "none", enabled: true,
+    });
+    const child = await f.services.work.agentWorkspace(f.context(), owner.id);
+    expect(await f.services.computer.start(f.context(child.id))).toMatchObject({
+      state: "running", verified: true, capabilities: { view: true, control: true },
+      workspace: { id: child.id, enabled: true, computerPolicy: "none" },
+    });
+    const before = await f.services.work.snapshot(f.context(child.id));
+    respond(f, (prompt) => {
+      expect(prompt.verifiedContext.allowed.availableComputerPolicies).toEqual(["none"]);
+      return ready("settings", { appearance: { theme: "dark" }, computerPolicy: "control" });
+    });
+    const rejected = await f.rpc("twin.message", {
+      workspaceId: child.id, message: "Use dark theme and allow computer control.", history: [], target: "settings",
+    });
+    expect(rejected.error?.code).toBe(-32014);
+    respond(f, (prompt) => {
+      expect(prompt.verifiedContext.allowed.availableComputerPolicies).toEqual(["none"]);
+      return ready("settings", { appearance: { theme: "dark" } });
+    });
+    const draft = await message(f, child.id, "Use dark theme.", "settings");
+    expect((await f.rpc("twin.applyProposal", {
+      ...applyInput(draft), editedDraft: { appearance: { theme: "dark" }, computerPolicy: "control" },
+    })).error?.code).toBe(-32602);
+    expect((await f.services.work.snapshot(f.context(child.id))).settings).toEqual(before.settings);
+    expect(await f.services.work.workspace(f.context(child.id))).toMatchObject({
+      id: child.id, computerPolicy: "none", updatedAt: child.updatedAt,
+    });
+    const commands = (await f.services.persistence.read(child.catalogScope)).commands;
+    expect(commands.some((command) => ["host.settings.update", "host.workspace.update"].includes(command.command.operation))).toBe(false);
+  }, 90_000);
+
+  it("applies a child settings policy within the inherited maximum with canonical evidence", async () => {
+    const f = await setup({ computer: true });
+    const root = await f.services.work.workspace(f.context());
+    await f.services.work.updateWorkspace(f.context(), {
+      name: root.name, purpose: root.purpose, twin: root.twin,
+      approvalPolicy: root.approvalPolicy, computerPolicy: "read-only", parentAccess: root.parentAccess,
+    });
+    const owner = await f.services.work.saveAgent(f.context(), {
+      ...workspaceInput("Inherited child", "inherited-child").leadAgent,
+      model: "gpt-6-astra", computerPolicy: "none", enabled: true,
+    });
+    const child = await f.services.work.agentWorkspace(f.context(), owner.id);
+    await f.services.computer.start(f.context(child.id));
+    respond(f, (prompt) => {
+      expect(prompt.verifiedContext.allowed.computerPolicies).toEqual(["none"]);
+      expect(prompt.verifiedContext.allowed.availableComputerPolicies).toEqual(["none", "read-only"]);
+      return ready("settings", { appearance: { theme: "dark" }, computerPolicy: "read-only" });
+    });
+    const draft = await message(f, child.id, "Use dark theme and inherited read-only computer access.", "settings");
+    expect((await f.rpc("twin.applyProposal", applyInput(draft))).error).toBeUndefined();
+    expect((await f.services.work.snapshot(f.context(child.id))).settings.appearance.theme).toBe("dark");
+    expect(await f.services.work.workspace(f.context(child.id))).toMatchObject({ id: child.id, computerPolicy: "read-only" });
+    const commands = (await f.services.persistence.read(child.catalogScope)).commands;
+    const settings = commands.find((command) => command.state === "committed" && command.command.operation === "host.settings.update");
+    const workspace = commands.find((command) => command.state === "committed" && command.command.operation === "host.workspace.update");
+    const application = commands.find((command) => command.state === "committed" && command.command.operation === "twin.apply");
+    for (const command of [settings, workspace, application]) {
+      expect(command).toMatchObject({
+        state: "committed", status: "succeeded",
+        proof: { intentRef: expect.any(String), outcomeRef: expect.any(String), evidenceRef: expect.any(String) },
+      });
+    }
+    if (!settings || settings.state !== "committed" || !workspace || workspace.state !== "committed"
+      || !application || application.state !== "committed") throw new Error("Missing canonical settings application proof.");
+    expect(application.receipts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "canonical-commit", evidenceRef: settings.proof.evidenceRef }),
+      expect.objectContaining({ kind: "canonical-commit", evidenceRef: workspace.proof.evidenceRef }),
+    ]));
+  }, 90_000);
+
+  it("preflights active-work policy constraints before applying a settings proposal", async () => {
+    const f = await setup({ computer: true });
+    await f.services.computer.start(f.context());
+    const input = workspaceInput("Active worker", f.workspace!.leadAgentId).leadAgent;
+    const agent = await f.services.work.saveAgent(f.context(), { ...input, computerPolicy: "control", enabled: true });
+    const task = await f.services.work.createTask(f.context(), {
+      requestId: randomUUID(), title: "Hold active control work", instructions: "Wait for explicit approval.",
+      agentId: agent.id, priority: "normal",
+    });
+    await f.services.work.startRun(f.context(), task.id, f.services.runtime, f.services.provider);
+    const active = await until(() => f.services.work.snapshot(f.context()), (snapshot) => snapshot.approvals.length === 1);
+    respond(f, () => ready("settings", { appearance: { theme: "dark" }, computerPolicy: "none" }));
+    const draft = await message(f, f.workspace!.id, "Use dark theme and disable computer access.", "settings");
+    const before = await f.services.work.snapshot(f.context());
+    const rejected = await f.rpc("twin.applyProposal", applyInput(draft));
+    expect(rejected.error).toMatchObject({ code: -32009, message: "Resolve active work before reducing its computer policy." });
+    expect((await f.services.work.snapshot(f.context())).settings).toEqual(before.settings);
+    expect(await f.services.work.workspace(f.context())).toMatchObject({ computerPolicy: "control" });
+    const commands = (await f.services.persistence.read(f.workspace!.catalogScope)).commands;
+    expect(commands.some((command) => command.command.operation === "host.settings.update")).toBe(false);
+    expect(commands.some((command) => command.command.operation === "twin.apply")).toBe(false);
+    expect((await f.rpc("approvals.decide", {
+      id: active.approvals[0]!.id, decision: "denied", reason: "Finish the atomicity test.",
+    })).error).toBeUndefined();
+    await f.services.runtime.drain();
+  }, 90_000);
+
   it("rejects invented or cross-scope provider, model, computer, agent, routine and approval options", async () => {
     const f = await setup();
     const mutations: ((prompt: Prompt) => unknown)[] = [

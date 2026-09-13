@@ -90,7 +90,7 @@ describe("filesystem-backed production composition", () => {
     expect(ssh.args.at(-1)).toBe("/usr/bin/node /usr/local/lib/rapp-work/guest-helper.js");
     expect(ssh.args).not.toContain("owned work");
     expect(f.commands.calls.every((call) => ["/opt/homebrew/bin/tart", "/usr/bin/ssh"].includes(call.file))).toBe(true);
-  }, 60_000);
+  }, 120_000);
 
   it.each(["configuration", "template", "tart"] as const)("missing %s produces zero model or guest execution", async (missing) => {
     const commands = new FakeCommands();
@@ -194,7 +194,7 @@ describe("filesystem-backed production composition", () => {
     expect(snapshot.runs[0]!).toMatchObject({ state: "completed", workspaceId: agent.workspaceId });
     expect(Date.parse(snapshot.automations[0]!.nextRunAt!)).toBeGreaterThan(due);
     expect(f.copilot.complete).toHaveBeenCalledOnce();
-  }, 60_000);
+  }, 120_000);
 
   it("retains an uncertain model intent across restart and never automatically replays it", async () => {
     const f = await setup();

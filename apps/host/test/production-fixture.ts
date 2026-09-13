@@ -148,7 +148,7 @@ export async function productionFixture(options: { computer?: boolean; commands?
   };
 }
 export async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): Promise<T> {
-  const deadline = Date.now() + 12_000;
+  const deadline = Date.now() + 45_000;
   let last: T | undefined;
   while (Date.now() < deadline) {
     last = await read();

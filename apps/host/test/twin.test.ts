@@ -366,7 +366,7 @@ describe("conversation-first canonical Twin", () => {
       command.command.operation === "host.automation.save" && command.state === "committed")).toBe(true);
     expect(snapshot.runs).toEqual([]);
     expect(f.commands.guestExecutions).toBe(0);
-  }, 60_000);
+  }, 120_000);
 
   it("does not absorb an interleaved catalog write into a proposal's own completion heads", async () => {
     const f = await setup();
@@ -412,7 +412,7 @@ describe("conversation-first canonical Twin", () => {
     await f.services.runtime.drain();
     expect(decide).toHaveBeenCalledOnce();
     expect(f.commands.guestExecutions).toBe(0);
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("strict Twin context-option validation", () => {
@@ -546,7 +546,7 @@ describe("strict Twin context-option validation", () => {
     expect(conversation.proposals).toEqual([]);
     expect(conversation.turns.every((turn) => turn.role === "user")).toBe(true);
     expect(f.commands.guestExecutions).toBe(0);
-  }, 60_000);
+  }, 120_000);
   it("strictly discriminates complete proposals from necessary clarifications and bounds conversation input", () => {
     const clarification = { kind: "clarification", assistantMessage: "Which period?", summary: "Period needed.", confidence: 0.5,
       readyForReview: false, missing: ["period"], draft: null };

@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HostProcess, type HostLease, type OwnedChild } from "../src/host-process.js";
+import { HOST_SHUTDOWN_TIMEOUT_MS, HostProcess, type HostLease, type OwnedChild } from "../src/host-process.js";
 
 class Child extends EventEmitter implements OwnedChild {
   pid = 321;
@@ -71,12 +71,22 @@ describe("owned host lifecycle", () => {
     child.emit("exit", 0); await stop;
     await expect(host.start()).rejects.toThrow("shutting down");
   });
+  it("allows cleanup beyond the former three-second deadline without force-killing", async () => {
+    vi.useFakeTimers();
+    const { host, child, ports } = setup();
+    const start = host.start(); child.emit("message", ready()); await start;
+    const stop = host.stop();
+    await vi.advanceTimersByTimeAsync(3001);
+    expect(ports.forceKill).not.toHaveBeenCalled();
+    child.emit("exit", 0); await stop;
+    expect(ports.forceKill).not.toHaveBeenCalled();
+  });
   it("forces termination if graceful shutdown stalls", async () => {
     vi.useFakeTimers();
     const { host, child, ports } = setup();
     const start = host.start(); child.emit("message", ready()); await start;
     const stop = host.stop();
-    await vi.advanceTimersByTimeAsync(3001); await stop;
+    await vi.advanceTimersByTimeAsync(HOST_SHUTDOWN_TIMEOUT_MS + 1); await stop;
     expect(ports.forceKill).toHaveBeenCalledWith(child);
   });
   it("kills a booting child when the application quits", async () => {

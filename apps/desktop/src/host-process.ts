@@ -20,6 +20,7 @@ const readySchema = z.strictObject({
   type: z.literal("ready"), protocolVersion: z.literal(1), port: z.number().int().min(1).max(65535), instanceId: z.uuid(),
 });
 const failedSchema = z.strictObject({ type: z.literal("failed"), code: z.string().max(80) });
+export const HOST_SHUTDOWN_TIMEOUT_MS = 15_000;
 export class HostProcess {
   private child?: OwnedChild;
   private lease?: HostLease;
@@ -103,7 +104,7 @@ export class HostProcess {
           deadline = setTimeout(() => {
             if (this.child === child) this.ports.forceKill(child);
             resolve();
-          }, 3000);
+          }, HOST_SHUTDOWN_TIMEOUT_MS);
         }),
       ]);
       clearTimeout(deadline);

@@ -283,16 +283,23 @@ export async function createHost(services: HostServices, options: HostOptions = 
         unsubscribe();
         for (const client of sockets.clients) client.terminate();
         sockets.close();
-        await new Promise<void>((resolve, reject) => {
-          const deadline = setTimeout(() => server.closeAllConnections(), 1500);
-          deadline.unref();
-          server.close((error) => { clearTimeout(deadline); error ? reject(error) : resolve(); });
-          server.closeIdleConnections();
-        });
+        const failures: unknown[] = [];
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const deadline = setTimeout(() => server.closeAllConnections(), 1500);
+            deadline.unref();
+            server.close((error) => { clearTimeout(deadline); error ? reject(error) : resolve(); });
+            server.closeIdleConnections();
+          });
+        } catch (error) { failures.push(error); }
         const closed = new Set<object>();
         for (const name of ["twin", "runtime", "computer", "provider", "work", "diagnostics", "security", "storage"] as const) {
-          if (!closed.has(services[name])) { closed.add(services[name]); await services[name].close?.(); }
+          if (!closed.has(services[name])) {
+            closed.add(services[name]);
+            try { await services[name].close?.(); } catch (error) { failures.push(error); }
+          }
         }
+        if (failures.length > 0) throw new AggregateError(failures, "Host shutdown failed after all cleanup was attempted.");
       })();
       return stopped;
     },

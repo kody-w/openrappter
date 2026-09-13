@@ -35,8 +35,12 @@ async function quitAndCheck() {
     await expect.poll(() => {
       try { process.kill(pid, 0); return true; }
       catch (error) { if (error.code === "ESRCH") return false; throw error; }
-    }, { timeout: 6000, message: "Owned host must not survive Quit." }).toBe(false);
+    }, { timeout: 20000, message: "Owned host must not survive Quit." }).toBe(false);
   }
+  await expect.poll(async () => {
+    try { await stat(join(profile, "host-lock", ".lock")); return true; }
+    catch (error) { if (error.code === "ENOENT") return false; throw error; }
+  }, { timeout: 20000, message: "Graceful Quit must release the host workspace lock." }).toBe(false);
   hostPids.clear();
 }
 function reviewedWorkspace(name, starterTask) {
@@ -143,7 +147,7 @@ try {
     method: "agents.openWorkspace", params: { workspaceId, id },
   }), { workspaceId: finance.id, id: finance.leadAgentId });
   await page.getByRole("region", { name: "Child agents" }).getByRole("button", { name: "Open Finance smoke analyst's workspace" }).click();
-  await expect(page.getByRole("heading", { name: childSummary.twin.name, level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: childSummary.twin.name, level: 1 })).toBeVisible({ timeout: 20000 });
   await expect(page.getByRole("main")).toHaveAttribute("data-workspace-depth", "1");
   await expect(page.getByRole("button", { name: "Start agent computer" })).toBeVisible();
   await page.getByRole("button", { name: "Back to parent workspace" }).click();

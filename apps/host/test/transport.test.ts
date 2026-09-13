@@ -54,6 +54,14 @@ describe("authenticated loopback HTTP transport", () => {
     await expect(createHost({ ...services, computer: undefined } as unknown as HostServices))
       .rejects.toThrow("Required composition port");
   });
+  it("attempts lock-owning storage cleanup after an earlier service close fails", async () => {
+    const isolated = fixture();
+    isolated.provider.close = vi.fn(async () => { throw new Error("Injected provider close failure."); });
+    isolated.storage.close = vi.fn(async () => {});
+    const isolatedHost = await createHost(isolated);
+    await expect(isolatedHost.close()).rejects.toThrow("Host shutdown failed after all cleanup was attempted.");
+    expect(isolated.storage.close).toHaveBeenCalledOnce();
+  });
   it("binds an ephemeral IPv4 loopback port and requires authentication for health", async () => {
     expect((await http("/healthz")).status).toBe(401);
     const health = await http("/healthz", { headers: auth });

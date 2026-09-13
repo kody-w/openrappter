@@ -366,7 +366,7 @@ export class LocalWork implements WorkPort, StoragePort {
         { type: "catalog.task", id: task.id, scope: json(scope), parentWorkspaceId: scope.workspaceId }],
     }), [{ kind: "task", id: task.id }]));
   }
-  private childWorkspace(parent: WorkspaceSummary, agent: Agent): WorkspaceSummary {
+  private childWorkspace(parent: WorkspaceSummary, agent: Agent, createdAt = new Date().toISOString()): WorkspaceSummary {
     const now = new Date().toISOString();
     const policy = parent.approvalPolicy === "always" || agent.approvalPolicy === "always" ? "always" : "on-risk";
     return workspaceSummarySchema.parse({
@@ -379,11 +379,20 @@ export class LocalWork implements WorkPort, StoragePort {
       twin: { name: `${agent.name.slice(0, 155)} Twin`,
         instructions: "Organize this agent's own workspace from conversation. Follow its owner instructions and inherited restrictions. Draft complete work for review; never act as the parent or a sibling." },
       approvalPolicy: policy, computerPolicy: agent.computerPolicy,
-      organization: emptyOrganization(), revision: 0, createdAt: now, updatedAt: now,
+      organization: emptyOrganization(), revision: 0, createdAt, updatedAt: now,
     });
   }
-  private async provisionAgent(parent: WorkspaceSummary, agent: Agent, key: string): Promise<{ workspace: WorkspaceSummary; proof: CommittedCommand }> {
-    const workspace = this.childWorkspace(parent, agent);
+  private async provisionAgent(parent: WorkspaceSummary, input: AgentInput, key: string): Promise<{
+    agent: Agent; workspace: WorkspaceSummary; proof: CommittedCommand;
+  }> {
+    const candidate = agentSchema.parse({
+      ...input, workspaceId: `workspace-${randomUUID()}`, updatedAt: new Date().toISOString(),
+    });
+    const reservation = await this.persistence.reserveAgentWorkspace(this.childWorkspace(parent, candidate));
+    const agent = agentSchema.parse({
+      ...input, workspaceId: reservation.id, updatedAt: new Date().toISOString(),
+    });
+    const workspace = this.childWorkspace(parent, agent, reservation.createdAt);
     await this.persistence.mintWorkspace(workspace);
     const proof = committed(await this.persistence.commit(agentScope(agent), `workspace/bootstrap/${key}`, "host.workspace.bootstrap",
       { parentWorkspaceId: parent.id, agent: json(agent) }, async (): Promise<EffectOutcome> => {
@@ -398,7 +407,7 @@ export class LocalWork implements WorkPort, StoragePort {
           ],
         };
       }));
-    return { workspace, proof };
+    return { agent, workspace, proof };
   }
   createWorkspace(context: RequestContext, raw: WorkspaceInput): Promise<WorkspaceSummary> {
     return this.exclusive(context, async () => {
@@ -411,7 +420,6 @@ export class LocalWork implements WorkPort, StoragePort {
       }
       const result = committed(await p.commit(p.owner.catalog, key, "host.workspace.create", input, async ({ intentRef }) => {
         const scope = { agentId: `twin-${randomUUID()}`, workspaceId: `business-${randomUUID()}` };
-        const leadScope = { agentId: input.leadAgent.id, workspaceId: `workspace-${randomUUID()}` };
         const now = new Date().toISOString();
         const summary = workspaceSummarySchema.parse({
           name: input.name, purpose: input.purpose, twin: input.twin,
@@ -422,10 +430,10 @@ export class LocalWork implements WorkPort, StoragePort {
           catalogScope: scope, leadAgentId: input.leadAgent.id, createdAt: now, updatedAt: now, revision: 0,
         });
         await p.mintWorkspace(summary);
-        const agent = agentSchema.parse({ ...input.leadAgent, workspaceId: leadScope.workspaceId, updatedAt: now });
         const bootstrap = committed(await p.commit(scope, `workspace/bootstrap/${intentRef}`, "host.workspace.bootstrap",
           input, async () => {
-            const child = await this.provisionAgent(summary, agent, intentRef);
+            const child = await this.provisionAgent(summary, input.leadAgent, intentRef);
+            const leadScope = agentScope(child.agent);
             const events: JsonObject[] = [
               { type: "workspace.saved", workspace: json(summary) },
               { type: "twin.identity.saved", identity: json(input.twin), parentWorkspaceId: summary.id },
@@ -438,7 +446,7 @@ export class LocalWork implements WorkPort, StoragePort {
             ];
             const receipts: JsonObject[] = [proofReceipt(child.proof)];
             if (input.starterTask) {
-              const task = await this.persistTask(leadScope, input.starterTask, intentRef, agent);
+              const task = await this.persistTask(leadScope, input.starterTask, intentRef, child.agent);
               receipts.push(proofReceipt(task));
               events.push({ type: "catalog.task", id: input.starterTask.requestId, scope: json(leadScope), parentWorkspaceId: summary.id });
             }
@@ -527,8 +535,10 @@ export class LocalWork implements WorkPort, StoragePort {
       if (input.id === parent.ownerAgentId) conflict("An agent's owner definition is managed in its parent workspace, not by impersonating the parent.");
       if (existing?.retiredAt) conflict("A retired agent and its dedicated workspace cannot be reassigned or re-enabled.");
       if (context.parentRevision !== undefined && context.parentRevision !== parent.revision) throw new HostError(-32015, "The parent workspace basis changed.");
-      if (!existing && p.hasAgent(input.id)) throw new HostError(-32003, "This agent identity is not in the selected business.");
-      if (!existing && (parent.depth >= MAX_WORKSPACE_DEPTH || p.childrenOf(parent.id).length >= MAX_WORKSPACE_AGENTS)) {
+      const recovery = existing ? null : p.recoverableAgentWorkspace(input.id, parent.id);
+      if (!existing && p.hasAgent(input.id) && !recovery) throw new HostError(-32003, "This agent identity is not in the selected business.");
+      if (!existing && !recovery
+        && (parent.depth >= MAX_WORKSPACE_DEPTH || p.childIdentityCount(parent.id) >= MAX_WORKSPACE_AGENTS)) {
         conflict("The bounded child-workspace depth or agent count has been reached.");
       }
       this.validateAgentPolicy(input, this.lineagePolicy(parent.id));
@@ -546,15 +556,15 @@ export class LocalWork implements WorkPort, StoragePort {
         if (ownedRuns.some((run) => run.agentId === input.id && ["running", "awaiting_approval", "unresolved"].includes(run.state))) {
           return { status: "failed", value: { code: "agent_busy" }, receipts: [{ kind: "no-effect" }], events: [] };
         }
-        const scope = existing ? agentScope(existing) : { agentId: input.id, workspaceId: `workspace-${randomUUID()}` };
-        const agent = agentSchema.parse({ ...input, workspaceId: scope.workspaceId, updatedAt: new Date().toISOString() });
         if (!existing) {
-          const child = await this.provisionAgent(parent, agent, intentRef);
-          return { status: "succeeded", value: json(agent), receipts: [proofReceipt(child.proof)], events: [
-            { type: "catalog.agent", scope: json(scope), parentWorkspaceId: catalog.workspaceId },
+          const child = await this.provisionAgent(parent, input, intentRef);
+          return { status: "succeeded", value: json(child.agent), receipts: [proofReceipt(child.proof)], events: [
+            { type: "catalog.agent", scope: json(agentScope(child.agent)), parentWorkspaceId: catalog.workspaceId },
             { type: "catalog.workspace", workspace: json(child.workspace) },
           ] };
         }
+        const scope = agentScope(existing);
+        const agent = agentSchema.parse({ ...input, workspaceId: scope.workspaceId, updatedAt: new Date().toISOString() });
         p.assertChild(scope, catalog.workspaceId);
         const workspace = p.workspaceInfo(scope.workspaceId);
         const saved = await this.persistAgent(scope, agent, intentRef, {

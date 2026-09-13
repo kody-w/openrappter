@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { isVerifiedChain } from "@rapp-work/rapp1";
 import { MAX_WORKSPACE_AGENTS, MAX_WORKSPACE_DEPTH, twinEvolutionEventSchema, workspaceSummarySchema } from "../src/contracts.js";
 import { agentScope } from "../src/local-work.js";
-import { agentInput, productionFixture } from "./production-fixture.js";
+import { agentInput, productionFixture, until, workspaceInput } from "./production-fixture.js";
 
 type Fixture = Awaited<ReturnType<typeof productionFixture>>;
 const fixtures: Fixture[] = [];
@@ -20,6 +20,32 @@ async function rpcAs(f: Fixture, token: string, method: string, params: unknown)
   });
   return result.json() as Promise<{ result?: any; error?: { code: number; message: string } }>;
 }
+function blockCatalogRead(f: Fixture, workspaceId: string) {
+  const persistence = f.services.persistence as unknown as {
+    readCatalogSource(scope: { agentId: string; workspaceId: string }): Promise<unknown>;
+  };
+  const original = persistence.readCatalogSource.bind(persistence);
+  let reached!: () => void, release!: () => void;
+  const waiting = new Promise<void>((resolve) => { reached = resolve; });
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  let selected = false;
+  const spy = vi.spyOn(persistence, "readCatalogSource").mockImplementation(async (scope) => {
+    const history = await original(scope);
+    if (!selected && scope.workspaceId === workspaceId) {
+      selected = true; reached(); await blocked;
+    }
+    return history;
+  });
+  return { waiting, release, restore: () => spy.mockRestore() };
+}
+const hasCatalogAgent = (history: Awaited<ReturnType<Fixture["services"]["persistence"]["read"]>>, id: string) =>
+  history.commands.some((command) => command.state === "committed" && command.status === "succeeded"
+    && command.events.some((event) => event.type === "catalog.agent"
+      && (event.scope as { agentId?: string }).agentId === id));
+const hasArchivedWorkspace = (history: Awaited<ReturnType<Fixture["services"]["persistence"]["read"]>>) =>
+  history.commands.some((command) => command.state === "committed" && command.status === "succeeded"
+    && command.events.some((event) => event.type === "workspace.saved"
+      && (event.workspace as { status?: string }).status === "archived"));
 
 describe("recursive canonical workspace lineage", () => {
   it("creates one unique dedicated child per agent, supports recursive sub-agents, and rejects sibling/ancestor impersonation", async () => {
@@ -157,6 +183,85 @@ describe("recursive canonical workspace lineage", () => {
     expect((await f.rpc("twin.message", { workspaceId: child.id, message: "Organize internal work.", history: [] })).error?.code).toBe(-32014);
     expect((await f.services.work.workspace(f.context(child.id))).organization.twinSummary).toBe("");
   }, 60_000);
+
+  it("recovers the same durably reserved child after failed publication and restart", async () => {
+    const f = await setup(), root = f.workspace!, id = "restart-reserved-agent";
+    const before = await readdir(join(f.directory, "workspaces"));
+    f.failAfterCommits(8);
+    await expect(f.services.work.saveAgent(f.context(), agentInput(id))).rejects.toMatchObject({ code: -32012 });
+    f.failPersistence(false);
+    const staged = (await readdir(join(f.directory, "workspaces"))).filter((workspaceId) => !before.includes(workspaceId));
+    expect(staged).toHaveLength(1);
+    const orphanId = staged[0]!;
+    const orphan = await (await f.services.persistence.workspace({ agentId: id, workspaceId: orphanId })).scan();
+    expect(JSON.stringify(orphan.streams.body.frames)).toContain("host.workspace.bootstrap");
+    await f.close(false); fixtures.splice(fixtures.indexOf(f), 1);
+
+    const recovered = await setup(f.directory);
+    expect(recovered.services.persistence.businessIds()).not.toContain(orphanId);
+    const other = await recovered.services.work.createWorkspace(
+      recovered.catalogContext(), workspaceInput("Reservation isolation", "reservation-isolation-lead"),
+    );
+    const beforeWrongParent = await readdir(join(recovered.directory, "workspaces"));
+    await expect(recovered.services.work.saveAgent(recovered.context(other.id), agentInput(id)))
+      .rejects.toMatchObject({ code: -32003 });
+    expect(await readdir(join(recovered.directory, "workspaces"))).toEqual(beforeWrongParent);
+    const agent = await recovered.services.work.saveAgent(recovered.context(root.id), agentInput(id));
+    expect(agent.workspaceId).toBe(orphanId);
+    expect(await recovered.services.work.agentWorkspace(recovered.context(root.id), id))
+      .toMatchObject({ id: orphanId, parentWorkspaceId: root.id, ownerAgentId: id });
+  }, 180_000);
+
+  it("serializes a delayed catalog refresh with child creation and installs only validated source heads", async () => {
+    const f = await setup(), p = f.services.persistence, root = f.workspace!, id = "refresh-create-agent";
+    const gate = blockCatalogRead(f, root.id);
+    try {
+      const stale = p.refreshCatalog();
+      await gate.waiting;
+      let settled = false;
+      const creating = f.services.work.saveAgent(f.context(), agentInput(id)).finally(() => { settled = true; });
+      const published = await until(() => p.read(root.catalogScope), (history) => hasCatalogAgent(history, id));
+      const event = published.commands.flatMap((command) => command.state === "committed" ? command.events : [])
+        .find((entry) => entry.type === "catalog.agent" && (entry.scope as { agentId?: string }).agentId === id)!;
+      const workspaceId = (event.scope as { workspaceId: string }).workspaceId;
+      const settledBeforeRelease = settled;
+      gate.release();
+      await stale;
+      expect(p.ownsBusiness(workspaceId)).toBe(true);
+      const agent = await creating;
+      expect(settledBeforeRelease).toBe(false);
+      expect(agent.workspaceId).toBe(workspaceId);
+      expect(p.businessIds()).toContain(workspaceId);
+    } finally {
+      gate.release();
+      gate.restore();
+    }
+  }, 180_000);
+
+  it("serializes a delayed catalog refresh with retirement and cannot restore stale authorization", async () => {
+    const f = await setup(), p = f.services.persistence;
+    const agent = await f.services.work.saveAgent(f.context(), agentInput("refresh-retire-agent"));
+    const session = await f.services.createAgentSession(f.context(), agent.id);
+    const gate = blockCatalogRead(f, agent.workspaceId);
+    try {
+      const stale = p.refreshCatalog();
+      await gate.waiting;
+      let settled = false;
+      const retiring = f.services.work.retireAgent(f.context(), agent.id).finally(() => { settled = true; });
+      await until(() => p.read(agentScope(agent)), hasArchivedWorkspace);
+      const settledBeforeRelease = settled;
+      gate.release();
+      await stale;
+      expect(p.workspaceInfo(agent.workspaceId).status).toBe("archived");
+      expect(p.isAgent(session.principal)).toBe(false);
+      await retiring;
+      expect(settledBeforeRelease).toBe(false);
+      expect(p.workspaceInfo(agent.workspaceId).status).toBe("archived");
+    } finally {
+      gate.release();
+      gate.restore();
+    }
+  }, 180_000);
 
   it("leaves no published orphan on failed agent creation and archives retired ownership instead of reassigning it", async () => {
     const f = await setup(), root = f.workspace!;

@@ -118,8 +118,13 @@ Workspace creation stages and verifies the business catalog, Twin identity,
 lead definition and optional starter work/routines, then publishes one
 verified owner-catalog entry. This is atomic **publication**, not a claim of a
 cross-directory filesystem transaction. Failure before publication leaves
-inaccessible staged scopes and an unresolved intent; restart never remints or
-automatically replays them.
+inaccessible staged scopes and an unresolved intent. A private durable
+reservation binds each child agent ID to its first workspace and parent
+lineage before minting, so restart may recover that exact staged child but
+never remint or reparent it. Catalog refreshes build detached verified maps,
+validate that every source stayed at the scanned version, and install the maps
+only as one serialized update; invalid refreshes revoke publication rather
+than retaining uncertain authorization.
 
 ## Canonical transition
 

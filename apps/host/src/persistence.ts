@@ -36,6 +36,23 @@ const ownerSchema = z.strictObject({
   schema: z.literal("rapp-work/owner/1"), id: idSchema,
   catalog: scopeSchema, computer: scopeSchema,
 });
+const agentWorkspaceReservationSchema = z.strictObject({
+  schema: z.literal("rapp-work/agent-workspace-reservation/1"),
+  ownerId: idSchema,
+  agentId: idSchema,
+  workspaceId: idSchema,
+  parentWorkspaceId: idSchema,
+  rootWorkspaceId: idSchema,
+  lineage: z.array(idSchema).min(2).max(MAX_WORKSPACE_DEPTH + 1),
+  depth: z.number().int().min(1).max(MAX_WORKSPACE_DEPTH),
+}).superRefine((value, context) => {
+  if (value.lineage.length !== value.depth + 1 || value.lineage[0] !== value.rootWorkspaceId
+    || value.lineage.at(-1) !== value.workspaceId || value.lineage.at(-2) !== value.parentWorkspaceId
+    || new Set(value.lineage).size !== value.lineage.length) {
+    context.addIssue({ code: "custom", message: "Agent workspace reservation lineage must be exact and acyclic." });
+  }
+});
+type AgentWorkspaceReservation = z.infer<typeof agentWorkspaceReservationSchema>;
 export type LocalOwner = z.infer<typeof ownerSchema>;
 export const json = (value: unknown): JsonValue => snapshotJson(value) as JsonValue;
 export const digest = (value: unknown): string => hashValue(PARTICLE_DOMAIN, snapshotJson(value));
@@ -60,6 +77,18 @@ interface EffectPermit {
   guestConsumed: boolean;
 }
 
+interface CatalogState {
+  scopes: Map<string, WorkspaceScope>;
+  parents: Map<string, string | null>;
+  businesses: Map<string, WorkspaceScope>;
+  published: Set<string>;
+  metadata: Map<string, WorkspaceSummary>;
+}
+
+const emptyCatalogState = (): CatalogState => ({
+  scopes: new Map(), parents: new Map(), businesses: new Map(), published: new Set(), metadata: new Map(),
+});
+
 /** Owns the only application store. Catalog entries locate, but never authorize, agent state. */
 export class LocalPersistence {
   readonly directory: string;
@@ -69,17 +98,22 @@ export class LocalPersistence {
   private store!: WorkspaceStore;
   private principal!: OwnerPrincipal;
   private identity!: LocalOwner;
-  private readonly scopes = new Map<string, WorkspaceScope>();
-  private readonly parents = new Map<string, string | null>();
-  private readonly businesses = new Map<string, WorkspaceScope>();
-  private readonly published = new Set<string>();
-  private readonly metadata = new Map<string, WorkspaceSummary>();
+  private scopes = new Map<string, WorkspaceScope>();
+  private parents = new Map<string, string | null>();
+  private businesses = new Map<string, WorkspaceScope>();
+  private published = new Set<string>();
+  private metadata = new Map<string, WorkspaceSummary>();
+  private readonly reservations = new Map<string, AgentWorkspaceReservation>();
+  private reservationWrites: Promise<void> = Promise.resolve();
+  private refreshes: Promise<void> = Promise.resolve();
+  private readonly refreshScopes = new AsyncLocalStorage<ReadonlyMap<string, WorkspaceScope>>();
   private readonly agentIdentities = new WeakMap<object, { workspaceId: string; agentId: string; lineage: string[] }>();
   private readonly humanIdentities = new WeakSet<object>();
   private readonly actor = new AsyncLocalStorage<Principal>();
   private readonly capabilityActors = new WeakMap<object, Principal>();
   private readonly scopedDelegations = new WeakMap<object, Principal>();
   private readonly generations = new Map<string, number>();
+  private readonly sourceVersions = new Map<string, number>();
   private readonly observedHeads = new Map<string, WorkspaceHeads>();
   private readonly scans = new Map<string, WorkspaceSnapshot>();
   private readonly lifecycle: LifecycleStore;
@@ -101,7 +135,7 @@ export class LocalPersistence {
       authenticate: (credential) => credential === this.credential && this.identity
         ? { id: this.identity.id, kind: "human", expiresAt: Number.MAX_SAFE_INTEGER } : null,
       authorize: (principal, scope) => principal.id === this.identity.id
-        && this.scopes.get(scope.agentId)?.workspaceId === scope.workspaceId
+        && (this.refreshScopes.getStore()?.get(scope.agentId) ?? this.scopes.get(scope.agentId))?.workspaceId === scope.workspaceId
         && scope.resources.includes(`workspace:${scope.workspaceId}`),
       // Arbitrary guest execution is always sensitive, including under on-risk policy.
       executionPolicy: (_principal, operation) => ({
@@ -318,12 +352,16 @@ export class LocalPersistence {
   private observe(snapshot: WorkspaceSnapshot): void {
     if (!isWorkspaceSnapshot(snapshot)) throw new Error("Only committed branded scans may update trusted heads.");
     const id = snapshot.identity.workspace_id, previous = this.observedHeads.get(id);
-    if (snapshot.generation < (this.generations.get(id) ?? 0)) throw new Error("Committed workspace generation rolled back.");
+    const previousGeneration = this.generations.get(id);
+    if (snapshot.generation < (previousGeneration ?? 0)) throw new Error("Committed workspace generation rolled back.");
     if (previous) for (const stream of ["body", "memory", "swarm"] as const) {
       const head = previous[stream];
       if (head && snapshot.streams[stream].frames[head.seq]?.frame_hash !== head.frame_hash) {
         throw new Error("A trusted workspace head was rolled back or forked.");
       }
+    }
+    if (!previous || previousGeneration !== snapshot.generation || canonicalJson(previous) !== canonicalJson(snapshot.heads)) {
+      this.sourceVersions.set(id, (this.sourceVersions.get(id) ?? 0) + 1);
     }
     this.observedHeads.set(id, snapshot.heads); this.generations.set(id, snapshot.generation);
     const key = this.scanKey(id, headHashes(snapshot.heads));
@@ -334,8 +372,7 @@ export class LocalPersistence {
   commandFrameHashes(command: CommittedCommand): string[] { return this.lifecycle.commandFrames(command); }
   clearProjectionCaches(): void { this.projected.clear(); }
   async rebuildFromFrames(): Promise<void> {
-    this.projected.clear(); this.metadata.clear(); this.businesses.clear(); this.published.clear(); this.parents.clear(); this.scopes.clear();
-    this.register(this.identity.catalog); this.register(this.identity.computer);
+    this.projected.clear();
     await this.refreshCatalog();
   }
 
@@ -360,6 +397,23 @@ export class LocalPersistence {
         }));
       }
       this.identity = ownerSchema.parse(parseCanonicalJson(await this.root.read("owner.json")));
+      await this.root.mkdir("agent-workspaces");
+      const workspaceIds = new Set<string>();
+      const reservationFiles = await this.root.list("agent-workspaces");
+      if (reservationFiles.length > MAX_WORKSPACES) throw new Error("The agent workspace reservation limit was exceeded.");
+      for (const filename of reservationFiles) {
+        if (!/^[a-f0-9]{64}\.json$/.test(filename)) throw new Error("Agent workspace reservation filename is invalid.");
+        const reservation = agentWorkspaceReservationSchema.parse(
+          parseCanonicalJson(await this.root.read(`agent-workspaces/${filename}`)),
+        );
+        if (reservation.ownerId !== this.identity.id
+          || filename !== `${digest({ ownerId: reservation.ownerId, agentId: reservation.agentId })}.json`
+          || this.reservations.has(reservation.agentId) || workspaceIds.has(reservation.workspaceId)) {
+          throw new Error("Agent workspace reservations must be unique and owner-bound.");
+        }
+        this.reservations.set(reservation.agentId, reservation);
+        workspaceIds.add(reservation.workspaceId);
+      }
       await this.root.mkdir("workspaces");
       await this.root.mkdir("host-lock");
     }, 5000);
@@ -381,111 +435,163 @@ export class LocalPersistence {
     }
     await this.refreshCatalog();
   }
-  async refreshCatalog(): Promise<void> {
-    const verified = new Set<string>();
-    const cache = new Map<string, WorkSnapshot>();
-    const read = async (scope: WorkspaceScope) => {
-      const history = cache.get(scope.workspaceId) ?? await this.read(scope);
-      cache.set(scope.workspaceId, history); return history;
-    };
-    const linked = (history: WorkSnapshot, receipt: JsonObject) => history.commands.find((entry) =>
-      entry.state === "committed" && entry.status === "succeeded" && entry.proof.evidenceRef === receipt.evidenceRef
-      && entry.proof.intentRef === receipt.intentRef && entry.proof.outcomeRef === receipt.outcomeRef);
-    const visit = async (birth: WorkspaceSummary, parent: WorkspaceSummary | null, command: CommittedCommand): Promise<void> => {
-      if (verified.has(birth.id) || verified.size >= MAX_WORKSPACES || birth.parentWorkspaceId !== (parent?.id ?? null)) {
-        throw new Error("Workspace lineage contains a duplicate, cycle or foreign parent.");
-      }
-      this.registerWorkspace(birth, false);
-      const history = await read(birth.catalogScope);
-      const bootstrap = history.commands.find((entry) => entry.state === "committed" && entry.status === "succeeded"
-        && entry.command.operation === "host.workspace.bootstrap" && command.receipts.some((receipt) =>
-          receipt.kind === "canonical-commit" && receipt.workspaceId === birth.id && linked(history, receipt) === entry));
-      if (!bootstrap || bootstrap.state !== "committed" || !bootstrap.events.some((event) =>
-        event.type === "workspace.saved" && digest(event.workspace) === digest(birth))
-        || !bootstrap.events.some((event) => event.type === "twin.identity.saved"
-          && event.parentWorkspaceId === birth.id && digest(event.identity) === digest(birth.twin))) {
-        throw new Error("Every workspace requires a parent-linked complete canonical bootstrap.");
-      }
-      const children = new Map<string, { birth: WorkspaceSummary; command: CommittedCommand }>();
-      const agents = new Map<string, WorkspaceScope>();
-      for (const entry of history.commands) {
-        if (entry.state !== "committed" || entry.status !== "succeeded") continue;
-        for (const event of entry.events) {
-          if (event.type === "catalog.workspace") {
-            const child = workspaceSummarySchema.parse(event.workspace);
-            if (children.has(child.id)) throw new Error("A dedicated workspace may be published only once.");
-            children.set(child.id, { birth: child, command: entry });
-          } else if (event.type === "catalog.agent") {
-            if (event.parentWorkspaceId !== birth.id) throw new Error("Agent parent ownership differs.");
-            const scope = scopeSchema.parse(event.scope);
-            this.register(scope, birth.id); agents.set(scope.agentId, scope);
-          }
-        }
-      }
-      if (agents.size > MAX_WORKSPACE_AGENTS || children.size !== agents.size) throw new Error("An agent and its dedicated child must be published together.");
-      for (const child of children.values()) {
-        if (agents.get(child.birth.ownerAgentId!)?.workspaceId !== child.birth.id) throw new Error("A child workspace has no owning agent.");
-        this.registerWorkspace(child.birth, false);
-      }
-      for (const receipt of bootstrap.receipts) {
-        if (receipt.kind === LIFECYCLE_RECEIPT) continue;
-        if (receipt.kind !== "canonical-commit") throw new Error("Bootstrap effects require canonical workspace proofs.");
-        const scope = receipt.workspaceId === birth.id ? birth.catalogScope : children.get(String(receipt.workspaceId))?.birth.catalogScope;
-        if (!scope || !linked(await read(scope), receipt)) {
-          this.published.delete(birth.id);
-          throw new Error("The complete bootstrap child evidence could not be verified.");
-        }
-      }
-      if (birth.ownerType === "agent") {
-        if (!history.commands.some((entry) => entry.state === "committed" && entry.status === "succeeded"
-          && entry.events.some((event) => event.type === "ui.agent.saved"
-            && (event.agent as { id?: string; workspaceId?: string })?.id === birth.ownerAgentId
-            && (event.agent as { workspaceId?: string }).workspaceId === birth.id))) throw new Error("The owning agent has no canonical definition.");
-      } else if (!agents.has(birth.leadAgentId)) throw new Error("A human workspace requires a lead agent and its dedicated child.");
-      verified.add(birth.id);
-      for (const child of children.values()) await visit(child.birth, birth, child.command);
-      for (const entry of history.commands) {
-        if (entry.state !== "committed" || entry.status !== "succeeded") continue;
-        for (const event of entry.events) {
-          if (event.type === "workspace.saved") this.registerWorkspace(workspaceSummarySchema.parse(event.workspace));
-          if (event.type === "workspace.evolved") {
-            const current = this.metadata.get(birth.id)!;
-            this.metadata.set(birth.id, { ...current, organization: workspaceOrganizationSchema.parse(event.organization), updatedAt: String(event.at) });
-          }
-        }
-      }
-    };
+  refreshCatalog(): Promise<void> {
+    const operation = this.refreshes.then(() => this.refreshCatalogSerialized());
+    this.refreshes = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+  private async refreshCatalogSerialized(): Promise<void> {
     try {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const state = await this.buildCatalog();
+        if (!state) continue;
+        this.scopes = state.scopes;
+        this.parents = state.parents;
+        this.businesses = state.businesses;
+        this.metadata = state.metadata;
+        this.published = state.published;
+        return;
+      }
+      throw new Error("Catalog sources did not reach a stable committed head.");
+    } catch (error) {
+      this.published = new Set();
+      throw error;
+    }
+  }
+  private async readCatalogSource(scope: WorkspaceScope): Promise<{ history: WorkSnapshot; version: number }> {
+    const history = await this.readSources(await this.capability(scope), scope);
+    return { history, version: this.sourceVersions.get(scope.workspaceId) ?? 0 };
+  }
+  private async buildCatalog(): Promise<CatalogState | null> {
+    const state = emptyCatalogState();
+    this.registerInto(state, this.identity.catalog);
+    this.registerInto(state, this.identity.computer);
+    return this.refreshScopes.run(state.scopes, async () => {
+      const verified = new Set<string>();
+      const cache = new Map<string, WorkSnapshot>();
+      const sources = new Map<string, number>();
+      const read = async (scope: WorkspaceScope) => {
+        const cached = cache.get(scope.workspaceId);
+        if (cached) return cached;
+        const source = await this.readCatalogSource(scope);
+        const history = source.history;
+        cache.set(scope.workspaceId, history);
+        sources.set(scope.workspaceId, source.version);
+        return history;
+      };
+      const linked = (history: WorkSnapshot, receipt: JsonObject) => history.commands.find((entry) =>
+        entry.state === "committed" && entry.status === "succeeded" && entry.proof.evidenceRef === receipt.evidenceRef
+        && entry.proof.intentRef === receipt.intentRef && entry.proof.outcomeRef === receipt.outcomeRef);
+      const visit = async (birth: WorkspaceSummary, parent: WorkspaceSummary | null, command: CommittedCommand): Promise<void> => {
+        if (verified.has(birth.id) || verified.size >= MAX_WORKSPACES || birth.parentWorkspaceId !== (parent?.id ?? null)) {
+          throw new Error("Workspace lineage contains a duplicate, cycle or foreign parent.");
+        }
+        this.registerWorkspaceInto(state, birth, false);
+        const history = await read(birth.catalogScope);
+        const bootstrap = history.commands.find((entry) => entry.state === "committed" && entry.status === "succeeded"
+          && entry.command.operation === "host.workspace.bootstrap" && command.receipts.some((receipt) =>
+            receipt.kind === "canonical-commit" && receipt.workspaceId === birth.id && linked(history, receipt) === entry));
+        if (!bootstrap || bootstrap.state !== "committed" || !bootstrap.events.some((event) =>
+          event.type === "workspace.saved" && digest(event.workspace) === digest(birth))
+          || !bootstrap.events.some((event) => event.type === "twin.identity.saved"
+            && event.parentWorkspaceId === birth.id && digest(event.identity) === digest(birth.twin))) {
+          throw new Error("Every workspace requires a parent-linked complete canonical bootstrap.");
+        }
+        const children = new Map<string, { birth: WorkspaceSummary; command: CommittedCommand }>();
+        const agents = new Map<string, WorkspaceScope>();
+        for (const entry of history.commands) {
+          if (entry.state !== "committed" || entry.status !== "succeeded") continue;
+          for (const event of entry.events) {
+            if (event.type === "catalog.workspace") {
+              const child = workspaceSummarySchema.parse(event.workspace);
+              if (children.has(child.id)) throw new Error("A dedicated workspace may be published only once.");
+              children.set(child.id, { birth: child, command: entry });
+            } else if (event.type === "catalog.agent") {
+              if (event.parentWorkspaceId !== birth.id) throw new Error("Agent parent ownership differs.");
+              const scope = scopeSchema.parse(event.scope);
+              this.registerInto(state, scope, birth.id); agents.set(scope.agentId, scope);
+            }
+          }
+        }
+        if (agents.size > MAX_WORKSPACE_AGENTS || children.size !== agents.size) throw new Error("An agent and its dedicated child must be published together.");
+        for (const child of children.values()) {
+          if (agents.get(child.birth.ownerAgentId!)?.workspaceId !== child.birth.id) throw new Error("A child workspace has no owning agent.");
+          this.registerWorkspaceInto(state, child.birth, false);
+        }
+        for (const receipt of bootstrap.receipts) {
+          if (receipt.kind === LIFECYCLE_RECEIPT) continue;
+          if (receipt.kind !== "canonical-commit") throw new Error("Bootstrap effects require canonical workspace proofs.");
+          const scope = receipt.workspaceId === birth.id ? birth.catalogScope : children.get(String(receipt.workspaceId))?.birth.catalogScope;
+          if (!scope || !linked(await read(scope), receipt)) {
+            throw new Error("The complete bootstrap child evidence could not be verified.");
+          }
+        }
+        if (birth.ownerType === "agent") {
+          if (!history.commands.some((entry) => entry.state === "committed" && entry.status === "succeeded"
+            && entry.events.some((event) => event.type === "ui.agent.saved"
+              && (event.agent as { id?: string; workspaceId?: string })?.id === birth.ownerAgentId
+              && (event.agent as { workspaceId?: string }).workspaceId === birth.id))) throw new Error("The owning agent has no canonical definition.");
+        } else if (!agents.has(birth.leadAgentId)) throw new Error("A human workspace requires a lead agent and its dedicated child.");
+        verified.add(birth.id);
+        for (const child of children.values()) await visit(child.birth, birth, child.command);
+        for (const entry of history.commands) {
+          if (entry.state !== "committed" || entry.status !== "succeeded") continue;
+          for (const event of entry.events) {
+            if (event.type === "workspace.saved") this.registerWorkspaceInto(state, workspaceSummarySchema.parse(event.workspace));
+            if (event.type === "workspace.evolved") {
+              const current = state.metadata.get(birth.id)!;
+              state.metadata.set(birth.id, { ...current, organization: workspaceOrganizationSchema.parse(event.organization), updatedAt: String(event.at) });
+            }
+          }
+        }
+      };
       for (const command of (await read(this.identity.catalog)).commands) {
         if (command.state !== "committed" || command.status !== "succeeded") continue;
         for (const event of command.events) if (event.type === "catalog.workspace") {
           await visit(workspaceSummarySchema.parse(event.workspace), null, command);
         }
       }
-      this.published.clear();
-      for (const id of verified) this.published.add(id);
-    } catch (error) {
-      this.published.clear();
-      throw error;
-    }
+      for (const [id, version] of sources) if ((this.sourceVersions.get(id) ?? 0) !== version) return null;
+      const pending = new Map<string, WorkspaceSummary>();
+      for (const workspace of this.metadata.values()) {
+        if (!this.published.has(workspace.id)) pending.set(workspace.id, workspace);
+      }
+      for (const workspace of [...pending.values()].sort((left, right) => left.depth - right.depth)) {
+        if (state.metadata.has(workspace.id)) continue;
+        if (workspace.parentWorkspaceId === null || state.metadata.has(workspace.parentWorkspaceId)) {
+          this.registerWorkspaceInto(state, workspace);
+        }
+      }
+      state.published = verified;
+      return state;
+    });
   }
-  register(scope: WorkspaceScope, parentWorkspaceId: string | null = null): void {
+  private currentCatalog(): CatalogState {
+    return {
+      scopes: this.scopes, parents: this.parents, businesses: this.businesses,
+      published: this.published, metadata: this.metadata,
+    };
+  }
+  private registerInto(state: CatalogState, scope: WorkspaceScope, parentWorkspaceId: string | null = null): void {
     scopeSchema.parse(scope);
-    const existing = this.scopes.get(scope.agentId);
+    const existing = state.scopes.get(scope.agentId);
     if (existing && existing.workspaceId !== scope.workspaceId) throw new Error("An agent cannot change its minted workspace.");
-    if ([...this.scopes.values()].some((item) => item.workspaceId === scope.workspaceId && item.agentId !== scope.agentId)) {
+    if ([...state.scopes.values()].some((item) => item.workspaceId === scope.workspaceId && item.agentId !== scope.agentId)) {
       throw new Error("A workspace has exactly one state owner.");
     }
-    if (this.parents.has(scope.workspaceId) && this.parents.get(scope.workspaceId) !== parentWorkspaceId) {
+    if (state.parents.has(scope.workspaceId) && state.parents.get(scope.workspaceId) !== parentWorkspaceId) {
       throw new Error("A workspace cannot change its parent ownership.");
     }
-    this.scopes.set(scope.agentId, Object.freeze({ ...scope }));
-    this.parents.set(scope.workspaceId, parentWorkspaceId);
+    state.scopes.set(scope.agentId, Object.freeze({ ...scope }));
+    state.parents.set(scope.workspaceId, parentWorkspaceId);
   }
-  private registerWorkspace(raw: WorkspaceSummary, update = true): void {
+  register(scope: WorkspaceScope, parentWorkspaceId: string | null = null): void {
+    this.registerInto(this.currentCatalog(), scope, parentWorkspaceId);
+  }
+  private registerWorkspaceInto(state: CatalogState, raw: WorkspaceSummary, update = true): void {
     const workspace = workspaceSummarySchema.parse(raw);
     if (workspace.ownerId !== this.identity.id) throw new Error("Workspace belongs to a different root owner.");
-    const previous = this.metadata.get(workspace.id);
+    const previous = state.metadata.get(workspace.id);
     const identity = (item: WorkspaceSummary) => ({
       id: item.id, ownerId: item.ownerId, ownerType: item.ownerType, ownerAgentId: item.ownerAgentId,
       parentWorkspaceId: item.parentWorkspaceId, rootWorkspaceId: item.rootWorkspaceId,
@@ -493,14 +599,17 @@ export class LocalPersistence {
     });
     if (previous && digest(identity(previous)) !== digest(identity(workspace))) throw new Error("Workspace lineage and owner are mint-once.");
     if (workspace.parentWorkspaceId !== null) {
-      const parent = this.metadata.get(workspace.parentWorkspaceId);
+      const parent = state.metadata.get(workspace.parentWorkspaceId);
       if (!parent || workspace.depth !== parent.depth + 1 || workspace.depth > MAX_WORKSPACE_DEPTH
         || digest(workspace.lineage) !== digest([...parent.lineage, workspace.id])
         || workspace.rootWorkspaceId !== parent.rootWorkspaceId) throw new Error("The exact parent lineage is required.");
     }
-    this.register(workspace.catalogScope, workspace.parentWorkspaceId);
-    this.businesses.set(workspace.id, Object.freeze({ ...workspace.catalogScope }));
-    if (update || !previous) this.metadata.set(workspace.id, structuredClone(workspace));
+    this.registerInto(state, workspace.catalogScope, workspace.parentWorkspaceId);
+    state.businesses.set(workspace.id, Object.freeze({ ...workspace.catalogScope }));
+    if (update || !previous) state.metadata.set(workspace.id, structuredClone(workspace));
+  }
+  private registerWorkspace(raw: WorkspaceSummary, update = true): void {
+    this.registerWorkspaceInto(this.currentCatalog(), raw, update);
   }
   ownsBusiness(workspaceId: string): boolean { return this.published.has(workspaceId); }
   businessScope(workspaceId: string): WorkspaceScope {
@@ -519,6 +628,13 @@ export class LocalPersistence {
   }
   childrenOf(workspaceId: string): string[] {
     return this.businessIds().filter((id) => this.parents.get(id) === workspaceId);
+  }
+  childIdentityCount(workspaceId: string): number {
+    return new Set([
+      ...this.childrenOf(workspaceId),
+      ...[...this.reservations.values()].filter((workspace) => workspace.parentWorkspaceId === workspaceId)
+        .map((workspace) => workspace.workspaceId),
+    ]).size;
   }
   activeLineage(workspaceId: string): boolean {
     const metadata = this.workspaceInfo(workspaceId);
@@ -541,12 +657,80 @@ export class LocalPersistence {
     if (scope.workspaceId === workspace.id && scope.agentId === workspace.catalogScope.agentId) return;
     this.assertChild(scope, workspaceId);
   }
-  hasAgent(agentId: string): boolean { return this.scopes.has(agentId); }
-  async mintWorkspace(workspace: WorkspaceSummary): Promise<void> {
-    if (this.metadata.has(workspace.id) || this.metadata.size >= MAX_WORKSPACES) throw new HostError(-32009, "Workspace identity is already reserved or the workspace limit was reached.");
+  hasAgent(agentId: string): boolean { return this.scopes.has(agentId) || this.reservations.has(agentId); }
+  recoverableAgentWorkspace(agentId: string, parentWorkspaceId: string): WorkspaceScope | null {
+    const reservation = this.reservations.get(agentId);
+    if (!reservation || reservation.parentWorkspaceId !== parentWorkspaceId || this.published.has(reservation.workspaceId)) return null;
+    return { agentId: reservation.agentId, workspaceId: reservation.workspaceId };
+  }
+  async reserveAgentWorkspace(raw: WorkspaceSummary): Promise<WorkspaceSummary> {
+    const requested = workspaceSummarySchema.parse(raw);
+    if (requested.ownerId !== this.identity.id || requested.ownerType !== "agent"
+      || requested.ownerAgentId === null || requested.parentWorkspaceId === null) {
+      throw new Error("Only exact owner-bound child workspaces may be reserved.");
+    }
+    const operation = this.reservationWrites.then(async () => {
+      const existing = this.reservations.get(requested.ownerAgentId!);
+      if (existing) {
+        const placement = {
+          ownerId: requested.ownerId, agentId: requested.ownerAgentId,
+          parentWorkspaceId: requested.parentWorkspaceId, rootWorkspaceId: requested.rootWorkspaceId,
+          lineage: requested.lineage.slice(0, -1), depth: requested.depth,
+        };
+        if (digest(placement) !== digest({
+          ownerId: existing.ownerId, agentId: existing.agentId,
+          parentWorkspaceId: existing.parentWorkspaceId, rootWorkspaceId: existing.rootWorkspaceId,
+          lineage: existing.lineage.slice(0, -1), depth: existing.depth,
+        })) {
+          throw new HostError(-32003, "This agent identity is durably reserved to a different workspace lineage.");
+        }
+        const recovered = workspaceSummarySchema.parse({
+          ...requested,
+          id: existing.workspaceId,
+          catalogScope: { agentId: existing.agentId, workspaceId: existing.workspaceId },
+          lineage: [...existing.lineage],
+        });
+        this.registerWorkspace(recovered);
+        return recovered;
+      }
+      const workspaceIds = new Set([...this.metadata.keys(), ...[...this.reservations.values()].map((workspace) => workspace.workspaceId)]);
+      if (workspaceIds.size >= MAX_WORKSPACES || workspaceIds.has(requested.id)) {
+        throw new HostError(-32009, "Workspace identity is already reserved or the workspace limit was reached.");
+      }
+      const record = agentWorkspaceReservationSchema.parse({
+        schema: "rapp-work/agent-workspace-reservation/1",
+        ownerId: this.identity.id,
+        agentId: requested.ownerAgentId,
+        workspaceId: requested.id,
+        parentWorkspaceId: requested.parentWorkspaceId,
+        rootWorkspaceId: requested.rootWorkspaceId,
+        lineage: requested.lineage,
+        depth: requested.depth,
+      });
+      const filename = `${digest({ ownerId: record.ownerId, agentId: record.agentId })}.json`;
+      await this.root.writeAtomic(`agent-workspaces/${filename}`, canonicalJson(record));
+      this.reservations.set(record.agentId, record);
+      this.registerWorkspace(requested);
+      return structuredClone(requested);
+    });
+    this.reservationWrites = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+  async mintWorkspace(raw: WorkspaceSummary): Promise<void> {
+    const workspace = workspaceSummarySchema.parse(raw);
+    const reservation = workspace.ownerAgentId ? this.reservations.get(workspace.ownerAgentId) : undefined;
+    const reserved = reservation?.workspaceId === workspace.id && reservation.agentId === workspace.catalogScope.agentId;
+    const workspaceIds = new Set([...this.metadata.keys(), ...[...this.reservations.values()].map((item) => item.workspaceId)]);
+    if ((this.metadata.has(workspace.id) && !reserved) || (!workspaceIds.has(workspace.id) && workspaceIds.size >= MAX_WORKSPACES)) {
+      throw new HostError(-32009, "Workspace identity is already reserved or the workspace limit was reached.");
+    }
+    if (workspace.ownerType === "agent" && !reserved) throw new Error("Agent workspace minting requires its durable reservation.");
     this.registerWorkspace(workspace);
     await this.store.create(await this.capability(workspace.catalogScope), {
-      owner: this.identity.id, slug: `${workspace.ownerType === "agent" ? "agent" : "business"}-${randomUUID()}`,
+      owner: this.identity.id,
+      slug: workspace.ownerType === "agent" ? `agent-${digest({
+        ownerId: workspace.ownerId, workspaceId: workspace.id, agentId: workspace.catalogScope.agentId,
+      }).slice(0, 64)}` : `business-${randomUUID()}`,
     });
   }
   async capability(scope: WorkspaceScope, resources: readonly string[] = []): Promise<Capability> {
@@ -680,6 +864,7 @@ export class LocalPersistence {
         referenceHashes: [...new Set([source.frame_hash, source.payload_hash, ...refs])].sort(),
       });
       const after = await transaction.compareAndAppend({ expectedHeads: heads, frames: [source, evidence] });
+      this.observe(after);
       return this.frameProof(after, source.frame_hash, evidence.frame_hash);
     });
   }

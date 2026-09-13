@@ -31,7 +31,8 @@ export class AgentRuntime {
     const limits = dependencies.limits;
     if (!bounded(limits.maxConcurrentRuns, 64) || !bounded(limits.maxConcurrentTools, 64)
       || !bounded(limits.maxStepsPerRun, 1_000) || !bounded(limits.maxToolCallsPerRun, 1_000, 0)
-      || !bounded(limits.maxDurationMs, 3_600_000) || !bounded(limits.maxOutputTokens, 131_072)) {
+      || !bounded(limits.maxDurationMs, 3_600_000) || !bounded(limits.maxOutputTokens, 131_072)
+      || !bounded(dependencies.cancellationGraceMs ?? 2_000, 60_000)) {
       throw new AgentRuntimeError("invalid_runtime_limits");
     }
     this.dependencies = { ...dependencies, limits: Object.freeze({ ...limits }) };
@@ -241,7 +242,9 @@ export class AgentRuntime {
           try {
             const settled = await Promise.race([
               Promise.allSettled([...active.pending]).then(() => true),
-              new Promise<boolean>((resolve) => { grace = setTimeout(() => resolve(false), 2000); }),
+              new Promise<boolean>((resolve) => {
+                grace = setTimeout(() => resolve(false), this.dependencies.cancellationGraceMs ?? 2_000);
+              }),
             ]);
             if (settled) {
               const snapshot = await this.dependencies.work.read(capability, request.scope);

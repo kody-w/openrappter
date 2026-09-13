@@ -1,91 +1,169 @@
 import { useState, type FormEvent } from "react";
+import { describeCadence } from "./Automations";
 import { Field, FormFooter, StatusBadge } from "./components";
-import type { Agent, AgentInput, Approval, Automation, AutomationInput, Provider, Settings } from "./model";
-import type { Perform } from "./useWorkspace";
+import { proposalIntegrity } from "./integrity";
+import { agentDraftSchema, agentInputSchema, automationInputSchema, MAX_INSTRUCTION_CHARS, settingsPatchSchema, settingsReviewSchema, taskInputSchema, taskSchema, twinBasisSchema, twinDraftSchema, workspaceInputSchema, type Agent, type AgentInput, type Approval, type AutomationInput, type Provider, type SettingsReview, type Task, type TaskInput, type TwinDraft, type WorkspaceInput } from "./model";
 
-interface FormProps { perform: Perform; busy: boolean; error: string; onClose: () => void }
+export type ReviewSource = "twin" | "existing";
+interface ReviewValues<T> {
+  draft: T;
+  onSave: (input: T) => Promise<boolean>;
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+}
+type ReviewProps<T> = ReviewValues<T> & (
+  | { source: "twin"; proposal: TwinDraft }
+  | { source: "existing"; proposal?: never }
+);
+type CreationReviewProps<T> = ReviewValues<T> & { source: "twin"; proposal: TwinDraft };
+function hasReviewSource<T>(props: ReviewProps<T>, kind: TwinDraft["kind"]): boolean {
+  if (props.source === "existing") return true;
+  if (props.source !== "twin") return false;
+  const parsed = twinDraftSchema.safeParse(props.proposal);
+  if (!parsed.success || parsed.data.kind !== kind || !parsed.data.readyForReview || parsed.data.missing.length || !parsed.data.draft) return false;
+  if (proposalIntegrity(parsed.data, parsed.data.workspaceId).state !== "verified") return false;
+  const basis = twinBasisSchema.safeParse(parsed.data.basis);
+  if (!basis.success || basis.data.workspaceId !== parsed.data.workspaceId) return false;
+  const schemas = { workspace: workspaceInputSchema, task: taskInputSchema, agent: agentDraftSchema, automation: automationInputSchema, settings: settingsPatchSchema };
+  if (!(kind in schemas) || !schemas[kind as keyof typeof schemas].safeParse(parsed.data.draft).success) return false;
+  const key = kind === "workspace" || kind === "task" ? "requestId" : kind === "agent" || kind === "automation" ? "id" : null;
+  return !key || (parsed.data.draft as Record<string, unknown>)[key] === (props.draft as Record<string, unknown>)[key];
+}
+export function ReviewNote({ source }: { source: ReviewSource }) {
+  return <p className="review-note">{source === "twin"
+    ? "Drafted by your Work Twin. Every detail is prefilled. Review or make small edits before applying."
+    : "Prefilled from the saved workspace record. Edits return to your Twin for a fresh, verified proposal; this sheet cannot apply changes directly."}</p>;
+}
 function FormError({ error }: { error: string }) {
   return error ? <p className="form-error" role="alert">{error}</p> : null;
 }
-export function TaskForm({ agents, settings, perform, busy, error, onClose }: FormProps & { agents: Agent[]; settings: Settings }) {
-  const [requestId] = useState(() => crypto.randomUUID());
+function IncompleteReview() {
+  return <p className="form-body form-error" role="alert">This draft is incomplete. Return to your Twin to finish it; no blank form is available.</p>;
+}
+export function TaskForm(props: CreationReviewProps<TaskInput> & { agents: Agent[] }) {
+  if (props.source !== "twin" || !taskInputSchema.safeParse(props.draft).success || !hasReviewSource(props, "task")) return <IncompleteReview />;
+  return <TaskReview {...props} />;
+}
+function TaskReview({ draft, source, agents, onSave, busy, error, onClose }: CreationReviewProps<TaskInput> & { agents: Agent[] }) {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const fields = new FormData(event.currentTarget);
-    if (await perform("work.createTask", {
-      requestId, title: String(fields.get("title")), instructions: String(fields.get("instructions")),
+    if (await onSave({
+      ...draft, title: String(fields.get("title")), instructions: String(fields.get("instructions")),
       agentId: String(fields.get("agentId")) || null,
       priority: fields.get("priority") === "high" ? "high" : "normal",
-    }, "Task created. It will run only when you start it.")) onClose();
+    })) onClose();
   };
   return <form onSubmit={(event) => { void submit(event); }}>
     <div className="form-body">
-      <p className="muted">Define a clear outcome. Work remains queued until an available runtime accepts it.</p>
-      <Field id="task-title" label="Task title"><input id="task-title" name="title" required maxLength={160} data-autofocus placeholder="What needs to get done?" /></Field>
-      <Field id="task-instructions" label="Instructions and expected outcome"><textarea id="task-instructions" name="instructions" required maxLength={16000} rows={5} placeholder="Include context, constraints, and the evidence you expect." /></Field>
+      <ReviewNote source={source} />
+      <Field id="task-title" label="Task title"><input id="task-title" name="title" defaultValue={draft.title} required maxLength={160} data-autofocus /></Field>
+      <Field id="task-instructions" label="Instructions and expected outcome"><textarea id="task-instructions" name="instructions" defaultValue={draft.instructions} required maxLength={16000} rows={5} /></Field>
       <div className="form-grid">
-        <Field id="task-agent" label="Assign to"><select id="task-agent" name="agentId">
-          <option value="">Unassigned</option>{agents.filter((agent) => agent.enabled).map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+        <Field id="task-agent" label="Assign to"><select id="task-agent" name="agentId" defaultValue={draft.agentId ?? ""}>
+          <option value="">Unassigned — do not run yet</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}{!agent.enabled && " · paused"}</option>)}
         </select></Field>
-        <Field id="task-priority" label="Priority"><select id="task-priority" name="priority" defaultValue={settings.work.defaultPriority}>
+        <Field id="task-priority" label="Priority"><select id="task-priority" name="priority" defaultValue={draft.priority}>
           <option value="normal">Normal</option><option value="high">High</option>
         </select></Field>
       </div>
+      <p className="inline-note">Applying creates a queued task, not a completed or verified outcome.</p>
       <FormError error={error} />
-    </div><FormFooter busy={busy} onClose={onClose} label="Create task" />
+    </div><FormFooter busy={busy} onClose={onClose} label={source === "twin" ? "Approve & create task" : "Save task"} />
   </form>;
 }
-export function AgentForm({ agent, providers, perform, busy, error, onClose }: FormProps & { agent?: Agent; providers: Provider[] }) {
-  const [id] = useState(() => agent?.id ?? crypto.randomUUID());
-  const [providerId, setProvider] = useState(agent?.providerId ?? "");
-  const [model, setModel] = useState(agent?.model ?? "");
+export function SavedTaskForm({ task, agents, onDiscuss, busy, error, onClose }: {
+  task: Task; agents: Agent[]; onDiscuss: () => void;
+  busy: boolean; error: string; onClose: () => void;
+}) {
+  if (!taskSchema.safeParse(task).success) return <IncompleteReview />;
+  return <section><div className="form-body">
+    <ReviewNote source="existing" />
+    <Field id="saved-task-title" label="Task title"><input id="saved-task-title" value={task.title} readOnly data-autofocus /></Field>
+    <Field id="saved-task-instructions" label="Instructions and expected outcome"><textarea id="saved-task-instructions" value={task.instructions} readOnly rows={4} /></Field>
+    <div className="form-grid">
+      <Field id="saved-task-priority" label="Priority"><input id="saved-task-priority" value={task.priority} readOnly /></Field>
+      <Field id="saved-task-agent" label="Assign to"><input id="saved-task-agent" readOnly value={agents.find((agent) => agent.id === task.agentId)?.name ?? "Unassigned"} /></Field>
+    </div>
+    <p className="inline-note">This is a read-only projection of the saved task. Changes return to your Twin for a fresh verified proposal, not an unverified form mutation.</p>
+    <FormError error={error} />
+  </div><footer className="form-footer"><button type="button" className="button secondary" onClick={onClose} disabled={busy}>Close</button>
+    <button type="button" className="button primary" disabled={busy} onClick={onDiscuss}>Discuss task changes with Twin</button>
+  </footer></section>;
+}
+type AgentReviewInput = AgentInput & { suggestedRoutines?: AutomationInput[] };
+export function AgentForm(props: ReviewProps<AgentReviewInput> & { providers: Provider[] }) {
+  const schema = props.source === "twin" ? agentDraftSchema : agentInputSchema;
+  if (!schema.safeParse(props.draft).success || !hasReviewSource(props, "agent")) return <IncompleteReview />;
+  return <AgentReview {...props} />;
+}
+function AgentReview({ draft, source, proposal, providers, onSave, busy, error, onClose }: ReviewProps<AgentReviewInput> & { providers: Provider[] }) {
+  const [providerId, setProvider] = useState(draft.providerId ?? "");
+  const [model, setModel] = useState(draft.model);
   const provider = providers.find((item) => item.id === providerId);
+  const documentBound = source === "existing" || Boolean(proposal.basis?.instructionDocument);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const fields = new FormData(event.currentTarget);
-    const input: AgentInput = {
-      id, name: String(fields.get("name")), role: String(fields.get("role")), instructions: String(fields.get("instructions")),
+    const input: AgentReviewInput = {
+      ...draft, name: String(fields.get("name")), role: String(fields.get("role")), instructions: documentBound ? draft.instructions : String(fields.get("instructions")),
       providerId: providerId || null, model,
       computerPolicy: fields.get("computerPolicy") as AgentInput["computerPolicy"],
       approvalPolicy: fields.get("approvalPolicy") as AgentInput["approvalPolicy"],
       enabled: fields.has("enabled"),
     };
-    if (await perform("agents.save", input, "Agent configuration saved.")) onClose();
+    if (await onSave(input)) onClose();
   };
   return <form onSubmit={(event) => { void submit(event); }}>
     <div className="form-body">
+      <ReviewNote source={source} />
       <div className="form-grid">
-        <Field id="agent-name" label="Agent name"><input id="agent-name" name="name" defaultValue={agent?.name} required maxLength={160} data-autofocus placeholder="Operations analyst" /></Field>
-        <Field id="agent-role" label="Role"><input id="agent-role" name="role" defaultValue={agent?.role} maxLength={240} placeholder="Responsibilities or team" /></Field>
+        <Field id="agent-name" label="Agent name"><input id="agent-name" name="name" defaultValue={draft.name} required maxLength={160} readOnly={source === "twin" && Boolean(proposal.basis?.instructionDocument)} data-autofocus /></Field>
+        <Field id="agent-role" label="Role"><input id="agent-role" name="role" defaultValue={draft.role} maxLength={240} /></Field>
       </div>
-      <Field id="agent-instructions" label="Agent instructions"><textarea id="agent-instructions" name="instructions" defaultValue={agent?.instructions} required rows={4} maxLength={16000} placeholder="Define responsibilities, boundaries, and review expectations." /></Field>
+      <Field id="agent-instructions" label="Agent instructions"><textarea id="agent-instructions" name="instructions" defaultValue={draft.instructions} required rows={8} maxLength={MAX_INSTRUCTION_CHARS} readOnly={documentBound} /></Field>
+      {documentBound && <p className="inline-note">{source === "existing"
+        ? "Saved instructions are retained through their verified instructionsRef. Send a revised document to your Twin to change them."
+        : "Your full instruction document is retained verbatim, including locked evidence language. Send a revised document to your Twin to change these instructions."}</p>}
       <div className="form-grid">
         <Field id="agent-provider" label="Provider"><select id="agent-provider" value={providerId} onChange={(event) => {
           setProvider(event.target.value); setModel(providers.find((item) => item.id === event.target.value)?.models[0] ?? "");
-        }}><option value="">Not connected</option>{providers.map((item) => <option key={item.id} value={item.id}>{item.name}{!item.configured && " · needs setup"}</option>)}</select></Field>
+        }}><option value="">Not connected</option>{providers.map((item) => <option key={item.id} value={item.id}>{item.name}{!item.configured && " · needs setup"}</option>)}
+          {providerId && !provider && <option value={providerId}>{providerId} · unavailable</option>}
+        </select></Field>
         <Field id="agent-model" label="Model"><select id="agent-model" value={model} disabled={!provider?.models.length} onChange={(event) => setModel(event.target.value)}>
-          <option value="">Select a model</option>{provider?.models.map((item) => <option key={item}>{item}</option>)}
+          <option value="">No model connected</option>{provider?.models.map((item) => <option key={item}>{item}</option>)}
           {model && !provider?.models.includes(model) && <option value={model}>{model} · unavailable</option>}
         </select></Field>
       </div>
-      {!provider?.configured && <p className="inline-note">You can save this agent now. A connected provider and runtime are required before it can execute work.</p>}
+      {!provider?.configured && <p className="inline-note">A connected provider and runtime are required before this agent can execute work.</p>}
       <div className="form-grid">
-        <Field id="agent-computer" label="Computer access"><select id="agent-computer" name="computerPolicy" defaultValue={agent?.computerPolicy ?? "none"}>
+        <Field id="agent-computer" label="Computer access"><select id="agent-computer" name="computerPolicy" defaultValue={draft.computerPolicy}>
           <option value="none">No computer access</option><option value="read-only">Read-only access</option><option value="control">Control with approval policy</option>
         </select></Field>
-        <Field id="agent-approval" label="Approval policy"><select id="agent-approval" name="approvalPolicy" defaultValue={agent?.approvalPolicy ?? "always"}>
+        <Field id="agent-approval" label="Approval policy"><select id="agent-approval" name="approvalPolicy" defaultValue={draft.approvalPolicy}>
           <option value="always">Always require approval</option><option value="on-risk">Require for sensitive actions</option>
         </select></Field>
       </div>
-      <p className="field-help">The workspace approval policy can be stricter than the agent policy.</p>
-      <label className="checkbox-row"><input type="checkbox" name="enabled" defaultChecked={agent?.enabled ?? true} />Enable this agent for assignment</label>
+      <p className="field-help">The stricter workspace or agent approval policy applies.</p>
+      <label className="checkbox-row"><input type="checkbox" name="enabled" defaultChecked={draft.enabled} />Enable this agent for assignment</label>
+      {Boolean(draft.suggestedRoutines?.length) && <details className="proposal-details"><summary>Suggested routines · disabled drafts</summary>
+        <ul className="starter-routines">{draft.suggestedRoutines!.map((routine) => <li key={routine.id}>
+          <h3>{routine.name}</h3><p>{describeCadence(routine)} · Disabled draft</p>
+          <p><strong>{routine.taskTitle}</strong></p><p className="preserve">{routine.instructions}</p>
+        </li>)}</ul><p className="field-help">Suggestions never enable schedules automatically. Review activation separately with your Twin.</p>
+      </details>}
       <FormError error={error} />
-    </div><FormFooter busy={busy} onClose={onClose} label={agent ? "Save agent" : "Create agent"} />
+    </div><FormFooter busy={busy} onClose={onClose} label={source === "twin" ? "Approve & apply agent" : "Ask Twin to review changes"} />
   </form>;
 }
-export function AutomationForm({ automation, agents, perform, busy, error, onClose }: FormProps & { automation?: Automation; agents: Agent[] }) {
-  const [id] = useState(() => automation?.id ?? crypto.randomUUID());
-  const [kind, setKind] = useState<AutomationInput["cadence"]["kind"]>(automation?.cadence.kind ?? "daily");
+export function AutomationForm(props: ReviewProps<AutomationInput> & { agents: Agent[] }) {
+  if (!automationInputSchema.safeParse(props.draft).success || !hasReviewSource(props, "automation")) return <IncompleteReview />;
+  return <AutomationReview {...props} />;
+}
+function AutomationReview({ draft, source, agents, onSave, busy, error, onClose }: ReviewProps<AutomationInput> & { agents: Agent[] }) {
+  const [kind, setKind] = useState<AutomationInput["cadence"]["kind"]>(draft.cadence.kind);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const fields = new FormData(event.currentTarget);
@@ -94,57 +172,133 @@ export function AutomationForm({ automation, agents, perform, busy, error, onClo
       : kind === "weekly"
         ? { kind, at: String(fields.get("at")), timezone: String(fields.get("timezone")), weekday: Number(fields.get("weekday")) }
         : { kind, at: String(fields.get("at")), timezone: String(fields.get("timezone")) };
-    if (await perform("automations.save", {
-      id, name: String(fields.get("name")), taskTitle: String(fields.get("taskTitle")),
+    if (await onSave({
+      ...draft, name: String(fields.get("name")), taskTitle: String(fields.get("taskTitle")),
       instructions: String(fields.get("instructions")), agentId: String(fields.get("agentId")),
       cadence, enabled: fields.has("enabled"),
-    }, "Schedule saved.")) onClose();
+    })) onClose();
   };
-  const scheduled = automation?.cadence && automation.cadence.kind !== "interval" ? automation.cadence : null;
+  const scheduled = draft.cadence.kind !== "interval" ? draft.cadence : null;
   return <form onSubmit={(event) => { void submit(event); }}>
     <div className="form-body">
-      <Field id="automation-name" label="Schedule name"><input id="automation-name" name="name" defaultValue={automation?.name} required maxLength={160} data-autofocus /></Field>
-      <Field id="automation-task" label="Task title"><input id="automation-task" name="taskTitle" defaultValue={automation?.taskTitle} required maxLength={160} /></Field>
-      <Field id="automation-instructions" label="Task instructions"><textarea id="automation-instructions" name="instructions" defaultValue={automation?.instructions} required maxLength={16000} rows={3} /></Field>
+      <ReviewNote source={source} />
+      <Field id="automation-name" label="Routine name"><input id="automation-name" name="name" defaultValue={draft.name} required maxLength={160} data-autofocus /></Field>
+      <Field id="automation-task" label="Task title"><input id="automation-task" name="taskTitle" defaultValue={draft.taskTitle} required maxLength={160} /></Field>
+      <Field id="automation-instructions" label="Task instructions"><textarea id="automation-instructions" name="instructions" defaultValue={draft.instructions} required maxLength={16000} rows={3} /></Field>
       <div className="form-grid">
-        <Field id="automation-agent" label="Assigned agent"><select id="automation-agent" name="agentId" required defaultValue={automation?.agentId ?? ""}>
-          <option value="" disabled>Select an agent</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}{!agent.enabled && " · paused"}</option>)}
+        <Field id="automation-agent" label="Assigned agent"><select id="automation-agent" name="agentId" required defaultValue={draft.agentId}>
+          {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}{!agent.enabled && " · paused"}</option>)}
         </select></Field>
         <Field id="automation-cadence" label="Repeat"><select id="automation-cadence" value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
           <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="interval">At an interval</option>
         </select></Field>
       </div>
       {kind === "interval" ? <Field id="automation-minutes" label="Every (minutes)" help="From 15 minutes to 7 days.">
-        <input id="automation-minutes" name="minutes" type="number" min={15} max={10080} step={1} required aria-describedby="automation-minutes-help" defaultValue={automation?.cadence.kind === "interval" ? automation.cadence.minutes : 60} />
+        <input id="automation-minutes" name="minutes" type="number" min={15} max={10080} step={1} required aria-describedby="automation-minutes-help" defaultValue={draft.cadence.kind === "interval" ? draft.cadence.minutes : 60} />
       </Field> : <div className="form-grid">
         <Field id="automation-at" label="Local time"><input id="automation-at" name="at" type="time" required defaultValue={scheduled?.at ?? "09:00"} /></Field>
-        <Field id="automation-timezone" label="Time zone (IANA)"><input id="automation-timezone" name="timezone" required maxLength={100} defaultValue={scheduled?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone} placeholder="America/New_York" /></Field>
-        {kind === "weekly" && <Field id="automation-weekday" label="Day of week"><select id="automation-weekday" name="weekday" defaultValue={automation?.cadence.kind === "weekly" ? automation.cadence.weekday : 1}>
+        <Field id="automation-timezone" label="Time zone (IANA)"><input id="automation-timezone" name="timezone" required maxLength={100} defaultValue={scheduled?.timezone ?? "UTC"} /></Field>
+        {kind === "weekly" && <Field id="automation-weekday" label="Day of week"><select id="automation-weekday" name="weekday" defaultValue={draft.cadence.kind === "weekly" ? draft.cadence.weekday : 1}>
           {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((day, index) => <option key={day} value={index}>{day}</option>)}
         </select></Field>}
       </div>}
-      <label className="checkbox-row"><input type="checkbox" name="enabled" defaultChecked={automation?.enabled ?? false} />Enable this schedule</label>
-      <p className="inline-note">Disabled schedules are saved as drafts. Enabling requires a connected scheduling runtime to confirm the next run. Keep RAPP Work open for local scheduling.</p>
+      <label className="checkbox-row"><input type="checkbox" name="enabled" defaultChecked={draft.enabled} />Enable this routine</label>
+      <p className="inline-note">Disabled routines remain drafts. Activation and the next run must be confirmed by the scheduling runtime.</p>
       <FormError error={error} />
-    </div><FormFooter busy={busy} onClose={onClose} label="Save schedule" />
+    </div><FormFooter busy={busy} onClose={onClose} label={source === "twin" ? "Approve & apply routine" : "Ask Twin to review changes"} />
   </form>;
 }
-export function ApprovalForm({ approval, perform, busy, error, onClose }: FormProps & { approval: Approval }) {
-  const [decision, setDecision] = useState<"approved" | "denied">("approved");
+export function SettingsForm(props: ReviewProps<SettingsReview>) {
+  const { draft, source, onSave, busy, error, onClose } = props;
+  if (!settingsReviewSchema.safeParse(draft).success || !hasReviewSource(props, "settings")) return <IncompleteReview />;
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const reason = String(new FormData(event.currentTarget).get("reason"));
-    if (await perform("approvals.decide", { id: approval.id, decision, reason }, "Approval decision recorded. Execution status is reported separately by the runtime.")) onClose();
+    const fields = new FormData(event.currentTarget);
+    if (await onSave({
+      workspaceName: String(fields.get("workspaceName")),
+      appearance: { theme: fields.get("theme") as SettingsReview["appearance"]["theme"], density: fields.get("density") as SettingsReview["appearance"]["density"] },
+      work: { defaultPriority: fields.get("defaultPriority") as SettingsReview["work"]["defaultPriority"], approvalPolicy: fields.get("approvalPolicy") as SettingsReview["work"]["approvalPolicy"] },
+      notifications: { approvals: fields.has("approvals"), completedRuns: fields.has("completedRuns") },
+      ...(draft.computerPolicy ? { computerPolicy: fields.get("computerPolicy") as SettingsReview["computerPolicy"] } : {}),
+      ...(draft.parentAccess ? { parentAccess: fields.get("parentAccess") as SettingsReview["parentAccess"] } : {}),
+    })) onClose();
   };
   return <form onSubmit={(event) => { void submit(event); }}><div className="form-body">
+    <ReviewNote source={source} />
+    <Field id="settings-name" label="Workspace name"><input id="settings-name" name="workspaceName" required maxLength={160} defaultValue={draft.workspaceName} data-autofocus /></Field>
+    <div className="form-grid">
+      <Field id="settings-theme" label="Theme"><select id="settings-theme" name="theme" defaultValue={draft.appearance.theme}><option value="system">Follow system</option><option value="light">Light</option><option value="dark">Dark</option></select></Field>
+      <Field id="settings-density" label="Density"><select id="settings-density" name="density" defaultValue={draft.appearance.density}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></Field>
+      <Field id="settings-priority" label="Default task priority"><select id="settings-priority" name="defaultPriority" defaultValue={draft.work.defaultPriority}><option value="normal">Normal</option><option value="high">High</option></select></Field>
+      <Field id="settings-policy" label="Require approval"><select id="settings-policy" name="approvalPolicy" defaultValue={draft.work.approvalPolicy}><option value="always">For all actions</option><option value="on-risk">For sensitive actions</option></select></Field>
+      {draft.computerPolicy && <Field id="settings-computer-policy" label="Agent computer policy"><select id="settings-computer-policy" name="computerPolicy" defaultValue={draft.computerPolicy}>
+        <option value="none">No agent computer tools</option><option value="read-only">Read-only guest tools</option><option value="control">Guest control with approval policy</option>
+      </select></Field>}
+      {draft.parentAccess && <Field id="settings-parent-access" label="Parent workspace inspection"><select id="settings-parent-access" name="parentAccess" defaultValue={draft.parentAccess}>
+        <option value="inspect">Parent may inspect</option><option value="none">No parent inspection</option>
+      </select></Field>}
+    </div>
+    <label className="checkbox-row"><input type="checkbox" name="approvals" defaultChecked={draft.notifications.approvals} />New approval requests</label>
+    <label className="checkbox-row"><input type="checkbox" name="completedRuns" defaultChecked={draft.notifications.completedRuns} />Completed runs</label>
+    <FormError error={error} />
+  </div><FormFooter busy={busy} onClose={onClose} label={source === "twin" ? "Approve & apply settings" : "Ask Twin to review changes"} /></form>;
+}
+export function WorkspaceForm(props: CreationReviewProps<WorkspaceInput>) {
+  const { draft, source, onSave, busy, error, onClose } = props;
+  if (source !== "twin" || !workspaceInputSchema.safeParse(draft).success || !hasReviewSource(props, "workspace")) return <IncompleteReview />;
+  return <form onSubmit={(event) => {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget);
+    void onSave({
+      ...draft, name: String(fields.get("name")), purpose: String(fields.get("purpose")),
+      twin: { name: String(fields.get("twinName")), instructions: String(fields.get("twinInstructions")) },
+    }).then((saved) => { if (saved) onClose(); });
+  }}><div className="form-body">
+    <ReviewNote source={source} />
+    <Field id="workspace-name" label="Workspace name"><input id="workspace-name" name="name" defaultValue={draft.name} required maxLength={160} data-autofocus /></Field>
+    <Field id="workspace-purpose" label="Workspace purpose"><textarea id="workspace-purpose" name="purpose" defaultValue={draft.purpose} required maxLength={4000} rows={4} /></Field>
+    <Field id="workspace-twin-name" label="Twin name"><input id="workspace-twin-name" name="twinName" defaultValue={draft.twin.name} required maxLength={160} /></Field>
+    <Field id="workspace-twin-instructions" label="Twin instructions"><textarea id="workspace-twin-instructions" name="twinInstructions" defaultValue={draft.twin.instructions} required maxLength={16000} rows={4} /></Field>
+    <details className="proposal-details"><summary>Prefilled team, policies & starter work</summary>
+      <dl className="metadata"><div><dt>Lead agent</dt><dd>{draft.leadAgent.name} · {draft.leadAgent.role}</dd></div>
+        <div><dt>Instructions</dt><dd className="preserve">{draft.leadAgent.instructions}</dd></div>
+        <div><dt>Model</dt><dd>{draft.leadAgent.providerId ?? "Not connected"} · {draft.leadAgent.model || "Not connected"}</dd></div>
+        <div><dt>Computer</dt><dd>Workspace: {draft.computerPolicy} · Agent: {draft.leadAgent.computerPolicy}</dd></div>
+        <div><dt>Approval</dt><dd>Workspace: {draft.approvalPolicy} · Agent: {draft.leadAgent.approvalPolicy}</dd></div>
+        <div><dt>Agent assignment</dt><dd>{draft.leadAgent.enabled ? "Enabled" : "Paused"}</dd></div>
+        <div><dt>Starter task</dt><dd>{draft.starterTask ? `${draft.starterTask.title} — ${draft.starterTask.instructions} (${draft.starterTask.priority} priority, assigned to ${draft.leadAgent.name}, queued until started)` : "None proposed"}</dd></div>
+        <div><dt>Routines</dt><dd>{draft.starterRoutines.length ? `${draft.starterRoutines.length} complete routines, detailed below` : "None proposed"}</dd></div>
+      </dl>
+      {draft.starterRoutines.length > 0 && <ul className="starter-routines">{draft.starterRoutines.map((routine) => <li key={routine.id}>
+        <h3>{routine.name}</h3><p>{describeCadence(routine)}</p>
+        <p>{routine.enabled ? "Requests activation on creation" : "Disabled draft"} · Assigned to {draft.leadAgent.name}</p>
+        <p><strong>{routine.taskTitle}</strong></p><p className="preserve">{routine.instructions}</p>
+      </li>)}</ul>}
+    </details>
+    <p className="inline-note">This creates a separate business workspace with its own Twin conversation, agents, tasks, routines, and settings.</p>
+    <FormError error={error} />
+  </div><FormFooter busy={busy} onClose={onClose} label="Approve & create workspace" /></form>;
+}
+export function ApprovalForm({ approval, recommendation, initialReason, onDecide, busy, error, onClose }: {
+  approval: Approval; recommendation?: string; initialReason: string;
+  onDecide: (decision: "approved" | "denied", reason: string) => Promise<boolean>;
+  busy: boolean; error: string; onClose: () => void;
+}) {
+  const [reason, setReason] = useState(initialReason);
+  const pending = approval.state === "pending" && !approval.consumedBy && new Date(approval.expiresAt).getTime() > Date.now();
+  const decide = async (decision: "approved" | "denied") => { if (await onDecide(decision, reason.trim())) onClose(); };
+  return <form onSubmit={(event) => event.preventDefault()}><div className="form-body">
+    <p className="review-note">{recommendation ? "Your Twin drafted a recommendation and reason. It cannot approve or deny this action for you." : "Prefilled from the existing approval request. The decision is yours alone."}</p>
     <div className="row between"><h3>{approval.action}</h3><StatusBadge state={approval.state} /></div>
     <p>{approval.reason}</p>
-    <dl className="metadata"><div><dt>Risk</dt><dd>{approval.risk}</dd></div><div><dt>Run</dt><dd className="mono">{approval.runId}</dd></div></dl>
-    <dl className="metadata"><div><dt>Agent workspace</dt><dd className="mono">{approval.workspaceId}</dd></div><div><dt>Exact operation</dt><dd className="mono">{approval.operationHash}</dd></div></dl>
-    <Field id="approval-decision" label="Decision"><select id="approval-decision" value={decision} onChange={(event) => setDecision(event.target.value as typeof decision)}>
-      <option value="approved">Approve this action only</option><option value="denied">Deny this action</option>
-    </select></Field>
-    <Field id="approval-reason" label="Decision reason"><textarea id="approval-reason" name="reason" required rows={3} maxLength={2000} data-autofocus placeholder="Record why this action is approved or denied." /></Field>
+    {recommendation && <p className="inline-note">Twin recommendation: {recommendation}. Not a recorded decision.</p>}
+    <dl className="metadata"><div><dt>Risk</dt><dd>{approval.risk}</dd></div><div><dt>Run</dt><dd className="mono">{approval.runId}</dd></div><div><dt>Workspace</dt><dd className="mono">{approval.workspaceId}</dd></div><div><dt>Exact operation</dt><dd className="mono">{approval.operationHash}</dd></div></dl>
+    <Field id="approval-reason" label="Decision reason"><textarea id="approval-reason" value={reason} onChange={(event) => setReason(event.target.value)} required rows={3} maxLength={2000} data-autofocus /></Field>
+    {!pending && <p role="status">This request is no longer pending or has expired. Refresh before making a decision.</p>}
     <FormError error={error} />
-  </div><FormFooter busy={busy} onClose={onClose} label={decision === "approved" ? "Approve action" : "Deny action"} /></form>;
+  </div><footer className="form-footer">
+    <button type="button" className="button secondary" onClick={onClose} disabled={busy}>Close</button>
+    <button type="button" className="button danger" disabled={busy || !pending || !reason.trim()} onClick={() => { void decide("denied"); }}>Deny action</button>
+    <button type="button" className="button primary" disabled={busy || !pending || !reason.trim()} onClick={() => { void decide("approved"); }}>Approve action</button>
+  </footer></form>;
 }

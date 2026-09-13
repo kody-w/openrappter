@@ -59,6 +59,7 @@ export interface RuntimeDependencies {
   readonly provider: ModelProvider;
   readonly tools: readonly AuthorizedTool[];
   readonly limits: RuntimeLimits;
+  readonly cancellationGraceMs?: number;
 }
 
 export interface RunRequest {

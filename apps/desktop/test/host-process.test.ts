@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HostProcess, type HostLease, type OwnedChild } from "../src/host-process.js";
+import { HOST_SHUTDOWN_TIMEOUT_MS, HostProcess, type HostLease, type OwnedChild } from "../src/host-process.js";
 
 class Child extends EventEmitter implements OwnedChild {
   pid = 321;
@@ -71,12 +71,22 @@ describe("owned host lifecycle", () => {
     child.emit("exit", 0); await stop;
     await expect(host.start()).rejects.toThrow("shutting down");
   });
+  it("allows cleanup beyond the former three-second deadline without force-killing", async () => {
+    vi.useFakeTimers();
+    const { host, child, ports } = setup();
+    const start = host.start(); child.emit("message", ready()); await start;
+    const stop = host.stop();
+    await vi.advanceTimersByTimeAsync(3001);
+    expect(ports.forceKill).not.toHaveBeenCalled();
+    child.emit("exit", 0); await stop;
+    expect(ports.forceKill).not.toHaveBeenCalled();
+  });
   it("forces termination if graceful shutdown stalls", async () => {
     vi.useFakeTimers();
     const { host, child, ports } = setup();
     const start = host.start(); child.emit("message", ready()); await start;
     const stop = host.stop();
-    await vi.advanceTimersByTimeAsync(3001); await stop;
+    await vi.advanceTimersByTimeAsync(HOST_SHUTDOWN_TIMEOUT_MS + 1); await stop;
     expect(ports.forceKill).toHaveBeenCalledWith(child);
   });
   it("kills a booting child when the application quits", async () => {
@@ -92,5 +102,28 @@ describe("owned host lifecycle", () => {
     child.emit("exit", 1);
     expect(host.state.state).toBe("offline");
     expect(host.state.detail).toContain("Refresh to restart");
+  });
+  it("preserves a safe startup failure instead of hiding it behind a termination event", async () => {
+    const { host, child } = setup();
+    const pending = host.start();
+    const rejected = expect(pending).rejects.toThrow("could not be authenticated");
+    child.emit("message", { type: "failed", code: "HOST_START_FAILED" });
+    await rejected;
+    expect(host.state.detail).toContain("could not load its saved workspace state");
+    expect(host.state.detail).toContain("No data was reset");
+    expect(child.killed).toBe(true);
+  });
+  it("does not let a late exit from a superseded child disconnect a fresh owned host", async () => {
+    const old = new Child(), current = new Child();
+    const spawn = vi.fn().mockReturnValueOnce(old).mockReturnValueOnce(current);
+    const host = new HostProcess({ spawn, probe: async () => true, forceKill: () => {}, stateChanged: () => {} }, "apps/desktop/.test-scratch/late-exit");
+    const first = host.start();
+    const rejected = expect(first).rejects.toThrow();
+    old.emit("message", { type: "failed", code: "HOST_START_FAILED" }); await rejected;
+    const second = host.start(); current.emit("message", ready()); const lease = await second;
+    old.emit("exit", 1);
+    expect(host.state.state).toBe("online");
+    expect(await host.start()).toBe(lease);
+    const stop = host.stop(); current.emit("exit", 0); await stop;
   });
 });

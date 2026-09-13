@@ -7,10 +7,10 @@
   "description": "RAPP Work for macOS Apple silicon.",
   "main": "dist/main.js",
   "scripts": {
-    "build": "npm --prefix ../host run build && npm --prefix ../ui run build && tsc -p tsconfig.build.json && esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.cjs && node scripts/stage.mjs",
+    "build": "npm --prefix ../host run build && npm --prefix ../ui run build && tsc -p tsconfig.build.json && node scripts/build-shell.mjs && node scripts/stage.mjs",
     "start": "electron .",
-    "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit",
+    "typecheck": "npm --prefix ../host run build && tsc --noEmit",
+    "lint": "npm --prefix ../host run build && tsc --noEmit",
     "test": "vitest run",
     "test:smoke": "node test/smoke.mjs",
     "package": "npm run build && electron-builder --mac --arm64",
@@ -44,6 +44,9 @@
       "hardenedRuntime": true,
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "RAPP Work uses your microphone only when you start dictation to your Work Twin. Review the transcript before sending."
+      },
       "target": [{ "target": "dmg", "arch": ["arm64"] }, { "target": "zip", "arch": ["arm64"] }]
     },
     "dmg": { "title": "RAPP Work" }

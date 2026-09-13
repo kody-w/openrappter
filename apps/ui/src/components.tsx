@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 
-export type IconName = "work" | "agents" | "automations" | "settings" | "plus" | "arrow" | "check" | "clock" | "document" | "computer" | "shield" | "close" | "refresh" | "menu" | "search";
+export type IconName = "work" | "agents" | "automations" | "settings" | "plus" | "arrow" | "check" | "clock" | "document" | "computer" | "shield" | "close" | "refresh" | "menu" | "search" | "chat" | "microphone" | "stop";
 const paths: Record<IconName, ReactNode> = {
   work: <><rect x="3" y="6" width="18" height="15" rx="2" /><path d="M8 6V3h8v3M3 11h18M10 11v3h4v-3" /></>,
   agents: <><circle cx="9" cy="8" r="3" /><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M21 21v-3a6 6 0 0 0-4-5" /></>,
@@ -17,6 +17,9 @@ const paths: Record<IconName, ReactNode> = {
   refresh: <><path d="M20 7V2l-3 3A9 9 0 0 0 3 11M4 17v5l3-3a9 9 0 0 0 14-6M20 2v5h-5M4 22v-5h5" /></>,
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
   search: <><circle cx="10" cy="10" r="6" /><path d="m15 15 6 6" /></>,
+  chat: <><path d="M21 11a8 8 0 0 1-8 8H7l-5 3V11a9 9 0 0 1 19 0Z" /><path d="M7 10h10M7 14h6" /></>,
+  microphone: <><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></>,
+  stop: <rect x="5" y="5" width="14" height="14" rx="2" />,
 };
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
@@ -67,25 +70,25 @@ export function Tabs<T extends string>({ label, selected, tabs, onChange }: {
 export function TabPanel({ id, children }: { id: string; children: ReactNode }) {
   return <section role="tabpanel" id={`panel-${id}`} aria-labelledby={`tab-${id}`} tabIndex={0} className="tab-panel">{children}</section>;
 }
-export function Modal({ title, children, onClose, busy = false }: { title: string; children: ReactNode; onClose: () => void; busy?: boolean }) {
+export function Modal({ title, children, onClose, busy = false, wide = false }: { title: string; children: ReactNode; onClose: () => void; busy?: boolean; wide?: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
     const element = dialog.current!;
     const previous = document.activeElement;
     element.showModal();
-    (element.querySelector<HTMLElement>("[data-autofocus]") ??
-      element.querySelector<HTMLElement>("input:not([disabled]), textarea:not([disabled]), select:not([disabled])"))?.focus();
+    (element.querySelector<HTMLElement>("[data-autofocus]:not(:disabled)") ??
+      element.querySelector<HTMLElement>("input:not(:disabled), textarea:not(:disabled), select:not(:disabled)"))?.focus();
     return () => {
       element.close();
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
   }, []);
-  return <dialog ref={dialog} className="modal" aria-labelledby={titleId}
+  return <dialog ref={dialog} className={`modal${wide ? " modal-wide" : ""}`} aria-labelledby={titleId}
     onKeyDown={(event) => {
       if (event.key !== "Tab") return;
       const controls = [...event.currentTarget.querySelectorAll<HTMLElement>(
-        "button:not([disabled]), a[href], input:not([disabled]):not([type='hidden']), textarea:not([disabled]), select:not([disabled]), [tabindex='0']",
+        "button:not(:disabled), a[href], input:not(:disabled):not([type='hidden']), textarea:not(:disabled), select:not(:disabled), [tabindex='0']",
       )];
       const first = controls[0], last = controls.at(-1);
       if (!first || !last) { event.preventDefault(); return; }

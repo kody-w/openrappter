@@ -1,15 +1,19 @@
 import { useState } from "react";
 import { Avatar, Badge, Empty, formatDate, Icon, Modal, StatusBadge, TabPanel, Tabs } from "./components";
-import type { Approval, Artifact, Computer, Run, Snapshot, Status } from "./model";
+import type { Approval, Artifact, Computer, Run, Snapshot, Status, Task } from "./model";
 import type { Perform } from "./useWorkspace";
 
 export type WorkTab = "tasks" | "runs" | "approvals" | "artifacts" | "computer";
 interface Props {
   snapshot: Snapshot; status: Status | null; computer: Computer | null;
   connected: boolean; busy: boolean; perform: Perform; newTask: () => void;
+  askTwin: (message: string) => void;
+  reviewTask: (task: Task) => void;
+  executionAllowed?: boolean;
   review: (approval: Approval) => void; openArtifact: (artifact: Artifact) => void;
 }
-export function Work({ snapshot, status, computer, connected, busy, perform, newTask, review, openArtifact }: Props) {
+export function Work({ snapshot, status, computer: reportedComputer, connected, busy, perform, newTask, askTwin, reviewTask, review, openArtifact, executionAllowed = true }: Props) {
+  const computer = reportedComputer?.workspace?.id === snapshot.workspaceId ? reportedComputer : null;
   const [tab, setTab] = useState<WorkTab>("tasks");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -24,8 +28,9 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
   const selected = tasks.find((task) => task.id === selectedId) ?? tasks[0];
   const selectedAgent = snapshot.agents.find((agent) => agent.id === selected?.agentId);
   const agentReady = Boolean(selectedAgent?.enabled && selectedAgent.providerId && selectedAgent.model
-    && (selectedAgent.computerPolicy === "none" || computer?.state === "running" && computer.verified));
-  const canExecute = connected && status?.checks.runtime.state === "ready" && status.checks.provider.state === "ready";
+    && (selectedAgent.computerPolicy === "none" || computer?.state === "running" && computer.verified
+      && computer.workspace?.id === snapshot.workspaceId && computer.workspace.enabled && computer.workspace.computerPolicy !== "none"));
+  const canExecute = connected && executionAllowed && status?.checks.runtime.state === "ready" && status.checks.provider.state === "ready";
   return <>
     <section className="metrics" aria-label="Work overview">
       <div><span className="metric-icon"><Icon name="work" /></span><dl><dt>Active work</dt><dd>{active.length}<span>tasks</span></dd></dl></div>
@@ -60,23 +65,14 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
               <h2>{selected.title}</h2><p className="preserve">{selected.instructions}</p>
               <dl className="metadata">
                 <div><dt>Assigned to</dt><dd>{snapshot.agents.find((agent) => agent.id === selected.agentId)?.name ?? "Unassigned"}</dd></div>
-                <div><dt>Agent workspace</dt><dd className="mono">{selected.workspaceId ?? "Minted when assigned"}</dd></div>
+                <div><dt>Execution scope</dt><dd className="mono">{selected.workspaceId ?? "Unassigned within this workspace"}</dd></div>
                 <div><dt>Created</dt><dd>{formatDate(selected.createdAt)}</dd></div>
                 <div><dt>Priority</dt><dd>{selected.priority === "high" ? "High" : "Normal"}</dd></div>
               </dl>
+              <button className="button secondary" disabled={!connected || busy} onClick={() => reviewTask(selected)}>Review saved task</button>
               {["queued", "failed", "cancelled"].includes(selected.state) && <div className="action-block">
-                {!snapshot.runs.some((run) => run.taskId === selected.id) && <form className="assignment-form" onSubmit={(event) => {
-                  event.preventDefault();
-                  const agentId = String(new FormData(event.currentTarget).get("agentId"));
-                  void perform("work.assignTask", { id: selected.id, agentId }, "Task assignment saved.");
-                }}>
-                  <label htmlFor="task-assignee" className="sr-only">Assign this task to</label>
-                  <select id="task-assignee" name="agentId" key={`${selected.id}:${selected.agentId}`} defaultValue={selected.agentId ?? ""} required disabled={!connected || busy}>
-                    <option value="" disabled>Select an agent</option>{snapshot.agents.filter((agent) => agent.enabled).map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-                  </select>
-                  <button type="submit" className="button secondary" disabled={!connected || busy || !snapshot.agents.some((agent) => agent.enabled)}>Assign</button>
-                </form>}
-                <button className="button primary" disabled={!canExecute || !agentReady || busy} onClick={() => { void perform("runs.start", { id: selected.id }, "Run accepted by the connected runtime."); }}><Icon name="arrow" size={16} />Start task</button>
+                {!snapshot.runs.some((run) => run.taskId === selected.id) && <button className="button secondary" disabled={!connected || busy} onClick={() => askTwin(`Help me assign the task "${selected.title}" (${selected.id}) to the right agent.`)}>Discuss assignment with Twin</button>}
+                <button className="button primary" disabled={!canExecute || !agentReady || busy} onClick={() => { void perform("runs.start", { workspaceId: snapshot.workspaceId, id: selected.id }, "Run accepted by the connected runtime."); }}><Icon name="arrow" size={16} />Start task</button>
                 {(!canExecute || !agentReady) && <p className="field-help">Choose an enabled agent with a connected model and the computer its policy requires.</p>}
                 {!selected.agentId && <p className="field-help">This task has no assigned agent.</p>}
               </div>}
@@ -130,10 +126,10 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
             </dl>
             <p className="inline-note">A connected service must report real computer state and evidence. Agent access is governed by its configuration and approval policy.</p>
             <div className="row wrap">
-              <button className="button primary" disabled={!connected || busy || computer?.state !== "stopped" || !computer.capabilities.control || status?.checks.computer.state !== "ready"}
-                onClick={() => { void perform("computer.start", {}, "Computer start response received. Review the service-reported state."); }}>Start computer</button>
-              <button className="button secondary" disabled={!connected || busy || computer?.state !== "running" || !computer.capabilities.control}
-                onClick={() => { void perform("computer.stop", {}, "Computer stop response received."); }}>Stop computer</button>
+              <button className="button primary" disabled={!connected || !executionAllowed || busy || computer?.state !== "stopped" || !computer.capabilities.control || status?.checks.computer.state !== "ready"}
+                onClick={() => { void perform("computer.start", { workspaceId: snapshot.workspaceId }, "Computer start response received. Review the service-reported state."); }}>Start computer</button>
+              <button className="button secondary" disabled={!connected || !executionAllowed || busy || computer?.state !== "running" || !computer.capabilities.control || !computer.workspace?.enabled}
+                onClick={() => { void perform("computer.stop", { workspaceId: snapshot.workspaceId }, "Computer stop response received."); }}>Stop computer</button>
             </div>
           </section>
         </div>}
@@ -142,7 +138,7 @@ export function Work({ snapshot, status, computer, connected, busy, perform, new
     {cancelRun && <Modal title="Cancel this run?" onClose={() => setCancelRun(null)} busy={busy}>
       <div className="form-body"><p>The connected runtime will be asked to cancel this run. Existing artifacts and evidence will remain available.</p><p className="mono">{cancelRun.id}</p></div>
       <footer className="form-footer"><button className="button secondary" onClick={() => setCancelRun(null)} disabled={busy}>Keep running</button><button className="button danger" disabled={busy} onClick={() => {
-        void perform("runs.cancel", { id: cancelRun.id }, "Cancellation response received. Unresolved actions are never replayed.").then((done) => { if (done) setCancelRun(null); });
+        void perform("runs.cancel", { workspaceId: snapshot.workspaceId, id: cancelRun.id }, "Cancellation response received. Unresolved actions are never replayed.").then((done) => { if (done) setCancelRun(null); });
       }}>{busy ? "Cancelling…" : "Cancel run"}</button></footer>
     </Modal>}
   </>;

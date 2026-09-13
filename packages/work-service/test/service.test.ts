@@ -36,6 +36,48 @@ describe("WorkService canonical orchestration", () => {
     expect(second).toMatchObject({ state: "committed", replayed: true });
     expect(effect).toHaveBeenCalledTimes(1);
   });
+  it("records canonical source references before publishing an acknowledged outcome", async () => {
+    const f = fixture();
+    f.authorization.recordOutcome = vi.fn(async (_capability, request, outcome) => {
+      expect(request.intentRef).toBeTruthy();
+      return { ...outcome, value: { source: request.intentRef }, events: [{ source: request.intentRef }],
+        receipts: [{ kind: "canonical-source", source: request.intentRef }] };
+    });
+    const result = await f.service.commit(f.capability, command(), async () => success());
+    expect(result).toMatchObject({ state: "committed", value: { source: expect.any(String) } });
+    expect(f.authorization.recordOutcome).toHaveBeenCalledOnce();
+  });
+  it("keeps missing source persistence unresolved and never promotes a failed acknowledgement", async () => {
+    const f = fixture();
+    f.authorization.recordOutcome = async () => { throw new Error("Source evidence unavailable."); };
+    const effect = vi.fn(async () => success());
+    expect(await f.service.commit(f.capability, command("source-failure"), effect)).toMatchObject({
+      state: "unresolved", reason: "persistence-uncertain",
+    });
+    expect(await f.service.commit(f.capability, command("source-failure"), effect)).toMatchObject({ state: "unresolved", replayed: true });
+    expect(effect).toHaveBeenCalledOnce();
+    f.authorization.recordOutcome = async (_capability, _request, outcome) => ({ ...outcome, status: "succeeded" });
+    expect(await f.service.commit(f.capability, command("no-promotion"), async () => ({
+      status: "failed", value: {}, receipts: [{ kind: "failed" }], events: [],
+    }))).toMatchObject({ state: "unresolved" });
+  });
+
+  it("compares expected heads under the command lock before writing an intent or executing", async () => {
+    const { service, capability, store } = fixture();
+    const heads = (await service.read(capability, scope)).heads;
+    await service.commit(capability, command("changed"), async () => success());
+    const count = store.frames().length;
+    const effect = vi.fn(async () => success());
+    await expect(service.commit(capability, command("stale"), effect, { expectedHeads: heads }))
+      .rejects.toMatchObject({ code: "stale_heads" });
+    expect(effect).not.toHaveBeenCalled();
+    expect(store.frames()).toHaveLength(count);
+    const current = (await service.read(capability, scope)).heads;
+    expect(await service.commit(capability, command("fresh"), effect, { expectedHeads: current })).toMatchObject({ state: "committed" });
+    expect(await service.commit(capability, command("fresh"), effect, { expectedHeads: heads }))
+      .toMatchObject({ state: "committed", replayed: true });
+    expect(effect).toHaveBeenCalledOnce();
+  });
 
   it("serializes concurrent service instances on the workspace lock", async () => {
     const { service, createService, capability } = fixture();

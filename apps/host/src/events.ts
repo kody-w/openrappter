@@ -50,7 +50,8 @@ export class EventJournal {
       return data.after;
     } catch { throw invalid(); }
   }
-  read(principal: Principal, scope: EventScope, cursor?: string, limit = 100): EventPage {
+  read(identity: Principal, scope: EventScope, cursor?: string, limit = 100, workspaceId = identity.workspaceId): EventPage {
+    const principal = { ...identity, workspaceId };
     const journal = this.journal(principal.workspaceId);
     const after = cursor ? this.decode(principal, scope, cursor) : 0;
     if (after > journal.sequence) throw new HostError(-32010, "Cursor is ahead of this event journal.");

@@ -73,3 +73,24 @@ guest-only enforcement.
 
 Run `npm test --workspace @rapp-work/domain` for replay-from-bytes, every event
 mapping, complete lifecycle and adversarial transition tests.
+
+## Work/Twin lifecycle sources
+
+`lifecycle.ts` defines the strict `rapp-work/lifecycle/1` profile for the
+conversation-first host. It reuses the same registered RAPP/1 kinds:
+`message.recorded` is `memory.chat-turn`; proposals, clarifications and
+workspace/agent/routine state are `memory.save`; request-bound intents,
+outcomes and proposal decisions are `memory.tool-call`. Every source requires
+an exact occurrence-bound `body.pulse` evidence frame.
+
+`buildLifecyclePayload`, `validateLifecyclePayload` and
+`verifyLifecycleSource` bind agent, workspace, principal, command hash,
+write-ahead request and source/evidence references. Work result/event records
+are references to these memory sources rather than a parallel JSON authority.
+The host's frame-only projector resolves references only after source,
+terminal receipt and publication verification. It separately validates the
+full workspace/agent/Twin DTOs and recursive ownership invariants.
+
+Canonical scanning proves local integrity, not factual truth, authorship, or
+promotion-grade trust. A renderer's success/verification boolean is never a
+substitute for these source and evidence checks.

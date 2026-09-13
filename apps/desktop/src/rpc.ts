@@ -20,6 +20,7 @@ export class HostRpc {
     private readonly event: (event: BridgeEvent) => void,
     private readonly connectionChanged: (state: HostState) => void,
     private readonly requestTimeout = 30000,
+    private readonly twinTimeout = 200000,
   ) {}
   connect(lease: HostLease): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN && this.leaseId === lease.instanceId) return Promise.resolve();
@@ -74,7 +75,7 @@ export class HostRpc {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error("The host did not respond in time. Refresh before retrying a state-changing action."));
-      }, this.requestTimeout);
+      }, request.method === "twin.message" ? this.twinTimeout : this.requestTimeout);
       this.pending.set(id, { resolve, reject, timer });
       socket.send(JSON.stringify({ jsonrpc: "2.0", id, ...request }), (error) => {
         if (!error) return;

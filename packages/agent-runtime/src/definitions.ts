@@ -18,7 +18,7 @@ export function bounded(value: unknown, maximum: number, minimum = 1): value is 
 export function parseDefinition(input: unknown): AgentDefinition {
   if (!record(input) || !name(input.id) || !name(input.workspaceId) || !name(input.model)
     || typeof input.name !== "string" || input.name.length < 1 || input.name.length > 200
-    || typeof input.instructions !== "string" || input.instructions.length > 32_768
+    || typeof input.instructions !== "string" || input.instructions.length > 65_536
     || typeof input.enabled !== "boolean" || !record(input.policy)) {
     throw new AgentRuntimeError("invalid_agent_definition");
   }

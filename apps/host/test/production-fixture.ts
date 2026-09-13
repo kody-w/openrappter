@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import { canonicalJson } from "@rapp-work/rapp1";
 import type { ManagedCopilotTransport, ModelResponse } from "@rapp-work/model-provider";
 import { createLocalServices } from "../src/local.js";
@@ -10,6 +10,7 @@ import { createHost } from "../src/server.js";
 import type { RequestContext } from "../src/ports.js";
 import { vmConfigurationHash, type CommandOptions, type CommandProcess, type FixedCommandTransport } from "../src/computer-drivers.js";
 import { digestBytes } from "../src/local-work.js";
+import type { WorkspaceInput } from "../src/contracts.js";
 
 export const template = { OS: "linux", CPU: 4, Memory: 4096, Disk: 8, DiskFormat: "raw", Display: "1920x1080", Running: false, State: "stopped" };
 const keyBytes = Buffer.alloc(51);
@@ -69,10 +70,13 @@ export class FakeCommands implements FixedCommandTransport {
     }
   }
 }
-export function fakeCopilot(): ManagedCopilotTransport & { complete: ReturnType<typeof vi.fn> } {
+export function fakeCopilot(): ManagedCopilotTransport & { complete: Mock<ManagedCopilotTransport["complete"]> } {
   return {
-    async status() { return { availability: "ready", authentication: "authenticated", models: ["test-model"], detail: "Injected model transport." }; },
-    complete: vi.fn(async (request, signal: AbortSignal): Promise<ModelResponse> => {
+    async status() { return {
+      availability: "ready", authentication: "authenticated", models: ["test-model", "gpt-6-astra"], detail: "Injected model transport.",
+      modelOptions: [{ model: "gpt-6-astra", reasoningEfforts: ["max"], maxContextWindowTokens: 1_048_576 }],
+    }; },
+    complete: vi.fn<ManagedCopilotTransport["complete"]>(async (request, signal: AbortSignal): Promise<ModelResponse> => {
       signal.throwIfAborted();
       if (request.tools.length > 0 && !request.messages.some((message: { role: string }) => message.role === "tool")) {
         return { kind: "tool-calls", calls: [{
@@ -81,7 +85,7 @@ export function fakeCopilot(): ManagedCopilotTransport & { complete: ReturnType<
             ? { argv: ["/usr/bin/printf", "owned work"], cwd: ".", timeoutMs: 10_000 } : { path: "report.txt" },
         }] };
       }
-      return { kind: "final", text: request.messages.map((message: { content?: string }) => message.content ?? "").join("\n") };
+      return { kind: "final", text: request.messages.map((message) => "content" in message ? message.content : "").join("\n") };
     }),
     async close() {},
   };
@@ -90,7 +94,13 @@ export const agentInput = (id: string, computerPolicy: "none" | "read-only" | "c
   id, name: id, role: "Worker", instructions: `Private instructions for ${id}.`, providerId: "github-copilot",
   model: "test-model", computerPolicy, approvalPolicy: "always" as const, enabled: true,
 });
-export async function productionFixture(options: { computer?: boolean; commands?: FakeCommands; directory?: string } = {}) {
+export const workspaceInput = (name = "Fixture business", leadId = `lead-${randomUUID()}`): WorkspaceInput => ({
+  requestId: randomUUID(), name, purpose: `Accountable work for ${name}.`,
+  twin: { name: `${name} Twin`, instructions: "Draft complete work from conversation and seek human review." },
+  leadAgent: { ...agentInput(leadId), enabled: false }, starterTask: null, starterRoutines: [],
+  approvalPolicy: "always", computerPolicy: "control",
+});
+export async function productionFixture(options: { computer?: boolean; commands?: FakeCommands; directory?: string; bootstrap?: boolean } = {}) {
   const directory = options.directory ?? join(process.cwd(), ".test-scratch", randomUUID());
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (options.computer) {
@@ -103,29 +113,42 @@ export async function productionFixture(options: { computer?: boolean; commands?
   const commands = options.commands ?? new FakeCommands();
   const copilot = fakeCopilot();
   let fault = false;
+  let remainingCommits: number | undefined;
   const token = randomBytes(48).toString("base64url");
   const services = createLocalServices({
     directory, token, commands, copilot,
-    persistenceFault: (point) => { if (fault && point === "before-commit") throw new Error("Injected persistence unavailable."); },
+    persistenceFault: (point) => {
+      if (point !== "before-commit") return;
+      if (remainingCommits !== undefined && --remainingCommits === 0) fault = true;
+      if (fault) throw new Error("Injected persistence unavailable.");
+    },
   });
   const host = await createHost(services);
   const principal = (await services.security.authenticate(token))!;
-  const context = (): RequestContext => ({ principal, requestId: randomUUID() });
-  const rpc = async (method: string, params: unknown = {}, id = randomUUID()) => {
+  const catalogContext = (): RequestContext => ({ principal, requestId: randomUUID(), workspaceId: null });
+  const catalog = await services.work.listWorkspaces(catalogContext());
+  const workspace = catalog.workspaces[0] ?? (options.bootstrap === false ? null
+    : await services.work.createWorkspace(catalogContext(), workspaceInput()));
+  const context = (workspaceId: string | null = workspace?.id ?? null): RequestContext => ({ principal, requestId: randomUUID(), workspaceId });
+  const rawRpc = async (method: string, params: unknown = {}, id = randomUUID()) => {
     const response = await fetch(`http://127.0.0.1:${host.port}/rpc`, {
       method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
     });
     return response.json() as Promise<{ result?: unknown; error?: { code: number; message: string } }>;
   };
+  const rpc = (method: string, params: unknown = {}, id = randomUUID()) => rawRpc(method,
+    ["system.status", "workspaces.list", "workspaces.create"].includes(method) ? params
+      : { workspaceId: workspace?.id ?? null, ...params as object }, id);
   return {
-    directory, services, host, commands, copilot, context, rpc,
-    failPersistence(value = true) { fault = value; },
+    directory, services, host, commands, copilot, context, catalogContext, workspace, rpc, rawRpc,
+    failPersistence(value = true) { fault = value; remainingCommits = undefined; },
+    failAfterCommits(count: number) { remainingCommits = count; },
     async close(remove = true) { await host.close(); if (remove) await rm(directory, { recursive: true, force: true }); },
   };
 }
 export async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): Promise<T> {
-  const deadline = Date.now() + 12_000;
+  const deadline = Date.now() + 45_000;
   let last: T | undefined;
   while (Date.now() < deadline) {
     last = await read();

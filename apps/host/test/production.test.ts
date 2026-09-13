@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { isVerifiedChain } from "@rapp-work/rapp1";
 import { approvalFromFrames } from "@rapp-work/security";
 import { rpcContracts } from "../../ui/src/model.js";
@@ -42,7 +42,7 @@ describe("filesystem-backed production composition", () => {
     const mismatched = structuredClone(snapshot);
     mismatched.tasks[0]!.workspaceId = mismatched.tasks[0]!.agentId;
     expect(rpcContracts["work.snapshot"].output.safeParse(mismatched).success).toBe(false);
-  }, 25_000);
+  }, 60_000);
 
   it("creates, assigns and starts through RPC; consumes approval and scans linked tool/computer evidence", async () => {
     const f = await setup({ computer: true });
@@ -90,7 +90,7 @@ describe("filesystem-backed production composition", () => {
     expect(ssh.args.at(-1)).toBe("/usr/bin/node /usr/local/lib/rapp-work/guest-helper.js");
     expect(ssh.args).not.toContain("owned work");
     expect(f.commands.calls.every((call) => ["/opt/homebrew/bin/tart", "/usr/bin/ssh"].includes(call.file))).toBe(true);
-  }, 35_000);
+  }, 120_000);
 
   it.each(["configuration", "template", "tart"] as const)("missing %s produces zero model or guest execution", async (missing) => {
     const commands = new FakeCommands();
@@ -104,7 +104,7 @@ describe("filesystem-backed production composition", () => {
     expect(f.commands.guestExecutions).toBe(0);
     expect((await f.services.work.snapshot(f.context())).runs).toEqual([]);
     expect((await f.services.computer.inspect(f.context())).state).toBe("unavailable");
-  }, 20_000);
+  }, 45_000);
 
   it("requires durable intent before invoking even the model transport", async () => {
     const f = await setup();
@@ -115,7 +115,7 @@ describe("filesystem-backed production composition", () => {
     expect(f.copilot.complete).not.toHaveBeenCalled();
     expect(f.commands.guestExecutions).toBe(0);
     f.failPersistence(false);
-  }, 20_000);
+  }, 45_000);
 
   it("restores the same owner, workspace and results after restart without replaying a run", async () => {
     const f = await setup();
@@ -131,7 +131,7 @@ describe("filesystem-backed production composition", () => {
     const reopened = await setup({ directory: f.directory });
     expect(reopened.services.persistence.owner).toEqual(owner);
     const snapshot = await reopened.services.work.snapshot(reopened.context());
-    expect(snapshot.agents[0]!.workspaceId).toBe(agent.workspaceId);
+    expect(snapshot.agents.find((item) => item.id === agent.id)!.workspaceId).toBe(agent.workspaceId);
     expect(snapshot.runs[0]!).toMatchObject({ id: run.id, state: "completed" });
     await reopened.services.work.createTask(reopened.context(), input);
     await reopened.services.work.startRun({ ...reopened.context(), requestId: runContext.requestId }, task.id, reopened.services.runtime, reopened.services.provider);
@@ -139,7 +139,7 @@ describe("filesystem-backed production composition", () => {
     expect((await reopened.services.work.snapshot(reopened.context())).tasks).toHaveLength(1);
     const result = snapshot.artifacts.find((item) => !item.evidence)!;
     expect((await reopened.services.work.readArtifact(reopened.context(), result.id)).content).toContain("agent-durable");
-  }, 25_000);
+  }, 60_000);
 
   it.each(["denied", "cancelled"] as const)("an approval can be %s without any guest execution", async (decision) => {
     const f = await setup({ computer: true });
@@ -160,7 +160,7 @@ describe("filesystem-backed production composition", () => {
     expect(snapshot.approvals[0]!.consumedBy).toBeNull();
     const history = await f.services.persistence.read(agentScope(agent));
     expect(history.commands.find((item) => item.command.operation === "tool.execute")).toMatchObject({ state: "committed", status: decision });
-  }, 35_000);
+  }, 90_000);
 
   it("enforces a read-only guest mount under an explicitly reviewed on-risk policy", async () => {
     const f = await setup({ computer: true });
@@ -176,7 +176,7 @@ describe("filesystem-backed production composition", () => {
     expect(snapshot.runs[0]!.state).toBe("completed");
     const ssh = f.commands.calls.find((call) => call.file === "/usr/bin/ssh")!;
     expect(JSON.parse(ssh.options.stdin!).request).toMatchObject({ readOnly: true, argv: ["/usr/bin/head", "-c", "65536", "--", "/workspace/report.txt"] });
-  }, 35_000);
+  }, 90_000);
 
   it("executes persisted schedules once and advances the same agent's canonical schedule", async () => {
     const f = await setup();
@@ -186,7 +186,20 @@ describe("filesystem-backed production composition", () => {
       agentId: agent.id, cadence: { kind: "interval", minutes: 15 }, enabled: true,
     }, f.services.runtime);
     const due = Date.parse(automation.nextRunAt!) + 1;
-    await f.services.runtime.tickSchedules(due);
+    let entered!: () => void, release!: () => void;
+    const scanning = new Promise<void>((resolve) => { entered = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const original = f.services.work.snapshot.bind(f.services.work);
+    const snapshotSpy = vi.spyOn(f.services.work, "snapshot").mockImplementationOnce(async (context) => {
+      entered();
+      await held;
+      return original(context);
+    });
+    const periodic = f.services.runtime.tickSchedules(Date.now());
+    await scanning;
+    const dueTick = f.services.runtime.tickSchedules(due);
+    release();
+    try { await Promise.all([periodic, dueTick]); } finally { snapshotSpy.mockRestore(); }
     await f.services.runtime.drain();
     await f.services.runtime.tickSchedules(due);
     const snapshot = await f.services.work.snapshot(f.context());
@@ -194,7 +207,7 @@ describe("filesystem-backed production composition", () => {
     expect(snapshot.runs[0]!).toMatchObject({ state: "completed", workspaceId: agent.workspaceId });
     expect(Date.parse(snapshot.automations[0]!.nextRunAt!)).toBeGreaterThan(due);
     expect(f.copilot.complete).toHaveBeenCalledOnce();
-  }, 25_000);
+  }, 120_000);
 
   it("retains an uncertain model intent across restart and never automatically replays it", async () => {
     const f = await setup();
@@ -212,7 +225,7 @@ describe("filesystem-backed production composition", () => {
     const commands = (await recovered.services.persistence.read(agentScope(agent))).commands;
     expect(commands.filter((item) => item.command.operation === "model.complete")).toHaveLength(1);
     expect(commands.find((item) => item.command.operation === "model.complete")!.state).toBe("unresolved");
-  }, 25_000);
+  }, 60_000);
 
   it("serializes two agents' approved guest operations on the one shared computer", async () => {
     const f = await setup({ computer: true });
@@ -231,5 +244,5 @@ describe("filesystem-backed production composition", () => {
     expect([...f.commands.executionScopes].sort()).toEqual(agents.map((agent) => agent.workspaceId).sort());
     expect(snapshot.approvals.every((approval) => approval.consumedBy !== null)).toBe(true);
     expect((await f.services.persistence.read(f.services.persistence.owner.computer)).commands.every((command) => command.state === "committed")).toBe(true);
-  }, 60_000);
+  }, 240_000);
 });

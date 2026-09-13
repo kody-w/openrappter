@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { isVerifiedChain } from "@rapp-work/rapp1";
 import { approvalFromFrames } from "@rapp-work/security";
 import { rpcContracts } from "../../ui/src/model.js";
@@ -186,7 +186,20 @@ describe("filesystem-backed production composition", () => {
       agentId: agent.id, cadence: { kind: "interval", minutes: 15 }, enabled: true,
     }, f.services.runtime);
     const due = Date.parse(automation.nextRunAt!) + 1;
-    await f.services.runtime.tickSchedules(due);
+    let entered!: () => void, release!: () => void;
+    const scanning = new Promise<void>((resolve) => { entered = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const original = f.services.work.snapshot.bind(f.services.work);
+    const snapshotSpy = vi.spyOn(f.services.work, "snapshot").mockImplementationOnce(async (context) => {
+      entered();
+      await held;
+      return original(context);
+    });
+    const periodic = f.services.runtime.tickSchedules(Date.now());
+    await scanning;
+    const dueTick = f.services.runtime.tickSchedules(due);
+    release();
+    try { await Promise.all([periodic, dueTick]); } finally { snapshotSpy.mockRestore(); }
     await f.services.runtime.drain();
     await f.services.runtime.tickSchedules(due);
     const snapshot = await f.services.work.snapshot(f.context());

@@ -37,6 +37,11 @@ interface Waiting {
   readonly active: Active;
   resolve(decision: "approved" | "denied" | "cancelled"): void;
 }
+interface ScheduleRequest {
+  readonly now: number;
+  resolve(): void;
+  reject(error: unknown): void;
+}
 const noEffect = (status: "cancelled" | "denied", reason: string): EffectOutcome => ({
   status, value: { code: reason }, receipts: [{ kind: "no-effect", reason }], events: [],
 });
@@ -44,6 +49,7 @@ const noEffect = (status: "cancelled" | "denied", reason: string): EffectOutcome
 export class LocalRuntime implements RuntimePort {
   private readonly active = new Map<string, Active>();
   private readonly waiting = new Map<string, Waiting>();
+  private readonly scheduleRequests: ScheduleRequest[] = [];
   private scheduleTimer: ReturnType<typeof setInterval> | undefined;
   private scheduling: Promise<void> | undefined;
   private scheduleProvider: ProviderPort | undefined;
@@ -360,55 +366,71 @@ export class LocalRuntime implements RuntimePort {
   }
   async tickSchedules(now = Date.now()): Promise<void> {
     if (this.closed || !this.scheduleProvider) return;
-    if (this.scheduling) return this.scheduling;
-    this.scheduling = (async () => {
-      const p = this.persistence;
-      for (const workspaceId of p.businessIds()) {
-        if (!p.activeLineage(workspaceId)) continue;
-        const snapshot = await this.work.snapshot(this.ownerContext("schedule-scan", workspaceId));
-        for (const automation of snapshot.automations.filter((item) => item.originWorkspaceId === workspaceId && item.enabled && item.nextRunAt && Date.parse(item.nextRunAt) <= now)) {
-          if (this.closed) return;
-          const scope = { agentId: automation.agentId, workspaceId: automation.workspaceId };
-          const key = `automation/fire/${automation.id}/${automation.nextRunAt}`;
-          const hex = digest(key);
-          const taskId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-          const context = this.ownerContext(key, workspaceId);
-          const fired = await p.commit(scope, key, "host.automation.fire", { automation: json(automation), taskId },
-            async (): Promise<EffectOutcome> => {
-              const task = await this.work.createTask(context, {
-                requestId: taskId, title: automation.taskTitle, instructions: automation.instructions,
-                agentId: automation.agentId, priority: "normal",
-              });
-              let run: Run | undefined;
-              try { run = await this.work.startRun(context, task.id, this, this.scheduleProvider!); }
-              catch (error) {
-                if (!(error instanceof HostError) || ![-32009, -32011].includes(error.code)) throw error;
-              }
-              const history = await p.read(scope);
-              const receipt = history.commands.find((item) => item.state === "committed"
-                && item.command.operation === "task.create" && item.command.resources.some((resource) => resource.kind === "task" && resource.id === task.id));
-              if (receipt?.state !== "committed") throw new Error("Scheduled task has no canonical creation proof.");
-              return {
-                status: "succeeded", value: { taskId: task.id, runId: run?.id ?? null },
-                receipts: [proofReceipt(receipt), { kind: run ? "scheduled-run-accepted" : "schedule-paused", runId: run?.id ?? null }],
-                events: [{ type: "ui.automation.saved", automation: json({
-                  ...automation, enabled: Boolean(run), nextRunAt: run ? nextSchedule(automation, now).toISOString() : null,
-                  updatedAt: new Date().toISOString(),
-                }) }, { type: "routine.fired", id: automation.id, taskId: task.id, runId: run?.id ?? null,
-                  workspaceId, agentWorkspaceId: scope.workspaceId, scheduledAt: automation.nextRunAt }],
-              };
-            }, [{ kind: "task", id: taskId }]);
-          if (fired.state === "unresolved") {
-            committed(await p.commit(scope, `automation/quarantine/${digest(key)}`, "host.automation.quarantine",
-              { id: automation.id, commandHash: fired.commandHash }, async () => ({
-                status: "succeeded", value: { paused: true }, receipts: [{ kind: "no-replay", commandHash: fired.commandHash }],
-                events: [{ type: "ui.automation.saved", automation: json({ ...automation, enabled: false, nextRunAt: null }) }],
-              })));
-          }
+    return new Promise<void>((resolve, reject) => {
+      this.scheduleRequests.push({ now, resolve, reject });
+      if (this.scheduling) return;
+      const operation = this.drainScheduleRequests();
+      this.scheduling = operation;
+      void operation.finally(() => { if (this.scheduling === operation) this.scheduling = undefined; }).catch(() => {});
+    });
+  }
+  private async drainScheduleRequests(): Promise<void> {
+    while (this.scheduleRequests.length > 0) {
+      const batch = this.scheduleRequests.splice(0);
+      try {
+        await this.runScheduleTick(Math.max(...batch.map((request) => request.now)));
+        for (const request of batch) request.resolve();
+      } catch (error) {
+        for (const request of batch) request.reject(error);
+      }
+    }
+  }
+  private async runScheduleTick(now: number): Promise<void> {
+    const p = this.persistence;
+    for (const workspaceId of p.businessIds()) {
+      if (!p.activeLineage(workspaceId)) continue;
+      const snapshot = await this.work.snapshot(this.ownerContext("schedule-scan", workspaceId));
+      for (const automation of snapshot.automations.filter((item) => item.originWorkspaceId === workspaceId && item.enabled && item.nextRunAt && Date.parse(item.nextRunAt) <= now)) {
+        if (this.closed) return;
+        const scope = { agentId: automation.agentId, workspaceId: automation.workspaceId };
+        const key = `automation/fire/${automation.id}/${automation.nextRunAt}`;
+        const hex = digest(key);
+        const taskId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+        const context = this.ownerContext(key, workspaceId);
+        const fired = await p.commit(scope, key, "host.automation.fire", { automation: json(automation), taskId },
+          async (): Promise<EffectOutcome> => {
+            const task = await this.work.createTask(context, {
+              requestId: taskId, title: automation.taskTitle, instructions: automation.instructions,
+              agentId: automation.agentId, priority: "normal",
+            });
+            let run: Run | undefined;
+            try { run = await this.work.startRun(context, task.id, this, this.scheduleProvider!); }
+            catch (error) {
+              if (!(error instanceof HostError) || ![-32009, -32011].includes(error.code)) throw error;
+            }
+            const history = await p.read(scope);
+            const receipt = history.commands.find((item) => item.state === "committed"
+              && item.command.operation === "task.create" && item.command.resources.some((resource) => resource.kind === "task" && resource.id === task.id));
+            if (receipt?.state !== "committed") throw new Error("Scheduled task has no canonical creation proof.");
+            return {
+              status: "succeeded", value: { taskId: task.id, runId: run?.id ?? null },
+              receipts: [proofReceipt(receipt), { kind: run ? "scheduled-run-accepted" : "schedule-paused", runId: run?.id ?? null }],
+              events: [{ type: "ui.automation.saved", automation: json({
+                ...automation, enabled: Boolean(run), nextRunAt: run ? nextSchedule(automation, now).toISOString() : null,
+                updatedAt: new Date().toISOString(),
+              }) }, { type: "routine.fired", id: automation.id, taskId: task.id, runId: run?.id ?? null,
+                workspaceId, agentWorkspaceId: scope.workspaceId, scheduledAt: automation.nextRunAt }],
+            };
+          }, [{ kind: "task", id: taskId }]);
+        if (fired.state === "unresolved") {
+          committed(await p.commit(scope, `automation/quarantine/${digest(key)}`, "host.automation.quarantine",
+            { id: automation.id, commandHash: fired.commandHash }, async () => ({
+              status: "succeeded", value: { paused: true }, receipts: [{ kind: "no-replay", commandHash: fired.commandHash }],
+              events: [{ type: "ui.automation.saved", automation: json({ ...automation, enabled: false, nextRunAt: null }) }],
+            })));
         }
       }
-    })();
-    try { await this.scheduling; } finally { this.scheduling = undefined; }
+    }
   }
   async drain(): Promise<void> { await Promise.all([...this.active.values()].map((item) => item.promise)); }
   async close(): Promise<void> {

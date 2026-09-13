@@ -1,0 +1,31 @@
+{
+  "schema": "rapp-work.migration-fixture-coverage/1",
+  "description": "Sanitized complete dogfood selection. Not an inventory or authority claim about the user's live estate.",
+  "compatibleRoots": [
+    { "id": "canonical-work", "name": "Canonical RAPP Work", "profile": "rapp-work.next/root/1", "hidden": false },
+    { "id": "canonical-operations", "name": "Operations World", "profile": "rapp-work.next/root/1", "hidden": true }
+  ],
+  "managerPointers": [
+    { "id": "workspace-manager", "title": "RAPP Workspace Manager", "scope": "root" },
+    { "id": "global-estate", "title": "RAPP Global Estate", "scope": "global-estate" },
+    { "id": "monorepo", "title": "RAPP Monorepo", "scope": "monorepo" },
+    { "id": "copilot-builder", "title": "Copilot Builder", "scope": "source-workspace" },
+    { "id": "microsoft-ceo", "title": "Microsoft CEO", "scope": "monorepo" },
+    { "id": "llc-autofile", "title": "LLC Autofile", "scope": "monorepo" },
+    { "id": "llc-private", "title": "LLC Private", "scope": "monorepo" },
+    { "id": "rapp", "title": "RAPP", "scope": "monorepo" },
+    { "id": "rar", "title": "RAR", "scope": "monorepo" },
+    { "id": "ambient-context", "title": "Ambient Context", "scope": "monorepo" },
+    { "id": "aideate", "title": "AIdeate", "scope": "monorepo" },
+    { "id": "herdr", "title": "herdr", "scope": "monorepo" },
+    { "id": "copilot-harness-sdk", "title": "Copilot Harness SDK", "scope": "monorepo" },
+    { "id": "rapp-factory", "title": "RAPP Factory", "scope": "source-factory" }
+  ],
+  "nativeProviders": ["copilot", "claude", "hermes", "scout", "grokbot"],
+  "historicalArchives": [
+    { "id": "legacy-canonical-root", "title": "Historical canonical root — unsupported application profile", "reason": "Canonical identity is retained as a reference; its application payload and adoption are not compatible with the new root contract." },
+    { "id": "old-work-archive", "title": "Old RAPP Work archive — unavailable", "reason": "Archive content/closure/domain authority is unavailable. No format conversion, private content import or identity reminting is authorized." }
+  ],
+  "requiredForms": ["world", "workspace", "librarian", "agent", "twin", "neighborhood", "factory", "rapplication", "task", "routine", "memory", "artifact", "evidence"],
+  "privateContentImport": false
+}

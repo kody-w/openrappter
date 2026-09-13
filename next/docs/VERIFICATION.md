@@ -1,5 +1,43 @@
 # Verified headless milestones
 
+## Observed migration/display release gate
+
+The current complete check passes **70 tests** (65 previous tests plus five
+migration acceptance/boundary tests), strict typecheck/build, and all prior
+canonical gates. The migration gate launches the **new application** and a
+separate passive projection process against an initially empty isolated profile.
+No destination population is performed by the test harness.
+
+The full selected fixture migrates **23 items: 2 exact root GUIDs, 44 scoped
+organs, 21 pointers, 4 artifacts and one preserved branch**. Its source includes
+all fourteen selected Workspace Manager entries, all five native providers,
+two honest historical/unavailable archives and every requested recursive RAPP
+form. The actual passive client observes 23 unique items and 10 world scopes.
+
+The exact rev-15 checker validates **109 signed destination/control/retained
+unpublished frames across nine streams**, plus sixteen authority frames.
+Thirty-seven frames are active rooted data; seventy-one are canonical control/
+staging records; one retained unpublished frame is rollback evidence, not a
+duplicate active bot. Fourteen original source frame files remain byte-identical
+in the destination prefix. Source comparison covers **43 files and 27
+directories**, including hashes, metadata and private native-content markers.
+
+Interruption/resume, deduplicated retries and rollback after an unpublished
+materialization fault pass. Controlled SIGTERM drains filesystem critical
+sections; arbitrary stale locks are not stolen. Restarting both application
+and passive client reconstructs the identical canonical projection/cursor.
+
+The delivered `verification/migration-replay.html` embeds the actual observed
+display log. It passes cold load, offline reload, keyboard controls, twice-
+repeated interactions, light/dark, 1280px/390px widths, zero page/resource/network
+errors and zero horizontal overflow in existing Playwright/system Chrome with
+a fresh isolated browser profile.
+
+**This is not the live release gate passing.** The approved controlled-local
+estate run remains mandatory and is not performed here. Current profiles and
+the old implementation stay untouched. See `MIGRATION_RELEASE_GATE.md`,
+`CONTROLLED_LOCAL_MIGRATION.md`, and `verification/observed-migration.json`.
+
 ## Provider-neutral projection extension
 
 The complete new-core run now passes **65 tests** (18 provider-neutral additions

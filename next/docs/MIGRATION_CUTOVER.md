@@ -2,6 +2,12 @@
 
 ## Current disposition
 
+**Critical acceptance:** a green API/core is insufficient. The observed
+full-estate migration/display test in `MIGRATION_RELEASE_GATE.md` is the release
+gate. It runs the new application and a separate passive client, not direct
+destination writes by a harness. Fixture success does not authorize release;
+the controlled-local runbook remains gated on final integration approval.
+
 This is an isolated headless replacement under `next/`, not a UI extension.
 The old `apps/`, all non-adopted `packages/`, existing contracts and release
 scripts remain unchanged. The only root housekeeping change makes
@@ -23,6 +29,10 @@ transformed, adopted or written.
 | Trusted dependency direction | Exactly one adopted old-code boundary, seven fingerprinted wire source files; zero app/UI/service/store imports and no host-shell or alternate database dependency |
 | Build | Strict full new-core typecheck and build, no ignored failures |
 | Behavior | Complete unit/integration suite, no skips; actual CLI and stdio processes |
+| Observed migration | New app starts empty; full selected estate populated only through public API; every bot/world/pointer appears on a separate live passive projection |
+| Migration restart/rollback | Exact source prefixes and GUIDs; service+projection restart equivalence; stable retries; rollback after an unpublished materialization fault |
+| Source protection | Full source file/directory inventories unchanged; no native private-content import; unavailable archives stay honest pointers |
+| Display evidence | Captured canonical cursor/event log and self-contained replay exercised offline in both themes and desktop/mobile widths |
 | Canonical authority | Exact current rev-15 checkpoint, complete sixteen-frame bootstrap verification and frozen registry agreement |
 | Emitted data | Nonzero emitted frames scanned by the exact reference checker; signed collaboration included, `COMPLIANT`, no findings |
 | Identity/world | Exact GUID and one Librarian survive restart, hide/restore, scopes and complete retained branches |

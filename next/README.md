@@ -21,6 +21,19 @@ publication. Only a tiny test consumer exists.
 See [the API/authority contract](docs/AI_PROJECTION_API.md) and
 [binding milestones](docs/MILESTONES.md).
 
+## Critical release gate: observed migration
+
+A green API is not release acceptance. `npm --prefix next run migration:gate`
+launches the **new** application with an empty isolated fixture profile and a
+separate passive real-time display, migrates all selected roots/forms/estate/
+native/historical pointers through public API operations, exercises rollback
+and restart, checks source zero writes, and produces an offline-tested
+self-contained replay. It is mandatory in `npm --prefix next run check`.
+
+See [the exact migration gate](docs/MIGRATION_RELEASE_GATE.md) and
+[controlled-local approval/run steps](docs/CONTROLLED_LOCAL_MIGRATION.md).
+Live current profiles remain untouched; fixture success cannot qualify a release.
+
 ## Development
 
 Node 22.12+; pinned development dependencies and Copilot SDK are declared in this

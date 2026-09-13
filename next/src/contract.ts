@@ -152,6 +152,7 @@ const EVENTS = new Set([
   'collaboration.perspective', 'collaboration.synthesized', 'provider.unavailable', 'operation.interrupted',
   'effect.approved', 'effect.outcome', 'channel.bound', 'channel.queued', 'channel.attempt', 'channel.outcome', 'hive.consented', 'hive.linked',
   'client.granted', 'client.revoked', 'client.conversation', 'client.activity', 'client.evidence', 'client.attention', 'client.view',
+  'migration.root.imported', 'migration.pointer.imported',
 ]);
 
 export function workEvent(value: unknown): WorkEvent {

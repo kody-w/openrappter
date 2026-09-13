@@ -111,3 +111,27 @@ Whole-store rollback cannot be disproved from that same rolled-back store;
 production must bind an independently retained signed registry/checkpoint.
 No synthetic test authority is a live adoption, contact permission, provider
 authentication, source-write grant or GODD/DOGG transfer permit.
+
+## Migration is a release gate, not an offline data seed
+
+The new migration application uses the same trusted runtime/repository and
+provider-neutral public stdio framing. It binds an exact signed selection to an
+empty isolated profile and records staging/transaction evidence in an existing
+owner-scoped canonical memory stream. No alternate migration database or Egg
+format is introduced.
+
+Whole compatible roots publish atomically with original GUID, frame bytes,
+hidden recursive world and branch ancestry intact, plus an authorized successor
+receipt. Pointer imports append bounded canonical events with original native/
+manager provenance and honest compatibility classification. Incomplete rollback
+retains canonical forensic data and removes no committed root.
+
+A separate passive process consumes the real app's cursor events as each
+root/world/pointer appears. The harness cannot seed the destination filesystem.
+Both processes restart and reconstruct the same state from frames. Source file
+and directory inventories must be unchanged. The static replay is a trusted
+test artifact driven by captured data, not AI-provided HTML or product UI.
+
+This fixture path is necessary but not sufficient: release remains blocked
+until the same observed controlled-local migration passes under adopted
+authority and final integration approval. See `MIGRATION_RELEASE_GATE.md`.

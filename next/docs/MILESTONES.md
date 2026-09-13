@@ -14,14 +14,26 @@
    reconnect cursor and deterministic replay. No UI state database and no
    executable UI payload. This milestone must pass headless contract tests and
    the tiny test consumer before visual implementation is considered.
-4. **Live binding and cutover qualification** — operator-owned signer custody,
+4. **Observed migration/display release gate** — launch the new application on
+   an empty isolated profile and migrate the complete selected estate through
+   public provider-neutral API operations while a separate passive projection
+   displays additions live. Prove full counts, GUIDs, hidden scopes, forms,
+   provenance, original frame bytes, source zero writes, restart, interruption/
+   resume/idempotency and incomplete transaction rollback. Capture an exercised
+   self-contained replay. Sanitized fixtures are mandatory first; an approved
+   controlled-local run is required for release. A green core/API alone is
+   explicitly incomplete.
+5. **Live binding and cutover qualification** — operator-owned signer custody,
    verified shared Brainstem and provider bindings where inference is used,
    signed domain/Hive adoption, optional channel permission, independent release
    constitution and reviewed migration. Skill installation is not any of these
    authorizations.
-5. **Optional passive one-chat projection** — only after the preceding headless
+6. **Optional passive one-chat projection** — only after the preceding headless
    behavior is proven. It subscribes and transforms around the AI's work; it may
    not acquire planning, approval, provider, persistence or deletion authority.
 
 The previous implementation remains intact. The old whole-tree Python ban is
 not relaxed to make the new root appear release-qualified.
+
+See `MIGRATION_RELEASE_GATE.md` and `CONTROLLED_LOCAL_MIGRATION.md` for the
+binding acceptance test and the exact approval-gated local sequence.

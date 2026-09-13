@@ -3,6 +3,7 @@ import { label, list, object, text, validateTree, workEvent, type Scope } from '
 import { requireThat } from './errors.js';
 import { validateDraft, wave, type Draft, type IntentAction, type RoutineAction } from './intent.js';
 import type { RootSnapshot } from './repository.js';
+import { migrationItem } from './migration-contract.js';
 
 export interface InternalState {
   scopes: Scope[];
@@ -70,6 +71,17 @@ export function foldState(root: RootSnapshot, extraCorrections: readonly string[
       if (!corrected.has(frame.frame_hash)) {
         state.progress.push({ scope: routine.scope, summary: text(data.summary, 2_000), evidence: data.evidence!, source: frame.frame_hash });
       }
+    } else if (e.event === 'migration.pointer.imported') {
+      object(data, ['planHash', 'batch', 'item', 'source', 'approvalWave']);
+      const item = migrationItem(data.source);
+      requireThat(item.kind === 'estate-pointer' && item.root === root.definition.root && item.id === data.item
+        && item.pointer!.scope === e.scope && ![...state.pointers.values()].some(p => p.sourceIdentity === item.sourceIdentity),
+      'migration-pointer', 'Imported pointer identities, scopes and provenance must remain exact and unique.');
+      state.pointers.set(`migration-${item.id}`, {
+        id: item.id, scope: e.scope, source: frame.frame_hash, sourceIdentity: item.sourceIdentity,
+        classification: item.classification, provider: item.provider, sourceDigest: item.sourceDigest,
+        pointer: { title: item.title, locator: item.sourceLocator, ...item.pointer! },
+      });
     }
   }
   validateTree(state.scopes);

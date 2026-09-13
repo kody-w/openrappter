@@ -55,6 +55,7 @@ export class HeadlessRuntime {
       ...(options.signatures ? { signatures: options.signatures } : {}),
       ...(options.lockTimeoutMs ? { lockTimeoutMs: options.lockTimeoutMs } : {}),
       ...(options.fault ? { fault: options.fault } : {}),
+      ...(options.migrationFault ? { migrationFault: options.migrationFault } : {}),
     });
     const capability = await targetCapability();
     const spine = new SharedBrainstem(options.brainstem ?? new UnavailableBrainstem(), [capability]);

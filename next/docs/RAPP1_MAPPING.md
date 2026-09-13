@@ -29,6 +29,10 @@ Normative text SHA-256:
 | AI focus/layout/cards/progress hints | Closed payload data in existing `memory.save`, or a bounded optional hint on a public work frame; never executable UI |
 | Multi-client view conflicts | Explicit prior canonical view-wave references; multiple unconsumed heads remain visible, not last-writer overwrite |
 | Real-time UI projection | Bounded disposable subscriptions with exact canonical root/stream/sequence/wave cursors and replay; no UI database |
+| Migration staging/rollback | Owner-signed existing `memory.save` control stream; immutable source chunks, explicit approved closure, no parallel migration database |
+| Root migration | Exact original canonical frame files and branch ancestry, atomically published with one authorized successor receipt; never remint/rewrite |
+| Estate/native/archive migration | Canonical pointer successor events with unchanged source identity and honest provider/compatibility classification; no native content copy |
+| Migration display proof | Real application cursor events consumed by a separate passive process; static replay is an observed test artifact, not UI authority |
 
 Application event names live **inside** payloads. They are not new frame kinds,
 wire fields, protocol registries, or protocol versions. The frame remains exactly

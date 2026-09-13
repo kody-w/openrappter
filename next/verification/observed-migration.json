@@ -1,0 +1,258 @@
+{
+  "schema": "rapp-work.observed-migration-gate/1",
+  "fixtureGate": "passed",
+  "releaseGate": "pending-approved-controlled-local-run",
+  "application": "NEW next/dist/migration-app.js",
+  "initialProfileEmpty": true,
+  "destinationWritesByHarness": 0,
+  "populationChannel": "public provider-neutral stdio migration API only",
+  "passiveClient": "separately launched next/test/migration-consumer.mjs",
+  "providerModelCalls": 0,
+  "uiImplemented": false,
+  "expected": {
+    "roots": 2,
+    "items": 23,
+    "pointers": 21,
+    "scopes": 44,
+    "artifacts": 4,
+    "branches": 1,
+    "forms": {
+      "world": 10,
+      "librarian": 2,
+      "workspace": 8,
+      "memory": 4,
+      "evidence": 2,
+      "agent": 2,
+      "twin": 2,
+      "neighborhood": 2,
+      "factory": 2,
+      "rapplication": 2,
+      "task": 2,
+      "artifact": 4,
+      "routine": 2
+    },
+    "sourceFrames": 14,
+    "classifications": {
+      "compatible-canonical": 2,
+      "historical-derived": 14,
+      "native-pointer": 5,
+      "historical-unavailable": 2
+    },
+    "providers": {
+      "rapp-1": 2,
+      "workspace-manager": 14,
+      "copilot": 1,
+      "claude": 1,
+      "hermes": 1,
+      "scout": 1,
+      "grokbot": 1,
+      "legacy-rapp": 2
+    },
+    "managerPointers": [
+      "workspace-manager",
+      "global-estate",
+      "monorepo",
+      "copilot-builder",
+      "microsoft-ceo",
+      "llc-autofile",
+      "llc-private",
+      "rapp",
+      "rar",
+      "ambient-context",
+      "aideate",
+      "herdr",
+      "copilot-harness-sdk",
+      "rapp-factory"
+    ],
+    "nativeProviders": [
+      "copilot",
+      "claude",
+      "hermes",
+      "scout",
+      "grokbot"
+    ]
+  },
+  "actual": {
+    "activeFrames": 37,
+    "artifacts": 4,
+    "branches": 1,
+    "controlFrames": 71,
+    "items": 23,
+    "pointers": 21,
+    "roots": 2,
+    "scopes": 44
+  },
+  "rootGuids": [
+    "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+    "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a"
+  ],
+  "canonical": {
+    "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+    "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+    "authorityFrames": 16,
+    "verdict": "COMPLIANT",
+    "framesScanned": 109,
+    "signedFrames": 109,
+    "streamsScanned": 9,
+    "findings": [],
+    "evidence": [
+      {
+        "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+        "ok": "1 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+        "ok": "6 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+        "ok": "1 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+        "ok": "1 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/branches/memory-bb552361e95e1719772f263f925800d061ce0bfac6be78530c29a3005e6d7e05/frames",
+        "ok": "1 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+        "ok": "26 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+        "ok": "1 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "migration/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/frames",
+        "ok": "71 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "migration/materialized/bdf7456d49576b4f4b6ca3cd42936e5f216dcee206f5f8c2e191444957ff3b4b/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+        "ok": "1 frames conform to §7 envelope"
+      }
+    ]
+  },
+  "exactOriginalFrameBytesPreserved": true,
+  "hiddenRootPreserved": true,
+  "fullHiddenScopesAndForms": true,
+  "sourceWrites": 0,
+  "sourceMoves": 0,
+  "sourceDeletes": 0,
+  "sourceFilesCompared": 43,
+  "sourceDirectoriesCompared": 27,
+  "nativePrivateContentImported": false,
+  "historicalUnavailableItems": 2,
+  "duplicateImports": 0,
+  "interruptionResume": true,
+  "interruptionMode": "SIGTERM with filesystem critical-section drain; no stale-lock stealing",
+  "replayedChunksDeduplicated": 1,
+  "incompleteTransactionRollback": true,
+  "unpublishedMaterializationFaultExercised": true,
+  "rollbackDeletesCommittedData": false,
+  "serviceAndProjectionRestartIdentical": true,
+  "observedEvents": 97,
+  "observedUniqueItems": 23,
+  "observedWorlds": 10,
+  "finalCursorHash": "a8e2cb677f9161b2283fd00ead139f7f4c7c06b3dcd1d51e2d8d4571c3668a6e",
+  "planHash": "72a22ce6cf4af62feb3e2c63fe565131c8b9d70f2f73c1a227e4f0a8ee344b87",
+  "evidenceDirectory": ".test-scratch/migration-observed-72419-1789341917535",
+  "sourceDirectory": ".test-scratch/migration-observed-72419-1789341917535/source",
+  "destinationDirectory": ".test-scratch/migration-observed-72419-1789341917535/destination",
+  "liveCurrentProfilesTouched": false,
+  "liveCanonicalAdoptionPerformed": false,
+  "replay": "migration-replay.html",
+  "browser": {
+    "schema": "rapp-work.migration-replay-browser/1",
+    "runtime": "existing Playwright 1.63.0 + system Chrome, isolated profile",
+    "selfContained": true,
+    "liveBrowserProfilesTouched": false,
+    "variants": [
+      {
+        "theme": "light",
+        "viewport": {
+          "width": 1280,
+          "height": 900
+        },
+        "coldLoad": "passed",
+        "offlineReload": "passed",
+        "interactionsRepeated": 2,
+        "keyboard": "passed",
+        "overflowPixels": 0,
+        "errors": [],
+        "failed": [],
+        "network": [],
+        "screenshot": "migration-light-1280.png"
+      },
+      {
+        "theme": "light",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "coldLoad": "passed",
+        "offlineReload": "passed",
+        "interactionsRepeated": 2,
+        "keyboard": "passed",
+        "overflowPixels": 0,
+        "errors": [],
+        "failed": [],
+        "network": [],
+        "screenshot": "migration-light-390.png"
+      },
+      {
+        "theme": "dark",
+        "viewport": {
+          "width": 1280,
+          "height": 900
+        },
+        "coldLoad": "passed",
+        "offlineReload": "passed",
+        "interactionsRepeated": 2,
+        "keyboard": "passed",
+        "overflowPixels": 0,
+        "errors": [],
+        "failed": [],
+        "network": [],
+        "screenshot": "migration-dark-1280.png"
+      },
+      {
+        "theme": "dark",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "coldLoad": "passed",
+        "offlineReload": "passed",
+        "interactionsRepeated": 2,
+        "keyboard": "passed",
+        "overflowPixels": 0,
+        "errors": [],
+        "failed": [],
+        "network": [],
+        "screenshot": "migration-dark-390.png"
+      }
+    ]
+  },
+  "fixtureReleaseGate": "observed-migration-and-display-passed",
+  "liveReleaseGate": "not-run; final integration approval and adopted live bindings required",
+  "deliveredReplay": "next/verification/migration-replay.html",
+  "replaySha256": "72b86ef1249de659d246f8e99fa299a05ba543d9572a7c792a3c4c46bc3b63c4",
+  "deliveredBytesIdenticalToBrowserTestedArtifact": true,
+  "tests": {
+    "passed": 70,
+    "failed": 0,
+    "skipped": 0
+  },
+  "primitiveTests": {
+    "passed": 90,
+    "failed": 0
+  },
+  "typecheck": "passed",
+  "build": "passed",
+  "fullCheckLog": "next/.test-scratch/migration-final-check.log",
+  "sourceAndDisplayScope": "sanitized fixtures only; approved controlled-local run remains the release gate",
+  "dependenciesInstalled": false,
+  "liveProfilesTouched": false
+}

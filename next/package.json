@@ -10,7 +10,8 @@
     "typecheck": "tsc -b ../packages/rapp1 --force && tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs",
     "check": "npm run typecheck && npm test && npm run gates",
-    "gates": "node scripts/gates.mjs && node scripts/e2e.mjs && node scripts/ai-projection-proof.mjs",
+    "gates": "node scripts/gates.mjs && node scripts/e2e.mjs && node scripts/ai-projection-proof.mjs && node scripts/run-migration-gate.mjs",
+    "migration:gate": "npm run build && node scripts/run-migration-gate.mjs",
     "start": "node dist/cli.js"
   },
   "dependencies": {
@@ -18,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "22.20.1",
+    "playwright": "1.63.0",
     "typescript": "5.9.3"
   }
 }

@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { link, lstat, mkdir, open, readdir, rmdir, unlink } from 'node:fs/promises';
+import { link, lstat, mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -9,6 +9,7 @@ import {
 } from './canonical.js';
 import { eventKind, label, rootDefinition, workEvent, type RootDefinition } from './contract.js';
 import { Refusal, requireThat } from './errors.js';
+import { CANONICAL_FILE, MIGRATION_LIMITS, migrationStream, verifyRootFiles } from './migration-contract.js';
 
 const FAMILIES: readonly Family[] = ['body', 'memory', 'swarm'];
 const FILE = /^\d{12}\.json$/u;
@@ -38,11 +39,19 @@ export interface Transaction {
   append(input: Append): Promise<RappFrame>;
   preserveBranch(root: string, family: Family, frames: readonly RappFrame[]): Promise<void>;
 }
+export interface MigrationTransaction {
+  readonly snapshot: StoreSnapshot;
+  readonly ledger: readonly RappFrame[];
+  appendControl(payload: JsonObject, utc: string): Promise<RappFrame>;
+  appendRoot(input: Append): Promise<RappFrame>;
+  materializeRoot(root: string, files: ReadonlyMap<string, Buffer>, receipt: Append, publication: string): Promise<RootSnapshot>;
+}
 export interface RepositoryOptions {
   directory: string;
   signatures?: SignaturePolicy;
   lockTimeoutMs?: number;
   fault?: (point: 'before-publish' | 'after-publish') => void;
+  migrationFault?: (point: 'frame-materialized' | 'before-root-publish', root: string) => void;
 }
 
 async function assertDirectory(directory: string): Promise<void> {
@@ -100,7 +109,7 @@ export class CanonicalRepository {
     requireThat((info.mode & 0o077) === 0 && (process.getuid === undefined || info.uid === process.getuid()),
       'private-store', 'The dedicated state directory must be owner-only (0700). Existing directories are never chmodded.');
     const entries = await readdir(directory);
-    requireThat(entries.every(name => name === 'bots' || name === '.writer-lock'), 'source-directory',
+    requireThat(entries.every(name => name === 'bots' || name === '.writer-lock' || name === 'migration'), 'source-directory',
       'Refusing a source/native/unknown directory; only canonical bot storage belongs here.');
     await mkdir(path.join(directory, 'bots'), { mode: 0o700 }).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
@@ -207,13 +216,23 @@ export class CanonicalRepository {
   async snapshot(): Promise<StoreSnapshot> { return this.#locked(() => this.#scan()); }
 
   async #publish(directory: string, frame: RappFrame): Promise<void> {
+    await this.#publishBytes(directory, frame.seq, Buffer.from(canonicalJson(frame)), false);
+  }
+
+  async #publishBytes(directory: string, seq: number, bytes: Buffer, allowExactExisting: boolean): Promise<void> {
     await assertAncestors(directory);
-    const destination = path.join(directory, `${String(frame.seq).padStart(12, '0')}.json`);
+    const destination = path.join(directory, `${String(seq).padStart(12, '0')}.json`);
+    if (allowExactExisting) {
+      try {
+        requireThat((await readBytes(destination)).equals(bytes), 'migration-existing-bytes', 'An unpublished canonical file differs; no overwrite or silent repair is permitted.');
+        return;
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
     const pending = path.join(directory, `pending-${randomUUID()}`);
     const handle = await open(pending, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o600);
     let linked = false;
     try {
-      await handle.writeFile(canonicalJson(frame), 'utf8');
+      await handle.writeFile(bytes);
       await handle.sync();
       this.#options.fault?.('before-publish');
       await link(pending, destination);
@@ -225,6 +244,33 @@ export class CanonicalRepository {
       if (!linked) await unlink(pending).catch(() => undefined);
       throw error;
     } finally { await handle.close(); }
+  }
+
+  async #appendRoot(snapshot: StoreSnapshot, input: Append): Promise<RappFrame> {
+    requireThat(input.family !== 'body', 'root-identity', 'The root genesis cannot be replaced.');
+    const root = snapshot.roots.find(r => r.definition.root === input.root);
+    requireThat(root, 'root-not-found', 'Choose an existing canonical root GUID.');
+    const frames = root.streams[input.family];
+    const head = frames.at(-1) ?? null;
+    requireThat((head?.frame_hash ?? null) === input.expectedHead, 'stale-head', 'Canonical context changed; review the new head before applying work.');
+    if (input.family === 'memory') {
+      const event = workEvent(input.payload);
+      requireThat(event.root === input.root && input.kind === eventKind(event.event), 'root-isolation', 'Wrong root or event kind.');
+      requireThat(!root.streams.memory.some(f => f.payload.operationId === event.operationId),
+        'idempotency-conflict', 'An operation ID already has a canonical receipt.');
+    }
+    const frame = buildFrame({ kind: input.kind, streamId: streamFor(input.root, input.family),
+      utc: input.utc, payload: input.payload, head: head ? frameHead(head) : null,
+      ...(input.signer ? { signer: input.signer } : {}),
+      ...(this.#options.signatures ? { signatures: this.#options.signatures } : {}) });
+    requireThat(signerOf(frame) === root.definition.signer, 'root-signature', 'A root cannot append as another signer.');
+    if (input.payload.operationId !== undefined) {
+      const operationId = label(input.payload.operationId);
+      requireThat(operationId !== root.definition.operationId && !Object.values(root.streams).flat().some(f => f.payload.operationId === operationId),
+        'idempotency-conflict', 'A command ID already belongs to another canonical root operation.');
+    }
+    await this.#publish(this.#framesDirectory(input.root, input.family), frame);
+    return frame;
   }
 
   async transaction<T>(operation: (transaction: Transaction) => Promise<T>): Promise<T> {
@@ -260,30 +306,7 @@ export class CanonicalRepository {
         },
         append: async input => {
           once();
-          requireThat(input.family !== 'body', 'root-identity', 'The root genesis cannot be replaced.');
-          const root = snapshot.roots.find(r => r.definition.root === input.root);
-          requireThat(root, 'root-not-found', 'Choose an existing canonical root GUID.');
-          const frames = root.streams[input.family];
-          const head = frames.at(-1) ?? null;
-          requireThat((head?.frame_hash ?? null) === input.expectedHead, 'stale-head', 'Canonical context changed; review the new head before applying work.');
-          if (input.family === 'memory') {
-            const event = workEvent(input.payload);
-            requireThat(event.root === input.root && input.kind === eventKind(event.event), 'root-isolation', 'Wrong root or event kind.');
-            requireThat(!root.streams.memory.some(f => f.payload.operationId === event.operationId),
-              'idempotency-conflict', 'An operation ID already has a canonical receipt.');
-          }
-          const frame = buildFrame({ kind: input.kind, streamId: streamFor(input.root, input.family),
-            utc: input.utc, payload: input.payload, head: head ? frameHead(head) : null,
-            ...(input.signer ? { signer: input.signer } : {}),
-            ...(this.#options.signatures ? { signatures: this.#options.signatures } : {}) });
-          requireThat(signerOf(frame) === root.definition.signer, 'root-signature', 'A root cannot append as another signer.');
-          if (input.payload.operationId !== undefined) {
-            const operationId = label(input.payload.operationId);
-            requireThat(operationId !== root.definition.operationId && !Object.values(root.streams).flat().some(f => f.payload.operationId === operationId),
-              'idempotency-conflict', 'A command ID already belongs to another canonical root operation.');
-          }
-          await this.#publish(this.#framesDirectory(input.root, input.family), frame);
-          return frame;
+          return this.#appendRoot(snapshot, input);
         },
         preserveBranch: async (root, family, frames) => {
           once();
@@ -324,6 +347,77 @@ export class CanonicalRepository {
       const selected = ordered.filter(f => hashes.has(f.frame_hash));
       requireThat(selected.length === hashes.size, 'stale-projection', 'A selected canonical occurrence is no longer available.');
       return selected;
+    });
+  }
+
+  async #migrationLedger(owner: string): Promise<readonly RappFrame[]> {
+    const directory = path.join(this.directory, 'migration', rootTail(owner), 'frames');
+    try {
+      const frames = await this.#readChain(directory, migrationStream(owner));
+      requireThat(frames.every(f => f.kind === 'memory.save' && signerOf(f) === owner),
+        'migration-authority', 'Migration coordination is an owner-signed canonical memory stream.');
+      return frames;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
+  async migrationSnapshot(owner: string): Promise<{ snapshot: StoreSnapshot; ledger: readonly RappFrame[] }> {
+    return this.#locked(async () => ({ snapshot: await this.#scan(), ledger: await this.#migrationLedger(owner) }));
+  }
+
+  async migrationTransaction<T>(owner: string, signer: FrameSigner, operation: (tx: MigrationTransaction) => Promise<T>): Promise<T> {
+    return this.#locked(async () => {
+      const snapshot = await this.#scan();
+      const ledger = [...await this.#migrationLedger(owner)];
+      return operation({
+        snapshot, ledger,
+        appendControl: async (payload, utc) => {
+          requireThat(ledger.length < MIGRATION_LIMITS.controlFrames, 'migration-bound', 'The canonical migration ledger limit is reached; no partial silent truncation is permitted.');
+          const frame = buildFrame({ kind: 'memory.save', streamId: migrationStream(owner),
+            utc, payload, head: ledger.length ? frameHead(ledger.at(-1)!) : null, signer,
+            ...(this.#options.signatures ? { signatures: this.#options.signatures } : {}) });
+          requireThat(signerOf(frame) === owner, 'migration-authority', 'The selected migration owner must sign coordination.');
+          const directory = path.join(this.directory, 'migration', rootTail(owner), 'frames');
+          await mkdir(directory, { recursive: true, mode: 0o700 });
+          await this.#publish(directory, frame);
+          ledger.push(frame);
+          return frame;
+        },
+        appendRoot: input => this.#appendRoot(snapshot, input),
+        materializeRoot: async (root, files, receipt, publication) => {
+          requireThat(/^[0-9a-f]{64}$/u.test(publication) && this.#options.signatures, 'migration-publication', 'An exact publication identity and selected signature policy are required.');
+          requireThat(!snapshot.roots.some(r => r.definition.root === root), 'migration-collision', 'Existing roots cannot be overwritten or silently merged.');
+          const source = verifyRootFiles(root, files, this.#options.signatures);
+          requireThat(receipt.root === root && receipt.family === 'memory' && receipt.kind === 'memory.save',
+            'migration-receipt', 'A rooted canonical import receipt is required.');
+          const last = source.streams.memory.at(-1);
+          requireThat(receipt.expectedHead === (last?.frame_hash ?? null), 'migration-receipt', 'The receipt must append to the original source head.');
+          const imported = buildFrame({ kind: receipt.kind, streamId: streamFor(root, 'memory'), utc: receipt.utc,
+            payload: receipt.payload, head: last ? frameHead(last) : null,
+            ...(receipt.signer ? { signer: receipt.signer } : {}), signatures: this.#options.signatures });
+          requireThat(signerOf(imported) === source.definition.signer, 'migration-receipt', 'The original root signer must authorize the successor receipt.');
+          const staged = path.join(this.directory, 'migration', 'materialized', publication, rootTail(root));
+          await mkdir(staged, { recursive: true, mode: 0o700 });
+          for (const family of FAMILIES) await mkdir(path.join(staged, family, 'frames'), { recursive: true, mode: 0o700 });
+          await mkdir(path.join(staged, 'branches'), { recursive: true, mode: 0o700 });
+          for (const [relative, bytes] of files) {
+            requireThat(CANONICAL_FILE.test(relative), 'migration-path', 'Only exact canonical frame paths may materialize.');
+            const target = path.join(staged, relative);
+            await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+            await this.#publishBytes(path.dirname(target), Number(path.basename(relative, '.json')), bytes, true);
+            this.#options.migrationFault?.('frame-materialized', root);
+          }
+          await this.#publishBytes(path.join(staged, 'memory', 'frames'), imported.seq, Buffer.from(canonicalJson(imported)), true);
+          await syncDirectory(staged);
+          this.#options.migrationFault?.('before-root-publish', root);
+          await rename(staged, this.#rootDirectory(root));
+          await syncDirectory(path.join(this.directory, 'bots'));
+          await syncDirectory(path.dirname(staged));
+          return { ...source, streams: { ...source.streams, memory: [...source.streams.memory, imported] } };
+        },
+      });
     });
   }
 }

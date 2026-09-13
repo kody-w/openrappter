@@ -427,6 +427,7 @@ export class LocalPersistence {
     this.principal = await this.security.authenticate(this.credential);
     this.store = await WorkspaceStore.open({
       root: join(this.directory, "workspaces"), security: this.security,
+      lockTimeoutMs: 30_000,
       ...(this.fault ? { fault: this.fault } : {}),
     });
     this.opened = true;

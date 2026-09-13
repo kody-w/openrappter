@@ -3,11 +3,11 @@ import { link, lstat, mkdir, open, readdir, rmdir, unlink } from 'node:fs/promis
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
-  buildFrame, canonicalJson, frameHead, isUtc, parseCanonicalJson, rootTail, signerOf, streamFor,
+  buildFrame, canonicalJson, frameHead, isUtc, mergeStoredChains, parseCanonicalJson, rootTail, signerOf, streamFor,
   verifiedFrame, verifySelectedAuthority, type Family, type FrameSigner, type JsonObject,
   type RappFrame, type SignaturePolicy,
 } from './canonical.js';
-import { eventKind, rootDefinition, workEvent, type RootDefinition } from './contract.js';
+import { eventKind, label, rootDefinition, workEvent, type RootDefinition } from './contract.js';
 import { Refusal, requireThat } from './errors.js';
 
 const FAMILIES: readonly Family[] = ['body', 'memory', 'swarm'];
@@ -180,6 +180,13 @@ export class CanonicalRepository {
         requireThat(!operationIds.has(event.operationId), 'idempotency', 'A committed operation ID occurs twice.');
         operationIds.add(event.operationId);
       }
+      for (const frame of streams.swarm) {
+        if (frame.payload.operationId !== undefined) {
+          const operationId = label(frame.payload.operationId);
+          requireThat(!operationIds.has(operationId), 'idempotency', 'A command ID may not be rebound across canonical stream families.');
+          operationIds.add(operationId);
+        }
+      }
       const branches: { family: Family; head: string; frames: readonly RappFrame[] }[] = [];
       const branchDirectory = path.join(rootDirectory, 'branches');
       await assertDirectory(branchDirectory);
@@ -270,6 +277,11 @@ export class CanonicalRepository {
             ...(input.signer ? { signer: input.signer } : {}),
             ...(this.#options.signatures ? { signatures: this.#options.signatures } : {}) });
           requireThat(signerOf(frame) === root.definition.signer, 'root-signature', 'A root cannot append as another signer.');
+          if (input.payload.operationId !== undefined) {
+            const operationId = label(input.payload.operationId);
+            requireThat(operationId !== root.definition.operationId && !Object.values(root.streams).flat().some(f => f.payload.operationId === operationId),
+              'idempotency-conflict', 'A command ID already belongs to another canonical root operation.');
+          }
           await this.#publish(this.#framesDirectory(input.root, input.family), frame);
           return frame;
         },
@@ -303,5 +315,15 @@ export class CanonicalRepository {
     const result = (await this.snapshot()).roots.find(r => r.definition.root === root);
     if (!result) throw new Refusal('root-not-found', 'Choose an existing canonical root GUID.');
     return result;
+  }
+
+  async orderSelection(hashes: ReadonlySet<string>): Promise<readonly RappFrame[]> {
+    return this.#locked(async () => {
+      const snapshot = await this.#scan();
+      const ordered = mergeStoredChains(snapshot.roots.flatMap(r => Object.values(r.streams)), this.#options.signatures);
+      const selected = ordered.filter(f => hashes.has(f.frame_hash));
+      requireThat(selected.length === hashes.size, 'stale-projection', 'A selected canonical occurrence is no longer available.');
+      return selected;
+    });
   }
 }

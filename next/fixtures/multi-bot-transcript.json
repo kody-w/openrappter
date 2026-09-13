@@ -1,0 +1,149 @@
+{
+  "fixture": "synthetic-canonical-public-turns",
+  "canonicalOrdering": "UTC then wave hash",
+  "turns": [
+    {
+      "role": "user",
+      "speaker": "human",
+      "text": "I need a place to build the Copilot bridge",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 0,
+        "utc": "2026-09-13T20:00:00.002Z",
+        "payload_hash": "00a396cb056177f99cc42a11a904b06763a559dc9e770e6e688c3b0f3039f5a9",
+        "frame_hash": "0c8c715573548b415a393f8af9c3f59aee1e63baf571381fc740736a883933ac"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Make Copilot Builder a coherent internal world, with a briefing artifact and a clear RAPP/1 boundary.\nTradeoff: Keep one visible root bot and one Librarian; Builder is an internal world, not another bot.\nTradeoff: The briefing is canonical inert text. No host source file, native profile, model configuration or external service is changed.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 1,
+        "utc": "2026-09-13T20:00:00.004Z",
+        "payload_hash": "477584b633e96c3a7d2aceffd6bcda5e216f8c774bac677396e887432e230021",
+        "frame_hash": "d84a1502d1172ca2aaf8f07c55e0bac767dda1746f8b63919cb50fac613a3ac5"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "user",
+      "speaker": "human",
+      "text": "RAPP Up: organize the explicitly discovered local native estate inside this one complete root world.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 4,
+        "utc": "2026-09-13T20:00:00.007Z",
+        "payload_hash": "edc255fa5b0bab2e370a6dadc7b0256b925f4c2e5587af27de615d6e43d7e6a7",
+        "frame_hash": "5adfa4286072b479bcf88ac6ee061f1e4850bcc28b4679290b3679cbf5ea0176"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Establish one complete Local Projects world inside this bot, keeping every native provider shape as a pointer.\nTradeoff: Discovery is historical metadata, not current native-store truth or ownership.\nTradeoff: One visible bot and one Librarian remain; no native data is copied, normalized, mounted or modified.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 5,
+        "utc": "2026-09-13T20:00:00.009Z",
+        "payload_hash": "e60180447bcfdc455d6bf3214ffdfdc6f72be800bdc1fc1fb5cb38013f40702a",
+        "frame_hash": "fa147bc2a5a97ae06166f3d7e5b6641bf9df51fdabf9659efcc5e328fe442877"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "user",
+      "speaker": "human",
+      "text": "Make this a world and recap progress every Monday",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 7,
+        "utc": "2026-09-13T20:00:00.011Z",
+        "payload_hash": "40f1a89aab8772f11e25ad9a758ef5a29d2a964747399809879781fc60424935",
+        "frame_hash": "571dd1bfeb3e930df4fab06002a275fd6d8e994e678f6b5024a5799f96081014"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Create an internal Weekly Work world and produce its canonical progress recap every Monday.\nTradeoff: Monday at 09:00 UTC is an explicit reviewable default, not a guessed local timezone.\nTradeoff: The routine is hidden implementation of this complete reviewed intent. It reads canonical context first and appends a reversible internal recap; it does not infer with a model, send messages or execute arbitrary instructions.\nRecurring intent: Recap this world's canonical progress; every Monday at 09:00 UTC, first 2026-09-14T09:00:00.000Z.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 8,
+        "utc": "2026-09-13T20:00:00.013Z",
+        "payload_hash": "640809cb8365093faea096647aaeb3d1c06e146ec034c3524bf58cef0dfa4f70",
+        "frame_hash": "f4126e40f034672eea8617b38940e2842cc8e0f5acfa5a4cacd41e9fbcf62c6c"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Review the public plan and preserve disagreement.",
+      "source": {
+        "stream_id": "net:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "seq": 0,
+        "utc": "2026-09-14T09:00:00.008Z",
+        "payload_hash": "90b195caa10510b92b78370abe99ba6813a563fdd59a54d2ad2f23709aaaba2e",
+        "frame_hash": "5b32d6adf06bdc48eb0e69fd4a5b8f5e29fdec5ab7d87b208c970b312f9348c4"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+      "text": "Independent reviewer perspective: preserve native pointers and confirm bounded internal work before acting.\nDisagreement: Do not normalize the native stores into a new shared workspace database.\nUnknown: Live external Brainstem and channel permission bindings have not been established.",
+      "source": {
+        "stream_id": "net:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+        "seq": 0,
+        "utc": "2026-09-14T09:00:00.009Z",
+        "payload_hash": "b09c8ceadbf4b8afab6c5569d18e7e4ced325bab73958d65bb7450e0d4713b9c",
+        "frame_hash": "ce5b651f6a5bb03c6cf95c36e1458d58c25066924f241985f058dc7bc0508707"
+      },
+      "replyTo": "5b32d6adf06bdc48eb0e69fd4a5b8f5e29fdec5ab7d87b208c970b312f9348c4"
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Two distinct public perspectives support a reviewed pointer-first plan; no external action is authorized.\nDisagreement: Do not normalize the native stores into a new shared workspace database.\nUnknown: Live external Brainstem and channel permission bindings have not been established.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 15,
+        "utc": "2026-09-14T09:00:00.011Z",
+        "payload_hash": "3c03c1dde16ed0ac29d19427e60aab74a928f52048df9282b11a24bdbc670014",
+        "frame_hash": "2b98867207740934178a5612929fc2145d9e75419caa6c05a6d0f1b64f26098e"
+      },
+      "replyTo": "5b32d6adf06bdc48eb0e69fd4a5b8f5e29fdec5ab7d87b208c970b312f9348c4"
+    },
+    {
+      "role": "user",
+      "speaker": "human",
+      "text": "Prepare an external message request, do not send it",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 22,
+        "utc": "2026-09-14T09:00:00.018Z",
+        "payload_hash": "19283a7d831590735d343dc852917f47ae9bbb4d59fcc3c56de59559bda638d9",
+        "frame_hash": "c109365dc52048bff58a819fc68fffa649ec2154663861606746bf66319340e5"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Prepare a bounded message request, without sending it.\nTradeoff: Confirming organization only records this request. A second exact local approval is required to call an external adapter.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 23,
+        "utc": "2026-09-14T09:00:00.020Z",
+        "payload_hash": "b0f46c7d13ec320c024c7ce3f63b09e02329cd723d3e8e2a06a92c7a7340d807",
+        "frame_hash": "ef2d5e8cab0f71896e5253d8ef164cf17751f1b1519c818c6c2df80db20a6887"
+      },
+      "replyTo": null
+    }
+  ]
+}

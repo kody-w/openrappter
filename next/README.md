@@ -20,6 +20,27 @@ npm --prefix next test
 npm --prefix next run gates
 ```
 
+Run the CLI/stdio boundary:
+
+```sh
+node next/dist/cli.js --store next/.state --id create-my-bot bots.create '{"name":"My Work"}'
+node next/dist/cli.js --store next/.state stdio
+```
+
+This creates a canonical local root, not a live model session. Real provider,
+Brainstem, Hive, domain-transfer and iMessage bindings remain explicit gates.
+For the complete **synthetic** dogfood scenario:
+
+```sh
+node next/scripts/e2e.mjs
+```
+
+It exercises two signed root bots, thought/review/confirmation, Copilot Builder,
+RAPP Up native pointers, weekly work, correction, branch preservation, public
+collaboration, an iMessage outage/recap/retry, external-action refusal and restart
+without replay. It writes inspectable canonical evidence below
+`next/.test-scratch/`, not a live profile.
+
 Validation for this milestone reuses already-installed, exact-version
 dependencies through an ignored worktree-local `node_modules` link. It does not
 install dependencies, launch a model, or touch a live profile.
@@ -36,4 +57,13 @@ unchanged; `next/` is not release-qualified by the old pipeline. See the honest
 
 Binding contracts: [architecture](docs/ARCHITECTURE.md),
 [primitive mapping](docs/RAPP1_MAPPING.md),
-[root/world](docs/BOT_WORLD_CONTRACT.md).
+[root/world](docs/BOT_WORLD_CONTRACT.md),
+[interaction/CLI](docs/INTERACTION_CONTRACT.md),
+[private channel](docs/CHANNEL_CONTRACT.md),
+[passive projection](docs/PROJECTION_CONTRACT.md),
+[migration/cutover](docs/MIGRATION_CUTOVER.md), and
+[discarded patterns](docs/DISCARDED_PATTERNS.md).
+
+See [exact verification and blockers](docs/VERIFICATION.md) and
+[prototype evidence usage](docs/SOURCE_EVIDENCE.md). This milestone does not
+authorize production cutover or removal of the retained implementation.

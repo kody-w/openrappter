@@ -1,5 +1,5 @@
 import {
-  canonicalJson, mintIdentity, type FrameSigner, type JsonObject, type RappFrame,
+  AUTHORITY, canonicalJson, mintIdentity, type FrameSigner, type JsonObject, type RappFrame,
 } from './canonical.js';
 import {
   ROOT_SCHEMA, defaultScopes, eventKind, eventPayload, label, text,
@@ -59,7 +59,7 @@ export class Bots {
       requireThat(input.keyedRoot === undefined || signer, 'signing-authority-unavailable',
         'A keyed root requires an explicitly injected independently custodied signer.');
       const definition: RootDefinition = {
-        schema: ROOT_SCHEMA, operationId, root, name, scopes: defaultScopes(name), capability: this.capability,
+        schema: ROOT_SCHEMA, operationId, root, name, scopes: defaultScopes(name), capability: this.capability, authority: { ...AUTHORITY },
         signer: signer ? root : null,
         policy: { externalEffects: 'explicit-approval', nativeStores: 'pointer-only', memory: 'public-turns-and-outcomes' },
       };

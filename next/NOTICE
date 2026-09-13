@@ -1,0 +1,12 @@
+The original next/ implementation is governed by the repository's license.
+
+The deliberately adopted @rapp-work/rapp1 wire implementation remains in
+packages/rapp1, with its existing Apache-2.0 NOTICE and source attribution.
+
+Unmodified public RAPP/1 reference/checker and authority bytes in vendor/rapp1
+are from kody-w/rapp-1@dda32d741c7218f41443a5bd17eebfe0eae82cb7,
+Copyright (c) 2025-2026 Kody Wildfeuer, MIT License.
+The full upstream license is preserved at vendor/rapp1/LICENSE.
+
+No external Brainstem implementation is copied or modified here.
+agent.py is the target-owned adapter contract, not another interpreter.

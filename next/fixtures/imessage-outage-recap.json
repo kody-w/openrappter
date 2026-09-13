@@ -1,0 +1,29 @@
+{
+  "fixture": "synthetic-private-channel-outage",
+  "source": "canonical channel queue and outcome frames",
+  "recapDuringOutage": {
+    "channel": "imessage",
+    "transportAvailable": false,
+    "pending": [
+      {
+        "deliveryId": "f5ceec9b0748197b4f083527d28dc22a44caa7a38405cc5652186ad0a4a5e3d9",
+        "summary": "organization.applied: Establish one complete Local Projects world inside this bot, keeping every native provider shape as a pointer.\nturn.assistant: Create an internal Weekly Work world and produce its canonical progress recap every Monday.\nTradeoff: Monday at 09:00 UTC is an explicit reviewable default, not a guessed local timezone.\nTradeoff: The routine is hidden implementation of this complete reviewed \norganization.applied: Create an internal Weekly Work world and produce its canonical progress recap every Monday.\nwork.progress: First internal draft prepared.\nroutine.tick: Canonical recap for Recap this world's canonical progress: 1 recent scoped public records read first. No prior internal progress is recorded. Reversible internal recap completed; no model, native-store write, delivery or external effect was run.\ncollaboration.synthesized: Two distinct public perspectives support a reviewed pointer-first plan; no external action is authorized.\nDisagreement: Do not normalize the native stores into a new shared workspace database.\nUnknown: Live external Brainstem and channel permission bindings ha",
+        "sources": [
+          "c48fa5959f210068d2b51e887241e4210e44b859eb6e4ed1ad67ca385c51caac",
+          "f4126e40f034672eea8617b38940e2842cc8e0f5acfa5a4cacd41e9fbcf62c6c",
+          "e5068ab9bb3f4a3c79935022b3b029bdc8dc35b41b67035c2d67b84094d22d11",
+          "2ad9aff0264f2a622416fb4fbb15e11572f3fe5981aa4848f55a314de1edc03d",
+          "9760b9c128120e132dcac01b59cc461d3ec126e9dda16a50e6dcdec60248b547",
+          "2b98867207740934178a5612929fc2145d9e75419caa6c05a6d0f1b64f26098e"
+        ]
+      }
+    ],
+    "automaticReplay": false
+  },
+  "recapAfterExplicitRetry": {
+    "channel": "imessage",
+    "transportAvailable": true,
+    "pending": [],
+    "automaticReplay": false
+  }
+}

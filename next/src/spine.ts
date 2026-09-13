@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { canonicalJson, isBodyStream, sha256, snapshotJson, type JsonObject } from './canonical.js';
 import { capabilityReference, type CapabilityReference } from './contract.js';
 import { Refusal, requireThat } from './errors.js';
+import { untilAborted } from './async.js';
 
 export interface ModelRequest {
   readonly root: string;
@@ -48,6 +49,7 @@ export class SharedBrainstem {
   readonly #catalog: ReadonlyMap<string, Uint8Array>;
   readonly #leases = new Map<Observation, Lease>();
   readonly #slots = new Map<string, Promise<BotInterpreter>>();
+  readonly #pending = new Map<string, Promise<JsonObject>>();
   readonly #clock: () => number;
 
   constructor(binding: BrainstemBinding, acceptedCapabilities: readonly { reference: CapabilityReference; bytes: Uint8Array }[],
@@ -78,13 +80,15 @@ export class SharedBrainstem {
 
   status(root: string): JsonObject {
     const leases = [...this.#leases.values()].filter(l => l.root === root && l.expires > this.#clock() && !l.abort.signal.aborted);
-    return { root, mode: leases.length ? 'observed' : 'dormant', observations: leases.length,
-      activeComputations: leases.reduce((sum, l) => sum + l.active, 0), externalBindingAvailable: this.#binding.available };
+    const pending = this.#pending.has(root);
+    return { root, mode: leases.length ? 'observed' : pending ? 'quiescing' : 'dormant', observations: leases.length,
+      activeComputations: pending ? 1 : 0, externalBindingAvailable: this.#binding.available };
   }
 
   async compute(handle: Observation, reference: CapabilityReference, request: Omit<ModelRequest, 'signal'>,
     provider: ModelProvider): Promise<JsonObject> {
     const lease = this.#lease(handle);
+    requireThat(!this.#pending.has(lease.root), 'spine-busy', 'An uncompleted call still owns this root; no concurrent replacement or replay is allowed.');
     requireThat(request.root === lease.root && canonicalJson(request.context).length <= 96_000,
       'root-isolation', 'Only this root’s bounded permitted canonical context may enter its interpreter.');
     const ref = capabilityReference(reference);
@@ -99,11 +103,16 @@ export class SharedBrainstem {
     }
     lease.active++;
     const timer = setTimeout(() => lease.abort.abort(), Math.max(1, lease.expires - this.#clock()));
-    try {
+    const work = (async (): Promise<JsonObject> => {
       const bot = await slot;
       requireThat(bot.root === lease.root, 'root-isolation', 'The shared spine returned another bot’s interpreter.');
       this.#lease(handle);
-      const response = await bot.publicResponse({ ...request, signal: lease.abort.signal }, provider);
+      return bot.publicResponse({ ...request, signal: lease.abort.signal }, provider);
+    })();
+    this.#pending.set(lease.root, work);
+    void work.finally(() => { if (this.#pending.get(lease.root) === work) this.#pending.delete(lease.root); }).catch(() => undefined);
+    try {
+      const response = await untilAborted(work, lease.abort.signal);
       this.#lease(handle);
       return snapshotJson(response) as JsonObject;
     } finally {
@@ -120,7 +129,15 @@ export class SharedBrainstem {
     if (![...this.#leases.values()].some(l => l.root === lease.root)) {
       const slot = this.#slots.get(lease.root);
       this.#slots.delete(lease.root);
-      if (slot) await slot.then(bot => bot.close(), () => undefined);
+      const pending = this.#pending.get(lease.root);
+      if (slot) {
+        const closing = (async () => {
+          if (pending) await pending.catch(() => undefined);
+          const bot = await slot;
+          await bot.close();
+        })();
+        void closing.catch(() => undefined);
+      }
     }
   }
 

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.projection/1",
+  "title": "Read-only RAPP Work root projection",
+  "type": "object",
+  "readOnly": true,
+  "additionalProperties": false,
+  "required": ["schema", "root", "name", "hidden", "authority", "scopes", "turns", "outcomes", "attention", "heads", "branches", "proposals", "routines", "pointers", "artifacts", "progress"],
+  "properties": {
+    "schema": { "const": "rapp-work.projection/1" },
+    "root": { "$ref": "#/$defs/rappid" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "hidden": { "type": "boolean" },
+    "authority": {
+      "type": "object",
+      "required": ["revision", "frame_hash", "payload_hash", "normative_sha256", "chain_sha256", "integrity", "factualTruth", "externalAdoption"],
+      "properties": {
+        "revision": { "const": "rev-15" },
+        "integrity": { "const": "verified" },
+        "factualTruth": { "const": false },
+        "externalAdoption": { "const": false }
+      }
+    },
+    "scopes": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/scope" } },
+    "turns": { "type": "array", "items": { "$ref": "#/$defs/turn" } },
+    "outcomes": { "$ref": "#/$defs/objects" },
+    "attention": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "summary", "source"],
+        "properties": {
+          "kind": { "type": "string" },
+          "summary": { "type": "string" },
+          "source": { "$ref": "#/$defs/hash" }
+        }
+      }
+    },
+    "heads": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["body", "memory", "swarm"],
+      "properties": {
+        "body": { "$ref": "#/$defs/reference" },
+        "memory": { "oneOf": [{ "$ref": "#/$defs/reference" }, { "type": "null" }] },
+        "swarm": { "oneOf": [{ "$ref": "#/$defs/reference" }, { "type": "null" }] }
+      }
+    },
+    "branches": { "$ref": "#/$defs/objects" },
+    "proposals": { "$ref": "#/$defs/objects" },
+    "routines": { "$ref": "#/$defs/objects" },
+    "pointers": { "$ref": "#/$defs/objects" },
+    "artifacts": { "$ref": "#/$defs/objects" },
+    "progress": { "$ref": "#/$defs/objects" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "rappid": { "type": "string", "pattern": "^rappid:@[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*:[0-9a-f]{64}$" },
+    "objects": { "type": "array", "items": { "type": "object" } },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stream_id", "seq", "utc", "payload_hash", "frame_hash"],
+      "properties": {
+        "stream_id": { "type": "string" },
+        "seq": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$" },
+        "payload_hash": { "$ref": "#/$defs/hash" },
+        "frame_hash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "parent", "kind", "name", "description"],
+      "properties": {
+        "id": { "type": "string" },
+        "parent": { "type": ["string", "null"] },
+        "kind": { "enum": ["world", "workspace", "librarian", "neighborhood", "agent", "twin", "factory", "rapplication", "task", "routine", "memory", "artifact", "evidence"] },
+        "name": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "speaker", "text", "source", "replyTo"],
+      "properties": {
+        "role": { "enum": ["user", "assistant"] },
+        "speaker": { "oneOf": [{ "const": "human" }, { "$ref": "#/$defs/rappid" }] },
+        "text": { "type": "string" },
+        "source": { "$ref": "#/$defs/reference" },
+        "replyTo": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+      }
+    }
+  }
+}

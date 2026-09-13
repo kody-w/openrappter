@@ -35,7 +35,7 @@ def main():
         "commit": COMMIT,
         "head": index["head"],
         "files": records,
-        "rule": "Unmodified public Apache-2.0 reference bytes. Not an application protocol.",
+        "rule": "Unmodified public MIT-licensed reference bytes. Not an application protocol.",
     }, indent=2) + "\n")
     print(json.dumps({"commit": COMMIT, "files": len(records), "head": HEAD}))
 

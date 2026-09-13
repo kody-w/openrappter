@@ -1,4 +1,4 @@
-import { isBodyStream, isLabel, snapshotJson, type JsonObject, type JsonValue } from './canonical.js';
+import { AUTHORITY, canonicalJson, isBodyStream, isLabel, snapshotJson, type JsonObject, type JsonValue } from './canonical.js';
 import { requireThat } from './errors.js';
 
 export const EVENT_SCHEMA = 'rapp-work.next/event/1';
@@ -80,7 +80,7 @@ export function defaultScopes(name: string): Scope[] {
   return [
     { id: 'root', parent: null, kind: 'world', name, description: 'The complete recursive world of this one RAPPbot.' },
     { id: 'librarian', parent: 'root', kind: 'librarian', name: 'Workspaces Librarian', description: 'Organizes this root only; hidden internal organ.' },
-    { id: 'global-estate', parent: 'root', kind: 'world', name: 'RAPP Global Estate', description: 'Historical/derived map, not live ownership or a verified current inventory.' },
+    { id: 'global-estate', parent: 'root', kind: 'world', name: 'RAPP Global Estate', description: 'Historical/derived map: RAPP foundation (https://github.com/kody-w/RAPP) and RAPP/1 protocol (https://github.com/kody-w/rapp-1). References are not live ownership or a verified current inventory.' },
     { id: 'local-estate', parent: 'root', kind: 'world', name: 'Local AI estate', description: 'Read-only native pointers from explicit discovery evidence; never copied or normalized.' },
     { id: 'monorepo', parent: 'root', kind: 'world', name: 'RAPP Monorepo', description: 'Bare canonical monorepo-shaped world; no filesystem mounting or source writes.' },
     { id: 'tasks', parent: 'monorepo', kind: 'workspace', name: 'Tasks', description: 'Scoped reversible internal work.' },
@@ -112,6 +112,7 @@ export interface RootDefinition extends JsonObject {
   name: string;
   scopes: Scope[];
   capability: CapabilityReference;
+  authority: JsonObject;
   signer: string | null;
   policy: {
     externalEffects: 'explicit-approval';
@@ -121,13 +122,15 @@ export interface RootDefinition extends JsonObject {
 }
 
 export function rootDefinition(value: unknown): RootDefinition {
-  const r = object(value, ['schema', 'operationId', 'root', 'name', 'scopes', 'capability', 'signer', 'policy']);
+  const r = object(value, ['schema', 'operationId', 'root', 'name', 'scopes', 'capability', 'authority', 'signer', 'policy']);
   requireThat(r.schema === ROOT_SCHEMA && isBodyStream(r.root), 'root-identity', 'Invalid rooted-bot genesis.');
   label(r.operationId);
   text(r.name, 120);
   const scopes = list(r.scopes, MAX_SCOPES).map(scope);
   validateTree(scopes);
   capabilityReference(r.capability);
+  requireThat(canonicalJson(r.authority) === canonicalJson(AUTHORITY), 'root-authority',
+    'Rooted data must retain the exact adopted rev-15 authority; no implicit repinning is permitted.');
   requireThat(r.signer === null || r.signer === r.root, 'signer', 'A keyed bot must sign as its exact root GUID.');
   const p = object(r.policy, ['externalEffects', 'nativeStores', 'memory']);
   requireThat(p.externalEffects === 'explicit-approval' && p.nativeStores === 'pointer-only'
@@ -147,7 +150,7 @@ const EVENTS = new Set([
   'root.visibility', 'turn.user', 'turn.assistant', 'organization.applied', 'work.progress',
   'state.corrected', 'discovery.recorded', 'routine.tick', 'collaboration.granted', 'collaboration.requested',
   'collaboration.perspective', 'collaboration.synthesized', 'provider.unavailable', 'operation.interrupted',
-  'effect.approved', 'effect.outcome', 'channel.bound', 'channel.queued', 'channel.outcome', 'hive.linked',
+  'effect.approved', 'effect.outcome', 'channel.bound', 'channel.queued', 'channel.attempt', 'channel.outcome', 'hive.consented', 'hive.linked',
 ]);
 
 export function workEvent(value: unknown): WorkEvent {
@@ -167,6 +170,6 @@ export function eventPayload(root: string, scopeId: string, operationId: string,
 export function eventKind(event: string): 'memory.chat-turn' | 'memory.save' | 'memory.tool-call' {
   if (event.startsWith('turn.') || event === 'collaboration.synthesized') return 'memory.chat-turn';
   if (['organization.applied', 'work.progress', 'routine.tick', 'provider.unavailable',
-    'operation.interrupted', 'effect.outcome', 'channel.outcome'].includes(event)) return 'memory.tool-call';
+    'operation.interrupted', 'effect.outcome', 'channel.attempt', 'channel.outcome'].includes(event)) return 'memory.tool-call';
   return 'memory.save';
 }

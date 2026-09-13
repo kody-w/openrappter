@@ -10,7 +10,7 @@
     "typecheck": "tsc -b ../packages/rapp1 --force && tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs",
     "check": "npm run typecheck && npm test && npm run gates",
-    "gates": "node scripts/gates.mjs",
+    "gates": "node scripts/gates.mjs && node scripts/e2e.mjs",
     "start": "node dist/cli.js"
   },
   "dependencies": {

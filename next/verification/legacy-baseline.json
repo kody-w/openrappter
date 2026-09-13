@@ -1,0 +1,25 @@
+{
+  "scope": "unchanged retained legacy product only; not next release qualification",
+  "commit": "d8601aa91c10f3330ea10b7fa31382137d981dfd",
+  "worktree": "next/.test-scratch/legacy-baseline",
+  "legacyAbsence": {
+    "command": "node scripts/check-legacy-absence.mjs",
+    "status": "passed",
+    "sourceFiles": 270,
+    "workspaces": 14
+  },
+  "releaseConstitution": {
+    "command": "node scripts/check-release-constitution.mjs",
+    "status": "passed",
+    "sourceDigest": "b78af90709a2d815d798ecb6646f8863a828a5032fe468484b8864e2db2c5325",
+    "lockDigest": "dca9d7679261726f47870dd8783a7bc9d29e2f0f81555bba43f11d7c2b2b93d5",
+    "fixturesDigest": "9de40dd30424c2b35162e516649c4cbcd0707e88a2f36df658b9986b3b7c499b",
+    "acceptanceDeclarations": 9
+  },
+  "fullReplacementTree": {
+    "status": "incompatible-with-legacy-source-constitution",
+    "reason": "The unchanged legacy gate forbids all Python files, including next/agent.py and the exact canonical checker. No rule or artifact allowlist was weakened."
+  },
+  "installed": false,
+  "liveProfilesTouched": false
+}

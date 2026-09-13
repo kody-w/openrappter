@@ -1,0 +1,42 @@
+{
+  "origin": "sanitized-fixture",
+  "observedUtc": "2026-09-13T20:00:00.000Z",
+  "historical": true,
+  "pointers": [
+    {
+      "id": "copilot-session",
+      "provider": "copilot",
+      "title": "Copilot Builder",
+      "nativeShape": "Copilot CLI session-state/session UUID + cwd pointer",
+      "locator": "native://copilot/session/fixture-builder"
+    },
+    {
+      "id": "claude-project",
+      "provider": "claude",
+      "title": "Claude architecture notes",
+      "nativeShape": "Claude project-path encoding + session JSONL handle",
+      "locator": "native://claude/project/fixture-architecture/session/fixture-one"
+    },
+    {
+      "id": "hermes-session",
+      "provider": "hermes",
+      "title": "Hermes operations",
+      "nativeShape": "Hermes native session identifier + native database locator",
+      "locator": "native://hermes/session/fixture-ops"
+    },
+    {
+      "id": "grokbot-workspace",
+      "provider": "grokbot",
+      "title": "Grokbot research",
+      "nativeShape": "Grokbot native workspace-root + conversation handle",
+      "locator": "native://grokbot/workspace/fixture-research/conversation/fixture-one"
+    },
+    {
+      "id": "scout-workspace",
+      "provider": "scout",
+      "title": "Scout estate map",
+      "nativeShape": "Scout native project/workspace handle",
+      "locator": "native://scout/workspace/fixture-estate"
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+# Binding migration and cutover criteria
+
+## Current disposition
+
+This is an isolated headless replacement under `next/`, not a UI extension.
+The old `apps/`, all non-adopted `packages/`, existing contracts and release
+scripts remain unchanged. The only root housekeeping change makes
+`node_modules` symlinks as well as directories ignorable; no package is installed.
+
+The old implementation must **not** be deleted, replaced, merged, published or
+installed as part of this milestone. No live profile has been read into a test,
+transformed, adopted or written.
+
+## Measurable headless gates
+
+| Gate | Required evidence |
+|---|---|
+| Trusted dependency direction | Exactly one adopted old-code boundary, seven fingerprinted wire source files; zero app/UI/service/store imports and no host-shell or alternate database dependency |
+| Build | Strict full new-core typecheck and build, no ignored failures |
+| Behavior | Complete unit/integration suite, no skips; actual CLI and stdio processes |
+| Canonical authority | Exact current rev-15 checkpoint, complete sixteen-frame bootstrap verification and frozen registry agreement |
+| Emitted data | Nonzero emitted frames scanned by the exact reference checker; signed collaboration included, `COMPLIANT`, no findings |
+| Identity/world | Exact GUID and one Librarian survive restart, hide/restore, scopes and complete retained branches |
+| Restart | Byte-identical canonical files, equal projection/transcript, zero model/tool/delivery replay |
+| Reviewed intent | Incomplete thought -> proposal/tradeoffs -> exact confirmation -> atomic internal outcome; stale review and authority questions block |
+| Human continuity | A reviewed answer can supersede its exact question; history remains intact |
+| Autonomy | Explicit recurring intent; deterministic bounded recap, no model/native/external effects while dormant |
+| Privacy/authority | No cross-root or sibling-scope context leakage, no source/native writes, deny-all SDK tools, no secret/reasoning persistence, no unauthorized effects |
+| Failure/concurrency | Provider/channel outages, non-cooperative cancellation, lost acknowledgements, signed response substitution, concurrent writers, idempotency, correction dependencies |
+| Private transport | Default-off production adapter; synthetic contact, outage recap, retry and idempotency tests |
+| Domain/Hive | Missing canonical adoption fails closed; no Egg transformation, inference-based classifier, unsigned sharing or identity merge |
+
+`npm --prefix next run check` runs the complete new-core gates. The E2E proof
+uses explicit synthetic adapters and creates two independently signed root bots;
+it is not live inference or a production Brainstem demonstration.
+
+## Legacy gates: preserve their meaning
+
+The unchanged legacy source gate bans every `.py` file across the repository.
+It therefore rejects the isolated target-owned `agent.py` contract and exact
+canonical Python checker, and may reject terminology in these new contracts.
+Its release constitution invokes that same source gate.
+
+**Do not add broad legacy allowlists to make a green badge.** The old artifact
+allowlist still excludes the new product. Its gates were run successfully on
+an exact clean retained `d8601aa91c10f3330ea10b7fa31382137d981dfd` baseline:
+270 source files, 14 workspaces, 9 required acceptance declarations. This is
+evidence that the old product's release boundary remains intact, **not** release
+qualification of `next/`. The full-tree incompatibility is recorded honestly.
+
+Native desktop/DMG installation acceptance and browser appearance parity are not
+new headless-core gates. No installation or visual implementation was performed.
+
+## Live integration gates before cutover
+
+1. Adopt and verify an external Brainstem binding that hotloads the exact root
+   GUID and immutable capability bytes, enforces root/scoped memory and
+   cancellation, and cannot expand tools. Do not modify the external grail or
+   introduce a second interpreter.
+2. Bind an authenticated GitHub Copilot SDK **empty, memory-only** host. Prove the
+   actual runtime honors every isolation flag, disables native discovery,
+   permits no tools/hidden session stores, and uses Astra max/long without
+   fallback. The injected-host declaration is not itself an OS sandbox.
+3. Establish independently custodied persistent signers and an authenticated
+   registry/checkpoint. Fixture keys must never become credentials. Keyless
+   offline roots are valid local RAPP/1 identities, not signed collaboration
+   identities; do not remint them to disguise a missing adopted delegation path.
+4. Use existing signed Private Hive `RegistryAuthority` / `HiveAcceptance`,
+   out-of-band owner anchor, fresh monotonic registry and full immutable
+   resolver/checkpoint. Require bilateral consent for the exact room/object;
+   ordinary public-perspective grants are insufficient. Never merge roots.
+5. Complete signed rooted GODD/DOGG selection and dependency closure adoption,
+   plus required GODD protection/transport. Until then all transfer scopes
+   refuse. Do not classify paths or remove frames to manufacture compliance.
+6. Optionally bind explicit local iMessage OS permission and contact authority;
+   remaining disabled is an acceptable product configuration, not a failed
+   reason to enable ambient access.
+7. Qualify an independent `next/` release constitution and artifact allowlist.
+   Retain external anti-rollback checkpoints and recover interrupted writes
+   explicitly. Same-UID hostile mutation is outside the in-process trust model.
+
+## Migration must be a separate reviewed outcome
+
+Do not copy old UI caches, native AI stores or application databases. Before
+adoption, prove full canonical root identity, recursive ancestry, every branch,
+artifact closure, authority and exact bytes. An old profile is not silently
+converted into this application's payload schema. Pre-release test stores are
+not an adoption path.
+
+Require signed owner-authorized migration evidence, read-only rehearsal,
+side-by-side restart/projection tests and an explicit human cutover decision.
+Rollback means selecting the preserved implementation/data and appending
+corrections where appropriate, not overwriting canonical history.

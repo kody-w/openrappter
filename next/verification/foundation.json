@@ -1,0 +1,35 @@
+{
+  "milestone": "verified-foundation",
+  "newCoreTests": { "passed": 9, "failed": 0, "skipped": 0 },
+  "adoptedPrimitiveTests": { "passed": 90, "failed": 0 },
+  "typecheck": "passed",
+  "build": "passed",
+  "canonical": {
+    "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+    "authorityRevision": "rev-15",
+    "authorityFrames": 16,
+    "emittedFramesScanned": 3,
+    "verdict": "COMPLIANT",
+    "findings": []
+  },
+  "dependencyBoundary": {
+    "oldApplicationImports": 0,
+    "adoptedLowLevelSourceFiles": 7,
+    "uiModules": 0
+  },
+  "legacyGate": {
+    "command": "node scripts/check-legacy-absence.mjs",
+    "status": "incompatible-with-isolated-replacement",
+    "reason": "The old whole-repository source gate bans all .py files. It rejects next/agent.py and the unmodified canonical reference checker. No legacy gate, artifact allowlist or application code was weakened to hide this conflict.",
+    "cutover": "The new system needs its own release constitution before it can replace or ship through the old release pipeline."
+  },
+  "notPerformed": [
+    "live model inference",
+    "external Brainstem import/start/modification",
+    "dependency installation",
+    "live profile modification",
+    "push",
+    "merge",
+    "publish"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@rapp-work/next",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Autonomous Agent First: isolated canonical headless core",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "build": "tsc -b ../packages/rapp1 --force && tsc -p tsconfig.json",
+    "typecheck": "tsc -b ../packages/rapp1 --force && tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs",
+    "check": "npm run typecheck && npm test && npm run gates",
+    "gates": "node scripts/gates.mjs",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@github/copilot-sdk": "1.0.13"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3"
+  }
+}

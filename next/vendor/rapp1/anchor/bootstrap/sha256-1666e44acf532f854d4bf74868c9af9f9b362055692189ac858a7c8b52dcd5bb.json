@@ -1,0 +1,64 @@
+{
+ "schema": "rapp-anchor-bootstrap/1",
+ "version": 1,
+ "authority": {
+  "canonical_repository": "https://github.com/kody-w/rapp-1",
+  "protected_ref": "refs/heads/main",
+  "chain_path": "anchor/chain.jsonl",
+  "index_path": "anchor/index.json",
+  "frame_path_template": "anchor/frames/{frame_hash}.json",
+  "stream_id": "rappid:@kody-w/rapp-1-anchor:a4298c417789ecff68b7be3df4d8b90d397c43f972eaf839977db16dbe02acc6",
+  "genesis_frame_hash": "a5aa6e6ba81d6b97b80ce46bc20905428d5679bb18309d176356bd194cdd005a",
+  "genesis_payload_hash": "7d9c87b7d58ba07b22b68e8b07c0d50714fcc377c627ea9c60bec3bc6518df29"
+ },
+ "canonicalization": {
+  "standard": "RFC 8785 JCS",
+  "encoding": "UTF-8",
+  "input": "I-JSON exact-integer subset",
+  "integer_min": -9007199254740991,
+  "integer_max": 9007199254740991,
+  "object_key_order": "UTF-16 code units",
+  "unicode_normalization": "none",
+  "floating_point": "refused"
+ },
+ "hash_domains": {
+  "particle": "rapp/1:particle",
+  "wave": "rapp/1:wave"
+ },
+ "frame": {
+  "spec": "rapp/1",
+  "kind": "body.pulse",
+  "keys": [
+   "spec",
+   "kind",
+   "stream_id",
+   "seq",
+   "utc",
+   "payload",
+   "payload_hash",
+   "frame_hash",
+   "prev",
+   "prev_wave",
+   "sig"
+  ],
+  "sig": null,
+  "prev_wave": null
+ },
+ "chaining": {
+  "genesis_seq": 0,
+  "genesis_prev": null,
+  "successor_seq": "predecessor.seq + 1",
+  "successor_prev": "predecessor.payload_hash",
+  "utc": "calendar-valid YYYY-MM-DDTHH:MM:SS.mmmZ, nondecreasing"
+ },
+ "limits": {
+  "canonical_frame_bytes": 1048576,
+  "json_input_bytes": 1048576,
+  "json_nesting_depth": 64
+ },
+ "verifier": {
+  "path": "anchor/bootstrap_verify.py",
+  "sha256": "4a4c19912063d5ce15cec69b1aca0cebf5df122fb1c481f357f1cf21bc0a07ff",
+  "bytes": 15802
+ }
+}

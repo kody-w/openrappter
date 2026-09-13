@@ -1,0 +1,165 @@
+{
+ "schema": "rapp-spec-chain-index/1",
+ "generated_utc": "2026-09-02T01:31:21.000Z",
+ "canonical_repository": "https://github.com/kody-w/rapp-1",
+ "canonical_ref": "refs/heads/main",
+ "chain_path": "anchor/chain.jsonl",
+ "checkpoint_url_template": "https://raw.githubusercontent.com/kody-w/rapp-1/{accepted_commit}/anchor/chain.jsonl",
+ "frame_discovery_url_template": "https://raw.githubusercontent.com/kody-w/rapp-1/{ref}/anchor/frames/{frame_hash}.json",
+ "authority": {
+  "canonical_repository": "https://github.com/kody-w/rapp-1",
+  "protected_ref": "refs/heads/main",
+  "selection": "owner-ratified acceptance of the chain snapshot onto protected canonical main",
+  "linearization": "the accepted canonical-main commit containing the new frame",
+  "history_replacement": "prohibited",
+  "competing_append": "must rebase onto the accepted head and regenerate",
+  "transition": "rev-14-ratified-under-rev-13-article-14",
+  "chain_append_process": "governs-rev-15-and-later",
+  "authenticated_registry_checkpoint": null
+ },
+ "bootstrap": {
+  "index_path": "anchor/bootstrap/index.json",
+  "profile_path": "anchor/bootstrap/sha256-1666e44acf532f854d4bf74868c9af9f9b362055692189ac858a7c8b52dcd5bb.json",
+  "profile_sha256": "1666e44acf532f854d4bf74868c9af9f9b362055692189ac858a7c8b52dcd5bb",
+  "verifier_path": "anchor/bootstrap_verify.py",
+  "verifier_sha256": "4a4c19912063d5ce15cec69b1aca0cebf5df122fb1c481f357f1cf21bc0a07ff"
+ },
+ "head": {
+  "seq": 15,
+  "revision": "rev-15",
+  "frame_hash": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+  "payload_hash": "1ac47416e9caf174c4fdc00265ca187c244fb701ae2a7fb7211ba1385a951310",
+  "normative_sha256": "348e7d5baa94aaf2ce4c5354f3cb261f389298a04af65e271a686d3b62f7c384",
+  "normative_bytes": 79692
+ },
+ "entries": [
+  {
+   "seq": 0,
+   "revision": "rev-5",
+   "frame_hash": "a5aa6e6ba81d6b97b80ce46bc20905428d5679bb18309d176356bd194cdd005a",
+   "payload_hash": "7d9c87b7d58ba07b22b68e8b07c0d50714fcc377c627ea9c60bec3bc6518df29",
+   "object_path": "anchor/frames/a5aa6e6ba81d6b97b80ce46bc20905428d5679bb18309d176356bd194cdd005a.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 1,
+   "revision": "rev-5",
+   "frame_hash": "963bf0689eb294164029a9088910749446c4e0fe0757fd27988b8fc220e5ab36",
+   "payload_hash": "50283a1267c896d96e5f33f1c03060729a3695e0ab2e1f782390978d5e6c1dd5",
+   "object_path": "anchor/frames/963bf0689eb294164029a9088910749446c4e0fe0757fd27988b8fc220e5ab36.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 2,
+   "revision": "rev-5",
+   "frame_hash": "8c78ac8415a48e8ff02d4c4363cf3afd2003399c76e64ad938609a7ca8fe7b23",
+   "payload_hash": "7fc511c74e677a748a71b7042fa1519429e0819096b5bdfcc610f7985fe980ff",
+   "object_path": "anchor/frames/8c78ac8415a48e8ff02d4c4363cf3afd2003399c76e64ad938609a7ca8fe7b23.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 3,
+   "revision": "rev-5",
+   "frame_hash": "587365ca3a04258348e943e709469d1eb5c07235d26e04d4637e3dffa9dd17c7",
+   "payload_hash": "49b49714dfd8ee162b27b251d87e3e268d4a35d17bcc39efb39055f3cf63b3d8",
+   "object_path": "anchor/frames/587365ca3a04258348e943e709469d1eb5c07235d26e04d4637e3dffa9dd17c7.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 4,
+   "revision": "rev-5",
+   "frame_hash": "5aa99ae21b39b2c3e5e63c696dc3c34596aabbc721cda002b9c4f7ef100f7363",
+   "payload_hash": "f75e1511ae48bc35efc791b9f15c869cb316e36de351786ba7ca8d868c8b1b72",
+   "object_path": "anchor/frames/5aa99ae21b39b2c3e5e63c696dc3c34596aabbc721cda002b9c4f7ef100f7363.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 5,
+   "revision": "rev-5",
+   "frame_hash": "f7a423190f613f9d0de3c63fb8add1a1d032410f2c74eb79a201da6151a7107a",
+   "payload_hash": "776f7ea01b2ce0c748ca9eeed8886b4e70101ba63871dbf82a12fbd3e84f91e8",
+   "object_path": "anchor/frames/f7a423190f613f9d0de3c63fb8add1a1d032410f2c74eb79a201da6151a7107a.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 6,
+   "revision": "rev-6",
+   "frame_hash": "da8dd02d50796c57ac7f9b7b1d8fd86d8a2d10ba15d28776914e71118243ce12",
+   "payload_hash": "72402ad7f2666f634e82ceb9ada3d2f577db5100160bd88c51f9f0aafc7ffad2",
+   "object_path": "anchor/frames/da8dd02d50796c57ac7f9b7b1d8fd86d8a2d10ba15d28776914e71118243ce12.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 7,
+   "revision": "rev-7",
+   "frame_hash": "3620f45825dbf73280a1df2db3aac4de87b07297afc35e1cee3034eb3c3ea6ef",
+   "payload_hash": "c8bdac0f3f194d35f8b60d968178dbb6ed133b6422d721c9e3e34980118679d2",
+   "object_path": "anchor/frames/3620f45825dbf73280a1df2db3aac4de87b07297afc35e1cee3034eb3c3ea6ef.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 8,
+   "revision": "rev-8",
+   "frame_hash": "65e2b1694f6c8d418bd66c7e8e8f567f798f5e9a210e68b9e0ed226aaf364786",
+   "payload_hash": "fb24c39d10b7083a7907f85cd35d5e04a15edd1d233171782cfb297374e19f37",
+   "object_path": "anchor/frames/65e2b1694f6c8d418bd66c7e8e8f567f798f5e9a210e68b9e0ed226aaf364786.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 9,
+   "revision": "rev-9",
+   "frame_hash": "24d8a02b1be5490c0d531dc568a4b6b580526015b7eb0b61b7062873cb8efbf3",
+   "payload_hash": "668aff2ebe980ce7a79a661e53bfa2612f110e2d6d80fe4b6250d5740d9ca521",
+   "object_path": "anchor/frames/24d8a02b1be5490c0d531dc568a4b6b580526015b7eb0b61b7062873cb8efbf3.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 10,
+   "revision": "rev-10",
+   "frame_hash": "d08fece2b3dd52593d7dad4602c0dd2f71e52e73d74c9813d90087f9015a495c",
+   "payload_hash": "bdd160bcb07e675dbd27a575dcbb9bf57241e91c8c6da590ad3a6eb146a5d97a",
+   "object_path": "anchor/frames/d08fece2b3dd52593d7dad4602c0dd2f71e52e73d74c9813d90087f9015a495c.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 11,
+   "revision": "rev-11",
+   "frame_hash": "4a15c02725494680ee8d9ae53e342e59cee4bcc30792b8056529bbd2290d55d9",
+   "payload_hash": "1e2261c57c17db3e0a49d8576e8572115196f63312980bbdc015a628668b2be7",
+   "object_path": "anchor/frames/4a15c02725494680ee8d9ae53e342e59cee4bcc30792b8056529bbd2290d55d9.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 12,
+   "revision": "rev-12",
+   "frame_hash": "d2bcf3a642237634025fece571187fc7db0e0a473192b03858a5a6c9735b8cc0",
+   "payload_hash": "415f2f79e285039f476baf647e0e037b52cc4ead110a5c99a44634e12ffc055a",
+   "object_path": "anchor/frames/d2bcf3a642237634025fece571187fc7db0e0a473192b03858a5a6c9735b8cc0.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 13,
+   "revision": "rev-13",
+   "frame_hash": "bbcee75ebbbf82d11d8ffd666fdda34c8233642de6d6e4f45910d43a24a001e3",
+   "payload_hash": "78a89c06509b5100494b9c7e0f551acdc6209fd90aded734321f3580b0f07051",
+   "object_path": "anchor/frames/bbcee75ebbbf82d11d8ffd666fdda34c8233642de6d6e4f45910d43a24a001e3.json",
+   "payload_profile": "legacy-immutable-pointer"
+  },
+  {
+   "seq": 14,
+   "revision": "rev-14",
+   "frame_hash": "59629adab4e26d156f3d66ecfb766e08705919ea1d2adc92ba0ad2b17337dfc2",
+   "payload_hash": "c7549bbd3e133b833930e24e008817ea295734b870f41706455d3f45821aba3a",
+   "object_path": "anchor/frames/59629adab4e26d156f3d66ecfb766e08705919ea1d2adc92ba0ad2b17337dfc2.json",
+   "payload_profile": "rapp-spec-revision/1"
+  },
+  {
+   "seq": 15,
+   "revision": "rev-15",
+   "frame_hash": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+   "payload_hash": "1ac47416e9caf174c4fdc00265ca187c244fb701ae2a7fb7211ba1385a951310",
+   "object_path": "anchor/frames/83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818.json",
+   "payload_profile": "rapp-spec-revision/1"
+  }
+ ]
+}

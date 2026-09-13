@@ -1,0 +1,27 @@
+# Binding rooted-bot/world contract
+
+1. One visible bot equals one immutable canonical root RAPPID and one complete
+   recursive world. A name, UUID, tail, locator or child scope is not its GUID.
+2. Exactly one Workspaces Librarian belongs directly to that root. Workspaces,
+   worlds, agents, Twins, factories, neighborhoods, rapplications, tasks,
+   routines, memories, artifacts and evidence are scoped internal organs.
+3. Every organ has one parent, complete ancestry and an acyclic route to `root`.
+   Scope IDs may repeat between roots; they never authorize cross-root reads.
+4. The default worlds are RAPP Global Estate (honestly historical/derived),
+   local AI estate (native pointers only), and bare RAPP Monorepo. Creating
+   these canonical scopes does not create or modify host directories.
+5. A root resolves to an exact `agent.py` capability reference and immutable
+   policy. The host independently verifies the capability before consuming it.
+   Carried bytes, names, digests or boolean claims are not code-loading grants.
+6. Multiple roots hotload independently through one shared spine. Only signed,
+   reviewed, scoped public collaboration packets cross roots. Memory is never
+   joined or silently shared. Public disagreement remains explicit.
+7. Clear means hide/unregister from ordinary selection, never delete. Restore
+   reveals the same GUID, complete history, branches and internal tree.
+8. “Where were we?” is a read-only, frame-grounded orientation. It makes no
+   model request, replays no tools, resumes no pending effects and appends no
+   event merely because the user observed it.
+9. A complete Egg is the rooted canonical data at rest, byte-identical, not a
+   new app archive. GODD/DOGG/both is the only domain pivot. Without adopted
+   signed domain declarations and closure/transport bindings, transfer refuses.
+   No frame selection, data transformation or reminting is allowed.

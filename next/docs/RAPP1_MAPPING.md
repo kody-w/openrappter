@@ -1,0 +1,44 @@
+# Binding primitive mapping
+
+Selected authority: **rev-15**, canonical main verified at
+`dda32d741c7218f41443a5bd17eebfe0eae82cb7`; head wave
+`83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818`,
+particle `1ac47416e9caf174c4fdc00265ca187c244fb701ae2a7fb7211ba1385a951310`.
+Normative text SHA-256:
+`348e7d5baa94aaf2ce4c5354f3cb261f389298a04af65e271a686d3b62f7c384`.
+
+| Product concern | Existing RAPP/1 primitive |
+|---|---|
+| One visible RAPPbot | Full canonical `rappid:@owner/slug:64hex`, mint once from UUID octets or keyed SPKI |
+| Root/world definition | Root `body.pulse` genesis particle |
+| Internal recursive organization | Inert, scoped data in existing `memory.save` / `memory.tool-call` payloads |
+| User and assistant public turns | `memory.chat-turn` |
+| Reviewed bounded work and meaningful outcomes | `memory.tool-call`, exact source particle + wave references |
+| Continuity and attention | Reconstruction of verified frames; no secondary store |
+| Clear / restore | Successor visibility particles; same root and history |
+| Corrections / undo | Successor correction particles; original evidence remains |
+| Cross-bot public requests and perspectives | Signed `swarm.guidance` / `swarm.echo`, original roots and stream ancestry |
+| Read-only transcript projection | Canonical Dream Catcher ordering (UTC then wave), distinct GUID speakers |
+| Native AI estate | Inert canonical evidence referencing native handles; no copied native schema/store |
+| Dormant bot / observed wave | Canonical particles at rest / transient interpreter projection |
+| Egg | Existing rooted canonical bytes; no alternate export representation |
+| GODD/DOGG | Existing adopted declared-domain authority, never filename inference or frame filtering |
+| Local Hive | Existing signed Private Hive authority/verifier boundary; no invented membership or taxonomy authority |
+
+Application event names live **inside** payloads. They are not new frame kinds,
+wire fields, protocol registries, or protocol versions. The frame remains exactly
+the canonical eleven keys. A body frame cannot be replayed on a memory or swarm
+stream. Each bot's keyed signer must match its full root identity; another
+otherwise trusted registry key cannot impersonate it.
+
+## Deliberate adoption, not compatibility
+
+The old isolated RAPP/1 package has no app imports and implements the wire frozen
+by rev-15. Only its low-level functions are adopted. Its old checkpoint labels,
+old application evidence helpers, workspace store and security/service layers
+are not exported by the new boundary. Independent emitted-frame checking uses
+unmodified rev-15 `rapp.py` and `rapp_check.py`, with the reference detached-JWS
+callback supplied an explicitly selected fixture registry for signed examples.
+The bootstrap verifier checks all sixteen authority frames. Tests and gates fail
+on zero artifacts, source drift, invalid signatures, wrong root signers and
+noncanonical stored bytes.

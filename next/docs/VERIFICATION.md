@@ -234,11 +234,15 @@ At `61b084b`, the complete suite passed **83 tests**, strict typecheck/build and
 migration/browser gates, plus the mandatory Catch me up gate. The separate
 adopted primitive suite still passes 90 tests.
 
-The replay gate checks two deterministic pages against the unmodified canonical
-Python `H("rapp/1:particle", value)`: **20 state checkpoints, 4 guest checkpoints
-and all original source frame references** match independently. The exact
-rev-15 checker validates 10 signed rooted frames and 13 signed canonical
-ComputerBroker-source fixture frames, with no findings.
+The current replay gate supersedes that milestone's document-local digest check.
+It checks two deterministic pages against canonical frames, a separate
+trusted-input manifest and the unmodified canonical Python
+`H("rapp/1:particle", value)`: **20 state checkpoints, 4 guest checkpoints,
+origins, cursor transitions, selection digests, timeline digest pins and all
+original source frame references** match independently. The gate also rejects a
+tampered page after its embedded timeline digest is consistently recomputed.
+The exact rev-15 checker validates 10 signed rooted frames and 13 signed
+canonical ComputerBroker-source fixture frames, with no findings.
 
 The optional guest lane proves: exact approved recorded PNG bytes →
 `recorded`; safe canonical command result and aggregate diff →
@@ -249,8 +253,11 @@ policy, and exclude raw arguments, output, diff text, secrets and keystrokes.
 
 Replay makes **zero model calls, tool executions, capture operations or canonical
 mutations**. Restart and fixed cursors reproduce identical digests; the
-test-only passive player fast-forwards verified states. No product player UI,
-live guest capture or production origin/safety binding is claimed.
+test-only passive player reconstructs canonical selection/origin/cursor
+provenance before fast-forwarding verified states. Retained branch-catalogue-only
+changes use an explicit state-only step and complete with `next === to`; actual
+forks still refuse. No product player UI, live guest capture or production
+origin/safety binding is claimed.
 
 See `CATCH_ME_UP.md` and `verification/catch-up.json`. The requested reference
 agent was contacted; an unreturned result from that agent is not represented

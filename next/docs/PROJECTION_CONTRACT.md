@@ -68,8 +68,13 @@ independent streams, not a central copied activity order. See
 `rapp_work_catch_up` returns a bounded `rapp-work.catch-up/1` timeline, not a new
 UI state authority. Every step retains canonical cursor/source hashes, explicit
 recorded/reconstructed/unavailable grades and a deterministic state digest.
+Retained branch-catalogue-only changes are explicit state-only steps and a
+completed page has `next === to`; unresolved conflicting branches still refuse.
+Client activity/evidence/attention references remain in step provenance.
 The player may fast-forward the returned states but may not regenerate work or
-invoke models/tools. See `CATCH_ME_UP.md`.
+invoke models/tools. Replay import verification requires canonical frames plus
+the separate trusted-input manifest, never an embedded self-authenticating
+digest alone. See `CATCH_ME_UP.md`.
 
 Optional `rapp-work.omarchy-replay/1` is separately opted-in GODD/private content.
 Only exact host-approved canonical guest artifacts are recorded frames; safe

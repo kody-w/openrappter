@@ -1,11 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canonicalJson, contentHash } from '../dist/canonical.js';
+import { buildFrame, canonicalJson, contentHash } from '../dist/canonical.js';
 import { findRoot } from '../dist/bots.js';
 import { AiEndpoint } from '../dist/ai-endpoint.js';
+import { eventPayload } from '../dist/contract.js';
+import { sourceChain } from '../dist/source-memory.js';
 import { CatchUpPlayer } from './catch-up-player.mjs';
 import { harness, inventory, durableText } from './harness.mjs';
 import { issue, publish, view } from './ai-fixture.mjs';
+
+function trustedReplay(root, scope, request, page, guestEvidenceDigest = null) {
+  const { timelineDigest: _claimed, ...payload } = page;
+  const trustedTimelineDigest = contentHash(payload);
+  assert.equal(page.timelineDigest, trustedTimelineDigest);
+  return {
+    schema: 'rapp-work.catch-up-verification-input/1',
+    root: root.definition.root,
+    scope,
+    request,
+    guestEvidenceDigest,
+    trustedTimelineDigest,
+  };
+}
 
 async function seeded() {
   const h = await harness();
@@ -29,6 +45,7 @@ test('Catch me up grades recorded intents, reconstructed state and unavailable m
   assert.match(stored.reason, /not-screen-recording/);
   assert.deepEqual(stored.sourceFrameHashes[0], recorded.receipt.frame_hash);
   for (const step of page.steps) {
+    assert.equal(step.stepKind, 'occurrence');
     assert.equal(step.sourceFrameHashes[0], step.cursor.frame_hash);
     if (step.state !== null) assert.equal(contentHash(step.state), step.stateDigest);
   }
@@ -38,6 +55,33 @@ test('Catch me up grades recorded intents, reconstructed state and unavailable m
   assert(!JSON.stringify(page).includes(client.capability));
   assert(!JSON.stringify(page).includes('tokenHash'));
   assert(!JSON.stringify(page).includes('NEVER-EXPOSE-PRIVATE-UI-CODE'));
+});
+
+test('client activity, evidence and attention content references remain in replay provenance', async () => {
+  const { h, a, client, recorded } = await seeded();
+  const activity = await h.runtime.ai.publish(a.root, client.capability, publish('activity', {
+    summary: 'Activity cites its exact recorded work.', status: 'complete', completed: 1, total: 1,
+    evidence: [recorded.receipt.frame_hash],
+  }), 'provenance-activity');
+  const evidence = await h.runtime.ai.publish(a.root, client.capability, publish('evidence', {
+    summary: 'Evidence cites both prior canonical occurrences.',
+    references: [recorded.receipt.frame_hash, activity.receipt.frame_hash],
+  }), 'provenance-evidence');
+  const attention = await h.runtime.ai.publish(a.root, client.capability, publish('attention', {
+    summary: 'The exact evidence needs review.', reason: 'decision',
+    references: [activity.receipt.frame_hash, evidence.receipt.frame_hash],
+  }), 'provenance-attention');
+  const page = await h.runtime.ai.catchUp(a.root, client.capability, { from: null });
+  const expected = new Map([
+    [activity.receipt.frame_hash, [recorded.receipt.frame_hash]],
+    [evidence.receipt.frame_hash, [recorded.receipt.frame_hash, activity.receipt.frame_hash]],
+    [attention.receipt.frame_hash, [activity.receipt.frame_hash, evidence.receipt.frame_hash]],
+  ]);
+  for (const [wave, references] of expected) {
+    const step = page.steps.find(candidate => candidate.cursor.frame_hash === wave);
+    assert(step);
+    for (const reference of references) assert(step.sourceFrameHashes.includes(reference));
+  }
 });
 
 test('replay and natural Catch me up never invoke models/tools or mutate canonical files', async () => {
@@ -68,23 +112,69 @@ test('fixed end cursors reconstruct identical pages after restart and after late
 
 test('bounded pages and a passive fast-forward player preserve state digests without last-position authority', async () => {
   const { h, a, client } = await seeded();
+  const canonicalRoot = await h.runtime.bots.repository.root(a.root);
   const whole = await h.runtime.ai.catchUp(a.root, client.capability, { from: null });
-  const fast = new CatchUpPlayer(a.root, 'root');
-  fast.load(whole, whole.timelineDigest); fast.forward(whole.steps.length);
-  const slow = new CatchUpPlayer(a.root, 'root');
+  const wholeTrust = trustedReplay(canonicalRoot, 'root', { from: null }, whole);
+  const fast = new CatchUpPlayer(canonicalRoot, 'root');
+  fast.load(whole, wholeTrust); fast.forward(whole.steps.length);
+  const slow = new CatchUpPlayer(canonicalRoot, 'root');
   let cursor = null, more = true;
   while (more) {
-    const page = await h.runtime.ai.catchUp(a.root, client.capability, { from: cursor, to: whole.to, limit: 1 });
+    const request = { from: cursor, to: whole.to, limit: 1 };
+    const page = await h.runtime.ai.catchUp(a.root, client.capability, request);
     assert(page.steps.length <= 1);
-    slow.load(page, page.timelineDigest); slow.forward(1);
+    slow.load(page, trustedReplay(canonicalRoot, 'root', request, page)); slow.forward(page.steps.length);
     cursor = page.next; more = page.more;
   }
   assert.equal(slow.stateDigest, fast.stateDigest);
   assert.equal(canonicalJson(slow.state), canonicalJson(fast.state));
   const altered = JSON.parse(JSON.stringify(whole));
   altered.steps[0].grade = 'recorded';
-  assert.throws(() => new CatchUpPlayer(a.root, 'root').load(altered, whole.timelineDigest));
+  const { timelineDigest: _claimed, ...alteredPayload } = altered;
+  altered.timelineDigest = contentHash(alteredPayload);
+  assert.throws(() => new CatchUpPlayer(canonicalRoot, 'root').load(altered, wholeTrust));
   await assert.rejects(h.runtime.ai.catchUp(a.root, client.capability, { limit: 17 }), { code: 'replay-bound' });
+});
+
+test('retained branch-catalogue-only changes emit a state-only step and conflicting branches still refuse', async () => {
+  const { h, a, client } = await seeded();
+  await h.runtime.conversation.recordProgress(a.root, 'monorepo', 'Branch catalogue source.', [], 'branch-catalogue-source');
+  const before = await h.runtime.ai.catchUp(a.root, client.capability, { from: null });
+  const source = await h.runtime.bots.repository.root(a.root);
+  const first = sourceChain(source, 'monorepo')[0];
+  await h.runtime.bots.repository.transaction(tx => tx.preserveBranch(a.root, 'memory', [first]));
+  const canonicalRoot = await h.runtime.bots.repository.root(a.root);
+  const request = { from: before.to };
+  const page = await h.runtime.ai.catchUp(a.root, client.capability, request);
+  assert.equal(page.steps.length, 1);
+  const [step] = page.steps;
+  assert.equal(step.stepKind, 'state-only');
+  assert.equal(step.event, 'retained-source-branches-changed');
+  assert.equal(step.workGrade, 'unavailable');
+  assert.equal(step.stateGrade, 'reconstructed');
+  assert.equal(step.origin, null);
+  assert.deepEqual(step.sourceFrameHashes, [first.frame_hash]);
+  assert.deepEqual(step.previousCursor, before.to);
+  assert.deepEqual(step.cursor, page.to);
+  assert.deepEqual(page.next, page.to);
+  assert.equal(page.more, false);
+  const player = new CatchUpPlayer(canonicalRoot, 'root');
+  player.load(page, trustedReplay(canonicalRoot, 'root', request, page));
+  player.forward(page.steps.length);
+  assert.deepEqual(player.cursor, page.to);
+
+  const conflict = buildFrame({
+    kind: first.kind, streamId: first.stream_id, head: null, utc: first.utc,
+    signer: h.keys.signers[0].signer, signatures: h.keys.signatures,
+    payload: {
+      ...eventPayload(a.root, 'monorepo', 'branch-catalogue-conflict', 'work.progress',
+        { summary: 'Conflicting retained interpretation.', evidence: [] }),
+      parents: [...first.payload.parents],
+    },
+  });
+  await h.runtime.bots.repository.transaction(tx => tx.preserveBranch(a.root, 'memory', [conflict]));
+  await assert.rejects(h.runtime.ai.catchUp(a.root, client.capability, { from: null }),
+    { code: 'canonical-fork-unresolved' });
 });
 
 test('bad/cross-root/reversed cursors refuse rather than inventing missing timeline state', async () => {

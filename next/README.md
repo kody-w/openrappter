@@ -38,8 +38,12 @@ Live current profiles remain untouched; fixture success cannot qualify a release
 
 `npm --prefix next run catch-up:gate` verifies deterministic replay from canonical
 frames/cursors: recorded, reconstructed and unavailable presentation grades,
-source hashes and exact state digests. The future UI is a passive fast-forward
-player; no model/tool execution or mutation occurs during replay.
+complete client content-reference provenance, explicit branch-catalogue
+state-only steps, and exact state/selection/timeline digests. Verification
+reconstructs origins and cursor transitions from canonical frames plus a
+separate trusted-input manifest, and rejects consistently rehashed tampering.
+The future UI is a passive fast-forward player; no model/tool execution or
+mutation occurs during replay.
 
 Optional Omarchy guest replay is explicitly opted-in GODD/private data. Approved
 canonical guest PNG frames are recorded; command/diff summaries reconstructed;

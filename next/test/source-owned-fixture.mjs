@@ -2,10 +2,26 @@ import assert from 'node:assert/strict';
 import { canonicalJson, contentHash } from '../dist/canonical.js';
 import { ProjectionStreams } from '../dist/ai-stream.js';
 import { memoryCursor, memoryFrames, sourceChain, sourceReference } from '../dist/source-memory.js';
+import { foldState, permittedScopes } from '../dist/state.js';
 import { TestProjectionConsumer } from './projection-consumer.mjs';
 import { CatchUpPlayer } from './catch-up-player.mjs';
 import { allowPair, harness, inventory } from './harness.mjs';
 import { issue, publish, view } from './ai-fixture.mjs';
+
+function trustedReplay(root, scope, request, page) {
+  const { timelineDigest: _claimed, ...payload } = page;
+  const trustedTimelineDigest = contentHash(payload);
+  assert.equal(page.timelineDigest, trustedTimelineDigest);
+  return {
+    schema: 'rapp-work.catch-up-verification-input/1',
+    root: root.definition.root,
+    scope,
+    request,
+    visibleScopes: [...permittedScopes(foldState(root).scopes, scope)].sort(),
+    guestEvidenceDigest: null,
+    trustedTimelineDigest,
+  };
+}
 
 export async function sourceOwnedProof() {
   const h = await harness();
@@ -54,7 +70,19 @@ export async function sourceOwnedProof() {
   }
   const source = await h.runtime.bots.repository.root(root);
   const alternative = sourceChain(source, 'local-estate')[0];
+  const beforeBranch = memoryCursor(source);
   await h.runtime.bots.repository.transaction(tx => tx.preserveBranch(root, 'memory', [alternative]));
+  const branchRoot = await h.runtime.bots.repository.root(root);
+  const branchRequest = { from: beforeBranch, to: memoryCursor(branchRoot) };
+  const branchPage = await h.runtime.ai.catchUp(root, client.capability, branchRequest);
+  const branchTrust = trustedReplay(branchRoot, 'root', branchRequest, branchPage);
+  const branchPlayer = new CatchUpPlayer(branchRoot, 'root');
+  branchPlayer.load(branchPage, branchTrust);
+  branchPlayer.forward(branchPage.steps.length);
+  assert.equal(branchPage.steps.length, 1);
+  assert.equal(branchPage.steps[0].stepKind, 'state-only');
+  assert.deepEqual(branchPage.next, branchPage.to);
+  assert.equal(branchPage.more, false);
   await drain();
   assert(events.some(e => e.reason === 'retained-source-branches-changed'));
   const branchBytes = canonicalJson(alternative);
@@ -103,11 +131,15 @@ export async function sourceOwnedProof() {
   const before = await inventory(h.directory);
   const modelCalls = h.transport.requests.length;
   const pages = [];
-  const player = new CatchUpPlayer(root, 'root');
+  const trustedPages = [];
+  const player = new CatchUpPlayer(finalRoot, 'root');
   let from = null, more = true;
   while (more) {
-    const page = await h.runtime.ai.catchUp(root, client.capability, { from, to: current.cursor });
-    player.load(page, page.timelineDigest); player.forward(page.steps.length);
+    const request = { from, to: current.cursor };
+    const page = await h.runtime.ai.catchUp(root, client.capability, request);
+    const trusted = trustedReplay(finalRoot, 'root', request, page);
+    player.load(page, trusted); player.forward(page.steps.length);
+    trustedPages.push(trusted);
     pages.push(page); from = page.next; more = page.more;
   }
   for (const ref of references) assert(pages.flatMap(p => p.steps).some(s => canonicalJson(s.origin) === canonicalJson(ref)));
@@ -121,6 +153,7 @@ export async function sourceOwnedProof() {
   assert.equal(canonicalJson(await restarted.collaboration.transcript(root)), canonicalJson(exchange.transcript));
   const reconstructed = await restarted.bots.repository.root(root);
   assert.equal(canonicalJson(reconstructed.sources.find(s => s.scope === 'local-estate').branches[0].frames[0]), branchBytes);
+  assert.equal(canonicalJson(await restarted.ai.catchUp(root, client.capability, branchRequest)), canonicalJson(branchPage));
   for (const page of pages) assert.equal(canonicalJson(await restarted.ai.catchUp(root, client.capability, { from: page.from, to: page.to })), canonicalJson(page));
   assert.deepEqual(await inventory(h.directory), before);
   assert.equal(h.transport.requests.length, modelCalls);
@@ -132,7 +165,7 @@ export async function sourceOwnedProof() {
   assert.equal(canonicalJson(secondConsumer.cursor), canonicalJson(consumer.cursor));
   streams.close(); resumed.close();
   return {
-    h, pages, events,
+    h, pages: [branchPage, ...pages], trustedPages: [branchTrust, ...trustedPages], events,
     report: {
       schema: 'rapp-work.source-ownership-gate/1', root, peer: peer.root, status: 'passed',
       sourceIdentity: 'original full root RAPPID + exact internal scope + original canonical stream',
@@ -143,7 +176,8 @@ export async function sourceOwnedProof() {
       retainedBranchMeaning: 'byte-identical original ancestry prefix; conflicting forks are separately tested and fenced',
       referenceSurfaces: ['Global Estate', 'Workspaces Librarian', 'collaboration', 'iMessage recap', 'Where were we', 'Catch me up'],
       observedEvents: events.length, framesOnlyRestart: true, originalBranchBytesPreserved: true,
-      replayPages: pages.length, stateDigest: contentHash(current), replayStateDigest: player.stateDigest,
+      replayPages: pages.length + 1, stateOnlyBranchCatalogueReplay: true,
+      stateDigest: contentHash(current), replayStateDigest: player.stateDigest,
       replayModelCalls: 0, replayToolExecutions: 0, replayMutations: 0,
       aggregateDurableStore: false, uiImplemented: false, liveProfilesTouched: false,
     },

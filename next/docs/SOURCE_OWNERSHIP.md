@@ -113,12 +113,18 @@ single global array offset. An independently clocked source arriving later with
 an earlier UTC cannot be skipped or displace previously observed work. Pinned
 cursors exclude later source streams/branches rather than retroactively adding
 them. A retained branch-catalogue change can trigger a passive update, without
-inventing an action or selecting that branch for replay.
+inventing an action or selecting that branch for replay. Catch-me-up represents
+an otherwise occurrence-free catalogue change as an explicit state-only step
+whose previous/current cursors expose the exact change; a terminal page always
+sets `next` equal to `to`. The same fork checks run before every cut, so a
+conflicting retained occurrence still refuses rather than becoming state-only.
 
 Catch-me-up reconstructs source-derived states and publishes original origins,
-source hashes and canonical state/page digests. Branch alternatives are not
-replayed as selected work. No observation, orientation, recap, subscription or
-replay writes a frame or executes a model/tool.
+source hashes and canonical state/page digests. Client activity evidence and
+client evidence/attention references are included in those source hashes.
+Branch alternatives are not replayed as selected work. No observation,
+orientation, recap, subscription or replay writes a frame or executes a
+model/tool.
 
 An actual fork is not merely an unselected presentation hint. Same-stream,
 same-sequence, same-predecessor occurrences with different waves are retained

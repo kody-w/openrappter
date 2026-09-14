@@ -34,11 +34,17 @@ sequence numbers or a central copied activity offset. Later-arriving earlier-
 clock source work is not skipped. Original UTC/wave hashes, GUID/scope origins
 and explicit references remain intact. Alternative canonical branches are
 retained but not silently replayed/merged as the selected history.
+A retained branch-catalogue-only change advances through an explicit
+`stepKind:"state-only"` / `event:"retained-source-branches-changed"` step. It
+has no invented work origin, selects no branch, and carries the added canonical
+branch-head hashes as provenance. A completed page always has `next === to`;
+if the step or byte bound defers that state transition, `more` remains true.
 See `SOURCE_OWNERSHIP.md` and `contracts/source-cursor.schema.json`.
 
 ## Grades and digests
 
-Each step provides `grade`, separate `workGrade` and `stateGrade`, original
+Each step identifies `stepKind:"occurrence"|"state-only"` and provides `grade`,
+separate `workGrade` and `stateGrade`, original
 `sourceFrameHashes`, original `origin` (GUID/scope/stream/hash/ownership), exact
 cursor/previous cursor, public summary, optional
 reconstructed state, `stateDigest` and an explicit reason:
@@ -58,13 +64,22 @@ reconstructed state, `stateDigest` and an explicit reason:
 occurrences and selected guest evidence; `timelineDigest` binds the entire
 returned page. An optional guest lane also has `guestDigest`. Unavailable state
 has `null`, not a fabricated empty-state digest.
+For client activity, evidence and attention occurrences, provenance includes
+every bounded canonical hash in `content.evidence` or `content.references`, in
+addition to the occurrence, causes and view parents.
 
 Digest pins must come from the authenticated source/owner, not a self-consistent
-imported replay document. `test/catch-up-player.mjs` verifies the caller's pin,
-per-step state digests and cursor transitions while fast-forwarding. It has no
-model, tool, storage or product-UI role.
+imported replay document. `contracts/catch-up-verification.schema.json` defines
+the separate trusted request, authorized visible scopes, guest evidence digest
+and timeline-digest pin. `test/catch-up-player.mjs` reconstructs the selection,
+origins and cursor chain from canonical frames before fast-forwarding.
+`scripts/check-replay-digests.py` independently repeats that reconstruction with
+the unmodified canonical Python hash primitive. A page whose content and
+embedded digests were all recomputed after tampering still fails the out-of-band
+pin and canonical reconstruction. The verifier has no model, tool, storage or
+product-UI role.
 
-Bounds: 16 occurrences/page, 96 KiB/state and 512 KiB/page. Pages can stop early
+Bounds: 16 steps/page, 96 KiB/state and 512 KiB/page. Pages can stop early
 at the byte bound; `more`/`next` make this explicit. Scope filtering prevents
 sibling/private-control payload export. Credential fields and hidden reasoning
 metadata never enter the public replay.
@@ -124,9 +139,11 @@ performed by the gate.
 `npm --prefix next run catch-up:gate` is mandatory in the full `check` gates.
 It verifies deterministic restart, passive fast-forward, all three grades,
 source hashes, no model/tool/mutation, default-off private guest handling and
-secret/keystroke exclusion. The unmodified reference `rapp.py` independently
-checks state/guest/page digests and exact referenced frames; the exact rev-15
-checker scans nonzero signed root and ComputerBroker-source frames.
+secret/keystroke exclusion. The proof stores replay pages separately from their
+trusted verification manifest, rejects a consistently rehashed tampered page,
+and uses the unmodified reference `rapp.py` while independently reconstructing
+origins, cursor transitions and selection digests from canonical frames. The
+exact rev-15 checker scans nonzero signed root and ComputerBroker-source frames.
 
 Prior reference evidence `catch-me-up-replay-validation.json` at
 `b5cec8af4eac2cb73dabe882dcf50e80f8c5b23d` informed independent digest pins,

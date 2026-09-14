@@ -17,8 +17,9 @@
       "type": "array", "maxItems": 16,
       "items": {
         "type": "object", "additionalProperties": false,
-        "required": ["cursor", "previousCursor", "event", "grade", "workGrade", "stateGrade", "sourceFrameHashes", "publicSummary", "stateDigest", "state", "reason", "guest", "guestDigest", "origin"],
+        "required": ["stepKind", "cursor", "previousCursor", "event", "grade", "workGrade", "stateGrade", "sourceFrameHashes", "publicSummary", "stateDigest", "state", "reason", "guest", "guestDigest", "origin"],
         "properties": {
+          "stepKind": { "enum": ["occurrence", "state-only"] },
           "cursor": { "$ref": "source-cursor.schema.json" },
           "previousCursor": { "$ref": "source-cursor.schema.json" },
           "event": { "type": "string" },
@@ -45,5 +46,5 @@
     "timelineDigest": { "$ref": "#/$defs/hash" }
   },
   "$defs": { "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } },
-  "$comment": "Cursors must match exact authorized canonical source occurrences. Recorded public/view intent is not a historical screen recording. Only the explicitly opted-in, independently approved canonical Omarchy guest lane can include recorded guest PNG bytes. Hashes do not grant authority."
+  "$comment": "Cursors must match exact authorized canonical source occurrences. A retained branch-catalogue-only transition is an explicit state-only step and completed pages set next equal to to. Client activity/evidence/attention content references remain in sourceFrameHashes. Recorded public/view intent is not a historical screen recording. Only the explicitly opted-in, independently approved canonical Omarchy guest lane can include recorded guest PNG bytes. Hashes do not grant authority."
 }

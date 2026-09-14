@@ -5,8 +5,8 @@ import { publicWorkText, reference } from './projection.js';
 import type { RootSnapshot } from './repository.js';
 import { foldState, permittedScopes } from './state.js';
 import {
-  AI_LIMITS, AI_PROJECTION_SCHEMA, grantData, publicationData, publicationKind, publicationRight,
-  type ClientGrant, type PublicationData, type PublicationKind, type ViewIntent,
+  AI_LIMITS, AI_PROJECTION_SCHEMA, clientProposalData, grantData, publicationData, publicationKind, publicationRight,
+  type AiRight, type ClientActor, type ClientGrant, type ClientProposalData, type PublicationData, type PublicationKind, type ViewIntent,
 } from './ai-contract.js';
 import { memoryAtCursor, memoryCursor, memoryFrames, sourceReference } from './source-memory.js';
 import { turnAttribution } from './channel-contract.js';
@@ -17,12 +17,28 @@ export interface PublishedRecord {
   scope: string;
   data: PublicationData;
 }
+export interface ProposalRecord {
+  frame: RappFrame;
+  scope: string;
+  data: ClientProposalData;
+}
 
-export function publishedRecords(root: RootSnapshot): PublishedRecord[] {
+function clientRecords(root: RootSnapshot, scopes = foldState(root).scopes): {
+  publications: PublishedRecord[];
+  proposals: ProposalRecord[];
+} {
   const grants = new Map<string, { data: ClientGrant; wave: string; active: boolean }>();
   const publications: PublishedRecord[] = [];
-  const scopes = foldState(root).scopes;
+  const proposals: ProposalRecord[] = [];
   const priorViews = new Map<string, PublishedRecord>();
+  const attributedGrant = (actor: ClientActor, frame: RappFrame, right: AiRight): ClientGrant => {
+    const grant = grants.get(actor.id);
+    requireThat(grant?.active && grant.wave === actor.grantWave && grant.data.name === actor.name
+      && grant.data.provider === actor.provider && grant.data.issuedUtc <= frame.utc && frame.utc < grant.data.expiresUtc
+      && grant.data.rights.includes(right), 'client-attribution',
+    'A client record must bind an active canonical grant at its occurrence, not a claimed identity.');
+    return grant.data;
+  };
   for (const frame of memoryFrames(root)) {
     const e = workEvent(frame.payload);
     if (e.event === 'client.granted') {
@@ -32,21 +48,23 @@ export function publishedRecords(root: RootSnapshot): PublishedRecord[] {
       const grant = grants.get(String(e.data.client));
       requireThat(grant && grant.wave === e.data.grantWave, 'client-authority', 'A client revocation does not match its grant.');
       grant.active = false;
+    } else if (e.event === 'client.proposal') {
+      const data = clientProposalData(e.data);
+      const grant = attributedGrant(data.actor, frame, 'proposal.publish');
+      requireThat(permittedScopes(scopes, grant.scope).has(e.scope), 'client-attribution',
+        'A signed proposal may not exceed its attributed grant scope.');
+      proposals.push({ frame, scope: e.scope, data });
     } else if (e.event.startsWith('client.')) {
       const kind = publicationKind(e.event.slice('client.'.length));
       const data = publicationData(kind, e.data);
-      const grant = grants.get(data.actor.id);
-      requireThat(grant?.active && grant.wave === data.actor.grantWave && grant.data.name === data.actor.name
-        && grant.data.provider === data.actor.provider && grant.data.issuedUtc <= frame.utc && frame.utc < grant.data.expiresUtc
-        && grant.data.rights.includes(publicationRight(kind)), 'client-attribution',
-      'A publication must bind an active canonical client grant at its occurrence, not a claimed identity.');
-      const permitted = permittedScopes(scopes, grant.data.scope);
+      const grant = attributedGrant(data.actor, frame, publicationRight(kind));
+      const permitted = permittedScopes(scopes, grant.scope);
       requireThat(permitted.has(e.scope), 'client-attribution', 'A signed publication may not exceed its attributed grant scope.');
       if (data.view !== null) {
         const publicationScope = permittedScopes(scopes, e.scope);
-        requireThat(grant.data.rights.includes('view.publish'), 'client-attribution', 'View authority is not implicit in conversation authority.');
+        requireThat(grant.rights.includes('view.publish'), 'client-attribution', 'View authority is not implicit in conversation authority.');
         requireThat(data.viewParents.every(hash => priorViews.has(hash) && publicationScope.has(priorViews.get(hash)!.scope)
-          && (grant.data.rights.includes('view.resolve') || priorViews.get(hash)!.data.actor.id === data.actor.id)),
+          && (grant.rights.includes('view.resolve') || priorViews.get(hash)!.data.actor.id === data.actor.id)),
         'view-causality', 'View history cannot silently consume another client’s unacknowledged intent.');
       }
       const record = { frame, kind, scope: e.scope, data };
@@ -54,7 +72,15 @@ export function publishedRecords(root: RootSnapshot): PublishedRecord[] {
       if (data.view !== null) priorViews.set(frame.frame_hash, record);
     }
   }
-  return publications;
+  return { publications, proposals };
+}
+
+export function publishedRecords(root: RootSnapshot): PublishedRecord[] {
+  return clientRecords(root).publications;
+}
+
+export function proposalRecords(root: RootSnapshot): ProposalRecord[] {
+  return clientRecords(root).proposals;
 }
 
 export function scopedFrames(root: RootSnapshot, scope: string): Map<string, RappFrame> {
@@ -110,7 +136,9 @@ export function atCursor(root: RootSnapshot, cursor: unknown): RootSnapshot {
 export function projectAi(root: RootSnapshot, scope: string): JsonObject {
   const state = foldState(root);
   const allowed = permittedScopes(state.scopes, scope);
-  const records = publishedRecords(root).filter(r => allowed.has(r.scope));
+  const client = clientRecords(root, state.scopes);
+  const records = client.publications.filter(r => allowed.has(r.scope));
+  const proposals = client.proposals.filter(r => allowed.has(r.scope));
   const visible = memoryFrames(root).filter(f => allowed.has(String(f.payload.scope)));
   const turnFrames = visible.filter(f => ['turn.user', 'turn.assistant', 'collaboration.synthesized', 'client.conversation'].includes(String(f.payload.event)));
   const byWave = new Map(records.map(r => [r.frame.frame_hash, r]));
@@ -139,7 +167,8 @@ export function projectAi(root: RootSnapshot, scope: string): JsonObject {
     ? byWave.get(heads[0]!.data.view!.progress) : undefined;
   const snapshot: JsonObject = {
     schema: AI_PROJECTION_SCHEMA, root: root.definition.root, name: root.definition.name, scope,
-    authority: { ...AUTHORITY, factualTruth: false, clientAssurance: 'root-signed-scoped-capability-attribution' },
+    authority: { ...AUTHORITY, factualTruth: false, clientAssurance: 'root-signed-scoped-capability-attribution',
+      confirmationAuthority: 'owner-only', mutationAuthority: 'owner-only' },
     cursor: cursorFor(root),
     sources: (root.sources ?? []).filter(s => allowed.has(s.scope)).map(s => ({
       guid: root.definition.root, scope: s.scope, stream_id: s.stream,
@@ -149,6 +178,15 @@ export function projectAi(root: RootSnapshot, scope: string): JsonObject {
     artifacts: [...state.artifacts.values()].filter(a => allowed.has(String(a.scope))).map(a => ({
       id: a.id!, scope: a.scope!, name: a.name!, mediaType: a.mediaType!, contentHash: a.contentHash!, source: a.source!,
     })),
+    proposals: proposals.slice(-AI_LIMITS.windowItems).map(record => {
+      const proposal = state.proposals.get(record.frame.frame_hash);
+      requireThat(proposal, 'proposal', 'An attributed client proposal must be reconstructible from canonical state.');
+      return {
+        wave: record.frame.frame_hash, scope: record.scope, actor: record.data.actor,
+        draft: record.data.draft, draftHash: record.data.draftHash, contextRevision: record.data.contextRevision,
+        status: proposal.status, confirmationAuthority: 'owner-only', mutationAuthority: 'owner-only',
+      };
+    }),
     turns, activity: contribution('activity'), evidence: contribution('evidence'), attention: contribution('attention'),
     view: {
       status, heads: heads.map(h => h.frame.frame_hash), candidates,
@@ -159,9 +197,9 @@ export function projectAi(root: RootSnapshot, scope: string): JsonObject {
     refusedHints: records.filter(r => r.data.viewRefusal !== null).slice(-AI_LIMITS.windowItems)
       .map(r => ({ source: reference(r.frame), actor: r.data.actor, diagnostic: r.data.viewRefusal })),
     history: {
-      conversationRecords: turnFrames.length, clientPublications: records.length,
+      conversationRecords: turnFrames.length, clientPublications: records.length, clientProposals: proposals.length,
       windowItems: AI_LIMITS.windowItems,
-      truncated: turnFrames.length > AI_LIMITS.windowItems || records.length > AI_LIMITS.windowItems,
+      truncated: turnFrames.length > AI_LIMITS.windowItems || records.length > AI_LIMITS.windowItems || proposals.length > AI_LIMITS.windowItems,
       pagingAvailable: true,
     },
   };
@@ -173,7 +211,7 @@ export function projectAi(root: RootSnapshot, scope: string): JsonObject {
 export function publicHistoryFrame(frame: RappFrame): JsonObject {
   const e = workEvent(frame.payload);
   const publicKinds = ['turn.user', 'turn.assistant', 'collaboration.synthesized', 'work.progress', 'routine.tick',
-    'client.conversation', 'client.activity', 'client.evidence', 'client.attention', 'client.view'];
+    'client.conversation', 'client.activity', 'client.evidence', 'client.attention', 'client.proposal', 'client.view'];
   return { source: reference(frame), origin: sourceReference(frame), event: e.event, scope: e.scope,
     frame: publicKinds.includes(e.event) ? snapshotJson(frame) : null, controlRecord: !publicKinds.includes(e.event) };
 }

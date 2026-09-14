@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.draft/1",
+  "title": "Validated review-only RAPP Work Draft",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "tradeoffs", "questions", "actions"],
+  "properties": {
+    "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "tradeoffs": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "type": "string", "minLength": 1, "maxLength": 700 }
+    },
+    "questions": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reason", "question"],
+        "properties": {
+          "reason": { "enum": ["human-authority", "irreducible-ambiguity"] },
+          "question": { "type": "string", "minLength": 1, "maxLength": 700 }
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "scope"],
+            "properties": {
+              "type": { "const": "scope.create" },
+              "scope": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "parent", "kind", "name", "description"],
+                "properties": {
+                  "id": { "$ref": "#/$defs/label" },
+                  "parent": { "$ref": "#/$defs/label" },
+                  "kind": { "enum": ["world", "workspace", "neighborhood", "agent", "twin", "factory", "rapplication", "task", "routine", "memory", "artifact", "evidence"] },
+                  "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+                  "description": { "type": "string", "minLength": 1, "maxLength": 2000 }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "id", "scope", "instruction", "cadence", "work"],
+            "properties": {
+              "type": { "const": "routine.create" },
+              "id": { "$ref": "#/$defs/label" },
+              "scope": { "$ref": "#/$defs/label" },
+              "instruction": { "type": "string", "minLength": 1, "maxLength": 2000 },
+              "cadence": { "const": "monday-0900-utc" },
+              "work": { "const": "canonical-recap" },
+              "firstDueUtc": { "$ref": "#/$defs/utc" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "id", "scope", "evidenceWave", "pointerId"],
+            "properties": {
+              "type": { "const": "pointer.register" },
+              "id": { "$ref": "#/$defs/label" },
+              "scope": { "$ref": "#/$defs/label" },
+              "evidenceWave": { "$ref": "#/$defs/wave" },
+              "pointerId": { "$ref": "#/$defs/label" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "id", "scope", "name", "content", "mediaType"],
+            "properties": {
+              "type": { "const": "artifact.save" },
+              "id": { "$ref": "#/$defs/label" },
+              "scope": { "$ref": "#/$defs/label" },
+              "name": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "^[^/\\\\]+$" },
+              "content": { "type": "string", "minLength": 1, "maxLength": 12000 },
+              "mediaType": { "enum": ["text/plain", "text/markdown"] }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "id", "scope", "operation", "target", "content"],
+            "properties": {
+              "type": { "const": "external.request" },
+              "id": { "$ref": "#/$defs/label" },
+              "scope": { "$ref": "#/$defs/label" },
+              "operation": { "const": "send-message" },
+              "target": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "content": { "type": "string", "minLength": 1, "maxLength": 2000 }
+            }
+          }
+        ]
+      }
+    },
+    "resolves": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/wave" }
+    }
+  },
+  "$defs": {
+    "label": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 100 },
+    "wave": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$" }
+  },
+  "$comment": "A Draft is inert review data. External AI proposal publication cannot use resolves; exact owner confirmation is required before any action is applied."
+}

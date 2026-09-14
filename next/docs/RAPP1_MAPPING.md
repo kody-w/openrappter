@@ -27,6 +27,7 @@ Normative text SHA-256:
 | Local Hive | Existing signed Private Hive authority/verifier boundary; no invented membership or taxonomy authority |
 | Provider-neutral AI clients | Explicit root-signed `memory.save` capability grants/revocations; host/provider labels do not mint visible bots or grant authority |
 | Attributed AI public turns / activity | Existing `memory.chat-turn` / `memory.tool-call`; actor is selected by the authenticated canonical grant |
+| External AI structured proposals | Existing root-signed `memory.chat-turn` carrying an attributed validated Draft and exact context revision; owner-only exact successor applies it |
 | AI focus/layout/cards/progress hints | Closed payload data in existing `memory.save`, or a bounded optional hint on a public work frame; never executable UI |
 | Multi-client view conflicts | Explicit prior canonical view-wave references; multiple unconsumed heads remain visible, not last-writer overwrite |
 | Real-time UI projection | Bounded disposable subscriptions with exact canonical root/stream/sequence/wave cursors and replay; no UI database |

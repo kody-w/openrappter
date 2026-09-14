@@ -10,7 +10,7 @@ import { publicError, Refusal, requireThat } from './errors.js';
 
 async function main(args: string[]): Promise<void> {
   if (args.includes('--help')) {
-    console.log('RAPP Work Bot — provider-neutral authenticated projection\nUsage: node next/dist/ai-cli.js --store <canonical-store> --root <exact-RAPPID> [--mcp|--stdio] [--fixture]\nSupply RAPP_WORK_CAPABILITY through the AI host secret/environment binding, never skill.md or publication text.\nNo HTTP listener, model inference, root administration, native scanning or product UI.');
+    console.log('RAPP Work Bot — provider-neutral authenticated context, proposals and projection\nUsage: node next/dist/ai-cli.js --store <canonical-store> --root <exact-RAPPID> [--mcp|--stdio] [--fixture]\nSupply RAPP_WORK_CAPABILITY through the AI host secret/environment binding, never skill.md or publication text.\nStructured proposals remain review-only; exact confirmation and mutation are owner-only. No HTTP listener, model inference, root administration, native scanning or product UI.');
     return;
   }
   let directory: string | undefined, root: string | undefined;

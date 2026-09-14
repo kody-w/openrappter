@@ -43,6 +43,36 @@ test('a portable skill or claimed identity never substitutes for root/capability
   assert(!body.includes(client.capability));
 });
 
+test('structured proposals require proposal authority, a fresh context revision and an in-scope validated Draft', async () => {
+  const h = await harness();
+  const a = await h.create();
+  const proposer = await issue(h, a.root, 'Arbitrary Provider', ['projection.read', 'proposal.publish']);
+  const reader = await issue(h, a.root, 'Read Only', ['projection.read']);
+  const context = await h.runtime.ai.context(a.root, proposer.capability);
+  assert.equal(context.authority.mutation, 'owner-only');
+  const draft = {
+    summary: 'Create one scoped artifact.',
+    tradeoffs: ['The proposal is inert until exact owner confirmation.'],
+    questions: [],
+    actions: [{ type: 'artifact.save', id: 'scoped-note', scope: 'root', name: 'Scoped note', content: 'reviewed', mediaType: 'text/plain' }],
+    resolves: [],
+  };
+  const unchanged = await inventory(h.directory);
+  await assert.rejects(h.runtime.ai.propose(a.root, reader.capability,
+    { contextRevision: context.revision, draft }, 'read-only-proposal'), { code: 'client-unauthorized' });
+  await assert.rejects(h.runtime.ai.propose(a.root, proposer.capability,
+    { contextRevision: '0'.repeat(64), draft }, 'stale-proposal'), { code: 'stale-head' });
+  await assert.rejects(h.runtime.ai.propose(a.root, proposer.capability, {
+    contextRevision: context.revision,
+    draft: { ...draft, resolves: ['0'.repeat(64)] },
+  }, 'claimed-owner-answer'), { code: 'proposal-authority' });
+  await assert.rejects(h.runtime.ai.propose(a.root, proposer.capability, {
+    contextRevision: context.revision,
+    draft: { ...draft, actions: [{ type: 'shell.exec', command: 'whoami' }] },
+  }, 'expanded-tool-surface'), { code: 'unauthorized-action' });
+  assert.deepEqual(await inventory(h.directory), unchanged);
+});
+
 test('closed view intents validate canonical artifact/activity references and refuse code without losing public work', async () => {
   const h = await harness();
   const a = await h.create();

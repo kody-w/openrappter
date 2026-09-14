@@ -16,12 +16,16 @@ function schema(required: string[], properties: JsonObject): JsonObject {
 export const AI_TOOLS = Object.freeze([
   { name: 'rapp_work_read', description: 'Read the authorized canonical root projection; no model call or mutation.',
     inputSchema: schema([], {}) },
+  { name: 'rapp_work_context', description: 'Read bounded canonical proposal context and its exact revision for this capability scope; no model call or mutation.',
+    inputSchema: schema([], { scope: { type: 'string' } }) },
   { name: 'rapp_work_catch_up', description: 'Deterministic read-only fast-forward timeline with recorded/reconstructed/unavailable grades, canonical source hashes and state digests. Never reruns models or tools.',
     inputSchema: schema([], { from: CURSOR_PROPERTY, to: CURSOR_PROPERTY, limit: { type: 'integer', minimum: 1, maximum: 16 },
       guest: { type: 'object', required: ['enabled', 'dataClass', 'visibility', 'policyWave'], additionalProperties: false,
         properties: { enabled: { const: true }, dataClass: { const: 'godd' }, visibility: { const: 'private' }, policyWave: { type: 'string', pattern: '^[0-9a-f]{64}$' } } } }) },
   { name: 'rapp_work_publish', description: 'Publish attributed public work and optional closed declarative view hints. No arbitrary UI code or external effects.',
     inputSchema: schema(['requestId', 'publication'], { requestId: { type: 'string' }, publication: { type: 'object' } }) },
+  { name: 'rapp_work_propose', description: 'Publish a validated structured Draft bound to an exact context revision. It remains review-only until exact owner confirmation.',
+    inputSchema: schema(['requestId', 'proposal'], { requestId: { type: 'string' }, proposal: { type: 'object' } }) },
   { name: 'rapp_work_history', description: 'Read a bounded canonical history page for replay; controls expose references only.',
     inputSchema: schema([], { cursor: CURSOR_PROPERTY, limit: { type: 'integer', minimum: 1, maximum: AI_LIMITS.pageEvents } }) },
   { name: 'rapp_work_artifact', description: 'Read an already-authorized canonical artifact, never a filesystem path or arbitrary URL.',
@@ -57,6 +61,9 @@ export class AiEndpoint {
       case 'rapp_work_read':
         exact([]);
         return this.api.read(this.root, this.capability);
+      case 'rapp_work_context':
+        exact([], ['scope']);
+        return this.api.context(this.root, this.capability, p.scope);
       case 'rapp_work_catch_up':
         exact([], ['from', 'to', 'limit', 'guest']);
         return this.api.catchUp(this.root, this.capability,
@@ -64,6 +71,9 @@ export class AiEndpoint {
       case 'rapp_work_publish':
         exact(['requestId', 'publication']);
         return this.api.publish(this.root, this.capability, p.publication, label(p.requestId));
+      case 'rapp_work_propose':
+        exact(['requestId', 'proposal']);
+        return this.api.propose(this.root, this.capability, p.proposal, label(p.requestId));
       case 'rapp_work_history':
         exact([], ['cursor', 'limit']);
         requireThat(p.limit === undefined || typeof p.limit === 'number', 'page-bound', 'History limit must be an integer.');
@@ -87,7 +97,7 @@ export class AiEndpoint {
         this.#owned.delete(id);
         return { closed: true };
       }
-      default: throw new Refusal('method-unavailable', 'Only scoped public-work/projection methods are exposed; owner grants, shell, deletion and external approvals are not AI tools.');
+      default: throw new Refusal('method-unavailable', 'Only scoped context, proposal and public-work projection methods are exposed; owner confirmation, grants, shell, deletion and external approvals are not AI tools.');
     }
   }
 
@@ -124,7 +134,7 @@ export class AiEndpoint {
         this.send({ jsonrpc: '2.0', id, result: {
           protocolVersion: MCP_PROTOCOL, serverInfo: { name: 'rapp-work-bot', version: '0.2.0' },
           capabilities: { tools: { listChanged: false }, resources: { subscribe: true, listChanged: false } },
-          instructions: 'Use the owner-provided exact root and connection capability. The portable skill is instructions, not authority. No model sampling, native scanning, owner administration or executable UI is exposed.',
+          instructions: 'Use the owner-provided exact root and connection capability. Read canonical context before publishing a structured proposal. Proposal publication never grants confirmation or mutation authority. No model sampling, native scanning, owner administration or executable UI is exposed.',
         } });
         return;
       }

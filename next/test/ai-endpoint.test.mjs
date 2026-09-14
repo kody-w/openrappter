@@ -100,6 +100,83 @@ test('the actual MCP stdio executable negotiates and reads the authenticated roo
   await pipe.close();
 });
 
+test('a non-Copilot client proposes from canonical context but only the exact owner confirmation applies it across restart', async t => {
+  const h = await harness({ clock: () => new Date().toISOString() });
+  const a = await h.create();
+  const client = await issue(h, a.root, 'Atlas Local', ['projection.read', 'proposal.publish']);
+  const observer = await issue(h, a.root, 'Passive Observer', ['projection.read', 'projection.subscribe']);
+  const provider = connection(h, a.root, client.capability);
+  const subscriber = connection(h, a.root, observer.capability);
+  t.after(() => {
+    if (provider.child.exitCode === null) provider.child.kill('SIGTERM');
+    if (subscriber.child.exitCode === null) subscriber.child.kill('SIGTERM');
+  });
+  subscriber.send({ id: 'subscribe', method: 'rapp_work_subscribe', params: { root: a.root } });
+  await subscriber.wait(message => message.id === 'subscribe');
+  await subscriber.wait(message => message.event?.type === 'snapshot');
+  provider.send({ id: 'context', method: 'rapp_work_context', params: { root: a.root } });
+  const context = (await provider.wait(message => message.id === 'context')).result;
+  assert.equal(context.schema, 'rapp-work.proposal-context/1');
+  assert.equal(context.root, a.root);
+  assert.equal(context.scope, 'root');
+  assert.equal(context.authority.confirmation, 'owner-only');
+  const draft = {
+    summary: 'Create a durable provider-neutral handoff artifact.',
+    tradeoffs: ['The external client may propose inert canonical data, while only the owner may apply it.'],
+    questions: [],
+    actions: [{
+      type: 'artifact.save',
+      id: 'provider-neutral-handoff',
+      scope: 'root',
+      name: 'Provider neutral handoff',
+      content: 'Applied only after exact owner confirmation.',
+      mediaType: 'text/plain',
+    }],
+    resolves: [],
+  };
+  provider.send({ id: 'propose', method: 'rapp_work_propose', params: {
+    root: a.root,
+    requestId: 'atlas-proposal',
+    proposal: { contextRevision: context.revision, draft },
+  } });
+  const proposed = (await provider.wait(message => message.id === 'propose')).result;
+  assert.equal(proposed.attribution.name, 'Atlas Local');
+  assert.equal(proposed.attribution.provider, 'atlas-local');
+  assert.equal(proposed.status, 'review');
+  assert.equal(proposed.confirmationAuthority, 'owner-only');
+  assert.equal(proposed.mutationApplied, false);
+  const observedReview = await subscriber.wait(message =>
+    message.event?.snapshot?.proposals?.some(proposal => proposal.wave === proposed.proposalWave));
+  assert.equal(observedReview.event.snapshot.proposals.find(proposal => proposal.wave === proposed.proposalWave).status, 'review');
+  assert(!observedReview.event.snapshot.artifacts.some(artifact => artifact.id === 'provider-neutral-handoff'));
+  const beforeSelfConfirm = await inventory(h.directory);
+  provider.send({ id: 'self-confirm', method: 'rapp_work_confirm', params: {
+    root: a.root,
+    proposalWave: proposed.proposalWave,
+  } });
+  assert.equal((await provider.wait(message => message.id === 'self-confirm')).error.code, 'method-unavailable');
+  assert.deepEqual(await inventory(h.directory), beforeSelfConfirm);
+  await assert.rejects(h.runtime.dispatch('organization.confirm', {
+    root: a.root,
+    proposalWave: '0'.repeat(64),
+  }, 'wrong-owner-confirmation'), { code: 'proposal' });
+  assert(!(await h.runtime.bots.project(a.root)).artifacts.some(artifact => artifact.id === 'provider-neutral-handoff'));
+  await h.runtime.dispatch('organization.confirm', {
+    root: a.root,
+    proposalWave: proposed.proposalWave,
+  }, 'exact-owner-confirmation');
+  const observedApplied = await subscriber.wait(message =>
+    message.event?.snapshot?.proposals?.some(proposal =>
+      proposal.wave === proposed.proposalWave && proposal.status === 'applied'));
+  assert(observedApplied.event.snapshot.artifacts.some(artifact => artifact.id === 'provider-neutral-handoff'));
+  await Promise.all([provider.close(), subscriber.close()]);
+  const restarted = await h.restart();
+  const rebuilt = await restarted.ai.read(a.root, client.capability);
+  assert.equal(rebuilt.proposals.find(proposal => proposal.wave === proposed.proposalWave).status, 'applied');
+  assert(rebuilt.artifacts.some(artifact => artifact.id === 'provider-neutral-handoff'));
+  assert.equal(h.transport.requests.length, 0);
+});
+
 test('uncredentialed or wrong-root startup refuses rather than loading arbitrary profiles or authority from a skill', async () => {
   const h = await harness({ clock: () => new Date().toISOString() });
   const a = await h.create(), b = await h.create(1);

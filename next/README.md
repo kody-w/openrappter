@@ -7,19 +7,28 @@ shell tool, second Brainstem runtime, or deletion API here.
 This directory is deliberately **not** added to the legacy npm workspaces or
 release package. The old product remains intact pending the new cutover gates.
 
-## Provider-neutral AI-driven projection
+## Provider-neutral AI proposals and projection
 
-The core also exposes an authenticated, provider-neutral publication API:
-Copilot, Claude, Hermes, Scout, Grokbot and future AI hosts use one
+The core also exposes an authenticated, provider-neutral proposal/publication
+API. Any AI host uses one
 [portable RAPP Work Bot skill](skills/rapp-work-bot/SKILL.md) with an independently
-issued capability for the same root GUID. Public work and closed declarative
-view hints are canonical frames, not UI state. Concurrent clients retain
-explicit view conflicts; bounded MCP/stdio subscriptions support cursor replay
-and resync. No model, renderer, native profile or HTTP listener is started by
-publication. Only a tiny test consumer exists.
+issued capability for the same root GUID. A client can read bounded canonical
+proposal context and publish a validated structured Draft bound to that exact
+context revision. The Draft remains review-only: only the owner-facing
+`organization.confirm` command can apply it, and it must name the exact current
+proposal wave. Public work and closed declarative view hints are canonical
+frames, not UI state. Concurrent clients retain explicit view conflicts;
+bounded MCP/stdio subscriptions support cursor replay and resync. No model,
+renderer, native profile or HTTP listener is started by publication. Only a
+tiny test consumer exists.
 
 See [the API/authority contract](docs/AI_PROJECTION_API.md) and
 [binding milestones](docs/MILESTONES.md).
+
+An optional [controlled-local proposal harness](docs/CONTROLLED_LOCAL_PROVIDER_PROPOSALS.md)
+can collect real provider/passive-subscriber/private-channel evidence. It is
+default-off, requires explicit credentials plus TCC/contact binding, never
+confirms work or sends a message, and fails rather than manufacturing evidence.
 
 ## Critical release gate: observed migration
 
@@ -127,6 +136,15 @@ node next/dist/scheduler-cli.js --store next/.state --root "<full canonical RAPP
 
 This creates a canonical local root, not a live model session. Real provider,
 Brainstem, Hive, domain-transfer and iMessage bindings remain explicit gates.
+The controlled-local provider proposal harness is separate and opt-in:
+
+```sh
+RAPP_WORK_CONTROLLED_LOCAL=1 npm --prefix next run proposal:controlled-local -- \
+  --config /absolute/path/to/config.json
+```
+
+It cannot run successfully without real provider credentials, distinct scoped
+capabilities and an inspect-only TCC/contact probe; it performs no live send.
 For the complete **synthetic** dogfood scenario:
 
 ```sh

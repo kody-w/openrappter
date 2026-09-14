@@ -1,9 +1,10 @@
-import { isBodyStream, isUtc, type JsonObject, type JsonValue } from './canonical.js';
+import { contentHash, isBodyStream, isUtc, type JsonObject, type JsonValue } from './canonical.js';
 import { label, list, object, text } from './contract.js';
 import { requireThat } from './errors.js';
-import { wave } from './intent.js';
+import { validateDraft, wave, type Draft } from './intent.js';
 
 export const AI_PROJECTION_SCHEMA = 'rapp-work.ai-projection/1';
+export const PROPOSAL_CONTEXT_SCHEMA = 'rapp-work.proposal-context/1';
 export const VIEW_SCHEMA = 'rapp-work.view-intent/1';
 export const AI_LIMITS = Object.freeze({
   requestBytes: 32_768, snapshotBytes: 262_144, publicationsPerMinute: 60,
@@ -13,7 +14,7 @@ export const AI_LIMITS = Object.freeze({
 });
 export const AI_RIGHTS = Object.freeze([
   'projection.read', 'projection.subscribe', 'conversation.publish', 'activity.publish',
-  'evidence.publish', 'attention.publish', 'view.publish', 'view.resolve',
+  'evidence.publish', 'attention.publish', 'proposal.publish', 'view.publish', 'view.resolve',
   'guest.replay',
 ] as const);
 export type AiRight = typeof AI_RIGHTS[number];
@@ -48,6 +49,31 @@ export function grantData(value: unknown): ClientGrant {
     && Date.parse(g.expiresUtc) - Date.parse(g.issuedUtc) === Number(g.ttlSeconds) * 1_000,
   'client-expiry', 'A bounded, exact credential lifetime is required.');
   return g as ClientGrant;
+}
+
+function clientActor(value: unknown): ClientActor {
+  const actor = object(value, ['id', 'name', 'provider', 'grantWave']);
+  requireThat(isBodyStream(actor.id), 'client-identity', 'Invalid attributed client identity.');
+  text(actor.name, 80); label(actor.provider); wave(actor.grantWave);
+  return actor as ClientActor;
+}
+
+export interface ClientProposalData extends JsonObject {
+  actor: ClientActor;
+  requestHash: string;
+  contextRevision: string;
+  draft: Draft;
+  draftHash: string;
+}
+export function clientProposalData(value: unknown, proposalTime?: string): ClientProposalData {
+  const p = object(value, ['actor', 'requestHash', 'contextRevision', 'draft', 'draftHash']);
+  const actor = clientActor(p.actor);
+  const requestHash = wave(p.requestHash);
+  const contextRevision = wave(p.contextRevision);
+  const draft = validateDraft(p.draft, proposalTime);
+  const draftHash = wave(p.draftHash);
+  requireThat(draftHash === contentHash(draft), 'proposal-integrity', 'The structured proposal digest does not match its validated Draft.');
+  return { actor, requestHash, contextRevision, draft, draftHash };
 }
 
 export interface CardReference extends JsonObject {
@@ -136,16 +162,15 @@ export interface PublicationData extends JsonObject {
 }
 export function publicationData(kind: PublicationKind, value: unknown): PublicationData {
   const p = object(value, ['actor', 'requestHash', 'content', 'causes', 'view', 'viewParents', 'viewRefusal']);
-  const actor = object(p.actor, ['id', 'name', 'provider', 'grantWave']);
-  requireThat(isBodyStream(actor.id), 'client-identity', 'Invalid attributed client identity.');
-  text(actor.name, 80); label(actor.provider); wave(actor.grantWave); wave(p.requestHash);
+  const actor = clientActor(p.actor);
+  wave(p.requestHash);
   if (p.viewRefusal !== null) {
     const refusal = object(p.viewRefusal, ['code', 'message']);
     requireThat(refusal.code === 'view-hint-refused' && typeof refusal.message === 'string'
       && refusal.message.length <= 160, 'view-contract', 'Only a bounded public refusal diagnostic is stored.');
   }
   return {
-    actor: actor as ClientActor, requestHash: String(p.requestHash),
+    actor, requestHash: String(p.requestHash),
     content: publicationContent(kind, p.content), causes: hashes(p.causes),
     view: p.view === null ? null : viewIntent(p.view), viewParents: hashes(p.viewParents, 8),
     viewRefusal: p.viewRefusal as JsonObject | null,

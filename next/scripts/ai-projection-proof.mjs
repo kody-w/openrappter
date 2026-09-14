@@ -8,6 +8,7 @@ import { HeadlessRuntime } from '../dist/runtime.js';
 import { fixtureSigners, FixtureCopilotTransport, FixtureBrainstem } from '../dist/fixtures.js';
 import { CopilotSdkProvider } from '../dist/copilot.js';
 import { AI_RIGHTS, VIEW_SCHEMA } from '../dist/ai-contract.js';
+import { AiEndpoint } from '../dist/ai-endpoint.js';
 import { ProjectionStreams } from '../dist/ai-stream.js';
 import { canonicalJson } from '../dist/canonical.js';
 import { TestProjectionConsumer } from '../test/projection-consumer.mjs';
@@ -78,6 +79,36 @@ assert.equal(refused.viewAccepted, false);
 assert.equal(refused.viewRefusal.code, 'view-hint-refused');
 await streams.poll();
 for (const event of await streams.take(subscription.subscription, 8)) consumer.accept(event);
+const proposalContext = await runtime.ai.context(bot.root, clients['future-provider'].capability);
+const proposalDraft = {
+  summary: 'Create one durable provider-neutral proposal artifact.',
+  tradeoffs: ['The external client publishes review data; only the exact owner confirmation may apply it.'],
+  questions: [],
+  actions: [{
+    type: 'artifact.save', id: 'provider-neutral-proposal-proof', scope: 'root',
+    name: 'Provider neutral proposal proof', content: 'Applied after exact owner confirmation.', mediaType: 'text/plain',
+  }],
+  resolves: [],
+};
+const proposal = await runtime.ai.propose(bot.root, clients['future-provider'].capability,
+  { contextRevision: proposalContext.revision, draft: proposalDraft }, 'provider-neutral-proposal');
+assert.equal(proposal.status, 'review');
+assert.equal(proposal.confirmationAuthority, 'owner-only');
+assert.equal(proposal.mutationApplied, false);
+const deniedMessages = [];
+const restricted = new AiEndpoint(runtime.ai, bot.root, clients['future-provider'].capability,
+  'stdio', message => deniedMessages.push(message));
+await restricted.handle(JSON.stringify({
+  id: 'self-confirm', method: 'rapp_work_confirm',
+  params: { root: bot.root, proposalWave: proposal.proposalWave },
+}));
+assert.equal(deniedMessages.at(-1).error.code, 'method-unavailable');
+assert(!(await runtime.ai.read(bot.root, clients.observer.capability)).artifacts.some(a => a.id === 'provider-neutral-proposal-proof'));
+await assert.rejects(runtime.conversation.confirm(bot.root, '0'.repeat(64), 'wrong-owner-confirmation'), { code: 'proposal' });
+await runtime.conversation.confirm(bot.root, proposal.proposalWave, 'exact-owner-confirmation');
+await streams.poll();
+for (const event of await streams.take(subscription.subscription, 8)) consumer.accept(event);
+assert.equal(consumer.state.root, bot.root);
 const lastApplied = consumer.cursor;
 streams.unsubscribe(subscription.subscription);
 const slow = new ProjectionStreams(runtime.ai, { queuedEvents: 2, queuedBytes: 262_144 });
@@ -92,6 +123,11 @@ const before = await runtime.bots.repository.snapshot();
 const restarted = await HeadlessRuntime.open(options);
 assert.deepEqual(await restarted.bots.repository.snapshot(), before);
 assert.deepEqual(await restarted.ai.read(bot.root, clients.observer.capability), expected);
+const restartedProposal = (await restarted.ai.read(bot.root, clients.observer.capability)).proposals
+  .find(candidate => candidate.wave === proposal.proposalWave);
+assert.equal(restartedProposal.status, 'applied');
+assert((await restarted.ai.read(bot.root, clients.observer.capability)).artifacts
+  .some(artifact => artifact.id === 'provider-neutral-proposal-proof'));
 const replay = new ProjectionStreams(restarted.ai);
 const resumed = await replay.subscribe(bot.root, clients.observer.capability, lastApplied);
 const rebuilt = new TestProjectionConsumer(bot.root);
@@ -131,13 +167,28 @@ const result = {
   exactRestartProjection: true, realTimeTestConsumer: true, causalConflictObserved: true,
   explicitResolutionVerified: true, unsupportedHintWorkRetained: true, backpressureResync: true,
   reconnectReplayEquivalent: true, credentialPlaintextPersisted: false, uiImplemented: false,
+  providerNeutralProposal: {
+    provider: 'future-provider', contextRead: true, structuredDraftValidated: true,
+    proposalWave: proposal.proposalWave, selfConfirmationRefused: true,
+    exactOwnerConfirmationRequired: true, mutationBeforeConfirmation: false,
+    appliedResultReconstructedAfterRestart: true,
+  },
   attribution: 'root-signed scoped-capability attribution; not vendor/client-key non-repudiation',
   protocols: ['MCP stdio 2025-11-25', 'bounded native stdio events'],
   evidenceDirectory: path.relative(directory, evidence),
   skillSha256: createHash('sha256').update(skill).digest('hex'),
   productionCredentialBindingPerformed: false,
+  controlledLocalAcceptance: 'not-run; real provider credentials and TCC/contact evidence were not supplied',
 };
 await writeFile(path.join(evidence, 'result.json'), JSON.stringify(result, null, 2) + '\n');
 await writeFile(path.join(evidence, 'consumer-state.json'), JSON.stringify(rebuilt.state, null, 2) + '\n');
+const outputIndex = process.argv.indexOf('--write-verification');
+if (outputIndex >= 0) {
+  const target = process.argv[outputIndex + 1];
+  assert(target, '--write-verification requires a destination');
+  const resolved = path.resolve(target);
+  assert(resolved.startsWith(path.join(directory, 'verification') + path.sep), 'Verification output must stay under next/verification.');
+  await writeFile(resolved, JSON.stringify(result, null, 2) + '\n');
+}
 streams.close(); slow.close(); replay.close();
 console.log(JSON.stringify(result, null, 2));

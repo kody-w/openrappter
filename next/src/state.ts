@@ -2,6 +2,7 @@ import { contentHash, type JsonObject, type RappFrame } from './canonical.js';
 import { label, list, object, text, validateTree, workEvent, type Scope } from './contract.js';
 import { requireThat } from './errors.js';
 import { validateDraft, wave, type Draft, type IntentAction, type RoutineAction } from './intent.js';
+import { clientProposalData } from './ai-contract.js';
 import type { RootSnapshot } from './repository.js';
 import { migrationItem } from './migration-contract.js';
 import { memoryFrames, sourceReference, scopeCreationOwners } from './source-memory.js';
@@ -51,6 +52,8 @@ export function foldState(root: RootSnapshot, extraCorrections: readonly string[
     const data = e.data;
     if (e.event === 'turn.assistant' && data.draft !== undefined) {
       state.proposals.set(frame.frame_hash, { draft: validateDraft(data.draft), frame, status: 'review' });
+    } else if (e.event === 'client.proposal') {
+      state.proposals.set(frame.frame_hash, { draft: clientProposalData(data).draft, frame, status: 'review' });
     }
     if (e.event === 'organization.applied') {
       object(data, ['proposalWave', 'summary', 'actor']);

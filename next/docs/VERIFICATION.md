@@ -15,6 +15,40 @@ All reviewed routines, due reconstruction, occurrence receipts and outcomes
 remain canonical RAPP/1 frames. No provider API, transcript projection, release
 workflow, live credential or live profile was changed or exercised.
 
+## Provider-neutral thought-to-outcome proposals
+
+The complete `npm --prefix next run check` passes **134 tests**, strict
+typecheck/build, and every foundation/headless/provider-neutral/migration/
+browser/Catch-up/source-owned/private-channel gate. The focused provider,
+endpoint, stream and controlled-local contract run passes **25 tests**.
+
+An actual restricted stdio process labeled `Atlas Local` reads
+`rapp-work.proposal-context/1`, publishes a validated structured Draft, receives
+a root-signed attributed `client.proposal`, and observes `status:"review"` in a
+separate passive subscription. The same restricted endpoint refuses
+`rapp_work_confirm`; a wrong owner wave also refuses and no artifact exists.
+Only the owner-facing exact `organization.confirm` applies the Draft. A fresh
+runtime then reconstructs the same proposal as `applied` and the resulting
+artifact without a provider replay.
+
+The generated synthetic receipt at
+`verification/provider-neutral-proposals.json` scans **27 signed frames across
+2 streams**, all `COMPLIANT`, with zero model calls and zero pre-confirmation
+mutation. It records context read, Draft validation, self-confirmation refusal,
+exact owner confirmation and applied-result restart reconstruction. The receipt
+was written by `scripts/ai-projection-proof.mjs --write-verification`; it is not
+a live-provider claim. The tested portable skill is version **0.5.0**, SHA-256
+`bf2c92cefdb25a6cabf0fbc802c0b1734984d48665cf49ba6a9a35fcc250bbb1`.
+
+The opt-in
+`docs/CONTROLLED_LOCAL_PROVIDER_PROPOSALS.md` harness requires a non-fixture
+trusted endpoint, real provider credential environment, distinct proposal and
+passive-subscriber capabilities, and an inspect-only probe tied to the exact
+private-channel binding wave. Missing credentials, TCC authorization or contact
+binding fail before a proposal is accepted. The harness never confirms work or
+invokes a live send. No controlled-local result is claimed here because those
+real bindings were not supplied.
+
 ## Prior independent review follow-up
 
 All five findings against `907f743` are fixed. Six deterministic red

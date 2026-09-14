@@ -56,6 +56,11 @@ model, tool, channel send or uncertain approval.
 4. Infer organization rather than asking the user to design folders. The public
    draft contains `summary`, material `tradeoffs`, irreducible `questions` and
    bounded `actions`. Nothing in a draft executes.
+   A capability-scoped external AI follows the provider-neutral path instead:
+   `rapp_work_context` returns the exact canonical context revision and
+   `rapp_work_propose` may append only a validated attributed `client.proposal`.
+   No provider label selects authority, and the restricted endpoint exposes no
+   confirmation method.
 5. `organization.confirm` names the exact proposal wave. It must still be the
    current head, have no unresolved human question, and fit the selected scope.
    One canonical successor atomically represents the whole internal outcome.
@@ -121,6 +126,11 @@ Selection is transient; an explicit invalid `root` never falls back to it.
 There is no delete method, arbitrary shell/tool method, provider switch,
 automatic external approval, native-store write or executable hotload from
 carried data.
+
+The separate AI endpoint adds `rapp_work_context` and `rapp_work_propose`.
+Neither is an owner command: the former is read-only and the latter publishes
+review data. Exact confirmation and all resulting state mutation remain on
+`organization.confirm`.
 
 Native exporter/receipt details are in `NATIVE_FEDERATION_API.md`. Native union
 provenance is metadata, not a provider switch or native-memory merge; unresolved

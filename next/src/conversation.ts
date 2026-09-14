@@ -40,13 +40,15 @@ export function canonicalContext(root: RootSnapshot, scope = 'root'): JsonObject
     artifacts: [...state.artifacts.values()].filter(a => permitted.has(String(a.scope))),
     pointers: [...state.pointers.values()].filter(p => permitted.has(String(p.scope))),
     progress: state.progress.filter(p => permitted.has(String(p.scope))).slice(-10),
+    proposals: [...state.proposals].filter(([, p]) => permitted.has(String(p.frame.payload.scope))).slice(-16)
+      .map(([proposalWave, p]) => ({ proposalWave, status: p.status, draft: p.draft })),
     pendingQuestions: [...state.proposals].filter(([, p]) => p.status === 'review' && p.draft.questions.length
       && permitted.has(String(p.frame.payload.scope))).map(([wave, p]) => ({ wave, questions: p.draft.questions })),
     authority: 'canonical-integrity-only; evidence is not factual truth',
   };
 }
 
-function contextWitness(root: RootSnapshot, scope: string, exclude?: string): { revision: string; parents: string[] } {
+export function contextWitness(root: RootSnapshot, scope: string, exclude?: string): { revision: string; parents: string[] } {
   const scopes = foldState(root).scopes;
   const permitted = permittedScopes(scopes, scope);
   const frames = memoryFrames(root).filter(f => f.frame_hash !== exclude && permitted.has(String(f.payload.scope)));

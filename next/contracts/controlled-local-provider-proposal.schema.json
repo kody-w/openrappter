@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.controlled-local-provider-proposal/1",
+  "title": "Opt-in real-provider proposal acceptance configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "mode", "fixture", "allowLiveSend", "canonicalStore", "evidenceDirectory",
+    "root", "scope", "requestId", "request", "endpoint", "provider", "subscriber", "privateChannel"
+  ],
+  "properties": {
+    "schema": { "const": "rapp-work.controlled-local-provider-proposal/1" },
+    "mode": { "const": "controlled-local" },
+    "fixture": { "const": false },
+    "allowLiveSend": { "const": false },
+    "canonicalStore": { "$ref": "#/$defs/absolutePath" },
+    "evidenceDirectory": { "$ref": "#/$defs/absolutePath" },
+    "root": { "type": "string", "pattern": "^rappid:@[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*:[0-9a-f]{64}$" },
+    "scope": { "$ref": "#/$defs/label" },
+    "requestId": { "$ref": "#/$defs/label" },
+    "request": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "endpoint": { "$ref": "#/$defs/command" },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "provider", "capabilityEnv", "credentialEnv", "adapter"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "provider": { "$ref": "#/$defs/label" },
+        "capabilityEnv": { "$ref": "#/$defs/envName" },
+        "credentialEnv": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/envName" }
+        },
+        "adapter": { "$ref": "#/$defs/command" }
+      }
+    },
+    "subscriber": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capabilityEnv"],
+      "properties": { "capabilityEnv": { "$ref": "#/$defs/envName" } }
+    },
+    "privateChannel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bindingWave", "probe"],
+      "properties": {
+        "bindingWave": { "$ref": "#/$defs/wave" },
+        "probe": { "$ref": "#/$defs/command" }
+      }
+    }
+  },
+  "$defs": {
+    "label": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 100 },
+    "wave": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "envName": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$", "maxLength": 100 },
+    "absolutePath": { "type": "string", "pattern": "^/" },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "args", "cwd", "environment"],
+      "properties": {
+        "command": { "$ref": "#/$defs/absolutePath" },
+        "args": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 1000 } },
+        "cwd": { "$ref": "#/$defs/absolutePath" },
+        "environment": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/envName" }
+        }
+      }
+    }
+  },
+  "$comment": "Credentials are named environment bindings, never values in this file. The harness requires RAPP_WORK_CONTROLLED_LOCAL=1, distinct provider/subscriber capabilities, a real provider adapter, and an inspect-only private-channel probe. It never invokes an owner confirmation or channel send."
+}

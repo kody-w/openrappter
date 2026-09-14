@@ -2,17 +2,19 @@ import { Bots, findRoot } from './bots.js';
 import { canonicalJson, contentHash, type JsonObject } from './canonical.js';
 import { eventKind, eventPayload, label, object } from './contract.js';
 import { requireThat } from './errors.js';
-import { foldState, permittedScopes } from './state.js';
+import { applyScopedActions, foldState, permittedScopes } from './state.js';
 import { ClientAuthority, actorFor } from './ai-authority.js';
 import {
-  AI_LIMITS, hashes, publicationContent, publicationKind, publicationRight, viewIntent,
-  type PublicationData,
+  AI_LIMITS, PROPOSAL_CONTEXT_SCHEMA, clientProposalData, hashes, publicationContent, publicationKind,
+  publicationRight, viewIntent, type PublicationData,
 } from './ai-contract.js';
 import { atCursor, cursorFor, projectAi, publicHistoryFrame, publishedRecords, scopedFrames, validateViewState, viewFrontier } from './ai-projector.js';
 import { reference } from './projection.js';
 import { catchUpTimeline } from './catch-up.js';
 import { CanonicalComputerReplay } from './computer-replay.js';
 import { memoryAdvance, memoryFrames, memoryPending, sourceChain } from './source-memory.js';
+import { canonicalContext, contextWitness } from './conversation.js';
+import { validateDraft, wave } from './intent.js';
 
 export class AiProjectionApi {
   readonly authority: ClientAuthority;
@@ -21,6 +23,77 @@ export class AiProjectionApi {
   async read(root: string, capability: string, cursor?: unknown): Promise<JsonObject> {
     const selected = await this.authority.authorize(root, capability, ['projection.read']);
     return projectAi(cursor === undefined ? selected.root : atCursor(selected.root, cursor), selected.grant.data.scope);
+  }
+
+  async context(root: string, capability: string, requestedScope?: unknown): Promise<JsonObject> {
+    const selected = await this.authority.authorize(root, capability, ['projection.read']);
+    const scope = requestedScope === undefined ? selected.grant.data.scope : label(requestedScope);
+    requireThat(permittedScopes(foldState(selected.root).scopes, selected.grant.data.scope).has(scope),
+      'client-scope', 'Canonical proposal context cannot leave the client grant scope.');
+    const basis = contextWitness(selected.root, scope);
+    const result: JsonObject = {
+      schema: PROPOSAL_CONTEXT_SCHEMA, root, scope, revision: basis.revision,
+      context: canonicalContext(selected.root, scope),
+      authority: { proposalPublication: 'capability-scoped', confirmation: 'owner-only', mutation: 'owner-only' },
+    };
+    requireThat(Buffer.byteLength(canonicalJson(result)) <= AI_LIMITS.snapshotBytes, 'proposal-context-size',
+      'The authorized canonical context exceeds the bounded response size.');
+    return result;
+  }
+
+  async propose(root: string, capability: string, value: unknown, requestId: string): Promise<JsonObject> {
+    label(requestId);
+    const input = object(value, ['contextRevision', 'draft'], ['scope']);
+    requireThat(Buffer.byteLength(canonicalJson(input)) <= AI_LIMITS.requestBytes, 'proposal-size', 'A structured proposal is bounded to 32 KiB.');
+    const requestHash = contentHash(input);
+    return this.bots.repository.transaction(async tx => {
+      const snapshot = findRoot(tx, root);
+      const utc = this.bots.now();
+      const grant = this.authority.authenticate(snapshot, root, capability, ['projection.read', 'proposal.publish'], utc);
+      const scope = input.scope === undefined ? grant.data.scope : label(input.scope);
+      const state = foldState(snapshot);
+      requireThat(permittedScopes(state.scopes, grant.data.scope).has(scope),
+        'client-scope', 'The proposal cannot leave its canonical grant scope.');
+      const operationId = `ai-proposal-${contentHash({ client: grant.data.client, requestId })}`;
+      const duplicate = memoryFrames(snapshot).find(f => f.payload.operationId === operationId);
+      if (duplicate) {
+        requireThat(duplicate.payload.event === 'client.proposal', 'idempotency-conflict', 'This client proposal ID already records different work.');
+        const prior = clientProposalData(duplicate.payload.data);
+        requireThat(prior.requestHash === requestHash, 'idempotency-conflict', 'This client proposal ID already records a different Draft.');
+        const proposal = state.proposals.get(duplicate.frame_hash);
+        requireThat(proposal, 'proposal', 'The original client proposal is unavailable.');
+        return { receipt: reference(duplicate), proposalWave: duplicate.frame_hash, attribution: prior.actor,
+          status: proposal.status, duplicate: true, confirmationRequired: proposal.status === 'review',
+          confirmationAuthority: 'owner-only', mutationApplied: proposal.status === 'applied' };
+      }
+      const basis = contextWitness(snapshot, scope);
+      requireThat(wave(input.contextRevision) === basis.revision, 'stale-head',
+        'Canonical context changed after the client read it; publish a fresh proposal from a new context revision.');
+      const draft = validateDraft(input.draft, utc);
+      requireThat(draft.actions.length > 0 || draft.questions.length > 0, 'proposal-empty',
+        'Use public conversation for a no-op summary; a proposal must contain reviewable actions or questions.');
+      requireThat(draft.resolves.length === 0, 'proposal-authority',
+        'An external AI proposal cannot claim that it supplied or settled an owner answer.');
+      const preview = foldState(snapshot);
+      applyScopedActions(preview, draft.actions, snapshot, operationId, scope);
+      const data = clientProposalData({
+        actor: actorFor(grant), requestHash, contextRevision: basis.revision,
+        draft, draftHash: contentHash(draft),
+      });
+      const recent = memoryFrames(snapshot).filter(f => f.payload.event?.toString().startsWith('client.')
+        && object(f.payload.data).actor && object(object(f.payload.data).actor).id === grant.data.client
+        && Date.parse(f.utc) > Date.parse(utc) - 60_000);
+      requireThat(recent.length < AI_LIMITS.publicationsPerMinute, 'client-rate',
+        'The canonical per-client publication rate is exhausted; retries must wait, not drop work.');
+      const signer = this.bots.signer(root);
+      requireThat(signer, 'signing-authority-unavailable', 'The root publication signer is unavailable; unsigned attribution is refused.');
+      const frame = await tx.append({ root, family: 'memory', kind: eventKind('client.proposal'), utc,
+        payload: { ...eventPayload(root, scope, operationId, 'client.proposal', data), parents: basis.parents },
+        expectedHead: sourceChain(snapshot, scope).at(-1)?.frame_hash ?? null, signer });
+      return { receipt: reference(frame), proposalWave: frame.frame_hash, attribution: data.actor,
+        status: 'review', duplicate: false, confirmationRequired: true,
+        confirmationAuthority: 'owner-only', mutationApplied: false };
+    });
   }
 
   async catchUp(root: string, capability: string, options: unknown = {}): Promise<JsonObject> {

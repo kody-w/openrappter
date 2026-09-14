@@ -1,0 +1,66 @@
+{
+  "schema": "rapp-work.ai-projection-evidence/1",
+  "authoritative": false,
+  "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+  "rootCount": 1,
+  "providers": [
+    "copilot",
+    "claude",
+    "hermes",
+    "scout",
+    "grokbot",
+    "future-provider"
+  ],
+  "clientCount": 8,
+  "canonical": {
+    "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+    "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+    "authorityFrames": 16,
+    "verdict": "COMPLIANT",
+    "framesScanned": 27,
+    "signedFrames": 27,
+    "streamsScanned": 2,
+    "findings": [],
+    "evidence": [
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+        "ok": "1 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+        "ok": "26 frames conform to §7 envelope"
+      }
+    ]
+  },
+  "observationFrameMutations": 0,
+  "modelCalls": 0,
+  "modelReplayOnRestart": 0,
+  "exactRestartProjection": true,
+  "realTimeTestConsumer": true,
+  "causalConflictObserved": true,
+  "explicitResolutionVerified": true,
+  "unsupportedHintWorkRetained": true,
+  "backpressureResync": true,
+  "reconnectReplayEquivalent": true,
+  "credentialPlaintextPersisted": false,
+  "uiImplemented": false,
+  "providerNeutralProposal": {
+    "provider": "future-provider",
+    "contextRead": true,
+    "structuredDraftValidated": true,
+    "proposalWave": "32c97323caed27ce989b237b2b35371fa28415cf0732746d39fb6f2dcc67d5ee",
+    "selfConfirmationRefused": true,
+    "exactOwnerConfirmationRequired": true,
+    "mutationBeforeConfirmation": false,
+    "appliedResultReconstructedAfterRestart": true
+  },
+  "attribution": "root-signed scoped-capability attribution; not vendor/client-key non-repudiation",
+  "protocols": [
+    "MCP stdio 2025-11-25",
+    "bounded native stdio events"
+  ],
+  "evidenceDirectory": ".test-scratch/ai-projection-89097-1789372027713",
+  "skillSha256": "bf2c92cefdb25a6cabf0fbc802c0b1734984d48665cf49ba6a9a35fcc250bbb1",
+  "productionCredentialBindingPerformed": false,
+  "controlledLocalAcceptance": "not-run; real provider credentials and TCC/contact evidence were not supplied"
+}

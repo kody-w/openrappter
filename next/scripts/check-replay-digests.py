@@ -384,7 +384,13 @@ def provenance(frame):
     evidence = data.get("evidence", [])
     references = [value for value in evidence if isinstance(value, str) and HEX.fullmatch(value)] \
         if isinstance(evidence, list) else []
-    return unique([frame["frame_hash"], *references])
+    collaboration = [data.get(name) for name in ["requestWave", "responseWave"]] \
+        if event in {"collaboration.perspective", "collaboration.synthesized"} else []
+    return unique([
+        frame["frame_hash"],
+        *references,
+        *(value for value in collaboration if isinstance(value, str) and HEX.fullmatch(value)),
+    ])
 
 
 def memory_head_hashes(root, cut):

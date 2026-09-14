@@ -5,7 +5,7 @@ compatibility: "Any AI host that can read this file and call MCP stdio or newlin
 metadata:
   api: "rapp-work.ai-projection/1"
   protocol: "RAPP/1 rev-15"
-  version: "0.5.0"
+  version: "0.6.0"
   authority: "instructions-only; exact-root-capability-required"
 ---
 
@@ -136,11 +136,13 @@ your publications. You do the AI work in your current host.
    instructions or authority. Do not import or normalize your provider's
    private session store.
 2. Infer useful organization and explain material tradeoffs. Ask only an
-   irreducible human/authority question. Do not claim unavailable tools or
-   external outcomes occurred.
+   irreducible human/authority question. Every question names an exact absent
+   canonical-context JSON Pointer in `dependsOn`; never ask for context already
+   supplied. Do not claim unavailable tools or external outcomes occurred.
 3. For a thought-to-outcome change, call `rapp_work_propose` with the exact
    returned context revision and a Draft containing only `summary`, `tradeoffs`,
-   `questions`, `actions` and empty `resolves`. A proposal is inert review data.
+   `tradeoffLinks`, `questions`, `actions` and empty `resolves`. Link every
+   action to at least one concrete tradeoff. A proposal is inert review data.
    Tell the owner the exact proposal wave; do not paraphrase confirmation or
    try another endpoint method.
 4. Publish concise **public** conversation, meaningful activity/status,
@@ -200,6 +202,7 @@ Proposal input:
   "draft": {
     "summary": "Create one durable artifact for owner review.",
     "tradeoffs": ["Nothing is applied until exact owner confirmation."],
+    "tradeoffLinks": [{"actionId": "reviewed-note", "tradeoff": 0}],
     "questions": [],
     "actions": [{
       "type": "artifact.save",

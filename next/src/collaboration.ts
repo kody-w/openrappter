@@ -1,35 +1,17 @@
-import { canonicalJson, signerOf, streamFor, type JsonObject, type RappFrame } from './canonical.js';
+import { type JsonObject, type RappFrame } from './canonical.js';
 import { Bots, findRoot } from './bots.js';
-import { label, list, object, text, workEvent } from './contract.js';
+import { label, text, workEvent } from './contract.js';
 import { requireThat } from './errors.js';
-import { projectBot, publicWorkText, reference, type PublicTurn } from './projection.js';
+import { projectBot, reference } from './projection.js';
 import type { RootSnapshot, StoreSnapshot } from './repository.js';
 import type { ModelProvider, Observation } from './spine.js';
-import { publicationData } from './ai-contract.js';
-import { memoryFrames, sourceReference } from './source-memory.js';
-import { turnAttribution } from './channel-contract.js';
-import { assertCanonicalSelection } from './canonical-forks.js';
+import { sourceReference } from './source-memory.js';
+import {
+  assertCollaborationRequest, peerGrant, projectTranscript, publicPerspective, verifiedTranscript,
+  type PublicPerspective, type TranscriptOptions, type TranscriptPage, type TranscriptTurn,
+} from './transcript.js';
 
 const SCHEMA = 'rapp-work.next/collaboration/1';
-export interface PublicPerspective extends JsonObject {
-  summary: string;
-  disagreements: string[];
-  unknowns: string[];
-}
-
-export function publicPerspective(value: unknown): PublicPerspective {
-  const p = object(value, ['summary', 'disagreements', 'unknowns']);
-  return {
-    summary: text(p.summary, 3_000),
-    disagreements: list(p.disagreements, 8).map(v => text(v, 700)),
-    unknowns: list(p.unknowns, 8).map(v => text(v, 700)),
-  };
-}
-
-export function peerGrant(root: RootSnapshot, peer: string): RappFrame | undefined {
-  const grant = memoryFrames(root).filter(f => f.payload.event === 'collaboration.granted' && workEvent(f.payload).data.peer === peer).at(-1);
-  return grant && workEvent(grant.payload).data.mode === 'allow' ? grant : undefined;
-}
 
 function pair(snapshot: StoreSnapshot, from: string, to: string): { caller: RootSnapshot; recipient: RootSnapshot; callerGrant: RappFrame; recipientGrant: RappFrame } {
   const caller = snapshot.roots.find(r => r.definition.root === from);
@@ -43,19 +25,6 @@ function pair(snapshot: StoreSnapshot, from: string, to: string): { caller: Root
   requireThat(callerGrant && recipientGrant, 'collaboration-approval',
     'Both independent roots must explicitly authorize this bounded public perspective exchange.');
   return { caller, recipient, callerGrant, recipientGrant };
-}
-
-function assertRequest(frame: RappFrame): JsonObject {
-  const p = object(frame.payload, ['schema', 'root', 'to', 'operationId', 'question', 'callerGrant', 'recipientGrant'], ['briefRef', 'publicBrief']);
-  requireThat(p.schema === SCHEMA && frame.kind === 'swarm.guidance', 'collaboration', 'A signed canonical guidance request is required.');
-  requireThat(frame.stream_id === streamFor(String(p.root), 'swarm') && signerOf(frame) === p.root,
-    'collaboration-binding', 'The public request must speak as its original signed root.');
-  label(p.operationId);
-  text(p.question, 2_000);
-  requireThat((p.briefRef !== undefined) !== (p.publicBrief !== undefined), 'collaboration-binding', 'A request retains exactly one original brief reference or immutable legacy brief.');
-  if (p.briefRef !== undefined) object(p.briefRef);
-  else text(p.publicBrief, 2_000);
-  return p;
 }
 
 export class Collaboration {
@@ -80,7 +49,7 @@ export class Collaboration {
       const caller = findRoot(transaction, from);
       const existing = caller.streams.swarm.find(f => f.payload.operationId === operationId);
       if (existing) {
-        const p = assertRequest(existing);
+        const p = assertCollaborationRequest(existing);
         requireThat(p.to === to && p.question === question, 'idempotency-conflict', 'A collaboration request ID is already bound.');
         return { request: existing, started: false as const };
       }
@@ -178,78 +147,13 @@ export class Collaboration {
       responseStatus: status, synthesisStatus, request: prepared.request.frame_hash, response: response.frame_hash, transcript: await this.transcript(from) };
   }
 
-  async transcript(root: string): Promise<PublicTurn[]> {
+  async transcript(root: string): Promise<TranscriptTurn[]> {
     const snapshot = await this.bots.repository.snapshot();
-    const own = snapshot.roots.find(r => r.definition.root === root);
-    requireThat(own, 'root-not-found', 'Choose an existing canonical root.');
-    assertCanonicalSelection(own);
-    const requests = snapshot.roots.flatMap(r => r.streams.swarm).filter(f =>
-      f.kind === 'swarm.guidance' && (f.payload.root === root || f.payload.to === root));
-    const authorized = new Map(requests.map(r => [r.frame_hash, assertRequest(r)]));
-    for (const request of requests) {
-      const p = assertRequest(request);
-      const caller = snapshot.roots.find(r => r.definition.root === p.root);
-      const recipient = snapshot.roots.find(r => r.definition.root === p.to);
-      if (caller) assertCanonicalSelection(caller);
-      if (recipient) assertCanonicalSelection(recipient);
-      const callerGrant = caller && memoryFrames(caller).find(f => f.frame_hash === p.callerGrant);
-      const recipientGrant = recipient && memoryFrames(recipient).find(f => f.frame_hash === p.recipientGrant);
-      requireThat(callerGrant?.payload.event === 'collaboration.granted'
-        && recipientGrant?.payload.event === 'collaboration.granted'
-        && workEvent(callerGrant.payload).data.mode === 'allow'
-        && workEvent(recipientGrant.payload).data.mode === 'allow'
-        && workEvent(callerGrant.payload).data.peer === p.to
-        && workEvent(recipientGrant.payload).data.peer === p.root
-        && (p.briefRef !== undefined ? canonicalJson(p.briefRef) === canonicalJson(sourceReference(callerGrant))
-          : workEvent(callerGrant.payload).data.publicBrief === p.publicBrief),
-      'collaboration-binding', 'A public request must retain both exact historical consent frames, not substitute a carried grant.');
-    }
-    const echoes = snapshot.roots.flatMap(r => r.streams.swarm).filter(f => {
-      if (f.kind !== 'swarm.echo') return false;
-      const request = requests.find(r => r.frame_hash === f.payload.requestWave);
-      if (!request) return false;
-      object(f.payload, ['schema', 'root', 'to', 'requestWave', 'requestParticle', 'recipientGrant', 'public', 'status', 'operationId']);
-      requireThat(f.payload.root === request.payload.to && f.payload.to === request.payload.root
-        && f.payload.requestParticle === request.payload_hash && f.payload.recipientGrant === request.payload.recipientGrant
-        && signerOf(f) === f.payload.root && f.payload.schema === SCHEMA
-        && f.payload.operationId === `echo-${request.frame_hash}`
-        && (f.payload.status === 'completed' || f.payload.status === 'unavailable'),
-      'collaboration-binding', 'A public echo must bind the exact signed request particle, occurrence, recipient and grant.');
-      publicPerspective(f.payload.public);
-      return true;
-    });
-    const syntheses = memoryFrames(own).filter(f => f.payload.event === 'collaboration.synthesized'
-      && authorized.has(String(workEvent(f.payload).data.requestWave)));
-    const ordinary = memoryFrames(own).filter(f => ['turn.user', 'turn.assistant', 'client.conversation'].includes(String(f.payload.event)));
-    const selected = await this.bots.repository.orderSelection(new Set([...requests, ...echoes, ...syntheses, ...ordinary].map(f => f.frame_hash)));
-    return selected.map(frame => {
-      const data = frame.kind.startsWith('memory.') ? workEvent(frame.payload).data : frame.payload;
-      if (frame.payload.event === 'collaboration.synthesized') {
-        const original = echoes.find(f => f.frame_hash === data.responseWave);
-        const request = authorized.get(String(data.requestWave));
-        requireThat(original && request?.root === own.definition.root && original.payload.requestWave === data.requestWave
-          && data.consensus === false && data.actions === 'review-required',
-        'collaboration-binding', 'A caller synthesis must bind this exact request/response pair without consensus or action authority.');
-        publicPerspective(data.public);
-        if (data.format !== undefined) {
-          requireThat(data.format === 'rapp-work.synthesis-references/1'
-            && canonicalJson(sourceReference(original)) === canonicalJson(data.responseRef),
-          'collaboration-binding', 'A synthesis must retain its peer’s exact original source, not copied dissent or substituted history.');
-        }
-      }
-      const role = frame.payload.event === 'turn.user' ? 'user' : 'assistant';
-      const publicText = frame.kind === 'swarm.guidance' ? String(data.question)
-        : frame.kind === 'swarm.echo' ? (() => {
-          const p = publicPerspective(data.public);
-          return [p.summary, ...p.disagreements.map(d => `Disagreement: ${d}`), ...p.unknowns.map(u => `Unknown: ${u}`)].join('\n');
-        })() : frame.payload.event === 'client.conversation' ? (() => {
-          const p = publicationData('conversation', data);
-          return `[${p.actor.name} / ${p.actor.provider}] ${String(p.content.text)}`;
-        })() : publicWorkText(frame);
-      return { role, speaker: role === 'user' ? 'human' : String(frame.payload.root),
-        text: publicText, source: reference(frame), origin: sourceReference(frame),
-        attribution: frame.kind.startsWith('memory.') ? turnAttribution(frame) : { origin: 'canonical-collaboration', approvalAuthority: false },
-        replyTo: typeof data.requestWave === 'string' ? data.requestWave : null };
-    });
+    return verifiedTranscript(snapshot, root);
+  }
+
+  async transcriptPage(root: string, options: TranscriptOptions = {}): Promise<TranscriptPage> {
+    const snapshot = await this.bots.repository.snapshot();
+    return projectTranscript(snapshot, root, 'root', options);
   }
 }

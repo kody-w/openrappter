@@ -4,7 +4,7 @@ import { Bots, findRoot } from './bots.js';
 import { label, object, text, workEvent } from './contract.js';
 import { Refusal, requireThat } from './errors.js';
 import { foldState, permittedScopes } from './state.js';
-import type { RootSnapshot } from './repository.js';
+import type { RootSnapshot, StoreSnapshot } from './repository.js';
 import { AI_LIMITS, grantData, type AiRight, type ClientActor, type ClientGrant } from './ai-contract.js';
 import { memoryFrames } from './source-memory.js';
 
@@ -98,9 +98,16 @@ export class ClientAuthority {
   }
 
   async authorize(root: string, capability: string, rights: readonly AiRight[]): Promise<{ root: RootSnapshot; grant: ActiveGrant }> {
-    let snapshot: RootSnapshot;
-    try { snapshot = await this.bots.repository.root(root); }
-    catch { throw new Refusal('client-unauthorized', 'Exact root GUID and independently issued capability authentication are required.'); }
-    return { root: snapshot, grant: this.authenticate(snapshot, root, capability, rights) };
+    const selected = await this.authorizeStore(root, capability, rights);
+    return { root: selected.root, grant: selected.grant };
+  }
+
+  async authorizeStore(root: string, capability: string, rights: readonly AiRight[]):
+    Promise<{ snapshot: StoreSnapshot; root: RootSnapshot; grant: ActiveGrant }> {
+    const snapshot = await this.bots.repository.snapshot();
+    const selected = snapshot.roots.find(candidate => candidate.definition.root === root);
+    if (!selected) throw new Refusal('client-unauthorized',
+      'Exact root GUID and independently issued capability authentication are required.');
+    return { snapshot, root: selected, grant: this.authenticate(selected, root, capability, rights) };
   }
 }

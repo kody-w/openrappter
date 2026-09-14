@@ -98,7 +98,7 @@ Restricted tool names:
 
 | Tool | Purpose |
 |---|---|
-| `rapp_work_read` | Scoped deterministic snapshot |
+| `rapp_work_read` | Scoped deterministic snapshot; optional transcript offset/limit |
 | `rapp_work_context` | Bounded canonical planning context plus exact revision; read-only |
 | `rapp_work_catch_up` | Deterministic graded canonical timeline; optional private guest replay requires extra authority |
 | `rapp_work_artifact` | Already-canonical artifact content, no path/URL access |
@@ -140,8 +140,9 @@ Reading it appends nothing and runs no model.
 input is `contracts/ai-proposal.schema.json`, whose Draft is defined by
 `contracts/draft.schema.json`. The server rejects stale revisions, unknown
 fields/actions, scope escape, invalid references, private-reasoning markers,
-unexplained material actions, no-op proposals and external attempts to populate
-`resolves`. The accepted root-signed `client.proposal` keeps the authenticated
+missing action-to-tradeoff links, vacuous tradeoffs, already-known clarification
+dependencies, no-op proposals and external attempts to populate `resolves`.
+The accepted root-signed `client.proposal` keeps the authenticated
 actor/grant, request digest, context revision, validated Draft and Draft digest.
 It is mapped to the existing `memory.chat-turn` frame kind; no RAPP/1 kind or
 wire field is added.
@@ -188,8 +189,11 @@ Turns/contributions/history retain their original `origin` and source hashes;
 authorized `sources` exposes source heads and unselected branches. Source
 catalogues are reconstructed references, not a new store. A branch-only update
 may report `retained-source-branches-changed`; it never selects/replays the
-branch. These are additions to the unreleased `/1` contracts, not rewrites of
-historical frames or an adoption path for older profiles.
+branch. A signed peer request/echo can report `transcript-changed` even when the
+local memory cursor is unchanged. Transcript pages expose explicit total,
+offset, limit, truncation, navigation offsets and revision. These are additions
+to the unreleased `/1` contracts, not rewrites of historical frames or an
+adoption path for older profiles.
 
 Corrections that remove a referenced artifact invalidate its projection hint,
 not its recorded work. Pending view heads are bounded; reaching the bound

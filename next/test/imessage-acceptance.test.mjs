@@ -130,7 +130,8 @@ test('only same-publication clarification markers queue automatic questions; nat
   assert.equal(reported.attribution.origin, 'copilot-cli');
   assert.equal(reported.attribution.approvalAuthority, false);
   h.transport.responses.push({ summary: 'One irreducible decision is required.', tradeoffs: [], actions: [],
-    questions: [{ reason: 'human-authority', question: 'Which owner-approved option?' }] });
+    questions: [{ reason: 'human-authority', question: 'Which owner-approved option?',
+      dependsOn: '/authority/approvedOption' }] });
   const native = await h.runtime.conversation.converse(h.bot.root, 'Ask the needed owner decision', 'native-question');
   await h.runtime.channels.drain();
   const root = await h.runtime.bots.repository.root(h.bot.root);

@@ -20,10 +20,20 @@ export interface ExternalAction extends Action {
   type: 'external.request'; id: string; scope: string; operation: 'send-message'; target: string; content: string;
 }
 export type IntentAction = ScopeAction | RoutineAction | PointerAction | ArtifactAction | ExternalAction;
+export interface DraftQuestion extends JsonObject {
+  reason: 'human-authority' | 'irreducible-ambiguity';
+  question: string;
+  dependsOn?: string;
+}
+export interface TradeoffLink extends JsonObject {
+  actionId: string;
+  tradeoff: number;
+}
 export interface Draft extends JsonObject {
   summary: string;
   tradeoffs: string[];
-  questions: { reason: 'human-authority' | 'irreducible-ambiguity'; question: string }[];
+  tradeoffLinks: TradeoffLink[];
+  questions: DraftQuestion[];
   actions: IntentAction[];
   resolves: string[];
 }
@@ -87,21 +97,89 @@ export function validateAction(value: unknown, proposalTime?: string): IntentAct
   return a as ExternalAction;
 }
 
-export function validateDraft(value: unknown, proposalTime?: string): Draft {
-  const d = object(value, ['summary', 'tradeoffs', 'questions', 'actions'], ['resolves']);
+function materialTradeoff(value: unknown): string {
+  const result = text(value, 700).trim();
+  requireThat(result.length >= 24 && (result.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) >= 4,
+    'review', 'A material tradeoff must state a concrete bounded consequence, not a placeholder.');
+  return result;
+}
+
+function actionId(action: IntentAction): string {
+  return action.type === 'scope.create' ? action.scope.id : action.id;
+}
+
+export function requireActionTradeoffs(draft: Draft): void {
+  draft.tradeoffs.forEach(materialTradeoff);
+  const actionIds = draft.actions.map(actionId);
+  requireThat(actionIds.every(id => draft.tradeoffLinks.some(link => link.actionId === id)),
+    'review', 'Every proposed action must identify at least one material tradeoff.');
+  requireThat(draft.tradeoffs.every((_tradeoff, index) =>
+    draft.tradeoffLinks.some(link => link.tradeoff === index)),
+  'review', 'Every retained tradeoff must identify the proposed action it qualifies.');
+}
+
+function dependencyPointer(value: unknown): string {
+  const pointer = text(value, 200);
+  requireThat(pointer.startsWith('/') && pointer.split('/').slice(1)
+    .every(segment => segment.length > 0 && !/~(?!0|1)/u.test(segment)),
+    'question-boundary', 'A clarification dependency must be an exact JSON Pointer into the supplied canonical context.');
+  return pointer;
+}
+
+function dependencyIsKnown(context: JsonObject, pointer: string): boolean {
+  let current: unknown = context;
+  for (const encoded of pointer.split('/').slice(1)) {
+    const segment = encoded.replaceAll('~1', '/').replaceAll('~0', '~');
+    if (Array.isArray(current)) {
+      if (!/^(?:0|[1-9]\d*)$/u.test(segment) || Number(segment) >= current.length) return false;
+      current = current[Number(segment)];
+    } else if (current !== null && typeof current === 'object' && Object.hasOwn(current, segment)) {
+      current = (current as JsonObject)[segment];
+    } else return current !== null && typeof current !== 'object';
+  }
+  return true;
+}
+
+export function validateDraft(value: unknown, proposalTime?: string, context?: JsonObject): Draft {
+  const d = object(value, ['summary', 'tradeoffs', 'questions', 'actions'], ['resolves', 'tradeoffLinks']);
   const summary = text(d.summary, 2_000);
   requireThat(!/<\/?(?:analysis|thinking|reasoning)>/iu.test(summary), 'private-reasoning',
     'Only public decision summaries may be recorded.');
-  const tradeoffs = list(d.tradeoffs, 8).map(v => text(v, 700));
+  const tradeoffs = list(d.tradeoffs, 8).map(value =>
+    context === undefined ? text(value, 700) : materialTradeoff(value));
   const questions = list(d.questions, 3).map(v => {
-    const q = object(v, ['reason', 'question']);
+    const q = object(v, ['reason', 'question'], ['dependsOn']);
     requireThat(q.reason === 'human-authority' || q.reason === 'irreducible-ambiguity',
       'question-boundary', 'Only irreducible human or authority questions may interrupt.');
-    return { reason: q.reason, question: text(q.question, 700) };
+    requireThat(context === undefined || q.dependsOn !== undefined,
+      'question-boundary', 'Every new clarification must identify the exact missing canonical-context dependency.');
+    const dependsOn = q.dependsOn === undefined ? undefined : dependencyPointer(q.dependsOn);
+    requireThat(context === undefined || !dependencyIsKnown(context, dependsOn!),
+      'question-boundary', 'The requested clarification dependency is already present in verified canonical context.');
+    requireThat(context === undefined || q.reason !== 'human-authority' || dependsOn!.startsWith('/authority/'),
+      'question-boundary', 'A human-authority question must identify an absent authority dependency.');
+    return { reason: q.reason, question: text(q.question, 700), ...(dependsOn === undefined ? {} : { dependsOn }) } as DraftQuestion;
   });
   const actions = list(d.actions, 16).map(v => validateAction(v, proposalTime));
+  const actionIds = actions.map(actionId);
+  requireThat(new Set(actionIds).size === actionIds.length, 'review',
+    'Each proposed action must have one distinct local identity.');
   const resolves = list(d.resolves ?? [], 8).map(wave);
   requireThat(new Set(resolves).size === resolves.length, 'review', 'A human question may be resolved only once per proposal.');
+  const tradeoffLinks = list(d.tradeoffLinks ?? [], 32).map(value => {
+    const link = object(value, ['actionId', 'tradeoff']);
+    const selectedAction = label(link.actionId);
+    requireThat(actionIds.includes(selectedAction) && Number.isInteger(link.tradeoff)
+      && Number(link.tradeoff) >= 0 && Number(link.tradeoff) < tradeoffs.length,
+    'review', 'Each tradeoff link must name one proposed action and one retained material tradeoff.');
+    return { actionId: selectedAction, tradeoff: Number(link.tradeoff) };
+  });
+  requireThat(new Set(tradeoffLinks.map(link => `${link.actionId}:${link.tradeoff}`)).size === tradeoffLinks.length,
+    'review', 'Duplicate action/tradeoff links are not a complete review.');
+  if (context !== undefined && actions.length) requireActionTradeoffs(
+    { summary, tradeoffs, tradeoffLinks, questions, actions, resolves });
+  requireThat(actions.length > 0 || tradeoffLinks.length === 0,
+    'review', 'Tradeoff links are valid only for proposed actions.');
   requireThat((actions.length === 0 && resolves.length === 0) || tradeoffs.length > 0, 'review', 'Material organization tradeoffs must be explained before review.');
-  return { summary, tradeoffs, questions, actions, resolves } as Draft;
+  return { summary, tradeoffs, tradeoffLinks, questions, actions, resolves } as Draft;
 }

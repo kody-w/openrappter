@@ -10,6 +10,7 @@ import { orient, projectBot, type BotProjection } from './projection.js';
 import { CanonicalRepository, type RootSnapshot, type Transaction } from './repository.js';
 import type { SharedBrainstem } from './spine.js';
 import { memoryFrames, sourceChain } from './source-memory.js';
+import { projectTranscript, type TranscriptOptions } from './transcript.js';
 
 export interface RootSigner { readonly root: string; readonly signer: FrameSigner }
 export interface BotOptions {
@@ -71,11 +72,16 @@ export class Bots {
   }
 
   async list(includeHidden = false): Promise<readonly { root: string; name: string; hidden: boolean }[]> {
-    return (await this.repository.snapshot()).roots.map(projectBot).filter(p => includeHidden || !p.hidden)
+    return (await this.repository.snapshot()).roots.map(root => projectBot(root)).filter(p => includeHidden || !p.hidden)
       .map(p => ({ root: p.root, name: p.name, hidden: p.hidden }));
   }
 
-  async project(root: string): Promise<BotProjection> { return projectBot(await this.repository.root(root)); }
+  async project(root: string, options: TranscriptOptions = {}): Promise<BotProjection> {
+    const snapshot = await this.repository.snapshot();
+    const selected = snapshot.roots.find(candidate => candidate.definition.root === root);
+    requireThat(selected, 'root-not-found', 'Choose an existing canonical root GUID.');
+    return projectBot(selected, projectTranscript(snapshot, root, 'root', options));
+  }
   async whereWereWe(root: string): Promise<ReturnType<typeof orient>> { return orient(await this.project(root)); }
   async select(root: string): Promise<BotProjection> {
     const projection = await this.project(root);

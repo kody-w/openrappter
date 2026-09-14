@@ -2,30 +2,23 @@ import { canonicalJson, contentHash, type JsonObject, type RappFrame } from './c
 import { Bots, findRoot } from './bots.js';
 import { label, object, text, workEvent } from './contract.js';
 import { requireThat } from './errors.js';
-import { validateDraft } from './intent.js';
+import { requireActionTradeoffs, validateDraft } from './intent.js';
 import { orient, projectBot, reference, type BotProjection } from './projection.js';
-import type { RootSnapshot } from './repository.js';
+import type { StoreSnapshot } from './repository.js';
 import { applyScopedActions, foldState, permittedScopes, validateEvidence, validateResolutions } from './state.js';
 import type { ModelProvider } from './spine.js';
-import { publicationData } from './ai-contract.js';
 import { catchUpTimeline } from './catch-up.js';
 import { CanonicalComputerReplay } from './computer-replay.js';
 import { memoryFrames, memoryCursor, sourceChain, sourceReference } from './source-memory.js';
 import { canonicalClarification, clarifyMarker, questionPending, turnAttribution } from './channel-contract.js';
+import { projectTranscript, TRANSCRIPT_LIMITS, verifiedTranscript } from './transcript.js';
 
-export function canonicalContext(root: RootSnapshot, scope = 'root'): JsonObject {
+export function canonicalContext(snapshot: StoreSnapshot, rootId: string, scope = 'root'): JsonObject {
+  const root = snapshot.roots.find(candidate => candidate.definition.root === rootId);
+  requireThat(root, 'root-not-found', 'Choose an existing canonical root GUID.');
   const state = foldState(root);
   const permitted = permittedScopes(state.scopes, scope);
-  const turns = memoryFrames(root).filter(frame => {
-    const e = workEvent(frame.payload);
-    return permitted.has(e.scope) && ['turn.user', 'turn.assistant', 'client.conversation'].includes(e.event);
-  }).slice(-20).map(frame => {
-    const data = workEvent(frame.payload).data;
-    const client = frame.payload.event === 'client.conversation' ? publicationData('conversation', data) : null;
-    return { role: frame.payload.event === 'turn.user' ? 'user' : 'assistant',
-      text: client ? `[${client.actor.name} / ${client.actor.provider}] ${String(client.content.text)}` : String(data.text),
-      source: reference(frame), origin: sourceReference(frame), attribution: turnAttribution(frame) };
-  });
+  const transcript = projectTranscript(snapshot, rootId, scope, { limit: TRANSCRIPT_LIMITS.context });
   const discovery = memoryFrames(root).filter(f => f.payload.event === 'discovery.recorded' && permitted.has(String(f.payload.scope)))
     .slice(-4).map(f => {
       const data = workEvent(f.payload).data;
@@ -36,24 +29,30 @@ export function canonicalContext(root: RootSnapshot, scope = 'root'): JsonObject
     head: sourceChain(root, scope).at(-1)?.frame_hash ?? root.streams.body[0]!.frame_hash,
     sourceCursor: memoryCursor(root),
     scopes: state.scopes.filter(s => permitted.has(s.id)),
-    turns, discovery,
+    transcript, discovery,
     artifacts: [...state.artifacts.values()].filter(a => permitted.has(String(a.scope))),
     pointers: [...state.pointers.values()].filter(p => permitted.has(String(p.scope))),
+    routines: [...state.routines.values()].filter(routine => permitted.has(routine.scope)),
     progress: state.progress.filter(p => permitted.has(String(p.scope))).slice(-10),
     proposals: [...state.proposals].filter(([, p]) => permitted.has(String(p.frame.payload.scope))).slice(-16)
       .map(([proposalWave, p]) => ({ proposalWave, status: p.status, draft: p.draft })),
     pendingQuestions: [...state.proposals].filter(([, p]) => p.status === 'review' && p.draft.questions.length
       && permitted.has(String(p.frame.payload.scope))).map(([wave, p]) => ({ wave, questions: p.draft.questions })),
-    authority: 'canonical-integrity-only; evidence is not factual truth',
+    authority: { assurance: 'canonical-integrity-only', factualTruth: false },
   };
 }
 
-export function contextWitness(root: RootSnapshot, scope: string, exclude?: string): { revision: string; parents: string[] } {
+export function contextWitness(snapshot: StoreSnapshot, rootId: string, scope: string,
+  exclude?: string): { revision: string; parents: string[] } {
+  const root = snapshot.roots.find(candidate => candidate.definition.root === rootId);
+  requireThat(root, 'root-not-found', 'Choose an existing canonical root GUID.');
   const scopes = foldState(root).scopes;
   const permitted = permittedScopes(scopes, scope);
   const frames = memoryFrames(root).filter(f => f.frame_hash !== exclude && permitted.has(String(f.payload.scope)));
   return { revision: contentHash({ root: root.definition.root, scope, scopes: scopes.filter(s => permitted.has(s.id)),
-    occurrences: frames.map(f => f.frame_hash).sort() }),
+    occurrences: frames.map(f => f.frame_hash).sort(),
+    transcript: verifiedTranscript(snapshot, rootId, scope).filter(turn => turn.source.frame_hash !== exclude)
+      .map(turn => turn.source.frame_hash) }),
   parents: [...new Map(frames.map(f => [f.stream_id, f.frame_hash])).values()] };
 }
 
@@ -69,7 +68,10 @@ export class Conversation {
   constructor(readonly bots: Bots, readonly provider: ModelProvider, readonly computerReplay?: CanonicalComputerReplay) {}
 
   async catchUp(root: string, options: unknown = {}, scope = 'root'): Promise<JsonObject> {
-    return catchUpTimeline(await this.bots.repository.root(root), scope, options, this.computerReplay);
+    const snapshot = await this.bots.repository.snapshot();
+    const selected = snapshot.roots.find(candidate => candidate.definition.root === root);
+    requireThat(selected, 'root-not-found', 'Choose an existing canonical root GUID.');
+    return catchUpTimeline(snapshot, selected, scope, options, this.computerReplay);
   }
 
   async report(root: string, scope: string, value: unknown, operationId: string): Promise<JsonObject> {
@@ -128,10 +130,12 @@ export class Conversation {
     label(operationId);
     label(scope);
     if (/^\s*catch me up[?.!]*\s*$/iu.test(thought)) {
-      const snapshot = await this.bots.repository.root(root);
-      const timeline = catchUpTimeline(snapshot, scope);
+      const store = await this.bots.repository.snapshot();
+      const snapshot = store.roots.find(candidate => candidate.definition.root === root);
+      requireThat(snapshot, 'root-not-found', 'Choose an existing canonical root GUID.');
+      const timeline = catchUpTimeline(store, snapshot, scope);
       const grades = object(timeline.grades);
-      return { status: 'orientation', projection: projectBot(snapshot), proposalWave: null, catchUp: timeline,
+      return { status: 'orientation', projection: await this.bots.project(root), proposalWave: null, catchUp: timeline,
         text: `Catch me up: a deterministic canonical replay with ${String(grades.recorded)} recorded, ${String(grades.reconstructed)} reconstructed and ${String(grades.unavailable)} unavailable presentation steps. No model, tool or mutation was replayed.` };
     }
     if (/^\s*(?:where were we|where are we|resume orientation)[?.!]*\s*$/iu.test(thought)) {
@@ -145,7 +149,9 @@ export class Conversation {
       return { status: 'complete', projection, proposalWave: null,
         text: `${hidden ? 'Hidden' : 'Restored'} ${projection.name}. The same root GUID, history and branches remain intact; nothing was deleted.` };
     }
-    const confirmation = /^\s*(?:yes(?:,? (?:do that|do it))?|go ahead|confirm(?: ([0-9a-f]{64}))?)[.!]*\s*$/iu.exec(thought);
+    requireThat(!/^\s*yes[.!]*\s*$/iu.test(thought), 'confirmation-ambiguous',
+      'Bare “yes” is not confirmation. Use “yes, do that”, “go ahead”, “confirm”, or “confirm <wave>”.');
+    const confirmation = /^\s*(?:yes,? (?:do that|do it)|go ahead|confirm(?: ([0-9a-f]{64}))?)[.!]*\s*$/iu.exec(thought);
     if (confirmation) {
       const snapshot = await this.bots.repository.root(root);
       const state = foldState(snapshot);
@@ -176,16 +182,20 @@ export class Conversation {
     if (!input.started) return this.#result(root, input.frame);
     const handle = this.bots.spine.observe(root);
     try {
-      const snapshot = await this.bots.repository.root(root);
-      const basis = contextWitness(snapshot, scope);
+      const store = await this.bots.repository.snapshot();
+      const snapshot = store.roots.find(candidate => candidate.definition.root === root);
+      requireThat(snapshot, 'root-not-found', 'Choose an existing canonical root GUID.');
+      const basis = contextWitness(store, root, scope);
+      const context = canonicalContext(store, root, scope);
       const raw = await this.bots.spine.compute(handle, snapshot.definition.capability, {
-        root, scope, thought, context: canonicalContext(snapshot, scope), purpose: 'organization',
+        root, scope, thought, context, purpose: 'organization',
       }, this.provider);
-      const draft = validateDraft(raw, this.bots.now());
+      const draft = validateDraft(raw, this.bots.now(), context);
       await this.bots.repository.transaction(async transaction => {
         const current = findRoot(transaction, root);
         requireThat(!projectBot(current).hidden, 'bot-hidden', 'A hidden bot cannot finish an unobserved proposal.');
-        requireThat(sourceChain(current, scope).at(-1)?.frame_hash === input.frame.frame_hash && contextWitness(current, scope).revision === basis.revision, 'stale-head',
+        requireThat(sourceChain(current, scope).at(-1)?.frame_hash === input.frame.frame_hash
+          && contextWitness(transaction.snapshot, root, scope).revision === basis.revision, 'stale-head',
           'The canonical context changed during inference. A fresh review is required, not stale work.');
         const preview = foldState(current);
         validateResolutions(preview, draft, scope);
@@ -225,7 +235,7 @@ export class Conversation {
   async #result(root: string, input: RappFrame): Promise<ConversationResult> {
     const snapshot = await this.bots.repository.root(root);
     const reply = memoryFrames(snapshot).find(f => workEvent(f.payload).data.replyTo === input.frame_hash);
-    const projection = projectBot(snapshot);
+    const projection = await this.bots.project(root);
     const draft = reply?.payload.event === 'turn.assistant' && workEvent(reply.payload).data.draft
       ? validateDraft(workEvent(reply.payload).data.draft) : null;
     return {
@@ -250,6 +260,7 @@ export class Conversation {
       }
       requireThat(proposal.status === 'review' && proposal.draft.questions.length === 0, 'human-question',
         'Only an unconfirmed proposal with no unresolved human questions can be applied.');
+      if (proposal.draft.actions.length) requireActionTradeoffs(proposal.draft);
       if (proposal.draft.resolves.length) {
         const answer = memoryFrames(snapshot).find(f => f.frame_hash === workEvent(proposal.frame.payload).data.replyTo);
         requireThat(answer?.payload.event === 'turn.user' && workEvent(answer.payload).data.origin === 'copilot-cli',
@@ -257,7 +268,8 @@ export class Conversation {
       }
       requireThat(sourceChain(snapshot, String(proposal.frame.payload.scope)).at(-1)?.frame_hash === proposalWave, 'stale-head', 'The proposal is stale; review current canonical context before confirmation.');
       const basis = workEvent(proposal.frame.payload).data.contextRevision;
-      requireThat(basis === undefined || basis === contextWitness(snapshot, String(proposal.frame.payload.scope), proposalWave).revision,
+      requireThat(basis === undefined
+        || basis === contextWitness(transaction.snapshot, root, String(proposal.frame.payload.scope), proposalWave).revision,
         'stale-head', 'A permitted source changed since this proposal read canonical context; a fresh review is required.');
       validateResolutions(state, proposal.draft, String(proposal.frame.payload.scope));
       applyScopedActions(state, proposal.draft.actions, snapshot, proposalWave, String(proposal.frame.payload.scope));

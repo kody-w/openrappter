@@ -18,6 +18,7 @@ import { canonicalForks } from '../dist/canonical-forks.js';
 
 const draft = (id, name = id) => ({
   summary: `Create the ${name} internal scope.`, tradeoffs: ['A reviewed canonical scope is not a native directory.'],
+  tradeoffLinks: [{ actionId: id, tradeoff: 0 }],
   questions: [], actions: [{ type: 'scope.create', scope: { id, parent: 'root', kind: 'world', name, description: 'Reviewed internal identity.' } }],
 });
 
@@ -40,7 +41,8 @@ test('retained same-stream forks fence both interpretations and successors witho
   const evidence = await reopened.root(bot.root);
   assert.equal(canonicalJson(sourceChain(evidence, 'monorepo')[1]), canonicalJson(left));
   assert.equal(canonicalJson(evidence.sources.find(s => s.scope === 'monorepo').branches[0].frames[1]), canonicalJson(right));
-  for (const view of [() => projectBot(evidence), () => projectAi(evidence, 'root'), () => catchUpTimeline(evidence, 'root')]) {
+  const store = { roots: [evidence], frameCount: 6 };
+  for (const view of [() => projectBot(evidence), () => projectAi(store, evidence, 'root'), () => catchUpTimeline(store, evidence, 'root')]) {
     assert.throws(view, { code: 'canonical-fork-unresolved' });
   }
   assert.throws(() => memoryPrefix(evidence, 0), { code: 'canonical-fork-unresolved' });
@@ -207,7 +209,8 @@ test('confirmed CLI draft.resolves settles the same canonical question and preve
     { ...DEFAULT_CHANNEL_POLICY, automaticQuestions: true });
   h.channel.available = true;
   h.transport.responses.push({ summary: 'An owner decision is needed.', tradeoffs: [], actions: [],
-    questions: [{ reason: 'human-authority', question: 'Which scope should be used?' }] });
+    questions: [{ reason: 'human-authority', question: 'Which scope should be used?',
+      dependsOn: '/authority/selectedScope' }] });
   const original = await h.runtime.conversation.converse(bot.root, 'Ask the owner', 'ask-settlement');
   await h.runtime.channels.drain();
   const queue = (await h.runtime.channels.recap(bot.root)).pending[0].deliveryId;

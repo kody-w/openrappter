@@ -5,7 +5,7 @@
   "type": "object",
   "readOnly": true,
   "additionalProperties": false,
-  "required": ["schema", "root", "name", "hidden", "authority", "scopes", "turns", "outcomes", "attention", "heads", "branches", "proposals", "routines", "pointers", "artifacts", "progress", "sources"],
+  "required": ["schema", "root", "name", "hidden", "authority", "scopes", "transcript", "turns", "outcomes", "attention", "heads", "branches", "proposals", "routines", "pointers", "artifacts", "progress", "sources"],
   "properties": {
     "schema": { "const": "rapp-work.projection/1" },
     "root": { "$ref": "#/$defs/rappid" },
@@ -22,6 +22,7 @@
       }
     },
     "scopes": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/scope" } },
+    "transcript": { "$ref": "#/$defs/transcript" },
     "turns": { "type": "array", "items": { "$ref": "#/$defs/turn" } },
     "outcomes": { "$ref": "#/$defs/objects" },
     "attention": {
@@ -60,6 +61,25 @@
     "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "rappid": { "type": "string", "pattern": "^rappid:@[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*:[0-9a-f]{64}$" },
     "objects": { "type": "array", "items": { "type": "object" } },
+    "transcript": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "root", "scope", "total", "offset", "limit", "returned", "truncatedBefore", "truncatedAfter", "previousOffset", "nextOffset", "revision"],
+      "properties": {
+        "schema": { "const": "rapp-work.transcript-page/1" },
+        "root": { "$ref": "#/$defs/rappid" },
+        "scope": { "type": "string" },
+        "total": { "type": "integer", "minimum": 0 },
+        "offset": { "type": "integer", "minimum": 0 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "returned": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "truncatedBefore": { "type": "boolean" },
+        "truncatedAfter": { "type": "boolean" },
+        "previousOffset": { "type": ["integer", "null"], "minimum": 0 },
+        "nextOffset": { "type": ["integer", "null"], "minimum": 0 },
+        "revision": { "$ref": "#/$defs/hash" }
+      }
+    },
     "reference": {
       "type": "object",
       "additionalProperties": false,
@@ -87,10 +107,21 @@
     "turn": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["role", "speaker", "text", "source", "origin", "replyTo", "attribution"],
+      "required": ["role", "speaker", "actor", "text", "source", "origin", "replyTo", "attribution"],
       "properties": {
         "role": { "enum": ["user", "assistant"] },
         "speaker": { "oneOf": [{ "const": "human" }, { "$ref": "#/$defs/rappid" }] },
+        "actor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name", "provider"],
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "provider": { "type": "string" },
+            "grantWave": { "$ref": "#/$defs/hash" }
+          }
+        },
         "text": { "type": "string" },
         "source": { "$ref": "#/$defs/reference" },
         "origin": { "$ref": "source-reference.schema.json" },

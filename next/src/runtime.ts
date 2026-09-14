@@ -15,6 +15,7 @@ import { RootedEgg } from './egg.js';
 import { Refusal, requireThat } from './errors.js';
 import { AiProjectionApi } from './ai-api.js';
 import { CanonicalComputerReplay } from './computer-replay.js';
+import type { TranscriptOptions } from './transcript.js';
 
 export interface RuntimeOptions extends RepositoryOptions {
   brainstem?: BrainstemBinding;
@@ -70,6 +71,18 @@ export class HeadlessRuntime {
     const p = object(value);
     const check = (fields: readonly string[], optional: readonly string[] = []): void => { object(p, fields, optional); };
     const root = (): string => p.root === undefined ? this.bots.selected() : text(p.root, 260);
+    const transcriptOptions = (): TranscriptOptions => {
+      requireThat(p.transcriptOffset === undefined
+        || (typeof p.transcriptOffset === 'number' && Number.isInteger(p.transcriptOffset) && p.transcriptOffset >= 0),
+      'transcript-page', 'Transcript offset must be a nonnegative integer.');
+      requireThat(p.transcriptLimit === undefined
+        || (typeof p.transcriptLimit === 'number' && Number.isInteger(p.transcriptLimit) && p.transcriptLimit >= 1),
+      'transcript-page', 'Transcript limit must be a positive integer.');
+      return {
+        ...(p.transcriptOffset === undefined ? {} : { offset: p.transcriptOffset }),
+        ...(p.transcriptLimit === undefined ? {} : { limit: p.transcriptLimit }),
+      };
+    };
     switch (method) {
       case 'runtime.info':
         check([]);
@@ -112,9 +125,8 @@ export class HeadlessRuntime {
         check([], ['root']);
         return { attention: (await this.bots.project(root())).attention, observation: this.bots.spine.status(root()) };
       case 'projection.get': {
-        check([], ['root']);
-        const projection = await this.bots.project(root());
-        return { ...projection, turns: await this.collaboration.transcript(root()) };
+        check([], ['root', 'transcriptOffset', 'transcriptLimit']);
+        return this.bots.project(root(), transcriptOptions());
       }
       case 'organization.confirm':
         check(['proposalWave'], ['root']);
@@ -144,8 +156,8 @@ export class HeadlessRuntime {
         check(['peer', 'question'], ['root']);
         return this.collaboration.ask(root(), text(p.peer, 260), text(p.question, 2_000), operationId);
       case 'collaboration.transcript':
-        check([], ['root']);
-        return this.collaboration.transcript(root());
+        check([], ['root', 'transcriptOffset', 'transcriptLimit']);
+        return this.collaboration.transcriptPage(root(), transcriptOptions());
       case 'effects.approve':
         check(['effectId', 'requestHash', 'target'], ['root']);
         return this.effects.approve(root(), text(p.effectId, 100), text(p.requestHash, 64), text(p.target, 200), operationId);

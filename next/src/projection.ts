@@ -1,4 +1,4 @@
-import { AUTHORITY, frameHead, snapshotJson, type JsonObject, type RappFrame } from './canonical.js';
+import { AUTHORITY, contentHash, frameHead, snapshotJson, type JsonObject, type RappFrame } from './canonical.js';
 import { PROJECTION_SCHEMA, list, object, text, workEvent, type Scope } from './contract.js';
 import type { RootSnapshot } from './repository.js';
 import { requireThat } from './errors.js';
@@ -6,16 +6,7 @@ import { foldState } from './state.js';
 import { publicationData } from './ai-contract.js';
 import { memoryFrames, sourceReference } from './source-memory.js';
 import { questionPending, turnAttribution } from './channel-contract.js';
-
-export interface PublicTurn extends JsonObject {
-  role: 'user' | 'assistant';
-  speaker: string;
-  text: string;
-  source: JsonObject;
-  origin: JsonObject;
-  replyTo: string | null;
-  attribution: JsonObject;
-}
+import type { TranscriptPage, TranscriptTurn } from './transcript.js';
 export interface Attention extends JsonObject { kind: string; summary: string; source: string }
 export interface BotProjection extends JsonObject {
   schema: typeof PROJECTION_SCHEMA;
@@ -24,7 +15,8 @@ export interface BotProjection extends JsonObject {
   hidden: boolean;
   authority: JsonObject;
   scopes: Scope[];
-  turns: PublicTurn[];
+  transcript: JsonObject;
+  turns: TranscriptTurn[];
   outcomes: JsonObject[];
   attention: Attention[];
   heads: JsonObject;
@@ -48,12 +40,12 @@ export function publicWorkText(frame: RappFrame): string {
   return text(event.data.text);
 }
 
-export function projectBot(root: RootSnapshot): BotProjection {
+export function projectBot(root: RootSnapshot, transcript?: TranscriptPage): BotProjection {
   const state = foldState(root);
   const result: BotProjection = {
     schema: PROJECTION_SCHEMA, root: root.definition.root, name: root.definition.name, hidden: false,
     authority: { ...AUTHORITY, integrity: 'verified', factualTruth: false, externalAdoption: false },
-    scopes: state.scopes, turns: [], outcomes: [], attention: [],
+    scopes: state.scopes, transcript: {}, turns: [], outcomes: [], attention: [],
     heads: Object.fromEntries(Object.entries(root.streams).map(([family, frames]) =>
       [family, frames.length ? reference(frames.at(-1)!) : null])),
     branches: [...root.branches.map(b => ({ family: b.family, head: b.head, frames: b.frames.length, selected: false })),
@@ -67,6 +59,7 @@ export function projectBot(root: RootSnapshot): BotProjection {
   };
   const settled = new Set<string>();
   const memory = memoryFrames(root);
+  const localTurns: TranscriptTurn[] = [];
   for (const frame of memory) {
     const event = workEvent(frame.payload);
     const data = event.data;
@@ -76,13 +69,19 @@ export function projectBot(root: RootSnapshot): BotProjection {
       result.hidden = data.hidden;
     } else if (event.event === 'turn.user' || event.event === 'turn.assistant' || event.event === 'collaboration.synthesized') {
       const role = event.event === 'turn.user' ? 'user' : 'assistant';
-      result.turns.push({ role, speaker: role === 'user' ? 'human' : root.definition.root,
-        text: publicWorkText(frame), source: reference(frame), origin: sourceReference(frame), attribution: turnAttribution(frame), replyTo: typeof data.replyTo === 'string' ? data.replyTo : null });
+      localTurns.push({ role, speaker: role === 'user' ? 'human' : root.definition.root,
+        actor: role === 'user'
+          ? data.origin === 'external-imessage'
+            ? { id: 'external-imessage', name: 'External iMessage participant', provider: 'external-imessage' }
+            : { id: 'human', name: 'Human', provider: 'local-operator' }
+          : { id: root.definition.root, name: root.definition.name, provider: 'canonical-core' },
+        text: publicWorkText(frame), source: reference(frame), origin: sourceReference(frame), attribution: turnAttribution(frame),
+        replyTo: typeof data.requestWave === 'string' ? data.requestWave : typeof data.replyTo === 'string' ? data.replyTo : null });
       if (typeof data.replyTo === 'string') settled.add(data.replyTo);
     } else if (event.event === 'client.conversation') {
       const p = publicationData('conversation', data);
-      result.turns.push({ role: 'assistant', speaker: root.definition.root,
-        text: `[${p.actor.name} / ${p.actor.provider}] ${String(p.content.text)}`, source: reference(frame), origin: sourceReference(frame),
+      localTurns.push({ role: 'assistant', speaker: root.definition.root, actor: p.actor,
+        text: String(p.content.text), source: reference(frame), origin: sourceReference(frame),
         attribution: { origin: 'ai-client', approvalAuthority: false }, replyTo: null });
     } else {
       result.outcomes.push({ event: event.event, scope: event.scope, data, source: reference(frame), origin: sourceReference(frame), corrected: state.corrected.has(frame.frame_hash) });
@@ -92,7 +91,7 @@ export function projectBot(root: RootSnapshot): BotProjection {
       }
     }
   }
-  for (const turn of result.turns) {
+  for (const turn of localTurns) {
     if (turn.attribution.origin === 'external') {
       if (!memory.some(f => f.payload.event === 'channel.inbound.reviewed' && workEvent(f.payload).data.sourceWave === turn.source.frame_hash)) {
         result.attention.push({ kind: 'external-inbox', summary: 'External iMessage input awaits genuine CLI review; it cannot confirm work or answer a gauntlet.',
@@ -145,6 +144,22 @@ export function projectBot(root: RootSnapshot): BotProjection {
   }
   const originals = new Map([...memory, ...root.streams.swarm, ...preserved.flatMap(b => b.frames)].map(f => [f.frame_hash, f]));
   result.attention = result.attention.map(a => ({ ...a, origin: originals.has(a.source) ? sourceReference(originals.get(a.source)!) : null }));
+  if (transcript) {
+    const { turns, ...metadata } = transcript;
+    result.turns = turns;
+    result.transcript = metadata;
+  } else {
+    const limit = 256;
+    const offset = Math.max(0, localTurns.length - limit);
+    result.turns = localTurns.slice(offset);
+    result.transcript = {
+      schema: 'rapp-work.transcript-page/1', root: root.definition.root, scope: 'root',
+      total: localTurns.length, offset, limit, returned: result.turns.length,
+      truncatedBefore: offset > 0, truncatedAfter: false,
+      previousOffset: offset > 0 ? Math.max(0, offset - limit) : null, nextOffset: null,
+      revision: contentHash({ root: root.definition.root, turns: localTurns.map(turn => turn.source.frame_hash) }),
+    };
+  }
   return snapshotJson(result) as BotProjection;
 }
 
@@ -153,7 +168,7 @@ export function orient(projection: BotProjection): { text: string; evidence: Jso
   const outcome = projection.outcomes.at(-1);
   const lines = [`We are in ${projection.name}, the same root ${projection.root}.`];
   if (projection.hidden) lines.push('This bot is hidden; restoring it preserves its GUID and history.');
-  if (last) lines.push(`Last public turn: ${last.text}`);
+  if (last) lines.push(`Last public turn from ${last.actor.name}: ${last.text}`);
   else lines.push('The canonical world is ready; no conversation has been recorded yet.');
   if (outcome) lines.push(`Latest recorded outcome: ${String(outcome.event)}.`);
   if (projection.progress.length) lines.push(`Progress: ${String(projection.progress.at(-1)!.summary)}`);

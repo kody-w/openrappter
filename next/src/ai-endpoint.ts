@@ -15,7 +15,10 @@ function schema(required: string[], properties: JsonObject): JsonObject {
 }
 export const AI_TOOLS = Object.freeze([
   { name: 'rapp_work_read', description: 'Read the authorized canonical root projection; no model call or mutation.',
-    inputSchema: schema([], {}) },
+    inputSchema: schema([], {
+      transcriptOffset: { type: 'integer', minimum: 0 },
+      transcriptLimit: { type: 'integer', minimum: 1, maximum: AI_LIMITS.windowItems },
+    }) },
   { name: 'rapp_work_context', description: 'Read bounded canonical proposal context and its exact revision for this capability scope; no model call or mutation.',
     inputSchema: schema([], { scope: { type: 'string' } }) },
   { name: 'rapp_work_catch_up', description: 'Deterministic read-only fast-forward timeline with recorded/reconstructed/unavailable grades, canonical source hashes and state digests. Never reruns models or tools.',
@@ -59,8 +62,18 @@ export class AiEndpoint {
     const exact = (required: string[], optional: string[] = []): void => { object(p, ['root', ...required], optional); };
     switch (method) {
       case 'rapp_work_read':
-        exact([]);
-        return this.api.read(this.root, this.capability);
+        exact([], ['transcriptOffset', 'transcriptLimit']);
+        requireThat(p.transcriptOffset === undefined
+          || (typeof p.transcriptOffset === 'number' && Number.isInteger(p.transcriptOffset) && p.transcriptOffset >= 0),
+        'transcript-page', 'Transcript offset must be a nonnegative integer.');
+        requireThat(p.transcriptLimit === undefined
+          || (typeof p.transcriptLimit === 'number' && Number.isInteger(p.transcriptLimit)
+            && p.transcriptLimit >= 1 && p.transcriptLimit <= AI_LIMITS.windowItems),
+        'transcript-page', `Transcript limit must be between 1 and ${AI_LIMITS.windowItems}.`);
+        return this.api.read(this.root, this.capability, undefined, {
+          ...(p.transcriptOffset === undefined ? {} : { offset: Number(p.transcriptOffset) }),
+          ...(p.transcriptLimit === undefined ? {} : { limit: Number(p.transcriptLimit) }),
+        });
       case 'rapp_work_context':
         exact([], ['scope']);
         return this.api.context(this.root, this.capability, p.scope);

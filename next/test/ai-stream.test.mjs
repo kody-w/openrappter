@@ -148,6 +148,9 @@ test('restricted MCP negotiates lifecycle and standard resource updates without 
   await call({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
   assert.equal(sent.at(-1).result.tools.length, 9);
   assert(!sent.at(-1).result.tools.some(t => /grant|shell|approve|delete/.test(t.name)));
+  const readTool = sent.at(-1).result.tools.find(tool => tool.name === 'rapp_work_read');
+  assert.equal(readTool.inputSchema.properties.transcriptOffset.minimum, 0);
+  assert.equal(readTool.inputSchema.properties.transcriptLimit.maximum, 16);
   await call({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'rapp_work_subscribe', arguments: { root: a.root } } });
   const sub = sent.at(-1).result.structuredContent;
   await call({ jsonrpc: '2.0', id: 4, method: 'resources/read', params: { uri: sub.uri } });

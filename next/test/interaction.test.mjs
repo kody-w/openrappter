@@ -19,6 +19,8 @@ test('incomplete thought -> complete public review -> atomic confirmed organizat
   assert(confirmed.scopes.some(s => s.id === 'copilot-builder'));
   assert.equal(confirmed.artifacts[0].name, 'Builder brief');
   assert.equal(confirmed.proposals[0].status, 'applied');
+  assert.deepEqual(new Set(confirmed.proposals[0].draft.tradeoffLinks.map(link => link.actionId)),
+    new Set(['copilot-builder', 'builder-brief']));
   assert.equal((await h.runtime.bots.repository.snapshot()).frameCount, 4);
   const before = await inventory(h.directory);
   const restarted = await h.restart();
@@ -34,6 +36,10 @@ test('one natural conversation accepts contextual confirmation and clear/restore
   const h = await harness();
   const a = await h.create();
   const proposal = await h.runtime.conversation.converse(a.root, 'I need a Builder world', 'natural-thought');
+  const before = await inventory(h.directory);
+  await assert.rejects(h.runtime.conversation.converse(a.root, 'yes', 'ambiguous-pending-confirm'), { code: 'confirmation-ambiguous' });
+  assert.deepEqual(await inventory(h.directory), before);
+  assert.equal(h.transport.requests.length, 1);
   const confirmed = await h.runtime.conversation.converse(a.root, 'Yes, do that.', 'natural-confirm');
   assert.equal(confirmed.status, 'complete');
   assert.equal(confirmed.proposalWave, proposal.proposalWave);
@@ -46,7 +52,33 @@ test('one natural conversation accepts contextual confirmation and clear/restore
   assert.equal(restored.projection.hidden, false);
   assert.equal(restored.projection.root, a.root);
   assert.equal(h.transport.requests.length, 1);
-  await assert.rejects(h.runtime.conversation.converse(a.root, 'yes', 'ambiguous-confirm'), { code: 'confirmation-context' });
+  await assert.rejects(h.runtime.conversation.converse(a.root, 'yes', 'ambiguous-confirm'), { code: 'confirmation-ambiguous' });
+});
+
+test('known clarification dependencies and unlinked or vacuous action tradeoffs are refused', async () => {
+  const h = await harness();
+  const bot = await h.create();
+  h.transport.responses.push({
+    summary: 'Ask for context that is already supplied.', tradeoffs: [], actions: [],
+    questions: [{ reason: 'irreducible-ambiguity', question: 'What is the exact root RAPPID?', dependsOn: '/root' }],
+  });
+  const known = await h.runtime.conversation.converse(bot.root, 'Organize this existing root', 'known-dependency');
+  assert.equal(known.status, 'unavailable');
+  assert(!known.projection.attention.some(item => item.kind === 'human-question'));
+  assert(!(await durableText(h.directory)).includes('What is the exact root RAPPID?'));
+  for (const [id, tradeoffs, tradeoffLinks] of [
+    ['unlinked-tradeoff', ['Creating this scope changes the reviewed internal organization.'], []],
+    ['vacuous-tradeoff', ['No downside'], [{ actionId: 'invalid-world', tradeoff: 0 }]],
+  ]) {
+    h.transport.responses.push({
+      summary: 'Propose one invalidly reviewed world.', tradeoffs, tradeoffLinks, questions: [],
+      actions: [{ type: 'scope.create', scope: { id: 'invalid-world', parent: 'root', kind: 'world',
+        name: 'Invalid world', description: 'This must not be created without a material linked tradeoff.' } }],
+    });
+    const result = await h.runtime.conversation.converse(bot.root, 'Create an invalidly reviewed world', id);
+    assert.equal(result.status, 'unavailable');
+    assert(!result.projection.scopes.some(scope => scope.id === 'invalid-world'));
+  }
 });
 
 test('irreducible human authority questions prevent confirmation, not ordinary context inference', async () => {
@@ -55,7 +87,8 @@ test('irreducible human authority questions prevent confirmation, not ordinary c
   h.transport.responses.push({
     summary: 'The external destination requires your authority.',
     tradeoffs: ['Keep internal preparation reversible; delivery remains outside authority.'],
-    questions: [{ reason: 'human-authority', question: 'Which recipient is authorized to receive the completed brief?' }],
+    questions: [{ reason: 'human-authority', question: 'Which recipient is authorized to receive the completed brief?',
+      dependsOn: '/authority/authorizedRecipient' }],
     actions: [],
   });
   const result = await h.runtime.conversation.converse(bot.root, 'Prepare a private handoff', 'human-question');
@@ -70,7 +103,8 @@ test('a reviewed human answer supersedes its exact question without erasing the 
   const a = await h.create();
   h.transport.responses.push({
     summary: 'Choose the authorized recipient.', tradeoffs: ['No external effect is authorized.'],
-    questions: [{ reason: 'human-authority', question: 'Which recipient may receive the handoff?' }], actions: [],
+    questions: [{ reason: 'human-authority', question: 'Which recipient may receive the handoff?',
+      dependsOn: '/authority/authorizedRecipient' }], actions: [],
   });
   const question = await h.runtime.conversation.converse(a.root, 'Prepare a handoff', 'handoff-question');
   h.transport.responses.push({
@@ -124,6 +158,7 @@ test('internal scope contexts exclude sibling and cross-bot memory and reject es
   const b = await h.create(1);
   h.transport.responses.push({
     summary: 'Two independent internal workspaces.', tradeoffs: ['They share a root but have separate scoped context.'],
+    tradeoffLinks: [{ actionId: 'scope-a', tradeoff: 0 }, { actionId: 'scope-b', tradeoff: 0 }],
     questions: [], actions: ['scope-a', 'scope-b'].map(id => ({ type: 'scope.create',
       scope: { id, parent: 'monorepo', kind: 'workspace', name: id, description: 'An explicitly scoped workspace.' } })),
   });
@@ -138,9 +173,10 @@ test('internal scope contexts exclude sibling and cross-bot memory and reject es
   const context = JSON.stringify(h.transport.requests.at(-1).canonicalContext);
   assert(!context.includes('SIBLING-PRIVATE-MARKER'));
   assert(!context.includes('OTHER-BOT-PRIVATE-MARKER'));
-  assert.deepEqual(canonicalContext(await h.runtime.bots.repository.root(a.root), 'scope-b').scopes.map(s => s.id), ['scope-b']);
+  assert.deepEqual(canonicalContext(await h.runtime.bots.repository.snapshot(), a.root, 'scope-b').scopes.map(s => s.id), ['scope-b']);
   h.transport.responses.push({
-    summary: 'Try to escape.', tradeoffs: ['Should be refused.'], questions: [],
+    summary: 'Try to escape.', tradeoffs: ['The proposed parent escapes the selected internal scope boundary.'],
+    tradeoffLinks: [{ actionId: 'escape', tradeoff: 0 }], questions: [],
     actions: [{ type: 'scope.create', scope: { id: 'escape', parent: 'scope-a', kind: 'workspace', name: 'escape', description: 'Not authorized.' } }],
   });
   assert.equal((await h.runtime.conversation.converse(a.root, 'Keep scope B bounded', 'scope-escape', 'scope-b')).status, 'unavailable');

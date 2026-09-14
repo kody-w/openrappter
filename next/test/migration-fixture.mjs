@@ -168,7 +168,7 @@ export async function migrationFixture(directory, options = {}) {
       pointer: { scope: 'global-estate', nativeShape: 'Historical archive/profile; unsupported interpretation',
         availability: 'unavailable', reason: descriptor.reason, sourceRappid } });
   }
-  const projected = snapshots.map(projectBot);
+  const projected = snapshots.map(snapshot => projectBot(snapshot));
   const forms = {};
   for (const p of projected) for (const scope of p.scopes) forms[scope.kind] = (forms[scope.kind] ?? 0) + 1;
   for (const form of coverage.requiredForms) if (!forms[form]) throw new Error(`Required fixture form missing: ${form}`);
@@ -251,7 +251,7 @@ export async function minimalRootMigrationFixture(directory, {
     sourceByItem.set(id, { directory: path.join(directory, relativeRoot), files });
     snapshots.push(verifyRootFiles(entry.root, files, keys.signatures));
   }
-  const projected = snapshots.map(projectBot);
+  const projected = snapshots.map(snapshot => projectBot(snapshot));
   const forms = {};
   for (const projection of projected) for (const scope of projection.scopes) {
     forms[scope.kind] = (forms[scope.kind] ?? 0) + 1;

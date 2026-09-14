@@ -99,9 +99,17 @@ returns one JSON object:
   "liveEffectsPerformed": false,
   "draft": {
     "summary": "Public review summary",
-    "tradeoffs": ["Material tradeoff"],
+    "tradeoffs": ["The proposed artifact remains inert until exact owner confirmation."],
+    "tradeoffLinks": [{"actionId": "reviewed-note", "tradeoff": 0}],
     "questions": [],
-    "actions": [],
+    "actions": [{
+      "type": "artifact.save",
+      "id": "reviewed-note",
+      "scope": "root",
+      "name": "Reviewed note",
+      "content": "Public inert text.",
+      "mediaType": "text/plain"
+    }],
     "resolves": []
   }
 }

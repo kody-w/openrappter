@@ -80,6 +80,7 @@ test('provider and private-channel evidence fail honestly without real bindings 
   const draft = {
     summary: 'Create one reviewed artifact.',
     tradeoffs: ['Owner confirmation remains separate.'],
+    tradeoffLinks: [{ actionId: 'real-note', tradeoff: 0 }],
     questions: [],
     actions: [{ type: 'artifact.save', id: 'real-note', scope: 'root', name: 'Real note', content: 'review', mediaType: 'text/plain' }],
     resolves: [],

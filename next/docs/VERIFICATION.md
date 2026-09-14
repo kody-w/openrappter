@@ -1,5 +1,35 @@
 # Verified headless milestones
 
+## Unified transcript and intent hardening (rebased onto `b5bd49f`)
+
+The complete `npm --prefix next run check` passes **158 tests**, strict
+typecheck/build and every existing gate. Focused validation passes **16**
+transcript/intent tests, **25** provider/endpoint/stream/controlled-local
+proposal tests, **10** Catch-me-up tests plus its independent proof gate, and
+**6** unattended scheduler tests.
+
+Owner projection, conversation results, provider-neutral snapshots/subscriptions,
+provider-proposal context, restart and private recap use one verified scoped
+transcript projector. Signed collaboration request/echo/synthesis turns remain
+distinct; recipient-only swarm changes produce passive `transcript-changed`
+updates. Bounded pages report total/offset/limit, both truncation directions,
+navigation offsets and a deterministic revision.
+
+New intent validation requires each new clarification to name an exact absent
+canonical-context JSON Pointer. Every new action has at least one explicit
+tradeoff link, and placeholder tradeoffs refuse. Bare `yes` is not confirmation;
+the qualified phrases in `INTERACTION_CONTRACT.md` remain accepted. Focused
+regressions are in `test/transcript.test.mjs` and `test/interaction.test.mjs`.
+Current deterministic end-to-end goldens are under
+`fixtures/unified-transcript-intent/`; prior receipts remain historical.
+The portable skill is version **0.6.0**, SHA-256
+`e582e2e8c18910a6956dee3c7cf32f7bf82a4cf2ea01462af2ac308780965177`.
+
+The integrated unattended scheduler, provider-neutral owner-confirmed proposals,
+independently verified Catch-me-up/state-only replay, migration authority,
+full-RAPPID storage and hermetic release/browser boundaries remain intact. No
+release/host code or live credential/private-channel binding is changed.
+
 ## Unattended recurrence follow-up
 
 The complete `npm --prefix next run check` passes **133 tests**, strict
@@ -37,7 +67,8 @@ The generated synthetic receipt at
 mutation. It records context read, Draft validation, self-confirmation refusal,
 exact owner confirmation and applied-result restart reconstruction. The receipt
 was written by `scripts/ai-projection-proof.mjs --write-verification`; it is not
-a live-provider claim. The tested portable skill is version **0.5.0**, SHA-256
+a live-provider claim. At integrated tip `b5bd49f`, that proof tested portable
+skill version **0.5.0**, SHA-256
 `bf2c92cefdb25a6cabf0fbc802c0b1734984d48665cf49ba6a9a35fcc250bbb1`.
 
 The opt-in

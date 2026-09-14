@@ -6,7 +6,7 @@ import { AiEndpoint } from '../dist/ai-endpoint.js';
 import { eventPayload } from '../dist/contract.js';
 import { sourceChain } from '../dist/source-memory.js';
 import { CatchUpPlayer } from './catch-up-player.mjs';
-import { harness, inventory, durableText } from './harness.mjs';
+import { harness, inventory, durableText, allowPair } from './harness.mjs';
 import { issue, publish, view } from './ai-fixture.mjs';
 
 function trustedReplay(root, scope, request, page, guestEvidenceDigest = null) {
@@ -107,6 +107,19 @@ test('fixed end cursors reconstruct identical pages after restart and after late
   assert.equal(canonicalJson(await restarted.ai.catchUp(a.root, client.capability, { from: null, to: first.to })), canonicalJson(first));
   await h.runtime.ai.publish(a.root, client.capability, publish('conversation', { text: 'Later work must not change a pinned replay.' }), 'later');
   const pinned = await restarted.ai.catchUp(a.root, client.capability, { from: null, to: first.to });
+  assert.equal(canonicalJson(pinned), canonicalJson(first));
+});
+
+test('a pinned replay is unchanged by later signed peer transcript state', async () => {
+  const { h, a, client } = await seeded();
+  const b = await h.create(1);
+  await allowPair(h, a.root, b.root);
+  const first = await h.runtime.ai.catchUp(a.root, client.capability, { from: null });
+  await h.runtime.collaboration.ask(a.root, b.root,
+    'Add a later signed public disagreement.', 'later-replay-collaboration');
+  const live = await h.runtime.ai.read(a.root, client.capability);
+  assert(live.turns.some(turn => turn.speaker === b.root && turn.text.includes('Disagreement:')));
+  const pinned = await h.runtime.ai.catchUp(a.root, client.capability, { from: null, to: first.to });
   assert.equal(canonicalJson(pinned), canonicalJson(first));
 });
 

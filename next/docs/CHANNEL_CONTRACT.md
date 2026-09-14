@@ -133,8 +133,14 @@ spend physical rate budget; uncertain attempts do.
 
 Recap reconstructs original public sources, external pending input, delivery
 status, preflight generation and batch outcomes from canonical frames. It is not
-a copied message/queue database. Restart, read, Catch-me-up and inspection do not
-send, infer or replay an uncertain effect.
+a copied message/queue database. A referenced collaboration synthesis is rendered
+through the same verified transcript projector, including the exact signed peer
+request/echo and preserved disagreement. Bounded excerpts carry an explicit
+`… [truncated]` marker and machine-readable transcript/truncated-source metadata.
+The six-source recap window also reports total/offset/limit and truncation rather
+than silently omitting older eligible work.
+Restart, read, Catch-me-up and inspection do not send, infer or replay an
+uncertain effect.
 
 ## Synthetic evidence and future channels
 

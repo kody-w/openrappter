@@ -108,8 +108,11 @@ export async function sourceOwnedProof() {
   const queue = memoryFrames(snapshot).find(f => f.frame_hash === queued.deliveryId);
   assert.equal(queue.payload.data.summary, undefined);
   assert.equal(queue.payload.data.format, 'rapp-work.recap-references/1');
+  assert.equal(queue.payload.data.sourceSelection.returned, queue.payload.data.sourceRefs.length);
   for (const ref of references) assert(queue.payload.data.sourceRefs.some(r => canonicalJson(r) === canonicalJson(ref)));
   assert(markers.every(marker => queued.summary.includes(marker)));
+  assert(queued.summary.includes(peerTurn.payload.public.disagreements[0]));
+  assert.equal(queued.transcript.schema, 'rapp-work.transcript-page/1');
   assert.equal((await h.runtime.channels.deliver(root, queued.deliveryId, 'source-outage')).status, 'unavailable');
   await drain();
   const finalRoot = await h.runtime.bots.repository.root(root);
@@ -117,7 +120,12 @@ export async function sourceOwnedProof() {
   const current = await h.runtime.ai.read(root, client.capability);
   const where = await h.runtime.bots.whereWereWe(root);
   const recap = await h.runtime.channels.recap(root);
-  assert(where.evidence.every(ref => ref.guid === root && ref.scope && ref.frame_hash));
+  assert(where.evidence.every(ref => ref.guid && ref.scope && ref.frame_hash));
+  for (const ref of where.evidence) {
+    assert(projection.turns.some(turn => canonicalJson(turn.origin) === canonicalJson(ref))
+      || projection.outcomes.some(outcome => canonicalJson(outcome.origin) === canonicalJson(ref))
+      || projection.progress.some(progress => canonicalJson(progress.origin) === canonicalJson(ref)));
+  }
   assert.equal(projection.progress.length, 2);
   for (const progress of projection.progress) assert(references.some(ref => canonicalJson(progress.origin) === canonicalJson(ref)));
   const frameText = canonicalJson(memoryFrames(finalRoot));

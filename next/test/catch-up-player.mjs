@@ -37,7 +37,10 @@ function expectedProvenance(frame) {
   }
   const evidence = Array.isArray(data.evidence)
     ? data.evidence.filter(value => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)) : [];
-  return [...new Set([frame.frame_hash, ...evidence])];
+  const collaboration = ['collaboration.perspective', 'collaboration.synthesized'].includes(event)
+    ? [data.requestWave, data.responseWave].filter(value =>
+      typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)) : [];
+  return [...new Set([frame.frame_hash, ...evidence, ...collaboration])];
 }
 
 function verifyState(point, root, scope, cursor) {

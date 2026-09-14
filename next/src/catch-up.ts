@@ -1,9 +1,9 @@
 import { canonicalJson, contentHash, snapshotJson, type JsonObject, type RappFrame } from './canonical.js';
 import { label, object, workEvent } from './contract.js';
 import { Refusal, requireThat } from './errors.js';
-import { atCursor, cursorFor, projectAi } from './ai-projector.js';
+import { atCursor, cursorFor, projectAi, withHistoricalTranscript } from './ai-projector.js';
 import { publicationData, publicationKind } from './ai-contract.js';
-import type { RootSnapshot } from './repository.js';
+import type { RootSnapshot, StoreSnapshot } from './repository.js';
 import { foldState, permittedScopes } from './state.js';
 import { CanonicalComputerReplay, guestOptIn, GUEST_REPLAY_SCHEMA } from './computer-replay.js';
 import { publicWorkText } from './projection.js';
@@ -64,11 +64,13 @@ function retainedBranchesIncluded(end: RootSnapshot, from: RootSnapshot): boolea
     [...heads].every(head => available.get(scope)?.has(head)));
 }
 
-function checkpoint(root: RootSnapshot, scope: string, guest: JsonObject | null = null): ReplayCheckpoint {
+function checkpoint(snapshot: StoreSnapshot, root: RootSnapshot, scope: string,
+  guest: JsonObject | null = null): ReplayCheckpoint {
   const cursor = cursorFor(root);
   const sourceFrameHashes = [root.streams.body[0]!.frame_hash, ...memoryHeadHashes(root)];
   try {
-    const projection = projectAi(root, scope);
+    const projection = projectAi(withHistoricalTranscript(snapshot, root), root, scope,
+      { allowIncompleteHistory: true });
     const state: ReplayState = { root: root.definition.root, scope, cursor, projection, guest };
     if (Buffer.byteLength(canonicalJson(state)) > CATCH_UP_LIMITS.stateBytes) {
       return { cursor, grade: 'unavailable', stateDigest: null, state: null, reason: 'state-byte-bound', sourceFrameHashes };
@@ -107,11 +109,16 @@ function publicMaterial(frame: RappFrame): { summary: string | null; recordedVie
   if (e.event.startsWith('migration.')) summary = `Recorded ${e.event}; original source identity and classification remain canonical.`;
   if (summary === undefined) summary = `Recorded ${e.event}.`;
   const evidence = Array.isArray(e.data.evidence) ? e.data.evidence.filter((v): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/u.test(v)) : [];
-  return { summary: String(summary).slice(0, 4_000), recordedView: false, refusedView: false, hashes: [...sources, ...evidence] };
+  const collaboration = ['collaboration.perspective', 'collaboration.synthesized'].includes(e.event)
+    ? [e.data.requestWave, e.data.responseWave].filter((value): value is string =>
+      typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)) : [];
+  return { summary: String(summary).slice(0, 4_000), recordedView: false, refusedView: false,
+    hashes: [...new Set([...sources, ...evidence, ...collaboration])] };
 }
 
 /** Pure replay over already verified canonical data; never invokes a runtime or writes state. */
-export function catchUpTimeline(root: RootSnapshot, scope: string, value: unknown = {}, computer?: CanonicalComputerReplay): JsonObject {
+export function catchUpTimeline(snapshot: StoreSnapshot, root: RootSnapshot, scope: string,
+  value: unknown = {}, computer?: CanonicalComputerReplay): JsonObject {
   label(scope);
   const input = object(value, [], ['from', 'to', 'limit', 'guest']);
   const guestRequest = input.guest === undefined ? null : guestOptIn(input.guest);
@@ -129,7 +136,7 @@ export function catchUpTimeline(root: RootSnapshot, scope: string, value: unknow
   requireThat(retainedBranchesIncluded(end, from), 'replay-range',
     'The start cursor cannot contain retained source branches absent from the fixed end cursor.');
   const pending = memoryPending(end, from);
-  const baseline = checkpoint(from, scope);
+  const baseline = checkpoint(snapshot, from, scope);
   const steps: ReplayStep[] = [];
   let cursor = cursorFor(from);
   let bytes = Buffer.byteLength(canonicalJson(baseline));
@@ -151,7 +158,7 @@ export function catchUpTimeline(root: RootSnapshot, scope: string, value: unknow
           image: null, command: null, diff: null, execution: false };
       }
     }
-    const state = checkpoint(after, scope, guest);
+    const state = checkpoint(snapshot, after, scope, guest);
     const material = visible ? publicMaterial(frame) : { summary: null, recordedView: false, refusedView: false, hashes: [frame.frame_hash] };
     const unavailable = !visible || material.summary === null || material.refusedView || state.grade === 'unavailable'
       || (material.recordedView && object(state.state?.projection?.view).status === 'invalidated');
@@ -178,7 +185,7 @@ export function catchUpTimeline(root: RootSnapshot, scope: string, value: unknow
   if (advanced === pending.length && canonicalJson(cursor) !== canonicalJson(to)) {
     requireThat(branchDelta.length > 0, 'replay-range', 'The fixed replay range contains an unsupported state-only transition.');
     if (steps.length < limit) {
-      const state = checkpoint(end, scope);
+      const state = checkpoint(snapshot, end, scope);
       const step: ReplayStep = {
         stepKind: 'state-only', cursor: to!, previousCursor: cursor, event: 'retained-source-branches-changed',
         grade: state.grade, workGrade: 'unavailable', stateGrade: state.grade,

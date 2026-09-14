@@ -18,7 +18,7 @@ test('six AI-provider labels publish root-signed attributed public work without 
   assert.equal(snapshot.root, a.root);
   assert.equal(snapshot.turns.length, 6);
   assert.equal(new Set(snapshot.turns.map(t => t.actor.id)).size, 6);
-  assert(snapshot.turns.every(t => t.bot === a.root && t.role === 'assistant'));
+  assert(snapshot.turns.every(t => t.speaker === a.root && t.role === 'assistant'));
   assert.equal((await h.runtime.bots.list()).length, 1);
   assert.equal(h.transport.requests.length, 0);
   const canonical = await h.runtime.bots.repository.root(a.root);
@@ -53,6 +53,7 @@ test('structured proposals require proposal authority, a fresh context revision 
   const draft = {
     summary: 'Create one scoped artifact.',
     tradeoffs: ['The proposal is inert until exact owner confirmation.'],
+    tradeoffLinks: [{ actionId: 'scoped-note', tradeoff: 0 }],
     questions: [],
     actions: [{ type: 'artifact.save', id: 'scoped-note', scope: 'root', name: 'Scoped note', content: 'reviewed', mediaType: 'text/plain' }],
     resolves: [],

@@ -16,6 +16,8 @@ The projection contains:
   bots;
 - public user/assistant turns with distinct original root speakers, canonical
   source stream/sequence/UTC/particle/wave and optional reply binding;
+- explicit transcript page metadata: total, offset, limit, returned count,
+  earlier/later truncation, navigation offsets and deterministic revision;
 - review proposals, resolved/superseded human questions, internal artifacts,
   native pointers, recurring work, progress, outcomes and attention;
 - original canonical heads and explicitly unselected preserved branch heads,
@@ -39,6 +41,13 @@ Projection, selection, observer status and Where-were-we are non-authoritative
 read-only views. Consuming a projection adds no event and runs no model.
 Discarding one view does not dispose another root's observation.
 
+The owner projection, conversation result, provider-neutral snapshot/subscription,
+model context and private recap all use the same verified scoped transcript
+projector. Cross-bot request/echo/synthesis turns therefore cannot disappear at
+an adapter boundary. Private recap follows a synthesis's exact peer response
+reference, and any bounded text excerpt is visibly marked with
+`… [truncated]` plus machine-readable source/truncation metadata.
+
 A future one-chat UI may display this contract and forward human intents. It
 must not implement its own planner, registry, provider routing, durable message
 history, scheduling authority, capability loader, approval policy or deletion.
@@ -55,7 +64,10 @@ cursor events. It also exposes attributed structured client proposals with
 their exact context revision, Draft digest and `review|applied|corrected` state;
 both confirmation and mutation authority are explicitly owner-only. The older
 owner-facing `projection.get` remains available; it is not the credentialed
-multi-client transport.
+multi-client transport. `rapp_work_read` accepts optional
+`transcriptOffset` and `transcriptLimit`; subscriptions carry the same transcript
+page and emit a `transcript-changed` update when a signed peer request/echo
+changes without a local memory append.
 
 The UI must subscribe and transform around canonical AI work, rather than turn
 these fields into a parallel control plane. A test-only render-model reducer

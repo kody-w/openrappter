@@ -46,6 +46,10 @@ model, tool, channel send or uncertain approval.
 
 1. Select a full root GUID and optional internal scope. Read and verify canonical
    context first; sibling scopes and other bots' private memory are excluded.
+   Public conversation comes from one verified transcript projector shared by
+   conversation results, owner projection, AI projection, private recap and
+   restart. Every bounded page reports total/offset/limit, earlier/later
+   truncation, navigation offsets and a deterministic revision.
 2. Append the user's public thought before inference. A crash at this boundary
    leaves an honest incomplete-turn attention item, not an instruction to retry.
 3. Under a transient observation, the verified root interpreter requests only
@@ -55,7 +59,11 @@ model, tool, channel send or uncertain approval.
    disabled. Only bounded public response JSON is accepted.
 4. Infer organization rather than asking the user to design folders. The public
    draft contains `summary`, material `tradeoffs`, irreducible `questions` and
-   bounded `actions`. Nothing in a draft executes.
+   bounded `actions`. Every proposed action is linked to at least one concrete
+   non-placeholder tradeoff through `{actionId,tradeoff}` in `tradeoffLinks`.
+   Every new question names an exact absent JSON Pointer in `dependsOn`;
+   already-present canonical context cannot be requested again. Human-authority
+   dependencies must be under `/authority/`. Nothing in a draft executes.
    A capability-scoped external AI follows the provider-neutral path instead:
    `rapp_work_context` returns the exact canonical context revision and
    `rapp_work_propose` may append only a validated attributed `client.proposal`.
@@ -66,8 +74,9 @@ model, tool, channel send or uncertain approval.
    One canonical successor atomically represents the whole internal outcome.
    In the same natural conversation, “yes, do that”, “go ahead”, or “confirm”
    resolves only the exact latest reviewed proposal in the permitted scope;
-   “confirm <wave>” names one explicitly. No pending context means refusal, not
-   a guessed action. This cannot approve an external effect.
+   “confirm <wave>” names one explicitly. Bare “yes” is rejected as ambiguous.
+   No pending context means refusal, not a guessed action. This cannot approve
+   an external effect.
 6. A later reviewed answer can carry `resolves:[question-wave]`. Only exact
    pending questions in the same scope can be superseded, and **only after
    human confirmation**. Both questions and answers remain in history.
@@ -98,7 +107,7 @@ Selection is transient; an explicit invalid `root` never falls back to it.
 | `conversation.where` | Canonical orientation/resume; no mutation or inference |
 | `conversation.catch-up` | Optional `scope`, `from`, `to`, `limit`, private `guest` opt-in; deterministic graded replay, no execution |
 | `attention.get` | Pending review, question, incomplete work, provider/channel/effect state and observation |
-| `projection.get` | Stable passive projection, distinct signed collaboration speakers |
+| `projection.get` | Stable passive projection, distinct signed collaboration speakers; optional `transcriptOffset` / `transcriptLimit` |
 | `organization.confirm` | `proposalWave`; exact human confirmation |
 | `estate.record` | `evidence`; closed historical local/native pointer provenance or non-candidate observation; exact source receipt, no registration |
 | `estate.rapp-up` | Complete reviewed organization of already recorded discovery |
@@ -108,7 +117,7 @@ Selection is transient; an explicit invalid `root` never falls back to it.
 | `work.tick` | `routineId`, exact `occurrence`; bounded idempotent internal recap |
 | `collaboration.grant` | `peer`, `publicBrief`, `mode:allow|revoke`; one-hop public perspective only |
 | `collaboration.ask` | `peer`, `question`; requires independent bilateral signed grants |
-| `collaboration.transcript` | Canonical UTC/wave order, distinct original GUID speakers |
+| `collaboration.transcript` | Canonical UTC/wave order, distinct original GUID speakers; optional `transcriptOffset` / `transcriptLimit` |
 | `effects.approve` | `effectId`, exact `requestHash`, exact `target`; separate external-action approval |
 | `channels.bind` | Explicit `root`, private `contactRef`/`permissionRef`, `enabled`, optional bounded `policy`/private `shortcut`/`credential`; strict runtime sibling only, no OS permission |
 | `channels.consider` | Explicit `root`; canonical clarification reconstruction and policy-approved internal queueing only |

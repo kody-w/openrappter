@@ -160,7 +160,7 @@ test('external receipts and correction successors belong to their original sourc
   const h = await harness(), bot = await h.create();
   h.transport.responses.push({ summary: 'Review one request only.', tradeoffs: ['This records a bounded request; separate exact approval is required for any effect.'], questions: [], actions: [
     { type: 'external.request', id: 'world-request', scope: 'local-estate', operation: 'send-message', target: 'fixture:operator', content: 'Public bounded request.' },
-  ] });
+  ], tradeoffLinks: [{ actionId: 'world-request', tradeoff: 0 }] });
   const proposal = await h.runtime.conversation.converse(bot.root, 'Review a bounded world action', 'review-world');
   await h.runtime.conversation.confirm(bot.root, proposal.proposalWave, 'confirm-world');
   const effect = foldState(await h.runtime.bots.repository.root(bot.root)).effects.get('world-request');
@@ -211,7 +211,7 @@ test('organization review binds all permitted source context without serializing
   assert.deepEqual(await inventory(h.directory), before);
   h.transport.responses.push({ summary: 'Create one nested world.', tradeoffs: ['Only this source subtree is reorganized.'], questions: [], actions: [
     { type: 'scope.create', scope: { id: 'nested-world', parent: 'monorepo', kind: 'world', name: 'Nested world', description: 'Source-scoped review.' } },
-  ] });
+  ], tradeoffLinks: [{ actionId: 'nested-world', tradeoff: 0 }] });
   const scoped = await h.runtime.conversation.converse(bot.root, 'Organize this subtree', 'scoped-review', 'monorepo');
   await h.runtime.conversation.recordProgress(bot.root, 'local-estate', 'Unrelated sibling evidence', [], 'sibling-changed');
   const confirmed = await h.runtime.conversation.confirm(bot.root, scoped.proposalWave, 'scoped-confirm');

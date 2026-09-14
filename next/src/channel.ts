@@ -4,13 +4,14 @@ import { label, object, text, workEvent } from './contract.js';
 import { Conversation } from './conversation.js';
 import { Refusal, requireThat } from './errors.js';
 import { wave } from './intent.js';
-import { projectBot, publicWorkText } from './projection.js';
-import type { RootSnapshot } from './repository.js';
+import { projectBot } from './projection.js';
+import type { RootSnapshot, StoreSnapshot } from './repository.js';
 import { memoryFrames, sourceReference } from './source-memory.js';
 import { canonicalClarification, channelPolicy, DEFAULT_CHANNEL_POLICY, isQuiet, questionPending, turnAttribution, type ChannelPolicy } from './channel-contract.js';
 import { PrivateChannelBindings, type PrivateChannelMaterial } from './channel-runtime.js';
 import { untilAborted } from './async.js';
 import { assertCanonicalSelection } from './canonical-forks.js';
+import { pageTranscript, transcriptMetadata, verifiedTranscript, type TranscriptTurn } from './transcript.js';
 
 export interface PrivateChannelPort {
   readonly channel: 'imessage';
@@ -37,14 +38,30 @@ function binding(root: RootSnapshot): RappFrame | undefined {
 }
 interface BoundChannel { frame: RappFrame; id: string; policy: ChannelPolicy }
 
-export function referenceRecap(root: RootSnapshot, queued: JsonObject): { summary: string; sources: JsonObject[] } {
+export function referenceRecap(snapshot: StoreSnapshot, rootId: string, queued: JsonObject): JsonObject {
+  const root = snapshot.roots.find(candidate => candidate.definition.root === rootId);
+  requireThat(root, 'root-not-found', 'Choose an existing canonical root GUID.');
   assertCanonicalSelection(root);
   if (queued.format !== 'rapp-work.recap-references/1' && queued.format !== 'rapp-work.question-references/1') {
     requireThat(queued.format === undefined && queued.sourceRefs === undefined, 'recap-source', 'Unknown recap references cannot become a legacy summary.');
-    return { summary: text(queued.summary, 3_000), sources: [] }; // immutable historical record, never rewritten
+    return { summary: text(queued.summary, 3_000), sources: [],
+      sourceSelection: { total: 0, offset: 0, limit: 6, returned: 0, truncatedBefore: false, truncatedAfter: false },
+      truncatedSources: [],
+      transcript: transcriptMetadata(pageTranscript([], rootId, 'root', { offset: 0, limit: 1 })) };
   }
   const refs = queued.sourceRefs;
   requireThat(Array.isArray(refs) && refs.length <= 6, 'recap-source', 'A recap contains bounded canonical source references only.');
+  const sourceSelection = queued.sourceSelection === undefined
+    ? { total: refs.length, offset: 0, limit: 6, returned: refs.length, truncatedBefore: false, truncatedAfter: false }
+    : object(queued.sourceSelection,
+      ['total', 'offset', 'limit', 'returned', 'truncatedBefore', 'truncatedAfter']);
+  requireThat(Number.isInteger(sourceSelection.total) && Number.isInteger(sourceSelection.offset)
+    && sourceSelection.limit === 6 && sourceSelection.returned === refs.length
+    && Number(sourceSelection.total) >= refs.length && Number(sourceSelection.offset) >= 0
+    && Number(sourceSelection.offset) + refs.length === Number(sourceSelection.total)
+    && sourceSelection.truncatedBefore === (Number(sourceSelection.offset) > 0)
+    && sourceSelection.truncatedAfter === false,
+  'recap-source', 'Recap source pagination metadata must exactly describe the retained references.');
   const byHash = new Map(memoryFrames(root).map(f => [f.frame_hash, f]));
   const frames = refs.map(value => {
     const ref = object(value);
@@ -53,18 +70,48 @@ export function referenceRecap(root: RootSnapshot, queued: JsonObject): { summar
       'The original source GUID/scope/stream occurrence is unavailable; no copied activity fallback is permitted.');
     return frame;
   });
+  const transcript = verifiedTranscript(snapshot, rootId);
+  const selectedTurns: TranscriptTurn[] = [];
+  const truncatedSources = new Set<string>();
+  const excerpt = (value: string, source: string): string => {
+    if (value.length <= 260) return value;
+    truncatedSources.add(source);
+    return `${value.slice(0, 246).trimEnd()} … [truncated]`;
+  };
   const summary = frames.length ? frames.map(frame => {
     const event = workEvent(frame.payload);
     if (queued.format === 'rapp-work.question-references/1') {
       const marker = canonicalClarification(frame);
       requireThat(marker, 'clarify-binding', 'A notification requires the original same-publication clarify marker and assistant turn.');
+      const turn = transcript.find(candidate => candidate.source.frame_hash === frame.frame_hash);
+      if (turn) selectedTurns.push(turn);
       return marker.questions.map(q => q.text).join('\n');
     }
-    const value = event.event === 'client.conversation' ? object(event.data.content).text
-      : event.event === 'collaboration.synthesized' ? publicWorkText(frame) : event.data.text ?? event.data.summary;
-    return `[${event.scope}] ${event.event}: ${String(value ?? 'Recorded source outcome').slice(0, 260)}`;
+    if (event.event === 'collaboration.synthesized' || event.event === 'collaboration.perspective') {
+      const requestWave = String(event.data.requestWave);
+      const exchange = transcript.filter(turn =>
+        turn.source.frame_hash === requestWave || turn.replyTo === requestWave);
+      requireThat((event.event === 'collaboration.perspective'
+        || exchange.some(turn => turn.source.frame_hash === frame.frame_hash))
+        && exchange.some(turn => turn.attribution.origin === 'canonical-collaboration'),
+      'recap-source', 'A collaboration recap must retain its verified request and peer response.');
+      selectedTurns.push(...exchange);
+      return exchange.map(turn =>
+        `[${turn.speaker}] ${excerpt(turn.text, String(turn.source.frame_hash))}`).join('\n');
+    }
+    const turn = transcript.find(candidate => candidate.source.frame_hash === frame.frame_hash);
+    if (turn) {
+      selectedTurns.push(turn);
+      return `[${turn.speaker}] ${excerpt(turn.text, frame.frame_hash)}`;
+    }
+    const value = event.data.text ?? event.data.summary;
+    return `[${event.scope}] ${event.event}: ${excerpt(String(value ?? 'Recorded source outcome'), frame.frame_hash)}`;
   }).join('\n') : `${root.definition.name}: no completed source work is referenced.`;
-  return { summary, sources: refs.map(value => object(value)) };
+  const uniqueTurns = [...new Map(selectedTurns.map(turn => [String(turn.source.frame_hash), turn])).values()];
+  const selectedPage = pageTranscript(uniqueTurns, rootId, 'root',
+    { offset: 0, limit: Math.max(1, uniqueTurns.length) });
+  return { summary, sources: refs.map(value => object(value)),
+    sourceSelection, truncatedSources: [...truncatedSources].sort(), transcript: transcriptMetadata(selectedPage) };
 }
 
 export class PrivateChannels {
@@ -166,17 +213,32 @@ export class PrivateChannels {
       const duplicate = memoryFrames(snapshot).find(f => f.payload.operationId === operationId);
       if (duplicate) {
         requireThat(duplicate.payload.event === 'channel.queued', 'idempotency-conflict', 'This request ID is already used.');
-        return { deliveryId: duplicate.frame_hash, ...referenceRecap(snapshot, workEvent(duplicate.payload).data) };
+        return { deliveryId: duplicate.frame_hash,
+          ...referenceRecap(transaction.snapshot, root, workEvent(duplicate.payload).data) };
       }
-      const meaningful = memoryFrames(snapshot).filter(f =>
-        ['turn.assistant', 'client.conversation', 'work.progress', 'routine.tick', 'organization.applied', 'collaboration.synthesized'].includes(String(f.payload.event))).slice(-6);
+      const synthesizedRequests = new Set(memoryFrames(snapshot)
+        .filter(frame => frame.payload.event === 'collaboration.synthesized')
+        .map(frame => workEvent(frame.payload).data.requestWave));
+      const allMeaningful = memoryFrames(snapshot).filter(frame =>
+        ['turn.assistant', 'client.conversation', 'work.progress', 'routine.tick', 'organization.applied',
+          'collaboration.perspective', 'collaboration.synthesized'].includes(String(frame.payload.event))
+        && (frame.payload.event !== 'collaboration.perspective'
+          || !synthesizedRequests.has(workEvent(frame.payload).data.requestWave)));
+      const meaningful = allMeaningful.slice(-6);
+      const sourceSelection = {
+        total: allMeaningful.length, offset: Math.max(0, allMeaningful.length - meaningful.length),
+        limit: 6, returned: meaningful.length, truncatedBefore: allMeaningful.length > meaningful.length,
+        truncatedAfter: false,
+      };
       requireThat(this.#pending(snapshot).length < selected.policy.maxPending, 'channel-queue-bound', 'The bounded pending delivery queue is full.');
       const frame = await this.bots.appendEvent(transaction, snapshot, 'channel.queued', {
         channel: 'imessage', kind: 'recap', bindingWave: selected.frame.frame_hash,
         format: 'rapp-work.recap-references/1', sourceRefs: meaningful.map(sourceReference),
+        sourceSelection,
         expiresUtc: new Date(Date.parse(this.bots.now()) + selected.policy.ttlSeconds * 1_000).toISOString(),
       }, operationId);
-      return { deliveryId: frame.frame_hash, ...referenceRecap(snapshot, workEvent(frame.payload).data) };
+      return { deliveryId: frame.frame_hash,
+        ...referenceRecap(transaction.snapshot, root, workEvent(frame.payload).data) };
     });
   }
 
@@ -324,7 +386,8 @@ export class PrivateChannels {
         if (!ids.every(id => this.#preflight(current, id)?.frame_hash === prepared.frame.frame_hash)) return { reason: 'generation-changed', attempt: null };
         if (ids.some(id => this.#status(current, id) !== 'pending')) return { reason: 'already-settled', attempt: null };
         const queues = memoryFrames(current).filter(f => ids.includes(f.frame_hash));
-        const message = queues.map(f => referenceRecap(current, workEvent(f.payload).data).summary).join('\n\n');
+        const message = queues.map(f =>
+          String(referenceRecap(tx.snapshot, root, workEvent(f.payload).data).summary)).join('\n\n');
         if (Buffer.byteLength(message, 'utf8') > 8_192) return { reason: 'message-byte-bound', attempt: null };
         const attempt = await this.bots.appendEvent(tx, current, 'channel.attempt', {
           deliveryIds: ids, bindingWave: bound.frame.frame_hash, preflight: prepared.frame.frame_hash,
@@ -373,7 +436,9 @@ export class PrivateChannels {
   }
 
   async recap(root: string): Promise<JsonObject> {
-    const snapshot = await this.bots.repository.root(root);
+    const store = await this.bots.repository.snapshot();
+    const snapshot = store.roots.find(candidate => candidate.definition.root === root);
+    requireThat(snapshot, 'root-not-found', 'Choose an existing canonical root GUID.');
     assertCanonicalSelection(snapshot);
     const frames = memoryFrames(snapshot);
     const queues = frames.filter(f => f.payload.event === 'channel.queued');
@@ -386,10 +451,12 @@ export class PrivateChannels {
         const preflight = this.#preflight(snapshot, f.frame_hash);
         const outcome = preflight && memoryFrames(snapshot).find(o => workEvent(o.payload).data.preflight === preflight.frame_hash
           && (o.payload.event === 'channel.preflight.outcome' || (o.payload.event === 'channel.outcome' && workEvent(o.payload).data.status === 'not-submitted')));
-        try { return { deliveryId: f.frame_hash, ...referenceRecap(snapshot, workEvent(f.payload).data), available: true,
+        try { return { deliveryId: f.frame_hash, ...referenceRecap(store, root, workEvent(f.payload).data), available: true,
           status: this.#status(snapshot, f.frame_hash), preflightGeneration: preflight ? workEvent(preflight.payload).data.generation! : 0,
           preflightOutcome: outcome ? workEvent(outcome.payload).data.status! : null }; }
-        catch { return { deliveryId: f.frame_hash, summary: 'Original source work is unavailable; no copied recap is substituted.', sources: [], available: false }; }
+        catch { return { deliveryId: f.frame_hash,
+          summary: 'Original source work is unavailable; no copied recap is substituted.',
+          sources: [], sourceSelection: null, truncatedSources: [], transcript: null, available: false }; }
       }), automaticReplay: false };
   }
 

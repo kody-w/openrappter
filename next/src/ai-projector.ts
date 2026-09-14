@@ -1,15 +1,15 @@
 import { AUTHORITY, canonicalJson, snapshotJson, type JsonObject, type RappFrame } from './canonical.js';
 import { workEvent } from './contract.js';
 import { requireThat } from './errors.js';
-import { publicWorkText, reference } from './projection.js';
-import type { RootSnapshot } from './repository.js';
+import { reference } from './projection.js';
+import type { RootSnapshot, StoreSnapshot } from './repository.js';
 import { foldState, permittedScopes } from './state.js';
 import {
   AI_LIMITS, AI_PROJECTION_SCHEMA, clientProposalData, grantData, publicationData, publicationKind, publicationRight,
   type AiRight, type ClientActor, type ClientGrant, type ClientProposalData, type PublicationData, type PublicationKind, type ViewIntent,
 } from './ai-contract.js';
 import { memoryAtCursor, memoryCursor, memoryFrames, sourceReference } from './source-memory.js';
-import { turnAttribution } from './channel-contract.js';
+import { projectTranscript, transcriptMetadata, TRANSCRIPT_LIMITS, type TranscriptOptions } from './transcript.js';
 
 export interface PublishedRecord {
   frame: RappFrame;
@@ -132,28 +132,39 @@ export function cursorFor(root: RootSnapshot): JsonObject | null {
 export function atCursor(root: RootSnapshot, cursor: unknown): RootSnapshot {
   return memoryAtCursor(root, cursor);
 }
+export function withSelectedRoot(snapshot: StoreSnapshot, root: RootSnapshot): StoreSnapshot {
+  requireThat(snapshot.roots.some(candidate => candidate.definition.root === root.definition.root),
+    'root-not-found', 'The selected projection root is not present in this canonical store.');
+  return { ...snapshot, roots: snapshot.roots.map(candidate =>
+    candidate.definition.root === root.definition.root ? root : candidate) };
+}
+export function withHistoricalTranscript(snapshot: StoreSnapshot, root: RootSnapshot): StoreSnapshot {
+  const anchoredRequests = new Set(memoryFrames(root)
+    .filter(frame => ['collaboration.perspective', 'collaboration.synthesized'].includes(String(frame.payload.event)))
+    .map(frame => String(workEvent(frame.payload).data.requestWave)));
+  const selected = withSelectedRoot(snapshot, root);
+  return { ...selected, roots: selected.roots.map(candidate => ({
+    ...candidate,
+    streams: {
+      ...candidate.streams,
+      swarm: candidate.streams.swarm.filter(frame =>
+        (frame.kind === 'swarm.guidance' && anchoredRequests.has(frame.frame_hash))
+        || (frame.kind === 'swarm.echo' && anchoredRequests.has(String(frame.payload.requestWave)))),
+    },
+  })) };
+}
 
-export function projectAi(root: RootSnapshot, scope: string): JsonObject {
+export function projectAi(snapshot: StoreSnapshot, root: RootSnapshot, scope: string,
+  options: TranscriptOptions = {}): JsonObject {
   const state = foldState(root);
   const allowed = permittedScopes(state.scopes, scope);
   const client = clientRecords(root, state.scopes);
   const records = client.publications.filter(r => allowed.has(r.scope));
   const proposals = client.proposals.filter(r => allowed.has(r.scope));
-  const visible = memoryFrames(root).filter(f => allowed.has(String(f.payload.scope)));
-  const turnFrames = visible.filter(f => ['turn.user', 'turn.assistant', 'collaboration.synthesized', 'client.conversation'].includes(String(f.payload.event)));
   const byWave = new Map(records.map(r => [r.frame.frame_hash, r]));
-  const turns = turnFrames.slice(-AI_LIMITS.windowItems).map(frame => {
-    const client = byWave.get(frame.frame_hash);
-    const e = workEvent(frame.payload);
-    return {
-      bot: root.definition.root, role: e.event === 'turn.user' ? 'user' : 'assistant',
-      actor: client ? client.data.actor : e.data.origin === 'external-imessage'
-        ? { id: 'external-imessage', name: 'External iMessage participant', provider: 'external-imessage' }
-        : { id: e.event === 'turn.user' ? 'human' : root.definition.root, name: e.event === 'turn.user' ? 'Human' : root.definition.name, provider: 'canonical-core' },
-      text: client ? client.data.content.text! : publicWorkText(frame), source: reference(frame), origin: sourceReference(frame),
-      attribution: client ? { origin: 'ai-client', approvalAuthority: false } : turnAttribution(frame),
-    };
-  });
+  const transcript = projectTranscript(snapshot, root.definition.root, scope,
+    { ...options, limit: options.limit ?? TRANSCRIPT_LIMITS.ai });
+  const turns = transcript.turns;
   const contribution = (kind: PublicationKind): JsonObject[] => records.filter(r => r.kind === kind)
     .slice(-AI_LIMITS.windowItems).map(r => ({ actor: r.data.actor, content: r.data.content, source: reference(r.frame), origin: sourceReference(r.frame), causes: r.data.causes }));
   const heads = viewFrontier(records);
@@ -165,7 +176,7 @@ export function projectAi(root: RootSnapshot, scope: string): JsonObject {
   const status = heads.length > 1 ? 'conflict' : candidates.length && !candidates[0]!.valid ? 'invalidated' : heads.length ? 'resolved' : 'none';
   const progressFrame = status === 'resolved' && heads[0]!.data.view!.progress
     ? byWave.get(heads[0]!.data.view!.progress) : undefined;
-  const snapshot: JsonObject = {
+  const projection: JsonObject = {
     schema: AI_PROJECTION_SCHEMA, root: root.definition.root, name: root.definition.name, scope,
     authority: { ...AUTHORITY, factualTruth: false, clientAssurance: 'root-signed-scoped-capability-attribution',
       confirmationAuthority: 'owner-only', mutationAuthority: 'owner-only' },
@@ -187,7 +198,8 @@ export function projectAi(root: RootSnapshot, scope: string): JsonObject {
         status: proposal.status, confirmationAuthority: 'owner-only', mutationAuthority: 'owner-only',
       };
     }),
-    turns, activity: contribution('activity'), evidence: contribution('evidence'), attention: contribution('attention'),
+    transcript: transcriptMetadata(transcript), turns,
+    activity: contribution('activity'), evidence: contribution('evidence'), attention: contribution('attention'),
     view: {
       status, heads: heads.map(h => h.frame.frame_hash), candidates,
       effective: status === 'resolved' ? heads[0]!.data.view! : null,
@@ -197,15 +209,16 @@ export function projectAi(root: RootSnapshot, scope: string): JsonObject {
     refusedHints: records.filter(r => r.data.viewRefusal !== null).slice(-AI_LIMITS.windowItems)
       .map(r => ({ source: reference(r.frame), actor: r.data.actor, diagnostic: r.data.viewRefusal })),
     history: {
-      conversationRecords: turnFrames.length, clientPublications: records.length, clientProposals: proposals.length,
+      conversationRecords: transcript.total, clientPublications: records.length, clientProposals: proposals.length,
       windowItems: AI_LIMITS.windowItems,
-      truncated: turnFrames.length > AI_LIMITS.windowItems || records.length > AI_LIMITS.windowItems || proposals.length > AI_LIMITS.windowItems,
+      truncated: transcript.truncatedBefore || transcript.truncatedAfter
+        || records.length > AI_LIMITS.windowItems || proposals.length > AI_LIMITS.windowItems,
       pagingAvailable: true,
     },
   };
-  requireThat(Buffer.byteLength(canonicalJson(snapshot)) <= AI_LIMITS.snapshotBytes, 'projection-size',
+  requireThat(Buffer.byteLength(canonicalJson(projection)) <= AI_LIMITS.snapshotBytes, 'projection-size',
     'This authorized projection exceeds the bounded snapshot size; canonical work remains available by scope/history page.');
-  return snapshotJson(snapshot) as JsonObject;
+  return snapshotJson(projection) as JsonObject;
 }
 
 export function publicHistoryFrame(frame: RappFrame): JsonObject {

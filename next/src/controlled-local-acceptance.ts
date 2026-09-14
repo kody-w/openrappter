@@ -2,7 +2,7 @@ import path from 'node:path';
 import { isBodyStream, isUtc, type JsonObject } from './canonical.js';
 import { label, list, object, text } from './contract.js';
 import { requireThat } from './errors.js';
-import { validateDraft, wave, type Draft } from './intent.js';
+import { requireActionTradeoffs, validateDraft, wave, type Draft } from './intent.js';
 
 export const CONTROLLED_LOCAL_PROPOSAL_SCHEMA = 'rapp-work.controlled-local-provider-proposal/1';
 export const CONTROLLED_LOCAL_PROVIDER_DRAFT_SCHEMA = 'rapp-work.controlled-local-provider-draft/1';
@@ -166,6 +166,7 @@ export function controlledLocalProviderDraft(value: unknown, provider: string): 
     && selected.fixture === false && selected.credentialBinding === 'environment' && selected.liveEffectsPerformed === false,
   'provider-binding-invalid', 'The provider adapter did not return exact non-effecting evidence for the configured provider label.');
   const draft = validateDraft(selected.draft);
+  if (draft.actions.length) requireActionTradeoffs(draft);
   requireThat(draft.actions.length > 0 || draft.questions.length > 0, 'proposal-empty',
     'The real provider must return a reviewable structured Draft, not a no-op summary.');
   requireThat(draft.resolves.length === 0, 'proposal-authority',

@@ -18,9 +18,11 @@ context revision. The Draft remains review-only: only the owner-facing
 `organization.confirm` command can apply it, and it must name the exact current
 proposal wave. Public work and closed declarative view hints are canonical
 frames, not UI state. Concurrent clients retain explicit view conflicts;
-bounded MCP/stdio subscriptions support cursor replay and resync. No model,
-renderer, native profile or HTTP listener is started by publication. Only a
-tiny test consumer exists.
+bounded MCP/stdio subscriptions support cursor replay and resync. Owner, AI,
+provider-proposal context and private-recap surfaces share one
+verified transcript projector with signed peer turns and explicit page/truncation
+metadata. No model, renderer, native profile or HTTP listener is started by
+publication. Only a tiny test consumer exists.
 
 See [the API/authority contract](docs/AI_PROJECTION_API.md) and
 [binding milestones](docs/MILESTONES.md).

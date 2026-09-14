@@ -4,13 +4,26 @@
   "title": "Validated review-only RAPP Work Draft",
   "type": "object",
   "additionalProperties": false,
-  "required": ["summary", "tradeoffs", "questions", "actions"],
+  "required": ["summary", "tradeoffs", "tradeoffLinks", "questions", "actions"],
   "properties": {
     "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
     "tradeoffs": {
       "type": "array",
       "maxItems": 8,
-      "items": { "type": "string", "minLength": 1, "maxLength": 700 }
+      "items": { "type": "string", "minLength": 24, "maxLength": 700 }
+    },
+    "tradeoffLinks": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["actionId", "tradeoff"],
+        "properties": {
+          "actionId": { "$ref": "#/$defs/label" },
+          "tradeoff": { "type": "integer", "minimum": 0, "maximum": 7 }
+        }
+      }
     },
     "questions": {
       "type": "array",
@@ -18,10 +31,11 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["reason", "question"],
+        "required": ["reason", "question", "dependsOn"],
         "properties": {
           "reason": { "enum": ["human-authority", "irreducible-ambiguity"] },
-          "question": { "type": "string", "minLength": 1, "maxLength": 700 }
+          "question": { "type": "string", "minLength": 1, "maxLength": 700 },
+          "dependsOn": { "type": "string", "pattern": "^/", "maxLength": 200 }
         }
       }
     },

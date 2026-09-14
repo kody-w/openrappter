@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { canonicalJson, snapshotJson, type JsonObject } from './canonical.js';
 import { AI_LIMITS } from './ai-contract.js';
 import { AiProjectionApi } from './ai-api.js';
-import { atCursor, cursorFor, projectAi } from './ai-projector.js';
+import { atCursor, cursorFor, projectAi, withHistoricalTranscript } from './ai-projector.js';
+import { object } from './contract.js';
 import { Refusal, requireThat } from './errors.js';
 import { memoryAdvance, memoryFrames, memoryPending } from './source-memory.js';
 
@@ -28,6 +29,7 @@ interface Subscription {
   expires: number;
   closed: boolean;
   initialFrames: ReadonlySet<string>;
+  transcriptRevision: string;
 }
 export interface StreamOptions { queuedEvents?: number; queuedBytes?: number; replayEvents?: number; clock?: () => number }
 
@@ -51,11 +53,12 @@ export class ProjectionStreams {
 
   async subscribe(root: string, capability: string, cursor: unknown = null): Promise<JsonObject> {
     requireThat(this.#subscriptions.size < AI_LIMITS.subscriptions, 'subscription-limit', 'The bounded subscription limit is reached.');
-    const selected = await this.api.authority.authorize(root, capability, ['projection.read', 'projection.subscribe']);
+    const selected = await this.api.authority.authorizeStore(root, capability, ['projection.read', 'projection.subscribe']);
     const base = cursor === null ? selected.root : atCursor(selected.root, cursor);
     requireThat(memoryFrames(selected.root).length - memoryFrames(base).length <= this.#replayLimit,
       'resync-required', 'The reconnect gap exceeds the replay window; request a fresh snapshot and page retained history explicitly.');
-    const projection = projectAi(base, selected.grant.data.scope);
+    const projection = projectAi(cursor === null ? selected.snapshot : withHistoricalTranscript(selected.snapshot, base),
+      base, selected.grant.data.scope, { ...(cursor === null ? {} : { allowIncompleteHistory: true }) });
     requireThat(this.#subscriptions.size < AI_LIMITS.subscriptions, 'subscription-limit', 'The bounded subscription limit is reached.');
     const id = randomUUID();
     const source = cursorFor(base);
@@ -63,6 +66,7 @@ export class ProjectionStreams {
       id, root, capability, scope: selected.grant.data.scope, queuedCursor: source, deliveredCursor: source,
       queue: [], bytes: 0, expires: this.#clock() + AI_LIMITS.subscriptionMs, closed: false,
       initialFrames: new Set(memoryFrames(selected.root).map(f => f.frame_hash)),
+      transcriptRevision: String(object(projection.transcript).revision),
     };
     this.#subscriptions.set(id, subscription);
     this.#enqueue(subscription, { schema: 'rapp-work.projection-event/1', subscription: id, type: 'snapshot',
@@ -105,7 +109,8 @@ export class ProjectionStreams {
       if (subscription.closed) continue;
       if (this.#clock() >= subscription.expires) { this.#close(subscription, 'subscription-expired'); continue; }
       try {
-        const selected = await this.api.authority.authorize(subscription.root, subscription.capability, ['projection.read', 'projection.subscribe']);
+        const selected = await this.api.authority.authorizeStore(subscription.root, subscription.capability,
+          ['projection.read', 'projection.subscribe']);
         const prefix = atCursor(selected.root, subscription.queuedCursor);
         const pending = memoryPending(selected.root, prefix);
         if (pending.length > this.#replayLimit) { this.#close(subscription, 'replay-window-exceeded'); continue; }
@@ -115,14 +120,22 @@ export class ProjectionStreams {
           const previous = subscription.queuedCursor;
           const state = memoryAdvance(selected.root, prefix, offset + 1);
           const cursor = cursorFor(state);
-          const snapshot = projectAi(state, subscription.scope);
+          const snapshot = projectAi(withHistoricalTranscript(selected.snapshot, state), state, subscription.scope,
+            { allowIncompleteHistory: true });
+          subscription.transcriptRevision = String(object(snapshot.transcript).revision);
           if (!this.#enqueue(subscription, { schema: 'rapp-work.projection-event/1', subscription: subscription.id,
             type: 'update', cursor, previous, snapshot, reason: null, replay: subscription.initialFrames.has(frame.frame_hash) })) break;
         }
-        if (!pending.length && canonicalJson(cursorFor(selected.root)) !== canonicalJson(subscription.queuedCursor)) {
+        if (!pending.length) {
+          const current = projectAi(selected.snapshot, selected.root, subscription.scope);
+          const revision = String(object(current.transcript).revision);
+          const cursorChanged = canonicalJson(cursorFor(selected.root)) !== canonicalJson(subscription.queuedCursor);
+          const transcriptChanged = revision !== subscription.transcriptRevision;
+          if (!cursorChanged && !transcriptChanged) continue;
+          subscription.transcriptRevision = revision;
           this.#enqueue(subscription, { schema: 'rapp-work.projection-event/1', subscription: subscription.id,
             type: 'update', cursor: cursorFor(selected.root), previous: subscription.queuedCursor,
-            snapshot: projectAi(selected.root, subscription.scope), reason: 'retained-source-branches-changed', replay: false });
+            snapshot: current, reason: cursorChanged ? 'retained-source-branches-changed' : 'transcript-changed', replay: false });
         }
       } catch (error) {
         this.#close(subscription, error instanceof Refusal && ['cursor-invalid', 'projection-size'].includes(error.code)
@@ -153,7 +166,8 @@ export class ProjectionStreams {
     const subscription = this.#subscriptions.get(id);
     requireThat(subscription, 'subscription-not-found', 'No such disposable subscription.');
     return { root: subscription.root, events: subscription.queue.length, bytes: subscription.bytes,
-      closed: subscription.closed, deliveredCursor: subscription.deliveredCursor, queuedCursor: subscription.queuedCursor };
+      closed: subscription.closed, deliveredCursor: subscription.deliveredCursor, queuedCursor: subscription.queuedCursor,
+      transcriptRevision: subscription.transcriptRevision };
   }
   unsubscribe(id: string): void { this.#subscriptions.delete(id); }
   close(): void { this.#subscriptions.clear(); }

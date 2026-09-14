@@ -111,22 +111,26 @@ export class FixtureCopilotTransport implements CopilotTransport {
       const discovery = (context.discovery as JsonObject[]).at(-1);
       requireThat(discovery, 'fixture-discovery', 'Record sanitized discovery evidence before RAPP Up.');
       const pointers = discovery.pointers as JsonObject[];
+      const actions = [
+        { type: 'scope.create', scope: { id: 'local-projects', parent: 'local-estate', kind: 'world',
+          name: 'Local Projects', description: 'Reviewed pointer federation of the discovered native AI estate.' } },
+        ...pointers.map(p => ({ type: 'pointer.register', id: `native-${String(p.provider)}`, scope: 'local-projects',
+          evidenceWave: String(object(discovery.source).frame_hash), pointerId: String(p.id) })),
+      ];
       return {
         summary: 'Establish one complete Local Projects world inside this bot, keeping every native provider shape as a pointer.',
         tradeoffs: ['Discovery is historical metadata, not current native-store truth or ownership.',
           'One visible bot and one Librarian remain; no native data is copied, normalized, mounted or modified.'],
+        tradeoffLinks: [{ actionId: 'local-projects', tradeoff: 1 },
+          ...pointers.map(p => ({ actionId: `native-${String(p.provider)}`, tradeoff: 0 }))],
         questions: [],
-        actions: [
-          { type: 'scope.create', scope: { id: 'local-projects', parent: 'local-estate', kind: 'world',
-            name: 'Local Projects', description: 'Reviewed pointer federation of the discovered native AI estate.' } },
-          ...pointers.map(p => ({ type: 'pointer.register', id: `native-${String(p.provider)}`, scope: 'local-projects',
-            evidenceWave: String(object(discovery.source).frame_hash), pointerId: String(p.id) })),
-        ],
+        actions,
       };
     }
     if (/external|send a message/iu.test(thought)) return {
       summary: 'Prepare a bounded message request, without sending it.',
       tradeoffs: ['Confirming organization only records this request. A second exact local approval is required to call an external adapter.'],
+      tradeoffLinks: [{ actionId: 'message-request', tradeoff: 0 }],
       questions: [],
       actions: [{ type: 'external.request', id: 'message-request', scope: 'tasks', operation: 'send-message',
         target: 'fixture-contact:operator', content: 'Synthetic reviewed update.' }],

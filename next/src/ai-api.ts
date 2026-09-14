@@ -8,32 +8,37 @@ import {
   AI_LIMITS, PROPOSAL_CONTEXT_SCHEMA, clientProposalData, hashes, publicationContent, publicationKind,
   publicationRight, viewIntent, type PublicationData,
 } from './ai-contract.js';
-import { atCursor, cursorFor, projectAi, publicHistoryFrame, publishedRecords, scopedFrames, validateViewState, viewFrontier } from './ai-projector.js';
+import { atCursor, cursorFor, projectAi, publicHistoryFrame, publishedRecords, scopedFrames, validateViewState, viewFrontier, withHistoricalTranscript } from './ai-projector.js';
 import { reference } from './projection.js';
 import { catchUpTimeline } from './catch-up.js';
 import { CanonicalComputerReplay } from './computer-replay.js';
 import { memoryAdvance, memoryFrames, memoryPending, sourceChain } from './source-memory.js';
 import { canonicalContext, contextWitness } from './conversation.js';
 import { validateDraft, wave } from './intent.js';
+import type { TranscriptOptions } from './transcript.js';
 
 export class AiProjectionApi {
   readonly authority: ClientAuthority;
   constructor(readonly bots: Bots, readonly computerReplay?: CanonicalComputerReplay) { this.authority = new ClientAuthority(bots); }
 
-  async read(root: string, capability: string, cursor?: unknown): Promise<JsonObject> {
-    const selected = await this.authority.authorize(root, capability, ['projection.read']);
-    return projectAi(cursor === undefined ? selected.root : atCursor(selected.root, cursor), selected.grant.data.scope);
+  async read(root: string, capability: string, cursor?: unknown, transcript: TranscriptOptions = {}): Promise<JsonObject> {
+    const selected = await this.authority.authorizeStore(root, capability, ['projection.read']);
+    const projectedRoot = cursor === undefined ? selected.root : atCursor(selected.root, cursor);
+    const projectionSnapshot = cursor === undefined ? selected.snapshot
+      : withHistoricalTranscript(selected.snapshot, projectedRoot);
+    return projectAi(projectionSnapshot, projectedRoot, selected.grant.data.scope,
+      { ...transcript, ...(cursor === undefined ? {} : { allowIncompleteHistory: true }) });
   }
 
   async context(root: string, capability: string, requestedScope?: unknown): Promise<JsonObject> {
-    const selected = await this.authority.authorize(root, capability, ['projection.read']);
+    const selected = await this.authority.authorizeStore(root, capability, ['projection.read']);
     const scope = requestedScope === undefined ? selected.grant.data.scope : label(requestedScope);
     requireThat(permittedScopes(foldState(selected.root).scopes, selected.grant.data.scope).has(scope),
       'client-scope', 'Canonical proposal context cannot leave the client grant scope.');
-    const basis = contextWitness(selected.root, scope);
+    const basis = contextWitness(selected.snapshot, root, scope);
     const result: JsonObject = {
       schema: PROPOSAL_CONTEXT_SCHEMA, root, scope, revision: basis.revision,
-      context: canonicalContext(selected.root, scope),
+      context: canonicalContext(selected.snapshot, root, scope),
       authority: { proposalPublication: 'capability-scoped', confirmation: 'owner-only', mutation: 'owner-only' },
     };
     requireThat(Buffer.byteLength(canonicalJson(result)) <= AI_LIMITS.snapshotBytes, 'proposal-context-size',
@@ -66,10 +71,10 @@ export class AiProjectionApi {
           status: proposal.status, duplicate: true, confirmationRequired: proposal.status === 'review',
           confirmationAuthority: 'owner-only', mutationApplied: proposal.status === 'applied' };
       }
-      const basis = contextWitness(snapshot, scope);
+      const basis = contextWitness(tx.snapshot, root, scope);
       requireThat(wave(input.contextRevision) === basis.revision, 'stale-head',
         'Canonical context changed after the client read it; publish a fresh proposal from a new context revision.');
-      const draft = validateDraft(input.draft, utc);
+      const draft = validateDraft(input.draft, utc, canonicalContext(tx.snapshot, root, scope));
       requireThat(draft.actions.length > 0 || draft.questions.length > 0, 'proposal-empty',
         'Use public conversation for a no-op summary; a proposal must contain reviewable actions or questions.');
       requireThat(draft.resolves.length === 0, 'proposal-authority',
@@ -98,8 +103,9 @@ export class AiProjectionApi {
 
   async catchUp(root: string, capability: string, options: unknown = {}): Promise<JsonObject> {
     const request = object(options);
-    const selected = await this.authority.authorize(root, capability, request.guest === undefined ? ['projection.read'] : ['projection.read', 'guest.replay']);
-    return catchUpTimeline(selected.root, selected.grant.data.scope, request, this.computerReplay);
+    const selected = await this.authority.authorizeStore(root, capability,
+      request.guest === undefined ? ['projection.read'] : ['projection.read', 'guest.replay']);
+    return catchUpTimeline(selected.snapshot, selected.root, selected.grant.data.scope, request, this.computerReplay);
   }
 
   async artifact(root: string, capability: string, id: string): Promise<JsonObject> {

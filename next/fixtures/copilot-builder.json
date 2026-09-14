@@ -4,6 +4,16 @@
     "Keep one visible root bot and one Librarian; Builder is an internal world, not another bot.",
     "The briefing is canonical inert text. No host source file, native profile, model configuration or external service is changed."
   ],
+  "tradeoffLinks": [
+    {
+      "actionId": "copilot-builder",
+      "tradeoff": 0
+    },
+    {
+      "actionId": "builder-brief",
+      "tradeoff": 1
+    }
+  ],
   "questions": [],
   "actions": [
     {

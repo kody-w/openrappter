@@ -83,6 +83,7 @@ const proposalContext = await runtime.ai.context(bot.root, clients['future-provi
 const proposalDraft = {
   summary: 'Create one durable provider-neutral proposal artifact.',
   tradeoffs: ['The external client publishes review data; only the exact owner confirmation may apply it.'],
+  tradeoffLinks: [{ actionId: 'provider-neutral-proposal-proof', tradeoff: 0 }],
   questions: [],
   actions: [{
     type: 'artifact.save', id: 'provider-neutral-proposal-proof', scope: 'root',

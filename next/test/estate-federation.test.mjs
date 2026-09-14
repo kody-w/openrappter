@@ -79,6 +79,7 @@ test('unresolved/app-only records remain observations and cannot be promoted thr
   assert.equal(recorded.createdWorlds, 0);
   h.transport.responses.push({
     summary: 'An app-only observation must not become a native workspace.', tradeoffs: ['No workspace mapping is established.'],
+    tradeoffLinks: [{ actionId: 'must-not-exist', tradeoff: 0 }],
     questions: [], actions: [{ type: 'pointer.register', id: 'must-not-exist', scope: 'local-estate',
       evidenceWave: recorded.sourceWave, pointerId: input.observations[0].id }],
   });
@@ -93,6 +94,7 @@ test('mapped candidates require human review and cannot produce duplicate regist
   const h = await harness(), bot = await h.create();
   const recorded = await h.runtime.dispatch('estate.record', { root: bot.root, evidence: evidence() }, 'mapped-record');
   const plan = id => ({ summary: 'Register this one reviewed pointer only.', tradeoffs: ['The native source stays external and historical.'],
+    tradeoffLinks: [{ actionId: id, tradeoff: 0 }],
     questions: [], actions: [{ type: 'pointer.register', id, scope: 'local-estate', evidenceWave: recorded.sourceWave, pointerId: pointer().id }] });
   h.transport.responses.push(plan('reviewed-local-pointer'));
   const proposal = await h.runtime.conversation.converse(bot.root, 'Review one local pointer', 'local-pointer-review');
@@ -116,6 +118,7 @@ test('historical app-root claims remain byte-identical evidence, never a newly a
     'discovery.recorded', { ...legacy, evidenceHash: contentHash(legacy) }, 'legacy-app-observation', 'local-estate'));
   const bytes = canonicalJson(captured);
   h.transport.responses.push({ summary: 'Do not activate an old app-root claim.', tradeoffs: ['Historical bytes are not mapping authority.'],
+    tradeoffLinks: [{ actionId: 'invalid-legacy-workspace', tradeoff: 0 }],
     questions: [], actions: [{ type: 'pointer.register', id: 'invalid-legacy-workspace', scope: 'local-estate',
       evidenceWave: captured.frame_hash, pointerId: 'old-app-root' }] });
   const result = await h.runtime.conversation.converse(bot.root, 'Inspect the historical candidate', 'inspect-legacy-mapping');

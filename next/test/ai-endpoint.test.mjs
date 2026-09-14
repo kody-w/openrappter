@@ -123,6 +123,7 @@ test('a non-Copilot client proposes from canonical context but only the exact ow
   const draft = {
     summary: 'Create a durable provider-neutral handoff artifact.',
     tradeoffs: ['The external client may propose inert canonical data, while only the owner may apply it.'],
+    tradeoffLinks: [{ actionId: 'provider-neutral-handoff', tradeoff: 0 }],
     questions: [],
     actions: [{
       type: 'artifact.save',

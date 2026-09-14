@@ -29,7 +29,7 @@
     },
     {
       "path": "next/scripts/check-replay-digests.py",
-      "sha256": "70a980dd14a0532af4cf295026fdadb4893bc1bad96d25dffea3699a945728fc",
+      "sha256": "5d86d79d41047e8f2783f0f3796d98ee0fabbddea2436cf594d7224bbd9d44e9",
       "reason": "An independent digest checker for deterministic Catch-me-up evidence."
     },
     {

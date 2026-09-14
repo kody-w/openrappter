@@ -3,7 +3,8 @@ import { appendFile, mkdir, readFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { inspectAsar, machOArchitectures } from '../src/asar.mjs';
-import { scanApplication, scanAsar, scanResources, scanSource } from '../src/legacy.mjs';
+import { readContract } from '../src/common.mjs';
+import { scanApplication, scanAsar, scanResources, scanSource, validateLegacyAllowlist } from '../src/legacy.mjs';
 import { appFiles, arm64MachO, makeAsar, negative, put, releaseFixture, scratch, sourceFixture } from './helpers.mjs';
 
 test('a clean source workspace and complete packaged application pass their respective gates', async t => {
@@ -51,6 +52,33 @@ test('an allowlisted inert migration fixture is source-only, not a packaging exe
   await scanSource(root);
   const asar = await put(path.join(root, 'dist'), 'app.asar', makeAsar(appFiles('2.0.0', { 'dist/fixture.json': JSON.stringify({ marker: negative.legacyIdentifier }) })));
   await assert.rejects(scanAsar(asar), /Removed identifier/u);
+});
+
+test('greenfield Python exceptions require listed paths, exact hashes and present files', async t => {
+  const root = await sourceFixture(t);
+  await put(root, 'next/scripts/not-allowlisted.py', 'print("not allowlisted")\n');
+  await assert.rejects(scanSource(root), /Removed executable\/asset type: next\/scripts\/not-allowlisted\.py/u);
+  await rm(path.join(root, 'next/scripts/not-allowlisted.py'));
+
+  await appendFile(path.join(root, 'next/agent.py'), '\n# changed\n');
+  await assert.rejects(scanSource(root), /Hash-pinned greenfield Python changed: next\/agent\.py/u);
+
+  const missing = await sourceFixture(t);
+  await rm(path.join(missing, 'next/agent.py'));
+  await assert.rejects(scanSource(missing), /Allowlisted greenfield Python is missing: next\/agent\.py/u);
+});
+
+test('greenfield Python allowlist paths must be unique', () => {
+  const allowlist = readContract('legacy-allowlist.json');
+  allowlist.greenfieldPython.push({ ...allowlist.greenfieldPython[0] });
+  assert.throws(() => validateLegacyAllowlist(allowlist), /Greenfield Python allowlist paths must be unique/u);
+});
+
+test('greenfield Python exceptions never apply to packaged runtime files', async t => {
+  const root = await scratch(t);
+  const python = await readFile(new URL('../../../next/agent.py', import.meta.url));
+  const asar = await put(root, 'app.asar', makeAsar(appFiles('2.0.0', { 'next/agent.py': python })));
+  await assert.rejects(scanAsar(asar), /Removed executable\/asset type: next\/agent\.py/u);
 });
 
 test('undeclared workspaces, old dependencies, and source symlink escapes fail', async t => {

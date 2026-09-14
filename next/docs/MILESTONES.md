@@ -44,8 +44,10 @@
    behavior is proven. It subscribes and transforms around the AI's work; it may
    not acquire planning, approval, provider, persistence or deletion authority.
 
-The previous implementation remains intact. The old whole-tree Python ban is
-not relaxed to make the new root appear release-qualified.
+The previous implementation remains intact. Python remains forbidden generally;
+only the exact source paths and SHA-256 values required by the greenfield
+contract/verifiers are accepted. The source-only exception does not qualify the
+new root for the legacy release artifact.
 
 See `MIGRATION_RELEASE_GATE.md` and `CONTROLLED_LOCAL_MIGRATION.md` for the
 binding acceptance test and the exact approval-gated local sequence.

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { chmod, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ARTIFACT_POLICY, AUTHORITY, canonical, readContract } from '../src/common.mjs';
+import { ARTIFACT_POLICY, AUTHORITY, REPOSITORY_ROOT, canonical, readContract } from '../src/common.mjs';
 import { captureBuildInputs, createProvenance, releaseFilename, writeBuildReceipt } from '../src/provenance.mjs';
 
 export const TEAM = 'RAPPWORK01';
@@ -53,6 +53,9 @@ export async function sourceFixture(t) {
   await put(root, 'README.md', '# RAPP Work\n');
   await put(root, 'LICENSE', 'Copyright 2026 Test Fixture\n');
   await put(root, '.gitignore', 'dist/\n.test-scratch/\nnode_modules/\n');
+  for (const entry of readContract('legacy-allowlist.json').greenfieldPython) {
+    await put(root, entry.path, await readFile(path.join(REPOSITORY_ROOT, entry.path)));
+  }
   execFileSync('git', ['init', '--quiet', '--template=', root]);
   commitFixture(root);
   return root;

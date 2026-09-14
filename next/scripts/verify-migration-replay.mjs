@@ -8,9 +8,9 @@ export async function verifyMigrationReplay(filename, evidenceDirectory, expecte
   const profile = path.join(evidenceDirectory, 'isolated-browser-profile');
   await mkdir(scratch, { recursive: true, mode: 0o700 });
   process.env.TMPDIR = scratch;
+  process.env.PLAYWRIGHT_BROWSERS_PATH ??= '0';
   const { chromium } = await import('playwright');
   const context = await chromium.launchPersistentContext(profile, {
-    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     headless: true, viewport: { width: 1280, height: 900 }, serviceWorkers: 'block',
     env: { ...process.env, TMPDIR: scratch },
     args: ['--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-component-update'],
@@ -77,7 +77,7 @@ export async function verifyMigrationReplay(filename, evidenceDirectory, expecte
       await context.setOffline(false);
     }
   } finally { await context.close(); }
-  const report = { schema: 'rapp-work.migration-replay-browser/1', runtime: 'existing Playwright 1.63.0 + system Chrome, isolated profile',
+  const report = { schema: 'rapp-work.migration-replay-browser/1', runtime: 'Playwright-managed pinned Chromium, isolated profile',
     selfContained: true, liveBrowserProfilesTouched: false, variants: results };
   await writeFile(path.join(evidenceDirectory, 'browser-verification.json'), JSON.stringify(report, null, 2) + '\n');
   return report;

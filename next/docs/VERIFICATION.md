@@ -7,7 +7,9 @@ reproductions first demonstrated the failures; eight focused regressions now
 pass. The complete `npm --prefix next run check` passes **127 tests**, strict
 typecheck/build, and every primitive-mapping/headless/provider-neutral/observed
 migration/browser/Catch-up/source-owned/private-channel gate. The separate
-adopted primitive suite passes **90 tests**. Retained legacy gates pass unchanged.
+adopted primitive suite passes **90 tests**. Retained legacy runtime/artifact
+behavior is unchanged; source qualification uses the documented exact
+SHA-pinned greenfield Python exception.
 
 The fork proof retains **6 signed frame files across 4 source chains**, each
 independently `COMPLIANT`, while proving that their joint unresolved fork cannot
@@ -44,7 +46,7 @@ there is no application override or directory-based branch promotion.
 The full new-core check passes **119 tests**, strict typecheck/build and every
 canonical/headless/provider-neutral/migration/browser/Catch-up/source-owned gate,
 plus the new mandatory `imessage:gate`. The adopted primitive suite passes
-**90 tests** and retained legacy gates remain unchanged.
+**90 tests** and retained legacy runtime/artifact behavior remains unchanged.
 
 The new real owner-stdio proof emits **12 signed frames across 2 streams**, all
 `COMPLIANT`. CLI/gauntlet reporting makes **zero model, guest or channel effects**;
@@ -88,8 +90,8 @@ controlled-local migration/adoption/release approval is still required.
 The complete independent check passes **107 core tests**, strict typecheck/build
 and every prior headless, native-federation, provider-neutral, observed
 migration/browser, Catch-up/guest and source-ownership gate. The adopted
-primitive suite passes **90 tests**; retained legacy gates remain unchanged and
-passing on their clean baseline.
+primitive suite passes **90 tests**; retained legacy runtime/artifact behavior
+remains unchanged and passes on its clean baseline.
 
 Five reference-informed regressions were reproduced before fixing them:
 immutable replay after grant revocation, clear-before-synthesis computation,
@@ -154,8 +156,9 @@ with zero failures/skips, and every mandatory headless/projection/migration/
 browser/replay/source-ownership gate. `npm test --workspace @rapp-work/rapp1`
 passes **90 adopted primitive tests**. The retained legacy absence and release
 constitution both pass at unchanged `d8601aa91c10f3330ea10b7fa31382137d981dfd`.
-Their current whole-tree invocations still refuse eight intentional canonical/
-target-owned Python files; no legacy rule or allowlist is relaxed.
+At that milestone their whole-tree invocations still refused the intentional
+canonical/target-owned Python files. Current integration permits only the exact
+SHA-pinned, source-only contract/verifier paths; the runtime/artifact ban remains.
 
 New-source proof: **21 signed frames across 9 streams**, including a retained
 source branch, pass the exact rev-15 checker. The independent canonical Python
@@ -348,11 +351,11 @@ and its referenced `next/.test-scratch/` directory.
 
 ## Honest limits
 
-The unchanged legacy **whole-tree** gate rejects seven intentional `.py` files
-under `next/`, including the exact canonical checker and target-owned contract.
-The release constitution invokes that gate and likewise refuses. Neither the
-legacy rules nor artifact allowlists were relaxed. The old application's source
-diff is empty; only the root dependency-cache ignore rule changed.
+The legacy whole-tree gate now accepts only the exact SHA-pinned, source-only
+Python paths listed for the target-owned contract and canonical verifiers.
+Unlisted, changed, duplicate or missing entries fail, and packaged runtime
+Python remains forbidden. The artifact allowlist and old application remain
+unchanged; `next/` still requires its own release constitution before cutover.
 
 The immutable external Brainstem was not modified, imported or launched. Actual
 root-isolated hotload, authenticated memory-only SDK hosting, persistent signer

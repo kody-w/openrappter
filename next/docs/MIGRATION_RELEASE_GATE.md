@@ -16,6 +16,7 @@ There are two distinct results:
 ## Execute the fixture gate
 
 ```sh
+npm --prefix next run browser:install
 npm --prefix next run migration:gate
 ```
 

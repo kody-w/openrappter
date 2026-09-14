@@ -9,9 +9,11 @@ destination writes by a harness. Fixture success does not authorize release;
 the controlled-local runbook remains gated on final integration approval.
 
 This is an isolated headless replacement under `next/`, not a UI extension.
-The old `apps/`, all non-adopted `packages/`, existing contracts and release
-scripts remain unchanged. The only root housekeeping change makes
-`node_modules` symlinks as well as directories ignorable; no package is installed.
+The old `apps/`, all non-adopted runtime packages and production packaging
+workflow remain unchanged. Root integration is limited to the greenfield CI
+gate, its standalone lockfile, `node_modules` ignore semantics, and an exact
+source-only SHA-pinned Python contract/verifier allowlist. No greenfield product is
+installed or added to the legacy release package.
 
 The follow-up requirement explicitly authorizes installing the single generic
 RAPP Work Bot skill. That narrow instruction-file installation does not install
@@ -60,17 +62,17 @@ it is not live inference or a production Brainstem demonstration.
 
 ## Legacy gates: preserve their meaning
 
-The unchanged legacy source gate bans every `.py` file across the repository.
-It therefore rejects the isolated target-owned `agent.py` contract and exact
-canonical Python checker, and may reject terminology in these new contracts.
-Its release constitution invokes that same source gate.
+The legacy source gate bans Python by default. It permits only the exact
+greenfield paths and SHA-256 values in `contracts/legacy-allowlist.json`; missing,
+changed, duplicate or unlisted Python files fail. The exception applies only to
+source qualification. Packaged runtime Python remains forbidden, and the old
+artifact allowlist still excludes the new product.
 
-**Do not add broad legacy allowlists to make a green badge.** The old artifact
-allowlist still excludes the new product. Its gates were run successfully on
-an exact clean retained `d8601aa91c10f3330ea10b7fa31382137d981dfd` baseline:
-270 source files, 14 workspaces, 9 required acceptance declarations. This is
-evidence that the old product's release boundary remains intact, **not** release
-qualification of `next/`. The full-tree incompatibility is recorded honestly.
+**Do not broaden that source-only allowlist to make a green badge.** The retained
+baseline at `d8601aa91c10f3330ea10b7fa31382137d981dfd` remains evidence for the
+old product. Passing the integrated source gate is **not** release qualification
+of `next/`; an independent release constitution and artifact allowlist remain
+mandatory.
 
 Native desktop/DMG installation acceptance and browser appearance parity are not
 new headless-core gates. No installation or visual implementation was performed.

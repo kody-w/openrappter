@@ -6,6 +6,7 @@
   "description": "Autonomous Agent First: isolated canonical headless core",
   "engines": { "node": ">=22.12.0" },
   "scripts": {
+    "browser:install": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium",
     "build": "tsc -b ../packages/rapp1 --force && tsc -p tsconfig.json",
     "typecheck": "tsc -b ../packages/rapp1 --force && tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs",

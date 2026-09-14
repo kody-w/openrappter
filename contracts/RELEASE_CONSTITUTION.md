@@ -14,9 +14,11 @@ that a particular binary is signed or that a real computer executed work.
    digest, complete lock digest, selected authority and the complete
    `packages/rapp1/fixtures` digest.
 3. Every packaged app path, ASAR module, unpacked module and extra resource is
-   checked against the clean artifact policy. The scanner has only exact wire
-   literal and inert migration-fixture exemptions. Policy definitions are data
-   for the scanner, not executable product exemptions.
+   checked against the clean artifact policy. Source scanning permits only exact
+   wire literals, inert migration fixtures and the explicitly listed SHA-256-
+   pinned Python contract/verifier/reference files under `next/`. The Python
+   exceptions are source-only: they never exempt packaged runtime or artifact content.
+   Policy definitions are data for the scanner, not executable product exemptions.
 4. Every native executable is arm64. Production requires Developer ID signing
    by the independently selected Apple team, hardened runtime, secure signing
    timestamps, successful Gatekeeper assessment, notarization and stapled

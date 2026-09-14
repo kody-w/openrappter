@@ -86,6 +86,7 @@ primitive** package, consumed through `src/canonical.ts`. No application, domain
 service, store, UI, or provider package is imported.
 
 ```sh
+npm --prefix next run browser:install
 npm --prefix next run typecheck
 npm --prefix next test
 npm --prefix next run gates
@@ -112,18 +113,21 @@ collaboration, an iMessage outage/recap/retry, external-action refusal and resta
 without replay. It writes inspectable canonical evidence below
 `next/.test-scratch/`, not a live profile.
 
-Validation for this milestone reuses already-installed, exact-version
-dependencies through an ignored worktree-local `node_modules` link. It does not
-install dependencies, launch a model, or touch a live profile.
+Local validation may reuse already-installed exact-version dependencies. CI
+performs clean installs from both committed lockfiles and installs the
+Playwright-pinned Chromium revision before running the complete check. Neither
+path launches a model or touches a live profile.
 
 The canonical rev-15 checker is vendored byte-for-byte at
 `kody-w/rapp-1@dda32d741c7218f41443a5bd17eebfe0eae82cb7`. The foundation gate requires
 actual emitted frames and a nonzero `COMPLIANT` result, not an empty `CLEAN` scan.
 
-The legacy whole-repository source gate bans **all Python** and consequently
-rejects the isolated target-owned `agent.py` contract and canonical reference
-checker. That legacy gate is not weakened. The old artifact allowlist remains
-unchanged; `next/` is not release-qualified by the old pipeline. See the honest
+The legacy whole-repository source gate continues to ban Python generally. Its
+only greenfield exception is the closed list of exact paths and SHA-256 hashes in
+`contracts/legacy-allowlist.json`, used for the target-owned contract and
+independent canonical verifiers. That exception is source-only; packaged Python
+remains forbidden and the artifact allowlist is unchanged. `next/` is therefore
+still not release-qualified by the old pipeline. See the historical
 [foundation verification receipt](verification/foundation.json).
 
 Binding contracts: [architecture](docs/ARCHITECTURE.md),

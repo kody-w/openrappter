@@ -80,6 +80,7 @@ jobs:
         run: test "$(uname -m)" = arm64
       - run: npm ci
       - run: npm ci --prefix next
+      - run: npm --prefix next run browser:install
       - run: npm --prefix next run check
 
   check:

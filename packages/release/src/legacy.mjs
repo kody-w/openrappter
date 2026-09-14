@@ -6,13 +6,32 @@ import { inspectAsar, machOArchitectures } from './asar.mjs';
 import { inventoryTree } from './inventory.mjs';
 
 const POLICY = readContract('legacy-policy.json');
-const ALLOWLIST = readContract('legacy-allowlist.json');
-invariant(ALLOWLIST.schema === 'rapp-work.legacy-allowlist/1'
-  && ALLOWLIST.migrationFixtures.every(entry => /^tests\/fixtures\/migration\/[a-z0-9-]+\.json$/u.test(entry.path) && typeof entry.reason === 'string' && entry.reason.length > 0)
-  && ALLOWLIST.greenfieldPython.every(entry => /^next\/(?:agent|scripts\/[a-z0-9-]+|vendor\/rapp1\/(?:anchor\/bootstrap_verify|rapp|rapp_check|rapp_registry))\.py$/u.test(entry.path)
-    && /^[a-f0-9]{64}$/u.test(entry.sha256) && typeof entry.reason === 'string' && entry.reason.length > 0)
-  && ALLOWLIST.normativeWireIdentifiers.every(entry => /^[a-z][a-z0-9-]+\/[1-9]\d*$/u.test(entry.identifier) && typeof entry.reason === 'string' && entry.reason.length > 0),
-'Only exact normative wire identifiers, inert JSON migration fixtures, and hash-pinned greenfield Python may be allowlisted');
+
+export function validateLegacyAllowlist(allowlist) {
+  invariant(allowlist?.schema === 'rapp-work.legacy-allowlist/1'
+    && Array.isArray(allowlist.migrationFixtures)
+    && allowlist.migrationFixtures.every(entry => entry
+      && /^tests\/fixtures\/migration\/[a-z0-9-]+\.json$/u.test(entry.path)
+      && typeof entry.reason === 'string' && entry.reason.length > 0)
+    && Array.isArray(allowlist.greenfieldPython)
+    && allowlist.greenfieldPython.every(entry => entry
+      && /^next\/(?:agent|scripts\/[a-z0-9-]+|vendor\/rapp1\/(?:anchor\/bootstrap_verify|rapp|rapp_check|rapp_registry))\.py$/u.test(entry.path)
+      && /^[a-f0-9]{64}$/u.test(entry.sha256) && typeof entry.reason === 'string' && entry.reason.length > 0)
+    && Array.isArray(allowlist.normativeWireIdentifiers)
+    && allowlist.normativeWireIdentifiers.every(entry => entry
+      && /^[a-z][a-z0-9-]+\/[1-9]\d*$/u.test(entry.identifier)
+      && typeof entry.reason === 'string' && entry.reason.length > 0),
+  'Only exact normative wire identifiers, inert JSON migration fixtures, and hash-pinned greenfield Python may be allowlisted');
+  invariant(new Set(allowlist.migrationFixtures.map(entry => entry.path)).size === allowlist.migrationFixtures.length,
+    'Migration fixture allowlist paths must be unique');
+  invariant(new Set(allowlist.greenfieldPython.map(entry => entry.path)).size === allowlist.greenfieldPython.length,
+    'Greenfield Python allowlist paths must be unique');
+  invariant(new Set(allowlist.normativeWireIdentifiers.map(entry => entry.identifier)).size === allowlist.normativeWireIdentifiers.length,
+    'Normative wire identifier allowlist entries must be unique');
+  return allowlist;
+}
+
+const ALLOWLIST = validateLegacyAllowlist(readContract('legacy-allowlist.json'));
 const CODE = /\.(?:[cm]?[jt]sx?)$/iu;
 const TEST_FIXTURES = new Set(ALLOWLIST.migrationFixtures.map(entry => entry.path));
 const WIRE_IDS = new Set(ALLOWLIST.normativeWireIdentifiers.map(entry => entry.identifier));
@@ -34,11 +53,11 @@ function forbiddenIdentifier(text) {
   return POLICY.forbiddenIdentifiers.find(identifier => lower.includes(identifier.toLowerCase()));
 }
 
-function checkName(relative, errors) {
+function checkName(relative, errors, { source = false } = {}) {
   const parts = relative.toLowerCase().split('/');
   if (parts.some(part => POLICY.forbiddenPathSegments.includes(part))) errors.push(`Removed path: ${relative}`);
   if (POLICY.forbiddenExtensions.some(extension => relative.toLowerCase().endsWith(extension))
-    && !GREENFIELD_PYTHON.has(relative)) errors.push(`Removed executable/asset type: ${relative}`);
+    && !(source && GREENFIELD_PYTHON.has(relative))) errors.push(`Removed executable/asset type: ${relative}`);
   if (POLICY.forbiddenFiles.some(file => path.posix.basename(relative).toLowerCase() === file.toLowerCase())) errors.push(`Removed file: ${relative}`);
   const identifier = forbiddenIdentifier(relative);
   if (identifier) errors.push(`Removed identifier in path: ${relative}`);
@@ -226,7 +245,7 @@ export async function scanSource(root) {
         if (!stat.isFile() || stat.isSymbolicLink()) errors.push('The legacy policy must be a regular source data file');
         continue;
       }
-      checkName(candidate, errors);
+      checkName(candidate, errors, { source: true });
       if (stat.isDirectory()) await walk(candidate);
       else if (stat.isSymbolicLink()) errors.push(`Source symlink is not allowlisted: ${candidate}`);
       else if (stat.isFile()) {
@@ -239,6 +258,10 @@ export async function scanSource(root) {
     }
   }
   await walk();
+  const presentFiles = new Set(files);
+  for (const relative of GREENFIELD_PYTHON.keys()) {
+    if (!presentFiles.has(relative)) errors.push(`Allowlisted greenfield Python is missing: ${relative}`);
+  }
   const rootManifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const workspaces = rootManifest.workspaces;
   invariant(Array.isArray(workspaces) && workspaces.length > 0, 'A declared clean workspace set is required');

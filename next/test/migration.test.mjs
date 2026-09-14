@@ -1,34 +1,54 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { canonicalJson, createFrameSigner, keyedIdentity, selectSignaturePolicy, sha256 } from '../dist/canonical.js';
+import {
+  canonicalJson, contentHash, createFrameSigner, frameHead, keyedIdentity, rootTail, selectSignaturePolicy, sha256,
+} from '../dist/canonical.js';
 import {
   CONTROLLED_MIGRATION_AUTHORITY_SCHEMA, CONTROLLED_MIGRATION_HIVE_SCHEMA,
 } from '../dist/migration-authority.js';
 import { openMigrationService } from '../dist/migration-bootstrap.js';
 import { MIGRATION_LIMITS, migrationPlan, verifyMigrationApproval, verifyRootFiles } from '../dist/migration-contract.js';
-import { fixtureSigners } from '../dist/fixtures.js';
+import { fixtureSigners, sameTailFixtureSigners } from '../dist/fixtures.js';
 import { nativeMetadataPointer } from '../dist/native-metadata.js';
 import { migrationFixture, minimalRootMigrationFixture, sourceInventory } from './migration-fixture.mjs';
 import { runObservedCapacityMigration, runObservedMigration } from './migration-harness.mjs';
 import { migrationReplayHtml } from '../scripts/migration-replay.mjs';
+import { rootStorageKey } from '../dist/repository.js';
+import { memoryFrames } from '../dist/source-memory.js';
 
 const base = fileURLToPath(new URL('../.test-scratch/migration-unit/', import.meta.url));
 await mkdir(base, { recursive: true, mode: 0o700 });
 let id = 0;
-async function fixture() {
+const openFixtureMigration = (directory, source, migrationFault) => openMigrationService({
+  directory,
+  plan: source.plan,
+  approvalBytes: canonicalJson(source.approval),
+  authority: { registry: source.keys.registry, signers: source.keys.signers },
+  capabilityHash: sha256('a'.repeat(43)),
+  ...(migrationFault ? { migrationFault } : {}),
+});
+async function fixture(options = {}) {
+  const { keys, migrationFault } = options;
   const folder = path.join(base, `case-${process.pid}-${Date.now()}-${id++}`);
   await mkdir(folder, { mode: 0o700 });
-  const source = await migrationFixture(path.join(folder, 'source'));
-  const { runtime, service } = await openMigrationService({
-    directory: path.join(folder, 'destination'), plan: source.plan, approvalBytes: canonicalJson(source.approval),
-    authority: { registry: source.keys.registry, signers: source.keys.signers }, capabilityHash: sha256('a'.repeat(43)),
-  });
+  const source = await migrationFixture(path.join(folder, 'source'), keys ? { keys } : {});
+  const { runtime, service } = await openFixtureMigration(path.join(folder, 'destination'), source, migrationFault);
   return { folder, source, runtime, service };
+}
+async function stageCanonicalRoot(f, batch, item) {
+  for (const descriptor of item.files) {
+    const bytes = await readFile(path.join(f.source.sourceByItem.get(item.id).directory, descriptor.path));
+    for (let index = 0; index < Math.ceil(bytes.length / MIGRATION_LIMITS.chunkBytes); index++) {
+      const chunk = bytes.subarray(index * MIGRATION_LIMITS.chunkBytes, (index + 1) * MIGRATION_LIMITS.chunkBytes);
+      await f.service.stage({ batch, item: item.id, path: descriptor.path, index, base64: chunk.toString('base64') },
+        `stage-${sha256(`${batch}\n${item.id}\n${descriptor.path}\n${index}`)}`);
+    }
+  }
 }
 
 function syntheticOperatorKeys(count = 2) {
@@ -110,6 +130,8 @@ test('a complete observed estate migration launches the new application and pass
   assert.equal(result.evidence.actual.pointers, 21);
   assert.equal(result.evidence.destinationWritesByHarness, 0);
   assert.equal(result.evidence.unpublishedMaterializationFaultExercised, true);
+  assert.equal(result.evidence.wholeRootLostAcknowledgementRecovered, true);
+  assert.equal(result.evidence.wholeRootRetryCursorUnchanged, true);
   assert.equal(result.evidence.serviceAndProjectionRestartIdentical, true);
   assert.equal(result.evidence.sourceFilesCompared, 45);
   assert.equal(result.evidence.actual.branches, 2);
@@ -352,6 +374,95 @@ test('source GUID and frame bytes cannot be rewritten or filtered into compatibi
   const before = await sourceInventory(path.join(f.folder, 'source'), true);
   assert.equal((await f.service.projection()).counts.roots, 0);
   assert.deepEqual(await sourceInventory(path.join(f.folder, 'source'), true), before);
+});
+
+test('same-tail migration owners receive distinct full-RAPPID ledger locators', async () => {
+  const keys = sameTailFixtureSigners();
+  const folder = path.join(base, `same-tail-ledgers-${process.pid}-${Date.now()}-${id++}`);
+  await mkdir(folder, { mode: 0o700 });
+  const source = await migrationFixture(path.join(folder, 'source'), { keys });
+  const directory = path.join(folder, 'destination');
+  const { runtime } = await openFixtureMigration(directory, source);
+  for (const [index, selected] of keys.signers.entries()) {
+    await runtime.bots.repository.migrationTransaction(selected.root, selected.signer, tx =>
+      tx.appendControl({ schema: 'rapp-work.test-ledger/1', owner: selected.root },
+        `2026-09-13T20:00:0${index}.000Z`));
+  }
+  assert.deepEqual((await readdir(path.join(directory, 'migration'))).sort(),
+    keys.signers.map(selected => rootStorageKey(selected.root)).sort());
+  for (const selected of keys.signers) {
+    const snapshot = await runtime.bots.repository.migrationSnapshot(selected.root);
+    assert.equal(snapshot.ledger.length, 1);
+    assert.equal(snapshot.ledger[0].stream_id, `${selected.root}:migration`);
+  }
+});
+
+test('same-tail full RAPPIDs use distinct staging and root locators through migration and restart', async () => {
+  const keys = sameTailFixtureSigners();
+  const secondRoot = keys.signers[1].root;
+  let interrupted = true;
+  const f = await fixture({ keys, migrationFault: (point, root) => {
+    if (interrupted && point === 'before-root-publish' && root === secondRoot) {
+      interrupted = false;
+      throw new Error('same-tail staging interruption');
+    }
+  } });
+  const roots = f.source.plan.items.filter(item => item.kind === 'canonical-root');
+  assert.equal(roots.length, 2);
+  assert.notEqual(roots[0].root, roots[1].root);
+  assert.equal(rootTail(roots[0].root), rootTail(roots[1].root));
+  await f.service.begin('same-tail-bind');
+  await f.service.startBatch('same-tail-roots', roots.map(root => root.id), 'same-tail-batch');
+  for (const root of roots) {
+    await stageCanonicalRoot(f, 'same-tail-roots', root);
+    await f.service.prepare('same-tail-roots', root.id, `prepare-${root.id}`);
+  }
+  await f.service.commit('same-tail-roots', roots[0].id);
+  await assert.rejects(f.service.commit('same-tail-roots', roots[1].id), /same-tail staging interruption/);
+  const publication = contentHash({ plan: f.service.planHash, batch: 'same-tail-roots', item: roots[1].id });
+  const staged = path.join(f.folder, 'destination', 'migration', 'materialized', publication, rootStorageKey(roots[1].root));
+  assert.deepEqual((await readdir(staged)).sort(), ['body', 'branches', 'memory', 'scopes', 'swarm']);
+  await f.service.commit('same-tail-roots', roots[1].id);
+  assert.deepEqual((await readdir(path.join(f.folder, 'destination', 'bots'))).sort(),
+    roots.map(root => rootStorageKey(root.root)).sort());
+  assert((await readdir(path.join(f.folder, 'destination', 'migration'))).includes(rootStorageKey(f.source.plan.owner)));
+  const { runtime: restarted } = await openFixtureMigration(path.join(f.folder, 'destination'), f.source);
+  assert.deepEqual((await restarted.bots.list(true)).map(root => root.root).sort(), roots.map(root => root.root).sort());
+  for (const root of roots) assert.equal((await restarted.bots.project(root.root)).root, root.root);
+});
+
+test('whole-root publication lost acknowledgement retries the identical receipt without duplicate frames or cursor movement', async () => {
+  let failAfterPublish = true;
+  const f = await fixture({ migrationFault: point => {
+    if (failAfterPublish && point === 'after-root-publish') {
+      failAfterPublish = false;
+      throw new Error('lost whole-root acknowledgement');
+    }
+  } });
+  const rootItem = f.source.plan.items.find(item => item.kind === 'canonical-root');
+  await f.service.begin('lost-root-ack-bind');
+  await f.service.startBatch('lost-root-ack', [rootItem.id], 'lost-root-ack-batch');
+  await stageCanonicalRoot(f, 'lost-root-ack', rootItem);
+  await f.service.prepare('lost-root-ack', rootItem.id, 'lost-root-ack-prepare');
+  await assert.rejects(f.service.commit('lost-root-ack', rootItem.id), /lost whole-root acknowledgement/);
+
+  const { runtime: restarted, service: resumed } = await openFixtureMigration(path.join(f.folder, 'destination'), f.source);
+  const beforeRetry = await resumed.projection();
+  assert.equal(beforeRetry.counts.roots, 1);
+  const committedRoot = await restarted.bots.repository.root(rootItem.root);
+  const receipts = memoryFrames(committedRoot).filter(frame => frame.payload.event === 'migration.root.imported');
+  assert.equal(receipts.length, 1);
+  const frameCount = (await restarted.bots.repository.snapshot()).frameCount;
+
+  const retry = await resumed.commit('lost-root-ack', rootItem.id);
+  assert.equal(retry.duplicate, true);
+  assert.equal(canonicalJson(retry.source), canonicalJson(frameHead(receipts[0])));
+  const afterRetry = await resumed.projection();
+  assert.equal(afterRetry.cursorHash, beforeRetry.cursorHash);
+  assert.equal(canonicalJson(afterRetry), canonicalJson(beforeRetry));
+  assert.equal((await restarted.bots.repository.snapshot()).frameCount, frameCount);
+  assert.equal(memoryFrames(await restarted.bots.repository.root(rootItem.root))
+    .filter(frame => frame.payload.event === 'migration.root.imported').length, 1);
 });
 
 test('native provider adapters accept selected native metadata only and never private content fields', () => {

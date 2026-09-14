@@ -11,7 +11,8 @@ import { BoundedWriter } from './bounded-stdio.js';
 import { publicError, Refusal, requireThat } from './errors.js';
 
 async function main(args: string[]): Promise<void> {
-  let directory: string | undefined, manifest: string | undefined, approval: string | undefined, interruptRoot: string | undefined;
+  let directory: string | undefined, manifest: string | undefined, approval: string | undefined;
+  let interruptRoot: string | undefined, lostAcknowledgementRoot: string | undefined;
   let fixture = false;
   if (args.includes('--help')) {
     console.log('NEW RAPP Work greenfield migration application\nnode next/dist/migration-app.js --fixture --store <empty-isolated-profile> --manifest <approved-plan> --approval <signed-approval>\nRAPP_WORK_MIGRATION_CAPABILITY is supplied through protected environment.\nControlled-local execution is available only to a trusted host that injects registry, signer and domain/closure/Hive authority through openMigrationService; this CLI accepts fixture authority only.');
@@ -24,6 +25,7 @@ async function main(args: string[]): Promise<void> {
     else if (flag === '--manifest') manifest = args.shift();
     else if (flag === '--approval') approval = args.shift();
     else if (flag === '--fixture-interrupt-root') interruptRoot = args.shift();
+    else if (flag === '--fixture-lost-ack-root') lostAcknowledgementRoot = args.shift();
     else throw new Refusal('migration-cli', 'Unknown migration application option.');
   }
   requireThat(fixture, 'migration-adoption-unavailable', 'Live local migration requires final approval and adopted canonical domain/closure bindings. The fixture authority cannot authorize live profiles.');
@@ -34,14 +36,20 @@ async function main(args: string[]): Promise<void> {
   const approvalBytes = await readFile(approval, 'utf8');
   const keys = fixtureSigners(plan.roots.length);
   requireThat(interruptRoot === undefined || plan.roots.includes(interruptRoot), 'migration-fixture', 'Fault injection is limited to a selected fixture root.');
-  let interrupted = false;
+  requireThat(lostAcknowledgementRoot === undefined || plan.roots.includes(lostAcknowledgementRoot),
+    'migration-fixture', 'Lost-acknowledgement injection is limited to a selected fixture root.');
+  let interrupted = false, acknowledgementLost = false;
   const { service } = await openMigrationService({
     directory, plan, approvalBytes, authority: { registry: keys.registry, signers: keys.signers },
     capabilityHash: sha256(capability),
-    ...(interruptRoot ? { migrationFault: (point: 'frame-materialized' | 'before-root-publish', root: string) => {
+    ...(interruptRoot || lostAcknowledgementRoot ? { migrationFault: (point: 'frame-materialized' | 'before-root-publish' | 'after-root-publish', root: string) => {
       if (!interrupted && point === 'frame-materialized' && root === interruptRoot) {
         interrupted = true;
         throw new Refusal('fixture-materialization-interrupted', 'Controlled fixture interruption after one unpublished canonical file; active roots remain unchanged.');
+      }
+      if (!acknowledgementLost && point === 'after-root-publish' && root === lostAcknowledgementRoot) {
+        acknowledgementLost = true;
+        throw new Refusal('fixture-root-acknowledgement-lost', 'The whole root is durable, but its success acknowledgement was intentionally lost.');
       }
     } } : {}),
   });

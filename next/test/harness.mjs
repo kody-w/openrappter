@@ -12,17 +12,18 @@ export const base = fileURLToPath(new URL('../.test-scratch/use-cases/', import.
 await mkdir(base, { recursive: true, mode: 0o700 });
 let index = 0;
 export async function harness(options = {}) {
+  const { keys: selectedKeys, ...overrides } = options;
   const directory = path.join(base, `store-${process.pid}-${Date.now()}-${index++}`);
   const transport = new FixtureCopilotTransport();
   const brainstem = new FixtureBrainstem();
   const channel = new SyntheticIMessage();
-  const keys = fixtureSigners();
+  const keys = selectedKeys ?? fixtureSigners();
   let now = '2026-09-13T20:00:00.000Z';
   const settings = {
     directory, signatures: keys.signatures, signers: keys.signers,
     brainstem, channel, fixture: true,
     provider: new CopilotSdkProvider(transport, { mode: 'empty', sessionStorage: 'memory-only', canonicalContextOnly: true }),
-    clock: () => now, ...options,
+    clock: () => now, ...overrides,
   };
   const runtime = await HeadlessRuntime.open(settings);
   return {

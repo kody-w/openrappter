@@ -35,6 +35,22 @@ export function fixtureSigners(count = 2): { signers: RootSigner[]; registry: Re
   return { signers, registry, signatures: selectSignaturePolicy(registry) };
 }
 
+export function sameTailFixtureSigners(): { signers: RootSigner[]; registry: RegistryKey[]; signatures: ReturnType<typeof selectSignaturePolicy> } {
+  const seed = Buffer.from(sha256('PUBLIC-RAPP-WORK-NEXT-SAME-TAIL-FIXTURE'), 'hex');
+  const privateKey = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
+  const publicKey = createPublicKey(privateKey);
+  const spki = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+  const identities = [['fixture', 'alpha'], ['fixture', 'beta']] as const;
+  const signers = identities.map(([owner, slug]) => {
+    const root = keyedIdentity(owner, slug, publicKey);
+    return { root, signer: createFrameSigner({ kid: root, privateKey }) };
+  });
+  const registry = signers.map(({ root }) => ({
+    kid: root, spki_der_b64: spki, revoked_utc: null, superseded_utc: null,
+  }));
+  return { signers, registry, signatures: selectSignaturePolicy(registry) };
+}
+
 export class FixtureBrainstem implements BrainstemBinding {
   readonly available = true;
   readonly hotloads: string[] = [];

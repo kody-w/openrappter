@@ -70,7 +70,7 @@ independent verification boundaries; the frozen kind registry/wire must agree.
 The disk adapter stores ordinary eleven-field RAPP/1 frames:
 
 ```
-<explicit-private-store>/bots/<root-rappid-tail>/
+<explicit-private-store>/bots/root-<full-rappid-storage-hash>/
   body/frames/000000000000.json
   memory/frames/000000000000.json …
   swarm/frames/000000000000.json …
@@ -78,6 +78,14 @@ The disk adapter stores ordinary eleven-field RAPP/1 frames:
   scopes/<canonical-source-key>/frames/000000000000.json …
   scopes/<canonical-source-key>/branches/<head-wave>/frames/000000000000.json …
 ```
+
+The directory suffix is
+`H("rapp/1:particle", {schema:"rapp-work.root-storage/1",root:<full-rappid>})`
+with a `root-` prefix. It is an opaque collision-resistant locator, never a
+replacement identity. Distinct full RAPPIDs remain distinct even when their
+minted tails match. Existing unprefixed tail directories reopen and continue in
+place; new roots, migration ledgers and unpublished materializations use the
+full-RAPPID-derived locator.
 
 No message database, workspace database, identity alias, task database, schedule
 database, mutable root manifest, cache authority or Egg format exists. The
@@ -173,6 +181,11 @@ hidden recursive world and branch ancestry intact, plus an authorized successor
 receipt. Pointer imports append bounded canonical events with original native/
 manager provenance and honest compatibility classification. Incomplete rollback
 retains canonical forensic data and removes no committed root.
+
+After the staged tree is atomically renamed and both parent directories are
+fsynced, a lost acknowledgement is resolved by reopening the full-RAPPID
+locator and returning the existing migration receipt. Retry does not append a
+second receipt, move the cursor or republish the root.
 
 A separate passive process consumes the real app's cursor events as each
 root/world/pointer appears. The harness cannot seed the destination filesystem.

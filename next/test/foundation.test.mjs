@@ -1,17 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, readFile, readdir, writeFile, symlink } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, writeFile, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   AUTHORITY, buildFrame, canonicalJson, createFrameSigner, frameHead, keyedIdentity,
-  selectSignaturePolicy, streamFor, verifySelectedAuthority,
+  rootTail, selectSignaturePolicy, streamFor, verifySelectedAuthority,
 } from '../dist/canonical.js';
-import { CanonicalRepository } from '../dist/repository.js';
+import { CanonicalRepository, rootStorageKey } from '../dist/repository.js';
 import { Bots } from '../dist/bots.js';
 import { SharedBrainstem, targetCapability, UnavailableBrainstem } from '../dist/spine.js';
 import { eventPayload } from '../dist/contract.js';
+import { sameTailFixtureSigners } from '../dist/fixtures.js';
 
 const base = fileURLToPath(new URL('../.test-scratch/foundation/', import.meta.url));
 await mkdir(base, { recursive: true, mode: 0o700 });
@@ -61,6 +62,37 @@ test('mint once, full GUID, recursive scopes, hidden organs and canonical restar
   assert.equal((await repository.snapshot()).frameCount, 1);
   assert.deepEqual(await inventory(f.directory), before);
   assert.equal((await restarted.list()).length, 1);
+});
+
+test('full-RAPPID storage locators keep same-tail roots distinct across creation and restart', async () => {
+  const keys = sameTailFixtureSigners();
+  const f = await fixture({ signatures: keys.signatures });
+  const bots = new Bots({ repository: f.repository, spine: f.spine, capability: capability.reference,
+    signers: keys.signers, clock: () => utc });
+  const a = await bots.create({ name: 'Same-tail A', keyedRoot: keys.signers[0].root, operationId: 'same-tail-a' });
+  const b = await bots.create({ name: 'Same-tail B', keyedRoot: keys.signers[1].root, operationId: 'same-tail-b' });
+  assert.notEqual(a.root, b.root);
+  assert.equal(rootTail(a.root), rootTail(b.root));
+  const expected = [rootStorageKey(a.root), rootStorageKey(b.root)].sort();
+  assert.deepEqual((await readdir(path.join(f.directory, 'bots'))).sort(), expected);
+  const reopened = await CanonicalRepository.open({ directory: f.directory, signatures: keys.signatures });
+  const restarted = new Bots({ repository: reopened, spine: f.spine, capability: capability.reference,
+    signers: keys.signers, clock: () => utc });
+  assert.deepEqual((await restarted.list(true)).map(root => root.root).sort(), [a.root, b.root].sort());
+  assert.equal((await restarted.project(a.root)).root, a.root);
+  assert.equal((await restarted.project(b.root)).root, b.root);
+});
+
+test('legacy tail storage reopens and continues in place without creating an identity alias', async () => {
+  const f = await fixture();
+  const bot = await f.bots.create({ name: 'Legacy locator', operationId: 'legacy-locator-root' });
+  const botsDirectory = path.join(f.directory, 'bots');
+  await rename(path.join(botsDirectory, rootStorageKey(bot.root)), path.join(botsDirectory, rootTail(bot.root)));
+  const reopened = await CanonicalRepository.open({ directory: f.directory });
+  const restarted = new Bots({ repository: reopened, spine: f.spine, capability: capability.reference, clock: () => utc });
+  await restarted.visibility(bot.root, true, 'legacy-locator-hide');
+  assert.deepEqual(await readdir(botsDirectory), [rootTail(bot.root)]);
+  assert.equal((await reopened.root(bot.root)).streams.memory.length, 1);
 });
 
 test('observation, selection and where-were-we do not append or compute; clear is hide only', async () => {
@@ -115,7 +147,7 @@ test('canonical corruption, scope escape and source/native directory writes fail
   const linkPath = path.join(run, 'linked');
   await symlink(f.directory, linkPath);
   await assert.rejects(CanonicalRepository.open({ directory: linkPath }), { code: 'path-boundary' });
-  const frameFile = path.join(f.directory, 'bots', a.root.split(':').at(-1), 'body/frames/000000000000.json');
+  const frameFile = path.join(f.directory, 'bots', rootStorageKey(a.root), 'body/frames/000000000000.json');
   const frame = JSON.parse(await readFile(frameFile, 'utf8'));
   frame.payload.name = 'tampered';
   await writeFile(frameFile, canonicalJson(frame));

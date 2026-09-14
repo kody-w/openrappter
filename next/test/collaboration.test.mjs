@@ -5,7 +5,8 @@ import { writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { LocalHive } from '../dist/hive.js';
-import { canonicalJson } from '../dist/canonical.js';
+import { canonicalJson, rootTail } from '../dist/canonical.js';
+import { sameTailFixtureSigners } from '../dist/fixtures.js';
 import { harness, allowPair, inventory, deferred } from './harness.mjs';
 
 test('no peer delegation before bilateral explicit root authority, and no self-identity merging', async () => {
@@ -65,6 +66,33 @@ test('two signed public perspectives use exact canonical streams, preserve disag
   assert.equal(verdict.verdict, 'COMPLIANT');
   assert(verdict.framesScanned > 0 && verdict.signedFrames > 0);
   assert.equal(verdict.authorityFrames, 16);
+});
+
+test('same-tail full RAPPIDs collaborate and restart as distinct signed roots', async () => {
+  const keys = sameTailFixtureSigners();
+  const h = await harness({ keys });
+  const a = await h.create(), b = await h.create(1);
+  assert.notEqual(a.root, b.root);
+  assert.equal(rootTail(a.root), rootTail(b.root));
+  await allowPair(h, a.root, b.root);
+  const exchange = await h.runtime.collaboration.ask(a.root, b.root, 'Keep both full identities distinct.', 'same-tail-exchange');
+  const snapshot = await h.runtime.bots.repository.snapshot();
+  const request = snapshot.roots.find(root => root.definition.root === a.root).streams.swarm[0];
+  const response = snapshot.roots.find(root => root.definition.root === b.root).streams.swarm[0];
+  assert.equal(request.stream_id, response.stream_id);
+  assert.notEqual(request.payload.root, response.payload.root);
+  assert(new Set(exchange.transcript.map(turn => turn.speaker)).has(a.root));
+  assert(new Set(exchange.transcript.map(turn => turn.speaker)).has(b.root));
+  const restarted = await h.restart();
+  assert.deepEqual(await restarted.collaboration.transcript(a.root), exchange.transcript);
+  assert.deepEqual((await restarted.bots.list(true)).map(root => root.root).sort(), [a.root, b.root].sort());
+  const registry = path.join(path.dirname(h.directory), `${path.basename(h.directory)}-same-tail-registry.json`);
+  await writeFile(registry, JSON.stringify(keys.registry));
+  const checker = fileURLToPath(new URL('../scripts/reference-check.py', import.meta.url));
+  const checked = spawnSync('python3', [checker, h.directory, registry], { encoding: 'utf8',
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+  assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+  assert.equal(JSON.parse(checked.stdout).verdict, 'COMPLIANT');
 });
 
 test('restart reconstructs the exact multibot transcript and never replays request or synthesis inference', async () => {

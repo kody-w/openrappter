@@ -3,7 +3,7 @@ import { link, lstat, mkdir, open, readdir, rename, rmdir, unlink } from 'node:f
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
-  buildFrame, canonicalJson, frameHead, isUtc, mergeStoredChains, parseCanonicalJson, rootTail, signerOf, streamFor,
+  buildFrame, canonicalJson, contentHash, frameHead, isBodyStream, isUtc, mergeStoredChains, parseCanonicalJson, rootTail, signerOf, streamFor,
   verifiedFrame, verifySelectedAuthority, type Family, type FrameSigner, type JsonObject,
   type RappFrame, type SignaturePolicy,
 } from './canonical.js';
@@ -15,9 +15,15 @@ import { assertCanonicalSelection } from './canonical-forks.js';
 
 const FAMILIES: readonly Family[] = ['body', 'memory', 'swarm'];
 const FILE = /^\d{12}\.json$/u;
-const TAIL = /^[0-9a-f]{64}$/u;
+const HASH = /^[0-9a-f]{64}$/u;
+const ROOT_DIRECTORY = /^(?:[0-9a-f]{64}|root-[0-9a-f]{64})$/u;
 const MAX_FRAMES = 8_192;
 const NOFOLLOW = constants.O_NOFOLLOW;
+
+export function rootStorageKey(root: string): string {
+  requireThat(isBodyStream(root), 'root-identity', 'A full canonical root RAPPID is required.');
+  return `root-${contentHash({ schema: 'rapp-work.root-storage/1', root })}`;
+}
 
 export interface RootSnapshot {
   readonly definition: RootDefinition;
@@ -54,12 +60,22 @@ export interface RepositoryOptions {
   signatures?: SignaturePolicy;
   lockTimeoutMs?: number;
   fault?: (point: 'before-publish' | 'after-publish') => void;
-  migrationFault?: (point: 'frame-materialized' | 'before-root-publish', root: string) => void;
+  migrationFault?: (point: 'frame-materialized' | 'before-root-publish' | 'after-root-publish', root: string) => void;
 }
 
 async function assertDirectory(directory: string): Promise<void> {
   const info = await lstat(directory);
   requireThat(info.isDirectory() && !info.isSymbolicLink(), 'path-boundary', 'A real directory is required.');
+}
+
+async function directoryExists(directory: string): Promise<boolean> {
+  try {
+    await assertDirectory(directory);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
 }
 
 async function assertAncestors(directory: string): Promise<void> {
@@ -89,6 +105,7 @@ export class CanonicalRepository {
   readonly directory: string;
   readonly #options: RepositoryOptions;
   readonly #publicationListeners = new Set<(notice: PublicationNotice) => void | Promise<void>>();
+  #rootLocations = new Map<string, string>();
   private constructor(options: RepositoryOptions) {
     this.directory = path.resolve(options.directory);
     this.#options = options;
@@ -150,7 +167,9 @@ export class CanonicalRepository {
     try { return await operation(); } finally { await rmdir(lock); }
   }
 
-  #rootDirectory(root: string): string { return path.join(this.directory, 'bots', rootTail(root)); }
+  #rootDirectory(root: string): string {
+    return path.join(this.directory, 'bots', this.#rootLocations.get(root) ?? rootStorageKey(root));
+  }
   #framesDirectory(root: string, family: Family): string {
     return path.join(this.#rootDirectory(root), family, 'frames');
   }
@@ -177,9 +196,10 @@ export class CanonicalRepository {
     const botsDirectory = path.join(this.directory, 'bots');
     await assertAncestors(botsDirectory);
     const roots: RootSnapshot[] = [];
+    const locations = new Map<string, string>();
     let frameCount = 0;
     const names = (await readdir(botsDirectory)).sort();
-    requireThat(names.length <= MIGRATION_LIMITS.roots && names.every(name => TAIL.test(name)),
+    requireThat(names.length <= MIGRATION_LIMITS.roots && names.every(name => ROOT_DIRECTORY.test(name)),
       'root-catalog', 'The canonical root catalog is invalid or full.');
     for (const name of names) {
       const rootDirectory = path.join(botsDirectory, name);
@@ -190,10 +210,14 @@ export class CanonicalRepository {
       const genesisBytes = await readBytes(path.join(rootDirectory, 'body/frames/000000000000.json'));
       const candidate = parseCanonicalJson(genesisBytes) as JsonObject;
       const definition = rootDefinition(candidate.payload);
-      requireThat(rootTail(definition.root) === name, 'root-identity', 'Root GUID and storage locator disagree.');
+      requireThat(name === rootStorageKey(definition.root) || name === rootTail(definition.root),
+        'root-identity', 'Full root GUID and storage locator disagree.');
+      requireThat(!locations.has(definition.root), 'root-identity',
+        'One full canonical root RAPPID cannot occupy multiple storage locators.');
+      locations.set(definition.root, name);
       const streams = {} as Record<Family, readonly RappFrame[]>;
       for (const family of FAMILIES) {
-        streams[family] = await this.#readChain(this.#framesDirectory(definition.root, family), streamFor(definition.root, family));
+        streams[family] = await this.#readChain(path.join(rootDirectory, family, 'frames'), streamFor(definition.root, family));
         frameCount += streams[family].length;
       }
       requireThat(streams.body.length === 1 && streams.body[0]!.kind === 'body.pulse',
@@ -207,7 +231,7 @@ export class CanonicalRepository {
         const directory = path.join(rootDirectory, 'scopes');
         await assertDirectory(directory);
         const scopeNames = (await readdir(directory)).sort();
-        requireThat(scopeNames.length <= 128 && scopeNames.every(name => TAIL.test(name)), 'source-scope', 'Invalid scoped source directories.');
+        requireThat(scopeNames.length <= 128 && scopeNames.every(name => HASH.test(name)), 'source-scope', 'Invalid scoped source directories.');
         for (const key of scopeNames) {
           const sourceDirectory = path.join(directory, key);
           await assertAncestors(sourceDirectory);
@@ -224,7 +248,7 @@ export class CanonicalRepository {
           const branchesDirectory = path.join(sourceDirectory, 'branches');
           await assertDirectory(branchesDirectory);
           for (const hash of (await readdir(branchesDirectory)).sort()) {
-            requireThat(TAIL.test(hash), 'source-branch', 'Invalid source branch head.');
+            requireThat(HASH.test(hash), 'source-branch', 'Invalid source branch head.');
             const branch = await this.#readChain(path.join(branchesDirectory, hash, 'frames'), stream);
             requireThat(branch.length > 0 && branch.at(-1)!.frame_hash === hash
               && branch.every(f => f.payload.root === event.root && f.payload.scope === event.scope && signerOf(f) === definition.signer),
@@ -268,6 +292,7 @@ export class CanonicalRepository {
       memoryFrames(root);
       roots.push(root);
     }
+    this.#rootLocations = locations;
     return Object.freeze({ roots: Object.freeze(roots), frameCount });
   }
 
@@ -457,27 +482,53 @@ export class CanonicalRepository {
     });
   }
 
-  async #migrationLedger(owner: string): Promise<readonly RappFrame[]> {
-    const directory = path.join(this.directory, 'migration', rootTail(owner), 'frames');
+  async #migrationLedger(owner: string): Promise<{ directory: string; frames: readonly RappFrame[] }> {
+    const migrationDirectory = path.join(this.directory, 'migration');
+    const current = path.join(migrationDirectory, rootStorageKey(owner));
+    const legacy = path.join(migrationDirectory, rootTail(owner));
+    const currentExists = await directoryExists(current);
+    const legacyExists = await directoryExists(legacy);
+    const expectedStream = migrationStream(owner);
+    const storedStream = async (directory: string): Promise<string | null> => {
+      try {
+        const frame = parseCanonicalJson(await readBytes(path.join(directory, 'frames/000000000000.json'))) as JsonObject;
+        return typeof frame.stream_id === 'string' ? frame.stream_id : null;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
+    };
+    const currentStream = currentExists ? await storedStream(current) : null;
+    const legacyStream = legacyExists ? await storedStream(legacy) : null;
+    requireThat(!currentExists || currentStream === null || currentStream === expectedStream,
+      'migration-authority', 'The full-RAPPID migration ledger locator belongs to another owner.');
+    requireThat(!(currentExists && legacyStream === expectedStream), 'migration-authority',
+      'One migration owner cannot occupy both legacy and full-RAPPID ledger locators.');
+    const ownerDirectory = currentExists || legacyStream !== expectedStream ? current : legacy;
+    const directory = path.join(ownerDirectory, 'frames');
     try {
       const frames = await this.#readChain(directory, migrationStream(owner));
       requireThat(frames.every(f => f.kind === 'memory.save' && signerOf(f) === owner),
         'migration-authority', 'Migration coordination is an owner-signed canonical memory stream.');
-      return frames;
+      return { directory, frames };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { directory, frames: [] };
       throw error;
     }
   }
 
   async migrationSnapshot(owner: string): Promise<{ snapshot: StoreSnapshot; ledger: readonly RappFrame[] }> {
-    return this.#locked(async () => ({ snapshot: await this.#scan(), ledger: await this.#migrationLedger(owner) }));
+    return this.#locked(async () => {
+      const ledger = await this.#migrationLedger(owner);
+      return { snapshot: await this.#scan(), ledger: ledger.frames };
+    });
   }
 
   async migrationTransaction<T>(owner: string, signer: FrameSigner, operation: (tx: MigrationTransaction) => Promise<T>): Promise<T> {
     return this.#locked(async () => {
       const snapshot = await this.#scan();
-      const ledger = [...await this.#migrationLedger(owner)];
+      const storedLedger = await this.#migrationLedger(owner);
+      const ledger = [...storedLedger.frames];
       return operation({
         snapshot, ledger,
         appendControl: async (payload, utc) => {
@@ -486,9 +537,8 @@ export class CanonicalRepository {
             utc, payload, head: ledger.length ? frameHead(ledger.at(-1)!) : null, signer,
             ...(this.#options.signatures ? { signatures: this.#options.signatures } : {}) });
           requireThat(signerOf(frame) === owner, 'migration-authority', 'The selected migration owner must sign coordination.');
-          const directory = path.join(this.directory, 'migration', rootTail(owner), 'frames');
-          await mkdir(directory, { recursive: true, mode: 0o700 });
-          await this.#publish(directory, frame);
+          await mkdir(storedLedger.directory, { recursive: true, mode: 0o700 });
+          await this.#publish(storedLedger.directory, frame);
           ledger.push(frame);
           return frame;
         },
@@ -508,7 +558,14 @@ export class CanonicalRepository {
             payload: receipt.payload, head: last ? frameHead(last) : null,
             ...(receipt.signer ? { signer: receipt.signer } : {}), signatures: this.#options.signatures });
           requireThat(signerOf(imported) === source.definition.signer, 'migration-receipt', 'The original root signer must authorize the successor receipt.');
-          const staged = path.join(this.directory, 'migration', 'materialized', publication, rootTail(root));
+          const materialized = path.join(this.directory, 'migration', 'materialized', publication);
+          const current = path.join(materialized, rootStorageKey(root));
+          const legacy = path.join(materialized, rootTail(root));
+          const currentExists = await directoryExists(current);
+          const legacyExists = await directoryExists(legacy);
+          requireThat(!(currentExists && legacyExists), 'migration-existing-bytes',
+            'One unpublished root cannot occupy both legacy and full-RAPPID staging locators.');
+          const staged = currentExists ? current : legacyExists ? legacy : current;
           await mkdir(staged, { recursive: true, mode: 0o700 });
           for (const family of FAMILIES) await mkdir(path.join(staged, family, 'frames'), { recursive: true, mode: 0o700 });
           await mkdir(path.join(staged, 'branches'), { recursive: true, mode: 0o700 });
@@ -526,6 +583,7 @@ export class CanonicalRepository {
           await rename(staged, this.#rootDirectory(root));
           await syncDirectory(path.join(this.directory, 'bots'));
           await syncDirectory(path.dirname(staged));
+          this.#options.migrationFault?.('after-root-publish', root);
           return { ...source, streams: { ...source.streams, memory: [...source.streams.memory, imported] } };
         },
       });

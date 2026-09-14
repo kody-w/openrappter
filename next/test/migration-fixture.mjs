@@ -39,10 +39,10 @@ export async function sourceInventory(directory, includeDirectories = false) {
   return files;
 }
 
-export async function migrationFixture(directory) {
+export async function migrationFixture(directory, options = {}) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const coverage = JSON.parse(await readFile(source, 'utf8'));
-  const keys = fixtureSigners();
+  const keys = options.keys ?? fixtureSigners();
   const capability = await targetCapability();
   const sourceByItem = new Map();
   const items = [];

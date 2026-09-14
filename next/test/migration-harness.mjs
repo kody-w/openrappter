@@ -7,6 +7,7 @@ import path from 'node:path';
 import { canonicalJson, contentHash, sha256 } from '../dist/canonical.js';
 import { MIGRATION_LIMITS } from '../dist/migration-contract.js';
 import { migrationFixture, minimalRootMigrationFixture, sourceInventory } from './migration-fixture.mjs';
+import { rootStorageKey } from '../dist/repository.js';
 
 const nextRoot = fileURLToPath(new URL('../', import.meta.url));
 const app = path.join(nextRoot, 'dist/migration-app.js');
@@ -38,10 +39,11 @@ function deliver(value, entries, waiters) {
   }
 }
 
-function launch(destination, fixture, capability, record, run, interruptRoot) {
+function launch(destination, fixture, capability, record, run, interruptRoot, lostAcknowledgementRoot) {
   const consumer = spawn(process.execPath, [consumerProgram], { stdio: ['pipe', 'pipe', 'pipe'] });
   const service = spawn(process.execPath, [app, '--fixture', '--store', destination, '--manifest', fixture.manifestPath, '--approval', fixture.approvalPath,
-    ...(interruptRoot ? ['--fixture-interrupt-root', interruptRoot] : [])],
+    ...(interruptRoot ? ['--fixture-interrupt-root', interruptRoot] : []),
+    ...(lostAcknowledgementRoot ? ['--fixture-lost-ack-root', lostAcknowledgementRoot] : [])],
     { env: { ...process.env, RAPP_WORK_MIGRATION_CAPABILITY: capability }, stdio: ['pipe', 'pipe', 'pipe'] });
   const responses = [], displays = [], events = [], responseWaiters = new Set(), displayWaiters = new Set();
   let serviceLog = '', displayLog = '';
@@ -102,7 +104,7 @@ export async function runObservedMigration(options = {}) {
   await assert.rejects(access(destination), { code: 'ENOENT' });
   const capability = randomBytes(32).toString('base64url');
   const record = { events: [], displays: [], calls: [], processes: [] };
-  let connection = launch(destination, fixture, capability, record, 1, fixture.roots[1]);
+  let connection = launch(destination, fixture, capability, record, 1, fixture.roots[1], fixture.roots[0]);
   let requestCounter = 0;
   const call = (method, params, id) => connection.request(method, params, id ?? `migration-request-${requestCounter++}`);
   const stageRoot = async (batch, item, onlyFirst = false) => {
@@ -134,10 +136,17 @@ export async function runObservedMigration(options = {}) {
     await call('rapp_work_migration_start_batch', { batch: 'first-root', items: [first.id] }, 'first-root-batch');
     await stageRoot('first-root', first);
     await call('rapp_work_migration_prepare', { batch: 'first-root', item: first.id }, 'prepare-first-root');
-    await call('rapp_work_migration_commit', { batch: 'first-root', item: first.id });
+    await assert.rejects(call('rapp_work_migration_commit', { batch: 'first-root', item: first.id }),
+      { code: 'fixture-root-acknowledgement-lost' });
     const appeared = await connection.checkpoint();
     assert.equal(appeared.counts.roots, 1);
     assert(connection.displays.some(d => d.additions.some(a => a.kind === 'root' && a.id === first.root)));
+    const retry = await call('rapp_work_migration_commit', { batch: 'first-root', item: first.id }, 'retry-first-root-after-lost-ack');
+    assert.equal(retry.duplicate, true);
+    assert.equal(retry.source.frame_hash, appeared.roots.find(root => root.root === first.root).heads.memory.frame_hash);
+    const afterRetry = await connection.checkpoint();
+    assert.equal(afterRetry.cursorHash, appeared.cursorHash);
+    assert.equal(afterRetry.counts.activeFrames, appeared.counts.activeFrames);
 
     await call('rapp_work_migration_start_batch', { batch: 'rollback-incomplete', items: [second.id] }, 'rollback-batch');
     await stageRoot('rollback-incomplete', second, true);
@@ -196,7 +205,7 @@ export async function runObservedMigration(options = {}) {
         for (const branch of source.branches) assert(preserved.branches.some(b => b.head === branch.head && b.frames === branch.frames.length));
       }
       for (const [relative, originalBytes] of fixture.sourceByItem.get(fixture.plan.items.find(i => i.kind === 'canonical-root' && i.root === original.definition.root).id).files) {
-        const actual = await readFile(path.join(destination, 'bots', original.definition.root.split(':').at(-1), relative));
+        const actual = await readFile(path.join(destination, 'bots', rootStorageKey(original.definition.root), relative));
         assert(actual.equals(originalBytes), `Source occurrence bytes changed: ${relative}`);
       }
     }
@@ -261,6 +270,8 @@ export async function runObservedMigration(options = {}) {
       nativePrivateContentImported: false, historicalUnavailableItems: 2, duplicateImports: 0,
       interruptionResume: true, interruptionMode: 'SIGTERM with filesystem critical-section drain; no stale-lock stealing', replayedChunksDeduplicated: resumed.duplicate,
       incompleteTransactionRollback: true, unpublishedMaterializationFaultExercised: true, rollbackDeletesCommittedData: false,
+      wholeRootLostAcknowledgementRecovered: true, wholeRootRetryReceipt: retry.source.frame_hash,
+      wholeRootRetryCursorUnchanged: afterRetry.cursorHash === appeared.cursorHash,
       serviceAndProjectionRestartIdentical: true, observedEvents: record.events.length,
       observedUniqueItems: new Set(visibleAdds.filter(a => ['canonical-root', 'estate-pointer'].includes(a.kind)).map(a => a.id)).size,
       observedWorlds: new Set(visibleAdds.filter(a => a.kind === 'world').map(a => a.id)).size,

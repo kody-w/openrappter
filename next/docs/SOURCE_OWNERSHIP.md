@@ -21,7 +21,7 @@ The root's independently selected signer signs each occurrence. The rev-15
 eleven-field envelope, kinds, hashes, predecessor links and checker are unchanged.
 
 ```
-bots/<original-root-tail>/
+bots/root-<full-rappid-storage-hash>/
   body/frames/…                     # original root genesis
   memory/frames/…                   # root-owned work and immutable old history
   swarm/frames/…                    # distinct signed root public exchanges
@@ -30,6 +30,12 @@ bots/<original-root-tail>/
     frames/…                       # this exact source scope only
     branches/<head>/frames/…        # complete unselected source alternatives
 ```
+
+The root directory name is an opaque hash of the complete original RAPPID,
+prefixed with `root-`; it is not a GUID or an alias. This prevents two valid
+full RAPPIDs with the same minted tail from sharing an active, staged or
+migration-ledger location. Legacy unprefixed tail directories remain readable
+and append in place.
 
 The repository routes new memory writes using the authorized event scope,
 checks the root/scope/stream/path/signature binding, and adds original scope

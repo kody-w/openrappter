@@ -6,10 +6,11 @@ Do **not** point the fixture application at current/live profiles. Do not relabe
 a real plan `sanitized-fixture`, change real root namespaces, copy private native
 transcripts, or weaken the canonical domain/closure guard to get a green result.
 
-The current executable deliberately accepts only signed sanitized-fixture
-authority. A real observed local run is **not yet approved or qualified**.
-The release gate stays pending until an operator-owned binding provides the
-existing adopted canonical source/domain/closure and signer authority.
+The packaged CLI deliberately accepts only signed sanitized-fixture authority.
+The core now has a separate programmatic injection seam for a trusted owner
+host, but this repository ships no production registry, signer custody,
+domain/closure verifier, Private Hive verifier or live credential. A real
+observed local run is therefore **still PENDING, not approved or qualified**.
 
 ## Exact preparation and review sequence
 
@@ -46,21 +47,46 @@ existing adopted canonical source/domain/closure and signer authority.
 5. Obtain **final integration approval** plus the adopted canonical authority
    binding for this exact plan hash, full root closure, domain selection and
    target isolation. Required GODD protection and signed PII/domain evidence
-   cannot be supplied by a boolean field or this runbook. Bind original root
-   signers in the trusted host; no fixture keys and no root reminting.
+   cannot be supplied by a boolean, manifest label or this runbook.
 
-   **This is where the current implementation stops for live data.** Its
-   `migration-adoption-unavailable` refusal is intentional. An actual adopted
-   binding must be implemented/qualified before continuing; no currently
-   working “enable live” flag is implied.
+   The trusted host must inject all of the following into
+   `openMigrationService`:
+
+   - the authenticated registry containing exactly the selected roots;
+   - one independently custodied signer for every selected root, including the
+     owner;
+   - a `controlledLocal.verify(...)` adapter that verifies the exact owner
+     approval wave, plan hash, registry commitment and computed closure
+     commitment;
+   - signed GODD/DOGG domain-declaration and closure-acceptance waves; and
+   - an existing Private Hive acceptance bound to the same owner and plan, with
+     its authenticated registry commitment, monotonic sequence and checkpoint.
+
+   Signer/registry probes and this authority verification run **before the
+   destination profile is opened**. Missing, revoked, mismatched or malformed
+   owner/domain/closure/Hive authority fails closed. Fixture roots cannot be
+   relabeled `controlled-local`, and classifications or neutral historical
+   records are never rewritten to manufacture adoption. The resulting authority
+   evidence hash is bound into the first owner-signed migration control frame;
+   restart with a different authority binding refuses rather than rebinding.
+
+   **This is still the operational stop for live data.** The injection contract
+   exists, but no production adapter or authority material is included here.
+   There is no “enable live” flag and the real cutover remains PENDING.
 
 ## Controlled execution after the authority gate is satisfied
 
-6. The trusted owner host launches the **new** `MigrationService` and its public
-   `MigrationEndpoint` over stdio with the approved plan/authority and a newly
-   chosen empty destination. Do not use a current profile as the destination.
-   The destination is created only by the application, never seeded by a driver.
-   Start a passive projection process before importing the first item.
+6. After an external adapter satisfies step 5, the trusted owner host calls
+   `openMigrationService({ directory, plan, approvalBytes, authority,
+   capabilityHash })`, then exposes the returned **new** `MigrationService`
+   through `MigrationEndpoint`. The `authority` value carries the operator
+   registry/signers and the verifier adapter; private keys remain opaque signer
+   handles and are never serialized into the plan or evidence.
+
+   Choose a newly empty destination; do not use a current profile. The
+   destination is created only after authority binding succeeds and only by the
+   application, never seeded by a driver. Start a passive projection process
+   before importing the first item.
 
    The fixture launch syntax demonstrates the interface, **not live authority**:
 
@@ -99,6 +125,10 @@ existing adopted canonical source/domain/closure and signer authority.
    Run the exact canonical checker on the destination and review the recorded
    live display/replay and browser checks. A skipped source category, missing
    artifact, duplicate identity, source write or projection gap fails the gate.
+   A plan may select at most the repository bound of **64 roots**, including
+   hidden roots. The observed capacity regression migrates all 64 and observes
+   all 64 through the passive projection; a 65-root plan is rejected before the
+   destination is created.
 
 10. Submit the machine evidence and self-contained replay for final human
     integration/cutover acceptance. The old implementation and live profiles

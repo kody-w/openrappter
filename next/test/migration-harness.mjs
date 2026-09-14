@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { canonicalJson, contentHash, sha256 } from '../dist/canonical.js';
 import { MIGRATION_LIMITS } from '../dist/migration-contract.js';
-import { migrationFixture, sourceInventory } from './migration-fixture.mjs';
+import { migrationFixture, minimalRootMigrationFixture, sourceInventory } from './migration-fixture.mjs';
 
 const nextRoot = fileURLToPath(new URL('../', import.meta.url));
 const app = path.join(nextRoot, 'dist/migration-app.js');
@@ -38,10 +38,10 @@ function deliver(value, entries, waiters) {
   }
 }
 
-function launch(destination, fixture, capability, record, run) {
+function launch(destination, fixture, capability, record, run, interruptRoot) {
   const consumer = spawn(process.execPath, [consumerProgram], { stdio: ['pipe', 'pipe', 'pipe'] });
   const service = spawn(process.execPath, [app, '--fixture', '--store', destination, '--manifest', fixture.manifestPath, '--approval', fixture.approvalPath,
-    ...(run === 1 ? ['--fixture-interrupt-root', fixture.roots[1]] : [])],
+    ...(interruptRoot ? ['--fixture-interrupt-root', interruptRoot] : [])],
     { env: { ...process.env, RAPP_WORK_MIGRATION_CAPABILITY: capability }, stdio: ['pipe', 'pipe', 'pipe'] });
   const responses = [], displays = [], events = [], responseWaiters = new Set(), displayWaiters = new Set();
   let serviceLog = '', displayLog = '';
@@ -102,7 +102,7 @@ export async function runObservedMigration(options = {}) {
   await assert.rejects(access(destination), { code: 'ENOENT' });
   const capability = randomBytes(32).toString('base64url');
   const record = { events: [], displays: [], calls: [], processes: [] };
-  let connection = launch(destination, fixture, capability, record, 1);
+  let connection = launch(destination, fixture, capability, record, 1, fixture.roots[1]);
   let requestCounter = 0;
   const call = (method, params, id) => connection.request(method, params, id ?? `migration-request-${requestCounter++}`);
   const stageRoot = async (batch, item, onlyFirst = false) => {
@@ -271,6 +271,77 @@ export async function runObservedMigration(options = {}) {
     };
     await writeEvidence('result.json', JSON.stringify(evidence, null, 2) + '\n');
     return { evidence, fixture, record, base, final };
+  } finally {
+    if (connection.service.exitCode === null && connection.service.signalCode === null) connection.service.kill('SIGTERM');
+    if (connection.consumer.exitCode === null && connection.consumer.signalCode === null) connection.consumer.kill('SIGTERM');
+  }
+}
+
+export async function runObservedCapacityMigration(options = {}) {
+  const base = options.directory ?? path.join(nextRoot, '.test-scratch', `migration-capacity-${process.pid}-${Date.now()}`);
+  await mkdir(base, { recursive: true, mode: 0o700 });
+  const sourceDirectory = path.join(base, 'source');
+  const destination = path.join(base, 'destination');
+  const fixture = await minimalRootMigrationFixture(sourceDirectory);
+  const before = await sourceInventory(sourceDirectory, true);
+  await assert.rejects(access(destination), { code: 'ENOENT' });
+  const capability = randomBytes(32).toString('base64url');
+  const record = { events: [], displays: [], calls: [], processes: [] };
+  let connection = launch(destination, fixture, capability, record, 1);
+  let requestCounter = 0;
+  const call = (method, params, id) => connection.request(method, params, id ?? `capacity-request-${requestCounter++}`);
+  try {
+    const empty = await call('rapp_work_migration_read');
+    assert.equal(empty.counts.roots, 0);
+    await call('rapp_work_migration_begin', {}, 'capacity-bind');
+    await call('rapp_work_migration_start_batch',
+      { batch: 'capacity-roots', items: fixture.plan.items.map(item => item.id) }, 'capacity-batch');
+    for (const [itemIndex, item] of fixture.plan.items.entries()) {
+      for (const descriptor of item.files) {
+        const bytes = fixture.sourceByItem.get(item.id).files.get(descriptor.path);
+        for (let index = 0; index < Math.ceil(bytes.length / MIGRATION_LIMITS.chunkBytes); index++) {
+          const chunk = bytes.subarray(index * MIGRATION_LIMITS.chunkBytes, (index + 1) * MIGRATION_LIMITS.chunkBytes);
+          await call('rapp_work_migration_stage', {
+            stage: { batch: 'capacity-roots', item: item.id, path: descriptor.path, index, base64: chunk.toString('base64') },
+          }, `capacity-stage-${itemIndex}-${index}-${descriptor.path.startsWith('body') ? 'body' : 'memory'}`);
+        }
+      }
+      await call('rapp_work_migration_prepare',
+        { batch: 'capacity-roots', item: item.id }, `capacity-prepare-${itemIndex}`);
+    }
+    await call('rapp_work_migration_subscribe');
+    for (const item of fixture.plan.items) {
+      await call('rapp_work_migration_commit', { batch: 'capacity-roots', item: item.id });
+    }
+    const completed = await call('rapp_work_migration_finish');
+    assert.equal(completed.fixtureMigrationComplete, true);
+    assert.equal(completed.releaseEligible, false);
+    const final = await connection.checkpoint();
+    assert.equal(final.counts.roots, MIGRATION_LIMITS.roots);
+    assert.equal(final.roots.filter(root => root.hidden).length, MIGRATION_LIMITS.roots / 2);
+    const observedRoots = new Set(record.displays.flatMap(display => display.additions)
+      .filter(addition => addition.kind === 'root').map(addition => addition.id));
+    assert.equal(observedRoots.size, MIGRATION_LIMITS.roots);
+    assert.equal((await call('rapp_work_migration_commit',
+      { batch: 'capacity-roots', item: fixture.plan.items[0].id })).duplicate, true);
+    assert.equal((await call('rapp_work_migration_commit',
+      { batch: 'capacity-roots', item: fixture.plan.items.at(-1).id })).duplicate, true);
+    await connection.stop();
+    connection = launch(destination, fixture, capability, record, 2);
+    const restarted = await call('rapp_work_migration_read');
+    assert.equal(canonicalJson(restarted), canonicalJson(final));
+    await call('rapp_work_migration_subscribe', { cursorHash: final.cursorHash });
+    await connection.displayed(final.cursorHash);
+    await connection.stop();
+    assert.deepEqual(await sourceInventory(sourceDirectory, true), before);
+    return {
+      roots: final.counts.roots,
+      hiddenRoots: final.roots.filter(root => root.hidden).length,
+      observedRoots: observedRoots.size,
+      sourceReadOnly: true,
+      restartIdentical: true,
+      destinationWritesByHarness: 0,
+    };
   } finally {
     if (connection.service.exitCode === null && connection.service.signalCode === null) connection.service.kill('SIGTERM');
     if (connection.consumer.exitCode === null && connection.consumer.signalCode === null) connection.consumer.kill('SIGTERM');

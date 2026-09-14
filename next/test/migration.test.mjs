@@ -1,15 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { canonicalJson, sha256 } from '../dist/canonical.js';
-import { HeadlessRuntime } from '../dist/runtime.js';
-import { MigrationService } from '../dist/migration.js';
-import { migrationPlan, verifyMigrationApproval, verifyRootFiles } from '../dist/migration-contract.js';
+import { canonicalJson, createFrameSigner, keyedIdentity, selectSignaturePolicy, sha256 } from '../dist/canonical.js';
+import {
+  CONTROLLED_MIGRATION_AUTHORITY_SCHEMA, CONTROLLED_MIGRATION_HIVE_SCHEMA,
+} from '../dist/migration-authority.js';
+import { openMigrationService } from '../dist/migration-bootstrap.js';
+import { MIGRATION_LIMITS, migrationPlan, verifyMigrationApproval, verifyRootFiles } from '../dist/migration-contract.js';
+import { fixtureSigners } from '../dist/fixtures.js';
 import { nativeMetadataPointer } from '../dist/native-metadata.js';
-import { migrationFixture, sourceInventory } from './migration-fixture.mjs';
-import { runObservedMigration } from './migration-harness.mjs';
+import { migrationFixture, minimalRootMigrationFixture, sourceInventory } from './migration-fixture.mjs';
+import { runObservedCapacityMigration, runObservedMigration } from './migration-harness.mjs';
 import { migrationReplayHtml } from '../scripts/migration-replay.mjs';
 
 const base = fileURLToPath(new URL('../.test-scratch/migration-unit/', import.meta.url));
@@ -19,10 +24,80 @@ async function fixture() {
   const folder = path.join(base, `case-${process.pid}-${Date.now()}-${id++}`);
   await mkdir(folder, { mode: 0o700 });
   const source = await migrationFixture(path.join(folder, 'source'));
-  const runtime = await HeadlessRuntime.open({ directory: path.join(folder, 'destination'), ...source.keys });
-  const service = new MigrationService(runtime.bots, { plan: source.plan, approvalBytes: canonicalJson(source.approval),
-    signatures: source.keys.signatures, fixtureAuthority: true, capabilityHash: sha256('a'.repeat(43)) });
+  const { runtime, service } = await openMigrationService({
+    directory: path.join(folder, 'destination'), plan: source.plan, approvalBytes: canonicalJson(source.approval),
+    authority: { registry: source.keys.registry, signers: source.keys.signers }, capabilityHash: sha256('a'.repeat(43)),
+  });
   return { folder, source, runtime, service };
+}
+
+function syntheticOperatorKeys(count = 2) {
+  const registry = [];
+  const signers = [];
+  for (let index = 0; index < count; index++) {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const root = keyedIdentity('operator-test', `root-${String(index + 1).padStart(2, '0')}`, publicKey);
+    registry.push({
+      kid: root,
+      spki_der_b64: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+      revoked_utc: null,
+      superseded_utc: null,
+    });
+    signers.push({ root, signer: createFrameSigner({ kid: root, privateKey }) });
+  }
+  return { registry, signers, signatures: selectSignaturePolicy(registry) };
+}
+
+function controlledAuthority(overrides = {}) {
+  return {
+    async verify(request) {
+      const hive = {
+        schema: CONTROLLED_MIGRATION_HIVE_SCHEMA,
+        hive: request.rootSelection.at(-1),
+        owner: request.owner,
+        acceptedPlanHash: request.planHash,
+        registrySeq: 17,
+        registryCommitment: sha256('synthetic-external-hive-registry'),
+        acceptanceWave: sha256('synthetic-external-hive-acceptance'),
+        checkpointWave: sha256('synthetic-external-hive-checkpoint'),
+        ...(overrides.hive ?? {}),
+      };
+      return {
+        schema: CONTROLLED_MIGRATION_AUTHORITY_SCHEMA,
+        owner: request.owner,
+        planHash: request.planHash,
+        approvalWave: request.approvalWave,
+        registryCommitment: request.registryCommitment,
+        closureCommitment: request.closureCommitment,
+        rootSelection: request.rootSelection,
+        ownerAnchorWave: sha256('synthetic-external-owner-anchor'),
+        domain: 'both',
+        domainDeclarationWave: sha256('synthetic-external-domain-declaration'),
+        closureWave: sha256('synthetic-external-closure-acceptance'),
+        ...overrides,
+        hive,
+      };
+    },
+  };
+}
+
+async function importMinimalRoots(service, source, batch = 'controlled-roots') {
+  await service.begin(`${batch}-bind`);
+  await service.startBatch(batch, source.plan.items.map(item => item.id), `${batch}-start`);
+  for (const [itemIndex, item] of source.plan.items.entries()) {
+    for (const [fileIndex, descriptor] of item.files.entries()) {
+      const bytes = source.sourceByItem.get(item.id).files.get(descriptor.path);
+      for (let index = 0; index < Math.ceil(bytes.length / MIGRATION_LIMITS.chunkBytes); index++) {
+        const chunk = bytes.subarray(index * MIGRATION_LIMITS.chunkBytes, (index + 1) * MIGRATION_LIMITS.chunkBytes);
+        await service.stage({
+          batch, item: item.id, path: descriptor.path, index, base64: chunk.toString('base64'),
+        }, `${batch}-stage-${itemIndex}-${fileIndex}-${index}`);
+      }
+    }
+    await service.prepare(batch, item.id, `${batch}-prepare-${itemIndex}`);
+    await service.commit(batch, item.id);
+  }
+  return service.finish();
 }
 
 test('a complete observed estate migration launches the new application and passive client using public operations only', async () => {
@@ -50,14 +125,199 @@ test('a complete observed estate migration launches the new application and pass
   assert(!/src=["']https?:|href=["']https?:|@import|fetch\(/u.test(html));
 });
 
-test('migration requires exact signed selection and refuses controlled-local data under fixture authority', async () => {
+test('an observed migration admits all 64 roots, including hidden roots, and survives restart', async () => {
+  const result = await runObservedCapacityMigration();
+  assert.deepEqual(result, {
+    roots: 64,
+    hiddenRoots: 32,
+    observedRoots: 64,
+    sourceReadOnly: true,
+    restartIdentical: true,
+    destinationWritesByHarness: 0,
+  });
+});
+
+test('migration requires the exact signed selection and independently supplied capability', async () => {
   const f = await fixture();
   assert.throws(() => f.service.authenticate(f.source.plan.owner, 'skill.md'), { code: 'migration-unauthorized' });
   assert.throws(() => f.service.authenticate(f.source.roots[1], 'a'.repeat(43)), { code: 'migration-unauthorized' });
   const modified = migrationPlan({ ...f.source.plan, expected: { ...f.source.plan.expected, roots: 3 } });
-  assert.throws(() => verifyMigrationApproval(modified, canonicalJson(f.source.approval), f.source.keys.signatures, true), { code: 'migration-authority' });
-  assert.throws(() => verifyMigrationApproval(f.source.plan, canonicalJson(f.source.approval), f.source.keys.signatures, false), { code: 'migration-adoption-unavailable' });
+  assert.throws(() => verifyMigrationApproval(modified, canonicalJson(f.source.approval), f.source.keys.signatures), { code: 'migration-authority' });
+  assert.equal(verifyMigrationApproval(f.source.plan, canonicalJson(f.source.approval), f.source.keys.signatures).frame_hash,
+    f.source.approval.frame_hash);
   assert.equal((await f.runtime.bots.list()).length, 0);
+});
+
+test('controlled-local migration accepts only an injected exact registry, signer and domain/closure/Hive authority', async () => {
+  const folder = path.join(base, `controlled-${process.pid}-${Date.now()}-${id++}`);
+  await mkdir(folder, { mode: 0o700 });
+  const keys = syntheticOperatorKeys();
+  const sourceDirectory = path.join(folder, 'source');
+  const destination = path.join(folder, 'destination');
+  const source = await minimalRootMigrationFixture(sourceDirectory, { count: 2, mode: 'controlled-local', keys });
+  const before = await sourceInventory(sourceDirectory, true);
+  await assert.rejects(access(destination), { code: 'ENOENT' });
+  let verifiedRequest;
+  const verifier = controlledAuthority();
+  const authority = {
+    registry: keys.registry,
+    signers: keys.signers,
+    controlledLocal: { verify: async request => {
+      verifiedRequest = request;
+      return verifier.verify(request);
+    } },
+  };
+  const { service } = await openMigrationService({
+    directory: destination,
+    plan: source.plan,
+    approvalBytes: canonicalJson(source.approval),
+    authority,
+    capabilityHash: sha256('b'.repeat(43)),
+  });
+  const completed = await importMinimalRoots(service, source);
+  assert.equal(completed.fixtureMigrationComplete, false);
+  assert.equal(completed.controlledLocalMigrationComplete, true);
+  assert.equal(completed.releaseEligible, false);
+  assert.equal(completed.projection.authority.mode, 'controlled-local');
+  assert.equal(completed.projection.authority.domain, 'both');
+  assert.equal(completed.projection.authority.hive.acceptedPlanHash, verifiedRequest.planHash);
+  assert.equal(completed.projection.counts.roots, 2);
+  assert.equal(completed.projection.roots.filter(root => root.hidden).length, 1);
+  assert.deepEqual(await sourceInventory(sourceDirectory, true), before);
+  const cursor = completed.projection.cursorHash;
+  assert.equal((await service.commit('controlled-roots', source.plan.items[0].id)).duplicate, true);
+  assert.equal((await service.projection()).cursorHash, cursor);
+  const { service: restarted } = await openMigrationService({
+    directory: destination,
+    plan: source.plan,
+    approvalBytes: canonicalJson(source.approval),
+    authority,
+    capabilityHash: sha256('b'.repeat(43)),
+  });
+  assert.equal(canonicalJson(await restarted.projection()), canonicalJson(completed.projection));
+  const { service: rebound } = await openMigrationService({
+    directory: destination,
+    plan: source.plan,
+    approvalBytes: canonicalJson(source.approval),
+    authority: {
+      registry: keys.registry,
+      signers: keys.signers,
+      controlledLocal: controlledAuthority({ ownerAnchorWave: sha256('different-owner-anchor') }),
+    },
+    capabilityHash: sha256('b'.repeat(43)),
+  });
+  await assert.rejects(rebound.projection(), { code: 'migration-plan-binding' });
+  assert.equal(canonicalJson(await restarted.projection()), canonicalJson(completed.projection));
+});
+
+test('controlled-local authority failures refuse before creating a destination', async () => {
+  const folder = path.join(base, `controlled-refusal-${process.pid}-${Date.now()}-${id++}`);
+  await mkdir(folder, { mode: 0o700 });
+  const keys = syntheticOperatorKeys();
+  const source = await minimalRootMigrationFixture(path.join(folder, 'source'),
+    { count: 2, mode: 'controlled-local', keys });
+  const common = {
+    plan: source.plan,
+    approvalBytes: canonicalJson(source.approval),
+    capabilityHash: sha256('c'.repeat(43)),
+  };
+  const cases = [
+    {
+      name: 'missing-authority',
+      authority: { registry: keys.registry, signers: keys.signers },
+      code: 'migration-adoption-unavailable',
+    },
+    {
+      name: 'missing-registry-owner',
+      authority: { registry: keys.registry.slice(1), signers: keys.signers, controlledLocal: controlledAuthority() },
+      code: 'migration-registry-authority',
+    },
+    {
+      name: 'missing-owner-signer',
+      authority: { registry: keys.registry, signers: keys.signers.slice(1), controlledLocal: controlledAuthority() },
+      code: 'migration-signer-authority',
+    },
+    {
+      name: 'invalid-domain',
+      authority: { registry: keys.registry, signers: keys.signers, controlledLocal: controlledAuthority({ domain: 'neutral' }) },
+      code: 'migration-domain-authority',
+    },
+    {
+      name: 'invalid-closure',
+      authority: {
+        registry: keys.registry,
+        signers: keys.signers,
+        controlledLocal: controlledAuthority({ closureCommitment: '0'.repeat(64) }),
+      },
+      code: 'migration-closure-authority',
+    },
+    {
+      name: 'invalid-hive',
+      authority: {
+        registry: keys.registry,
+        signers: keys.signers,
+        controlledLocal: controlledAuthority({ hive: { acceptedPlanHash: '0'.repeat(64) } }),
+      },
+      code: 'migration-hive-authority',
+    },
+  ];
+  for (const entry of cases) {
+    const destination = path.join(folder, entry.name);
+    await assert.rejects(openMigrationService({ directory: destination, ...common, authority: entry.authority }),
+      { code: entry.code });
+    await assert.rejects(access(destination), { code: 'ENOENT' });
+  }
+});
+
+test('fixture history cannot become controlled-local authority by relabeling its plan', async () => {
+  const folder = path.join(base, `relabel-refusal-${process.pid}-${Date.now()}-${id++}`);
+  await mkdir(folder, { mode: 0o700 });
+  const source = await migrationFixture(path.join(folder, 'source'));
+  const classifications = source.plan.items.map(item => item.classification);
+  const relabeled = migrationPlan({ ...source.plan, mode: 'controlled-local' });
+  const destination = path.join(folder, 'destination');
+  await assert.rejects(openMigrationService({
+    directory: destination,
+    plan: relabeled,
+    approvalBytes: canonicalJson(source.approval),
+    authority: {
+      registry: source.keys.registry,
+      signers: source.keys.signers,
+      controlledLocal: controlledAuthority(),
+    },
+    capabilityHash: sha256('d'.repeat(43)),
+  }), { code: 'migration-authority' });
+  assert.deepEqual(source.plan.items.map(item => item.classification), classifications);
+  await assert.rejects(access(destination), { code: 'ENOENT' });
+});
+
+test('a 65-root migration plan refuses before the destination is created', async () => {
+  const folder = path.join(base, `capacity-refusal-${process.pid}-${Date.now()}-${id++}`);
+  await mkdir(folder, { mode: 0o700 });
+  const roots = fixtureSigners(MIGRATION_LIMITS.roots + 1).signers.map(entry => entry.root);
+  const manifest = path.join(folder, 'plan.json');
+  const approval = path.join(folder, 'approval.json');
+  const destination = path.join(folder, 'destination');
+  await writeFile(manifest, canonicalJson({
+    schema: 'rapp-work.migration-plan/1',
+    mode: 'sanitized-fixture',
+    owner: roots[0],
+    roots,
+    items: [],
+    expected: {},
+  }));
+  await writeFile(approval, '{}');
+  const app = fileURLToPath(new URL('../dist/migration-app.js', import.meta.url));
+  const result = spawnSync(process.execPath, [
+    app, '--fixture', '--store', destination, '--manifest', manifest, '--approval', approval,
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, RAPP_WORK_MIGRATION_CAPABILITY: 'e'.repeat(43) },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /"code":"root-capacity"/u);
+  assert.match(result.stderr, /at most 64 roots/u);
+  await assert.rejects(access(destination), { code: 'ENOENT' });
 });
 
 test('incomplete closure, changed chunks, path escape and aborted-batch replay cannot create a root', async () => {

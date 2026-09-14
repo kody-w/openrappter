@@ -9,7 +9,7 @@ import type { RootSnapshot } from './repository.js';
 import { memoryFrames, sourceKey, sourceStream, type SourceMemory } from './source-memory.js';
 
 export const MIGRATION_LIMITS = Object.freeze({
-  items: 256, filesPerRoot: 1_024, fileBytes: 1_048_576, rootBytes: 33_554_432,
+  roots: 64, items: 256, filesPerRoot: 1_024, fileBytes: 1_048_576, rootBytes: 33_554_432,
   chunkBytes: 16_384, requestBytes: 65_536, controlFrames: 8_192,
 });
 export const MIGRATION_SCHEMA = 'rapp-work.migration-plan/1';
@@ -74,7 +74,9 @@ export function migrationPlan(value: unknown): MigrationPlan {
   const plan = object(value, ['schema', 'mode', 'owner', 'roots', 'items', 'expected']);
   requireThat(plan.schema === MIGRATION_SCHEMA && ['sanitized-fixture', 'controlled-local'].includes(String(plan.mode))
     && isBodyStream(plan.owner), 'migration-plan', 'An explicitly selected canonical migration plan is required.');
-  const roots: string[] = list(plan.roots, 32).map(value => {
+  requireThat(Array.isArray(plan.roots) && plan.roots.length <= MIGRATION_LIMITS.roots,
+    'root-capacity', 'A migration plan may select at most 64 roots, including hidden roots.');
+  const roots: string[] = list(plan.roots, MIGRATION_LIMITS.roots).map(value => {
     requireThat(isBodyStream(value), 'migration-root', 'Every selected root is a full canonical GUID.');
     return value;
   });
@@ -92,15 +94,13 @@ export function migrationPlan(value: unknown): MigrationPlan {
 
 export const migrationStream = (owner: string): string => `${owner}:migration`;
 export const approvalStream = (owner: string): string => `${owner}:migration-approval`;
-export function verifyMigrationApproval(plan: MigrationPlan, source: string, signatures: SignaturePolicy, fixture: boolean): RappFrame {
+export function verifyMigrationApproval(plan: MigrationPlan, source: string, signatures: SignaturePolicy): RappFrame {
   const approval = verifiedFrame(source, approvalStream(plan.owner), null, signatures);
   requireThat(signerOf(approval) === plan.owner && approval.kind === 'memory.save', 'migration-authority', 'The out-of-band owner must sign the selected approval.');
   const data = object(approval.payload, ['schema', 'planHash', 'mode', 'destination', 'nativeContent', 'rootSelection']);
   requireThat(data.schema === 'rapp-work.migration-approval/1' && data.planHash === contentHash(plan)
     && data.mode === plan.mode && data.destination === 'empty-isolated-profile' && data.nativeContent === 'refused'
     && canonicalJson(data.rootSelection) === canonicalJson(plan.roots), 'migration-authority', 'The approval does not bind this exact complete selection and isolated destination.');
-  requireThat(fixture && plan.mode === 'sanitized-fixture' && plan.roots.every(r => r.startsWith('rappid:@fixture/')),
-    'migration-adoption-unavailable', 'Controlled local transfer requires adopted canonical domain/closure and signer bindings. A fixture flag or carried classification cannot authorize live data.');
   return approval;
 }
 

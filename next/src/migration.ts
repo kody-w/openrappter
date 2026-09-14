@@ -1,12 +1,15 @@
 import { timingSafeEqual } from 'node:crypto';
-import { canonicalJson, contentHash, sha256, type JsonObject, type RappFrame, type SignaturePolicy } from './canonical.js';
+import { canonicalJson, contentHash, sha256, type JsonObject, type RappFrame } from './canonical.js';
 import { Bots } from './bots.js';
 import { eventPayload, label, list, object, text, workEvent } from './contract.js';
 import { requireThat } from './errors.js';
 import { reference, projectBot } from './projection.js';
 import type { MigrationTransaction, RootSnapshot } from './repository.js';
 import {
-  MIGRATION_LIMITS, migrationPlan, verifyFileTable, verifyMigrationApproval, verifyRootFiles,
+  requireMigrationAuthority, type BoundMigrationAuthority,
+} from './migration-authority.js';
+import {
+  MIGRATION_LIMITS, migrationPlan, verifyFileTable, verifyRootFiles,
   type MigrationItem, type MigrationPlan,
 } from './migration-contract.js';
 import { memoryFrames, memoryHeadHashes, sourceChain, sourceReference } from './source-memory.js';
@@ -23,7 +26,7 @@ const batchItem = (batch: string, item: string): string => `${batch}/${item}`;
 const pieceKey = (batch: string, item: string, path: string): string => `${batch}/${item}/${path}`;
 const controlSchema = 'rapp-work.migration-control/1';
 
-function controls(frames: readonly RappFrame[], plan: MigrationPlan): ControlState {
+function controls(frames: readonly RappFrame[], plan: MigrationPlan, authorityHash: string): ControlState {
   const state: ControlState = { bound: false, batches: new Map(), chunks: new Map(), pointers: new Set(), prepared: new Map() };
   for (const frame of frames) {
     const p = object(frame.payload, ['schema', 'owner', 'planHash', 'event', 'operationId', 'data']);
@@ -32,7 +35,8 @@ function controls(frames: readonly RappFrame[], plan: MigrationPlan): ControlSta
     label(p.operationId);
     const data = object(p.data);
     if (p.event === 'plan.bound') {
-      requireThat(!state.bound && frame.seq === 0, 'migration-plan-binding', 'Bind an empty profile once.');
+      requireThat(!state.bound && frame.seq === 0 && data.authorityHash === authorityHash,
+        'migration-plan-binding', 'Bind an empty profile once to the exact prevalidated authority.');
       state.bound = true;
     } else {
       requireThat(state.bound, 'migration-plan-binding', 'The isolated profile has no canonical migration binding.');
@@ -65,21 +69,25 @@ function controls(frames: readonly RappFrame[], plan: MigrationPlan): ControlSta
 
 export interface MigrationOptions {
   plan: MigrationPlan;
-  approvalBytes: string;
-  signatures: SignaturePolicy;
-  fixtureAuthority: boolean;
+  authority: BoundMigrationAuthority;
   capabilityHash: string;
 }
 
 export class MigrationService {
   readonly plan: MigrationPlan;
   readonly planHash: string;
+  readonly authorityHash: string;
   readonly approval: RappFrame;
+  readonly authority: BoundMigrationAuthority;
   readonly #options: MigrationOptions;
   constructor(readonly bots: Bots, options: MigrationOptions) {
     this.plan = migrationPlan(options.plan);
     this.planHash = contentHash(this.plan);
-    this.approval = verifyMigrationApproval(this.plan, options.approvalBytes, options.signatures, options.fixtureAuthority);
+    this.authority = requireMigrationAuthority(options.authority, this.plan);
+    this.authorityHash = contentHash(this.authority.evidence);
+    this.approval = this.authority.approval;
+    requireThat(this.authority.signers.every(entry => this.bots.signer(entry.root) === entry.signer),
+      'migration-signer-authority', 'The migration runtime does not hold the exact prevalidated signer set.');
     requireThat(/^[0-9a-f]{64}$/u.test(options.capabilityHash), 'migration-authority', 'An out-of-band migration capability commitment is required.');
     this.#options = options;
   }
@@ -128,7 +136,8 @@ export class MigrationService {
   async #transaction<T>(work: (tx: MigrationTransaction, state: ControlState) => Promise<T>): Promise<T> {
     const signer = this.bots.signer(this.plan.owner);
     requireThat(signer, 'migration-authority', 'The approved migration owner signer is unavailable.');
-    return this.bots.repository.migrationTransaction(this.plan.owner, signer, tx => work(tx, controls(tx.ledger, this.plan)));
+    return this.bots.repository.migrationTransaction(this.plan.owner, signer,
+      tx => work(tx, controls(tx.ledger, this.plan, this.authorityHash)));
   }
 
   async begin(operationId: string): Promise<JsonObject> {
@@ -137,7 +146,7 @@ export class MigrationService {
       requireThat(tx.snapshot.roots.length === 0 && tx.ledger.length === 0, 'migration-empty-profile', 'Migration starts only in an empty isolated greenfield profile.');
       const frame = await this.#control(tx, 'plan.bound', {
         approvalWave: this.approval.frame_hash, mode: this.plan.mode, selectedItems: this.plan.items.map(i => i.id),
-        sourceRoots: this.plan.roots, profile: 'empty-isolated-profile',
+        sourceRoots: this.plan.roots, profile: 'empty-isolated-profile', authorityHash: this.authorityHash,
       }, operationId);
       return { bound: true, duplicate: false, source: reference(frame), planHash: this.planHash };
     });
@@ -199,7 +208,7 @@ export class MigrationService {
       if (receipt) return { prepared: true, committed: true, duplicate: true, source: reference(receipt) };
       const previous = state.prepared.get(batchItem(batch.id, item.id));
       if (previous) return { prepared: true, duplicate: true, source: reference(previous) };
-      if (item.kind === 'canonical-root') projectBot(verifyRootFiles(item.root, this.#files(state, batch.id, item), this.#options.signatures));
+      if (item.kind === 'canonical-root') projectBot(verifyRootFiles(item.root, this.#files(state, batch.id, item), this.authority.signatures));
       else {
         requireThat(state.pointers.has(batchItem(batch.id, item.id)), 'migration-incomplete', 'Stage the approved pointer before preparing it.');
         const root = tx.snapshot.roots.find(r => r.definition.root === item.root);
@@ -227,7 +236,7 @@ export class MigrationService {
       if (item.kind === 'canonical-root') {
         requireThat(!root, 'migration-collision', 'Never overwrite or merge an existing destination root.');
         const files = this.#files(state, batch.id, item);
-        const candidate = verifyRootFiles(item.root, files, this.#options.signatures);
+        const candidate = verifyRootFiles(item.root, files, this.authority.signatures);
         projectBot(candidate);
         const imported = await tx.materializeRoot(item.root, files, {
           root: item.root, family: 'memory', kind: 'memory.save', utc: prepared.utc, signer,
@@ -272,7 +281,7 @@ export class MigrationService {
     const { snapshot, ledger } = await this.bots.repository.migrationSnapshot(this.plan.owner);
     requireThat(snapshot.roots.every(r => this.plan.roots.includes(r.definition.root)),
       'migration-isolation', 'The isolated destination contains an unselected root; migration qualification refuses.');
-    const state = controls(ledger, this.plan);
+    const state = controls(ledger, this.plan, this.authorityHash);
     const roots = snapshot.roots.filter(r => this.plan.roots.includes(r.definition.root)).map(r => {
       const p = projectBot(r);
       const legacy = memoryFrames(r).filter(f => sourceReference(f).ownership === 'legacy-root-stream').length;
@@ -297,7 +306,7 @@ export class MigrationService {
       counts: { roots: roots.length, items: imported.length, pointers: imported.filter(i => i.kind === 'estate-pointer').length,
         scopes: roots.reduce((n, r) => n + r.scopes.length, 0), branches: roots.reduce((n, r) => n + r.branches.length, 0),
         artifacts: roots.reduce((n, r) => n + r.artifacts.length, 0), controlFrames: ledger.length, activeFrames: snapshot.frameCount },
-      authority: { source: 'canonical-root-and-control-frames', scopeTransfer: 'fixture-only; live adopted binding unavailable', factualTruth: false },
+      authority: this.authority.evidence,
     };
     requireThat(Buffer.byteLength(canonicalJson(projection)) <= 524_288, 'migration-projection-bound', 'The full selected estate exceeds this projection bound; no silent frame or scope filtering is allowed.');
     return projection;
@@ -325,7 +334,15 @@ export class MigrationService {
       for (const item of imported) actual[String(item[property])] = (actual[String(item[property])] ?? 0) + 1;
       requireThat(canonicalJson(actual) === canonicalJson(this.plan.expected[expected]), 'migration-parity', 'Source classifications/provider provenance changed.');
     }
-    return { fixtureMigrationComplete: true, releaseEligible: false, projection,
-      reason: 'This is the observed fixture gate. An approved controlled-local migration and canonical adoption remain mandatory for release.' };
+    const controlled = this.plan.mode === 'controlled-local';
+    return {
+      fixtureMigrationComplete: !controlled,
+      controlledLocalMigrationComplete: controlled,
+      releaseEligible: false,
+      projection,
+      reason: controlled
+        ? 'The approved selection completed under injected authority; external cutover acceptance remains pending.'
+        : 'This is the observed fixture gate. An approved controlled-local migration and canonical adoption remain mandatory for release.',
+    };
   }
 }

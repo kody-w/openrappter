@@ -17,9 +17,12 @@ export async function readFixture(name: 'copilot-builder' | 'rapp-up' | 'recurri
   return object(parseJson(await readFile(new URL(`../fixtures/${name}.json`, import.meta.url))));
 }
 
-export function fixtureSigners(): { signers: RootSigner[]; registry: RegistryKey[]; signatures: ReturnType<typeof selectSignaturePolicy> } {
+export function fixtureSigners(count = 2): { signers: RootSigner[]; registry: RegistryKey[]; signatures: ReturnType<typeof selectSignaturePolicy> } {
+  requireThat(Number.isSafeInteger(count) && count > 0 && count <= 256, 'fixture', 'Choose a bounded positive fixture signer count.');
   const registry: RegistryKey[] = [];
-  const signers = ['builder', 'reviewer'].map(name => {
+  const names = ['builder', 'reviewer', ...Array.from({ length: Math.max(0, count - 2) },
+    (_, index) => `capacity-${String(index + 3).padStart(3, '0')}`)].slice(0, count);
+  const signers = names.map(name => {
     // Publicly reproducible test keys; never production credentials.
     const seed = Buffer.from(sha256(`PUBLIC-RAPP-WORK-NEXT-FIXTURE-${name}`), 'hex');
     const privateKey = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });

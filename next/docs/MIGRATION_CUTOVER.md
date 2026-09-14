@@ -6,7 +6,10 @@
 full-estate migration/display test in `MIGRATION_RELEASE_GATE.md` is the release
 gate. It runs the new application and a separate passive client, not direct
 destination writes by a harness. Fixture success does not authorize release;
-the controlled-local runbook remains gated on final integration approval.
+the controlled-local runbook remains gated on final integration approval and
+externally supplied operator authority. The code accepts that authority only
+through a trusted-host injection contract; no production authority adapter,
+registry, signer or credential is shipped, so real cutover remains **PENDING**.
 
 This is an isolated headless replacement under `next/`, not a UI extension.
 The old `apps/`, all non-adopted runtime packages and production packaging
@@ -32,6 +35,7 @@ transformed, adopted or written.
 | Build | Strict full new-core typecheck and build, no ignored failures |
 | Behavior | Complete unit/integration suite, no skips; actual CLI and stdio processes |
 | Observed migration | New app starts empty; full selected estate populated only through public API; every bot/world/pointer appears on a separate live passive projection |
+| Migration capacity | Plan and repository share the 64-root bound, hidden roots included; an observed 64-root import completes and root 65 refuses before destination mutation |
 | Migration restart/rollback | Exact source prefixes and GUIDs; service+projection restart equivalence; stable retries; rollback after an unpublished materialization fault |
 | Source protection | Full source file/directory inventories unchanged; no native private-content import; unavailable archives stay honest pointers |
 | Display evidence | Captured canonical cursor/event log and self-contained replay exercised offline in both themes and desktop/mobile widths |
@@ -88,16 +92,24 @@ new headless-core gates. No installation or visual implementation was performed.
    permits no tools/hidden session stores, and uses Astra max/long without
    fallback. The injected-host declaration is not itself an OS sandbox.
 3. Establish independently custodied persistent signers and an authenticated
-   registry/checkpoint. Fixture keys must never become credentials. Keyless
-   offline roots are valid local RAPP/1 identities, not signed collaboration
-   identities; do not remint them to disguise a missing adopted delegation path.
-4. Use existing signed Private Hive `RegistryAuthority` / `HiveAcceptance`,
-   out-of-band owner anchor, fresh monotonic registry and full immutable
-   resolver/checkpoint. Require bilateral consent for the exact room/object;
-   ordinary public-perspective grants are insufficient. Never merge roots.
-5. Complete signed rooted GODD/DOGG selection and dependency closure adoption,
-   plus required GODD protection/transport. Until then all transfer scopes
-   refuse. Do not classify paths or remove frames to manufacture compliance.
+   registry/checkpoint. The trusted host must inject exactly one registry entry
+   and signer handle for every selected root; the migration bootstrap validates
+   them before opening the destination. Fixture keys must never become
+   credentials. Keyless offline roots are valid local RAPP/1 identities, not
+   signed collaboration identities; do not remint them to disguise a missing
+   adopted delegation path.
+4. Supply an external verifier for existing signed Private Hive
+   `RegistryAuthority` / `HiveAcceptance`, an out-of-band owner anchor, fresh
+   monotonic registry and full immutable resolver/checkpoint. Its result must
+   bind the exact owner and migration plan. Missing or invalid Hive evidence
+   refuses before destination mutation. Ordinary public-perspective grants are
+   insufficient. Never merge roots.
+5. Through the same injected verifier, complete signed rooted GODD/DOGG
+   selection and dependency-closure adoption for the computed plan closure,
+   plus required GODD protection/transport. A mode label, boolean or carried
+   classification is never authority; fixture/neutral history cannot be
+   relabeled. Until an external adapter supplies and validates these bindings,
+   controlled-local launch refuses and cutover stays PENDING.
 6. Optionally bind explicit local iMessage OS permission and contact authority;
    remaining disabled is an acceptable product configuration, not a failed
    reason to enable ambient access.

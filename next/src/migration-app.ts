@@ -4,9 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseJson, sha256 } from './canonical.js';
 import { fixtureSigners } from './fixtures.js';
-import { HeadlessRuntime } from './runtime.js';
-import { MigrationService } from './migration.js';
-import { migrationPlan, verifyMigrationApproval } from './migration-contract.js';
+import { migrationPlan } from './migration-contract.js';
+import { openMigrationService } from './migration-bootstrap.js';
 import { MigrationEndpoint, serveMigration } from './migration-endpoint.js';
 import { BoundedWriter } from './bounded-stdio.js';
 import { publicError, Refusal, requireThat } from './errors.js';
@@ -15,7 +14,7 @@ async function main(args: string[]): Promise<void> {
   let directory: string | undefined, manifest: string | undefined, approval: string | undefined, interruptRoot: string | undefined;
   let fixture = false;
   if (args.includes('--help')) {
-    console.log('NEW RAPP Work greenfield migration application\nnode next/dist/migration-app.js --fixture --store <empty-isolated-profile> --manifest <approved-plan> --approval <signed-approval>\nRAPP_WORK_MIGRATION_CAPABILITY is supplied through protected environment.\nPublic provider-neutral stdio migration only. No UI, source writes, native scanning or live-adoption bypass.');
+    console.log('NEW RAPP Work greenfield migration application\nnode next/dist/migration-app.js --fixture --store <empty-isolated-profile> --manifest <approved-plan> --approval <signed-approval>\nRAPP_WORK_MIGRATION_CAPABILITY is supplied through protected environment.\nControlled-local execution is available only to a trusted host that injects registry, signer and domain/closure/Hive authority through openMigrationService; this CLI accepts fixture authority only.');
     return;
   }
   while (args.length) {
@@ -33,11 +32,12 @@ async function main(args: string[]): Promise<void> {
   requireThat(capability && /^[A-Za-z0-9_-]{43}$/u.test(capability), 'migration-unauthorized', 'The operator must supply an independent migration capability.');
   const plan = migrationPlan(parseJson(await readFile(manifest)));
   const approvalBytes = await readFile(approval, 'utf8');
-  const keys = fixtureSigners();
-  verifyMigrationApproval(plan, approvalBytes, keys.signatures, fixture);
+  const keys = fixtureSigners(plan.roots.length);
   requireThat(interruptRoot === undefined || plan.roots.includes(interruptRoot), 'migration-fixture', 'Fault injection is limited to a selected fixture root.');
   let interrupted = false;
-  const runtime = await HeadlessRuntime.open({ directory, ...keys, fixture: true,
+  const { service } = await openMigrationService({
+    directory, plan, approvalBytes, authority: { registry: keys.registry, signers: keys.signers },
+    capabilityHash: sha256(capability),
     ...(interruptRoot ? { migrationFault: (point: 'frame-materialized' | 'before-root-publish', root: string) => {
       if (!interrupted && point === 'frame-materialized' && root === interruptRoot) {
         interrupted = true;
@@ -45,8 +45,6 @@ async function main(args: string[]): Promise<void> {
       }
     } } : {}),
   });
-  const service = new MigrationService(runtime.bots, { plan, approvalBytes, signatures: keys.signatures,
-    fixtureAuthority: fixture, capabilityHash: sha256(capability) });
   const writer = new BoundedWriter(process.stdout);
   const endpoint = new MigrationEndpoint(service, capability, message => writer.send(message));
   console.error('NEW greenfield migration application: isolated fixture authority only; current profiles are untouched.');

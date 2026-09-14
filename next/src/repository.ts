@@ -17,7 +17,6 @@ const FAMILIES: readonly Family[] = ['body', 'memory', 'swarm'];
 const FILE = /^\d{12}\.json$/u;
 const TAIL = /^[0-9a-f]{64}$/u;
 const MAX_FRAMES = 8_192;
-const MAX_ROOTS = 64;
 const NOFOLLOW = constants.O_NOFOLLOW;
 
 export interface RootSnapshot {
@@ -180,7 +179,8 @@ export class CanonicalRepository {
     const roots: RootSnapshot[] = [];
     let frameCount = 0;
     const names = (await readdir(botsDirectory)).sort();
-    requireThat(names.length <= MAX_ROOTS && names.every(name => TAIL.test(name)), 'root-catalog', 'The canonical root catalog is invalid or full.');
+    requireThat(names.length <= MIGRATION_LIMITS.roots && names.every(name => TAIL.test(name)),
+      'root-catalog', 'The canonical root catalog is invalid or full.');
     for (const name of names) {
       const rootDirectory = path.join(botsDirectory, name);
       await assertDirectory(rootDirectory);
@@ -379,7 +379,7 @@ export class CanonicalRepository {
             requireThat(canonicalJson(existing.definition) === canonicalJson(definition), 'idempotency-conflict', 'An operation ID is already bound to different root data.');
             return existing.streams.body[0]!;
           }
-          requireThat(snapshot.roots.length < MAX_ROOTS, 'root-capacity',
+          requireThat(snapshot.roots.length < MIGRATION_LIMITS.roots, 'root-capacity',
             'The canonical catalog already contains 64 roots, including hidden roots. No directory or genesis was created.');
           requireThat(!snapshot.roots.some(r => r.definition.root === definition.root), 'root-identity', 'Root GUID already exists.');
           const frame = buildFrame({ kind: 'body.pulse', streamId: definition.root, payload: definition,
@@ -496,7 +496,8 @@ export class CanonicalRepository {
         materializeRoot: async (root, files, receipt, publication) => {
           requireThat(/^[0-9a-f]{64}$/u.test(publication) && this.#options.signatures, 'migration-publication', 'An exact publication identity and selected signature policy are required.');
           requireThat(!snapshot.roots.some(r => r.definition.root === root), 'migration-collision', 'Existing roots cannot be overwritten or silently merged.');
-          requireThat(snapshot.roots.length < MAX_ROOTS, 'root-capacity', 'The complete canonical root catalog is full, including hidden roots.');
+          requireThat(snapshot.roots.length < MIGRATION_LIMITS.roots,
+            'root-capacity', 'The complete canonical root catalog is full, including hidden roots.');
           const source = verifyRootFiles(root, files, this.#options.signatures);
           assertCanonicalSelection(source);
           requireThat(receipt.root === root && receipt.family === 'memory' && receipt.kind === 'memory.save',

@@ -192,3 +192,91 @@ export async function migrationFixture(directory) {
   await writeFile(approvalPath, canonicalJson(approval), { mode: 0o400 });
   return { plan, approval, manifestPath, approvalPath, roots, sourceByItem, snapshots, keys, coverage };
 }
+
+export async function minimalRootMigrationFixture(directory, {
+  count = 64,
+  mode = 'sanitized-fixture',
+  keys = fixtureSigners(count),
+} = {}) {
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  if (keys.signers.length !== count) throw new Error('Minimal migration fixture requires one signer per root');
+  const capability = await targetCapability();
+  const roots = keys.signers.map(entry => entry.root);
+  const items = [];
+  const snapshots = [];
+  const sourceByItem = new Map();
+  let clock = Date.parse('2026-09-01T08:00:00.000Z');
+  const now = () => new Date(clock++).toISOString();
+  for (const [index, entry] of keys.signers.entries()) {
+    const number = String(index + 1).padStart(2, '0');
+    const hidden = index % 2 === 1;
+    const scopes = [
+      { id: 'root', parent: null, kind: 'world', name: `Capacity Root ${number}`, description: 'Complete bounded migration capacity root.' },
+      { id: 'librarian', parent: 'root', kind: 'librarian', name: 'Workspaces Librarian', description: 'Root-private canonical librarian.' },
+    ];
+    const definition = {
+      schema: ROOT_SCHEMA, operationId: `capacity-root-${number}`, root: entry.root,
+      name: `Capacity Root ${number}`, scopes, capability: capability.reference, authority: { ...AUTHORITY }, signer: entry.root,
+      policy: { externalEffects: 'explicit-approval', nativeStores: 'pointer-only', memory: 'public-turns-and-outcomes' },
+    };
+    const body = buildFrame({
+      kind: 'body.pulse', streamId: entry.root, head: null, utc: now(), payload: definition,
+      signer: entry.signer, signatures: keys.signatures,
+    });
+    const files = new Map([['body/frames/000000000000.json', Buffer.from(canonicalJson(body))]]);
+    if (hidden) {
+      const visibility = buildFrame({
+        kind: 'memory.save', streamId: streamFor(entry.root, 'memory'), head: null, utc: now(),
+        payload: eventPayload(entry.root, 'root', `capacity-hidden-${number}`, 'root.visibility', { hidden: true }),
+        signer: entry.signer, signatures: keys.signatures,
+      });
+      files.set('memory/frames/000000000000.json', Buffer.from(canonicalJson(visibility)));
+    }
+    const id = `capacity-root-${number}`;
+    const relativeRoot = path.join('canonical', id);
+    for (const [name, bytes] of files) {
+      const target = path.join(directory, relativeRoot, name);
+      await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+      await writeFile(target, bytes, { mode: 0o400 });
+    }
+    const table = [...files].sort(([a], [b]) => a.localeCompare(b))
+      .map(([filePath, bytes]) => ({ path: filePath, sha256: sha256(bytes), bytes: bytes.length }));
+    const item = {
+      id, kind: 'canonical-root', root: entry.root, title: definition.name, sourceIdentity: entry.root,
+      classification: 'compatible-canonical', provider: 'rapp-1',
+      sourceLocator: `${mode === 'sanitized-fixture' ? 'fixture' : 'selected'}://canonical/${id}`,
+      sourceDigest: contentHash(table), files: table, pointer: null,
+    };
+    items.push(item);
+    sourceByItem.set(id, { directory: path.join(directory, relativeRoot), files });
+    snapshots.push(verifyRootFiles(entry.root, files, keys.signatures));
+  }
+  const projected = snapshots.map(projectBot);
+  const forms = {};
+  for (const projection of projected) for (const scope of projection.scopes) {
+    forms[scope.kind] = (forms[scope.kind] ?? 0) + 1;
+  }
+  const expected = {
+    roots: count, items: count, pointers: 0,
+    scopes: projected.reduce((total, projection) => total + projection.scopes.length, 0),
+    artifacts: 0, branches: 0, forms,
+    sourceFrames: snapshots.reduce((total, snapshot) => total + snapshot.streams.body.length + memoryFrames(snapshot).length, 0),
+    classifications: { 'compatible-canonical': count },
+    providers: { 'rapp-1': count },
+    managerPointers: [], nativeProviders: [],
+  };
+  const plan = migrationPlan({ schema: MIGRATION_SCHEMA, mode, owner: roots[0], roots, items, expected });
+  const approval = buildFrame({
+    kind: 'memory.save', streamId: approvalStream(plan.owner), head: null, utc: now(),
+    payload: {
+      schema: 'rapp-work.migration-approval/1', planHash: contentHash(plan), mode: plan.mode,
+      destination: 'empty-isolated-profile', nativeContent: 'refused', rootSelection: roots,
+    },
+    signer: keys.signers[0].signer, signatures: keys.signatures,
+  });
+  const manifestPath = path.join(directory, 'approved-plan.json');
+  const approvalPath = path.join(directory, 'approved-plan.frame.json');
+  await writeFile(manifestPath, canonicalJson(plan), { mode: 0o400 });
+  await writeFile(approvalPath, canonicalJson(approval), { mode: 0o400 });
+  return { plan, approval, manifestPath, approvalPath, roots, sourceByItem, snapshots, keys };
+}

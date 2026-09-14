@@ -1,7 +1,7 @@
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import ts from 'typescript';
-import { ARTIFACT_POLICY, digest, invariant, readContract, requireRealDirectory, safeRelative } from './common.mjs';
+import { ARTIFACT_POLICY, digest, invariant, readContract, requireRealDirectory, safeRelative, sha256 } from './common.mjs';
 import { inspectAsar, machOArchitectures } from './asar.mjs';
 import { inventoryTree } from './inventory.mjs';
 
@@ -9,11 +9,14 @@ const POLICY = readContract('legacy-policy.json');
 const ALLOWLIST = readContract('legacy-allowlist.json');
 invariant(ALLOWLIST.schema === 'rapp-work.legacy-allowlist/1'
   && ALLOWLIST.migrationFixtures.every(entry => /^tests\/fixtures\/migration\/[a-z0-9-]+\.json$/u.test(entry.path) && typeof entry.reason === 'string' && entry.reason.length > 0)
+  && ALLOWLIST.greenfieldPython.every(entry => /^next\/(?:agent|scripts\/[a-z0-9-]+|vendor\/rapp1\/(?:anchor\/bootstrap_verify|rapp|rapp_check|rapp_registry))\.py$/u.test(entry.path)
+    && /^[a-f0-9]{64}$/u.test(entry.sha256) && typeof entry.reason === 'string' && entry.reason.length > 0)
   && ALLOWLIST.normativeWireIdentifiers.every(entry => /^[a-z][a-z0-9-]+\/[1-9]\d*$/u.test(entry.identifier) && typeof entry.reason === 'string' && entry.reason.length > 0),
-'Only exact normative wire identifiers and inert JSON migration fixtures may be allowlisted');
+'Only exact normative wire identifiers, inert JSON migration fixtures, and hash-pinned greenfield Python may be allowlisted');
 const CODE = /\.(?:[cm]?[jt]sx?)$/iu;
 const TEST_FIXTURES = new Set(ALLOWLIST.migrationFixtures.map(entry => entry.path));
 const WIRE_IDS = new Set(ALLOWLIST.normativeWireIdentifiers.map(entry => entry.identifier));
+const GREENFIELD_PYTHON = new Map(ALLOWLIST.greenfieldPython.map(entry => [entry.path, entry.sha256]));
 
 function decoded(text) {
   return text.replace(/\\u\{([a-f\d]{1,6})\}|\\u([a-f\d]{4})|\\x([a-f\d]{2})/giu, (_, wide, short, byte) => {
@@ -34,7 +37,8 @@ function forbiddenIdentifier(text) {
 function checkName(relative, errors) {
   const parts = relative.toLowerCase().split('/');
   if (parts.some(part => POLICY.forbiddenPathSegments.includes(part))) errors.push(`Removed path: ${relative}`);
-  if (POLICY.forbiddenExtensions.some(extension => relative.toLowerCase().endsWith(extension))) errors.push(`Removed executable/asset type: ${relative}`);
+  if (POLICY.forbiddenExtensions.some(extension => relative.toLowerCase().endsWith(extension))
+    && !GREENFIELD_PYTHON.has(relative)) errors.push(`Removed executable/asset type: ${relative}`);
   if (POLICY.forbiddenFiles.some(file => path.posix.basename(relative).toLowerCase() === file.toLowerCase())) errors.push(`Removed file: ${relative}`);
   const identifier = forbiddenIdentifier(relative);
   if (identifier) errors.push(`Removed identifier in path: ${relative}`);
@@ -227,7 +231,10 @@ export async function scanSource(root) {
       else if (stat.isSymbolicLink()) errors.push(`Source symlink is not allowlisted: ${candidate}`);
       else if (stat.isFile()) {
         files.push(candidate);
-        checkBytes(await readFile(path.join(root, candidate)), candidate, errors, { source: true });
+        const bytes = await readFile(path.join(root, candidate));
+        const expected = GREENFIELD_PYTHON.get(candidate);
+        if (expected && sha256(bytes) !== expected) errors.push(`Hash-pinned greenfield Python changed: ${candidate}`);
+        checkBytes(bytes, candidate, errors, { source: true });
       } else errors.push(`Special source file: ${candidate}`);
     }
   }

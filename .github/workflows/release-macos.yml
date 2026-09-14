@@ -26,10 +26,14 @@ jobs:
       OUTPUT_DIRECTORY: packages/release/dist/artifacts
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - name: Require release tag ancestry from origin/main
+        run: node scripts/check-release-tag-ancestry.mjs --tag "$GITHUB_REF_NAME"
       - name: Require exact Apple Silicon release identity
         run: |
           test "$(uname -m)" = arm64

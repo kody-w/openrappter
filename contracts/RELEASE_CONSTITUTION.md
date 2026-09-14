@@ -61,8 +61,12 @@ rebuild retains mint-once identity and trusted commit heads; it copies no
 projection, cache or application database. Integrity-checked unsigned RAPP/1
 frames are not presented as independently authenticated authorship.
 
-`release-macos.yml` is the only production publication workflow. It runs in
-the protected `production` environment, checks the tag against the workspace
-version, and publishes only after independently remounting the final artifact.
-Private signing inputs live only in the runner's ignored build directory and
-are removed even on failure. No other platform or distribution train is implied.
+`release-macos.yml` is the only production publication workflow. The repository
+must keep `production` configured as a protected environment; naming it in the
+workflow does not create that protection. Every pushed `v*` tag must peel to a
+commit reachable from a freshly fetched `origin/main`. An unreachable or
+branch-only tag fails before dependency installation, build, signing or
+publication. The workflow also checks the tag against the workspace version and
+publishes only after independently remounting the final artifact. Private
+signing inputs live only in the runner's ignored build directory and are removed
+even on failure. No other platform or distribution train is implied.

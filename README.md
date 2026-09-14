@@ -154,12 +154,17 @@ in a plan are locators, never ownership grants.
 
 ## Production release administration
 
-The protected `production` environment supplies an Apple Developer ID
-certificate, notarization credentials, an Ed25519 provenance signing key, and
-an independently configured public verification key and Apple Team ID.
-`release-macos.yml` accepts only an exact version tag, runs the clean acceptance
-gates, signs and notarizes the application and DMG, independently remounts the
-artifact, and publishes only verified production files.
+Repository administrators must keep `production` configured as a protected
+GitHub environment; the workflow's environment declaration does not create
+that protection. It supplies an Apple Developer ID certificate, notarization
+credentials, an Ed25519 provenance signing key, and an independently configured
+public verification key and Apple Team ID. Every pushed `v*` tag must peel to a
+commit reachable from freshly fetched `origin/main`; branch-only or otherwise
+unreachable tags stop before dependency installation, build, signing or
+publication. `release-macos.yml` also accepts only an exact version tag, runs
+the clean acceptance gates, signs and notarizes the application and DMG,
+independently remounts the artifact, and publishes only verified production
+files.
 
 Local unsigned builds do not establish production readiness. No production
 signature, notarization or live-computer execution is claimed by a fixture test.

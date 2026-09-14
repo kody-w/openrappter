@@ -23,6 +23,10 @@ particle/wave references. Multiple sources use a causally closed source-head
 vector; a closed root-only history can retain its scalar head. Wrong-root,
 missing, causally incomplete or reversed cursors refuse; no history repair or
 guessed replacement is attempted.
+Live canonical fork detection is applied before any historical cursor cut:
+neither a cursor nor a retained branch directory can hide a known unresolved
+fork and authorize a replay state. Exact shared ancestry prefixes remain valid;
+conflicting occurrences require canonical owner resolution.
 
 State reconstruction uses original **source-stream ancestry and causal cuts**.
 Paging advances by unseen occurrences, not by comparing independent local

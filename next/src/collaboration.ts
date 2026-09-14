@@ -8,6 +8,7 @@ import type { ModelProvider, Observation } from './spine.js';
 import { publicationData } from './ai-contract.js';
 import { memoryFrames, sourceReference } from './source-memory.js';
 import { turnAttribution } from './channel-contract.js';
+import { assertCanonicalSelection } from './canonical-forks.js';
 
 const SCHEMA = 'rapp-work.next/collaboration/1';
 export interface PublicPerspective extends JsonObject {
@@ -181,6 +182,7 @@ export class Collaboration {
     const snapshot = await this.bots.repository.snapshot();
     const own = snapshot.roots.find(r => r.definition.root === root);
     requireThat(own, 'root-not-found', 'Choose an existing canonical root.');
+    assertCanonicalSelection(own);
     const requests = snapshot.roots.flatMap(r => r.streams.swarm).filter(f =>
       f.kind === 'swarm.guidance' && (f.payload.root === root || f.payload.to === root));
     const authorized = new Map(requests.map(r => [r.frame_hash, assertRequest(r)]));
@@ -188,6 +190,8 @@ export class Collaboration {
       const p = assertRequest(request);
       const caller = snapshot.roots.find(r => r.definition.root === p.root);
       const recipient = snapshot.roots.find(r => r.definition.root === p.to);
+      if (caller) assertCanonicalSelection(caller);
+      if (recipient) assertCanonicalSelection(recipient);
       const callerGrant = caller && memoryFrames(caller).find(f => f.frame_hash === p.callerGrant);
       const recipientGrant = recipient && memoryFrames(recipient).find(f => f.frame_hash === p.recipientGrant);
       requireThat(callerGrant?.payload.event === 'collaboration.granted'

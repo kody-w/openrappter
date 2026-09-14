@@ -11,6 +11,7 @@ import { eventKind, label, rootDefinition, workEvent, type RootDefinition } from
 import { Refusal, requireThat } from './errors.js';
 import { CANONICAL_FILE, MIGRATION_LIMITS, migrationStream, verifyRootFiles } from './migration-contract.js';
 import { memoryFrames, memoryHeadHashes, rawMemoryFrames, sourceChain, sourceKey, sourceParents, sourceStream, type SourceMemory } from './source-memory.js';
+import { assertCanonicalSelection } from './canonical-forks.js';
 
 const FAMILIES: readonly Family[] = ['body', 'memory', 'swarm'];
 const FILE = /^\d{12}\.json$/u;
@@ -258,6 +259,7 @@ export class CanonicalRepository {
         const family = match[1] as Family;
         const frames = await this.#readChain(path.join(branchDirectory, branch, 'frames'), streamFor(definition.root, family));
         requireThat(frames.length > 0 && frames.at(-1)!.frame_hash === match[2], 'branch', 'A branch head or ancestry is missing.');
+        requireThat(frames.every(f => signerOf(f) === definition.signer), 'root-signature', 'Retained branches must preserve the exact original root signer.');
         branches.push({ family, head: match[2]!, frames });
         frameCount += frames.length;
       }
@@ -306,6 +308,7 @@ export class CanonicalRepository {
     requireThat(input.family !== 'body', 'root-identity', 'The root genesis cannot be replaced.');
     const root = snapshot.roots.find(r => r.definition.root === input.root);
     requireThat(root, 'root-not-found', 'Choose an existing canonical root GUID.');
+    assertCanonicalSelection(root);
     const scope = input.family === 'memory' ? workEvent(input.payload).scope : 'root';
     const frames = input.family === 'memory' ? sourceChain(root, scope) : root.streams[input.family];
     const head = frames.at(-1) ?? null;
@@ -335,6 +338,9 @@ export class CanonicalRepository {
         : { ...root, sources: [...(root.sources ?? []).filter(s => s.scope !== scope),
           { scope, stream: frame.stream_id, frames: [...frames, frame], branches: root.sources?.find(s => s.scope === scope)?.branches ?? [] }] };
       memoryFrames(projected);
+      assertCanonicalSelection(projected);
+    } else {
+      assertCanonicalSelection({ ...root, streams: { ...root.streams, [input.family]: [...frames, frame] } });
     }
     const directory = input.family === 'memory' ? this.#sourceDirectory(input.root, scope) : this.#framesDirectory(input.root, input.family);
     if (input.family === 'memory' && scope !== 'root') {
@@ -373,6 +379,8 @@ export class CanonicalRepository {
             requireThat(canonicalJson(existing.definition) === canonicalJson(definition), 'idempotency-conflict', 'An operation ID is already bound to different root data.');
             return existing.streams.body[0]!;
           }
+          requireThat(snapshot.roots.length < MAX_ROOTS, 'root-capacity',
+            'The canonical catalog already contains 64 roots, including hidden roots. No directory or genesis was created.');
           requireThat(!snapshot.roots.some(r => r.definition.root === definition.root), 'root-identity', 'Root GUID already exists.');
           const frame = buildFrame({ kind: 'body.pulse', streamId: definition.root, payload: definition,
             utc, head: null, ...(signer ? { signer } : {}), ...(this.#options.signatures ? { signatures: this.#options.signatures } : {}) });
@@ -437,6 +445,11 @@ export class CanonicalRepository {
   async orderSelection(hashes: ReadonlySet<string>): Promise<readonly RappFrame[]> {
     return this.#locked(async () => {
       const snapshot = await this.#scan();
+      for (const root of snapshot.roots) {
+        if ([...Object.values(root.streams).flat(), ...(root.sources ?? []).flatMap(s => s.frames)].some(f => hashes.has(f.frame_hash))) {
+          assertCanonicalSelection(root);
+        }
+      }
       const ordered = mergeStoredChains(snapshot.roots.flatMap(r => [...Object.values(r.streams), ...(r.sources ?? []).map(s => s.frames)]), this.#options.signatures);
       const selected = ordered.filter(f => hashes.has(f.frame_hash));
       requireThat(selected.length === hashes.size, 'stale-projection', 'A selected canonical occurrence is no longer available.');
@@ -483,7 +496,9 @@ export class CanonicalRepository {
         materializeRoot: async (root, files, receipt, publication) => {
           requireThat(/^[0-9a-f]{64}$/u.test(publication) && this.#options.signatures, 'migration-publication', 'An exact publication identity and selected signature policy are required.');
           requireThat(!snapshot.roots.some(r => r.definition.root === root), 'migration-collision', 'Existing roots cannot be overwritten or silently merged.');
+          requireThat(snapshot.roots.length < MAX_ROOTS, 'root-capacity', 'The complete canonical root catalog is full, including hidden roots.');
           const source = verifyRootFiles(root, files, this.#options.signatures);
+          assertCanonicalSelection(source);
           requireThat(receipt.root === root && receipt.family === 'memory' && receipt.kind === 'memory.save',
             'migration-receipt', 'A rooted canonical import receipt is required.');
           const last = source.streams.memory.at(-1);

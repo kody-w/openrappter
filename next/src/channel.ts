@@ -10,6 +10,7 @@ import { memoryFrames, sourceReference } from './source-memory.js';
 import { canonicalClarification, channelPolicy, DEFAULT_CHANNEL_POLICY, isQuiet, questionPending, turnAttribution, type ChannelPolicy } from './channel-contract.js';
 import { PrivateChannelBindings, type PrivateChannelMaterial } from './channel-runtime.js';
 import { untilAborted } from './async.js';
+import { assertCanonicalSelection } from './canonical-forks.js';
 
 export interface PrivateChannelPort {
   readonly channel: 'imessage';
@@ -37,6 +38,7 @@ function binding(root: RootSnapshot): RappFrame | undefined {
 interface BoundChannel { frame: RappFrame; id: string; policy: ChannelPolicy }
 
 export function referenceRecap(root: RootSnapshot, queued: JsonObject): { summary: string; sources: JsonObject[] } {
+  assertCanonicalSelection(root);
   if (queued.format !== 'rapp-work.recap-references/1' && queued.format !== 'rapp-work.question-references/1') {
     requireThat(queued.format === undefined && queued.sourceRefs === undefined, 'recap-source', 'Unknown recap references cannot become a legacy summary.');
     return { summary: text(queued.summary, 3_000), sources: [] }; // immutable historical record, never rewritten
@@ -75,7 +77,7 @@ export class PrivateChannels {
     bindings = new PrivateChannelBindings(bots.repository.directory)) {
     this.bindings = bindings;
     bots.repository.onPublication(notice => {
-      if (notice.event?.startsWith('channel.')) return;
+      if (notice.event === null || notice.event.startsWith('channel.')) return;
       this.#invalidated.add(notice.root);
       return this.#startObserver();
     });
@@ -279,11 +281,25 @@ export class PrivateChannels {
       };
       if (prepared.reason) return noSend(prepared.reason === 'cancelled' ? 'cancelled' : 'deferred', prepared.reason);
       if (!this.port.available) return noSend('unavailable', 'transport-disabled');
+      const expiresUtc = workEvent(prepared.frame.payload).data.expiresUtc;
+      requireThat(isUtc(expiresUtc), 'channel-preflight', 'The selected preflight must retain its original canonical deadline.');
+      const remaining = Math.min(prepared.bound.policy.preflightSeconds * 1_000, Date.parse(expiresUtc) - Date.parse(this.bots.now()));
+      if (remaining <= 0) return noSend('deferred', 'preflight-expired');
+      timer = setTimeout(() => controller.abort(), remaining);
       let privateBinding: PrivateChannelMaterial;
-      try { privateBinding = await this.bindings.get(root, prepared.bound.id); }
-      catch { return noSend('unavailable', 'private-runtime-binding-unavailable'); }
-      if (controller.signal.aborted || keys.some(key => this.#cancelled.has(key))) return noSend('cancelled', 'cancelled-before-readiness');
-      timer = setTimeout(() => controller.abort(), prepared.bound.policy.preflightSeconds * 1_000);
+      try {
+        settled = false;
+        const loading = this.bindings.get(root, prepared.bound.id);
+        active = loading;
+        void loading.finally(() => { settled = true; }).catch(() => undefined);
+        privateBinding = await untilAborted(loading, controller.signal);
+      } catch {
+        if (keys.some(key => this.#cancelled.has(key))) return noSend('cancelled', 'cancelled-before-readiness');
+        if (controller.signal.aborted || this.bots.now() >= expiresUtc) return noSend('deferred', 'preflight-expired');
+        return noSend('unavailable', 'private-runtime-binding-unavailable');
+      }
+      if (keys.some(key => this.#cancelled.has(key))) return noSend('cancelled', 'cancelled-before-readiness');
+      if (controller.signal.aborted || this.bots.now() >= expiresUtc) return noSend('deferred', 'preflight-expired');
       let ready: { status: 'ready' | 'unavailable' | 'deferred' };
       try {
         settled = false;
@@ -291,14 +307,20 @@ export class PrivateChannels {
         void active.finally(() => { settled = true; }).catch(() => undefined);
         ready = object(await untilAborted(active, controller.signal), ['status']) as typeof ready;
         requireThat(['ready', 'unavailable', 'deferred'].includes(ready.status), 'channel-preflight', 'Preflight must report a bounded no-send state.');
-      } catch { return noSend(keys.some(key => this.#cancelled.has(key)) ? 'cancelled' : 'unavailable', 'preflight-did-not-submit'); }
+      } catch {
+        if (keys.some(key => this.#cancelled.has(key))) return noSend('cancelled', 'preflight-did-not-submit');
+        return controller.signal.aborted || this.bots.now() >= expiresUtc
+          ? noSend('deferred', 'preflight-expired') : noSend('unavailable', 'preflight-did-not-submit');
+      }
       if (ready.status !== 'ready') return noSend(ready.status, 'preflight-did-not-submit');
       const sending = await this.bots.repository.transaction(async tx => {
         const current = findRoot(tx, root);
         if (binding(current)?.frame_hash !== prepared.bound.frame.frame_hash) return { reason: 'authority-changed', attempt: null };
         const bound = this.#binding(current);
-        const reason = this.#eligibility(current, ids, bound, this.bots.now());
-        if (reason || controller.signal.aborted) return { reason: reason ?? 'cancelled', attempt: null };
+        const now = this.bots.now();
+        if (now >= expiresUtc) return { reason: 'preflight-expired', attempt: null };
+        const reason = this.#eligibility(current, ids, bound, now);
+        if (reason || controller.signal.aborted) return { reason: reason ?? (keys.some(key => this.#cancelled.has(key)) ? 'cancelled' : 'preflight-expired'), attempt: null };
         if (!ids.every(id => this.#preflight(current, id)?.frame_hash === prepared.frame.frame_hash)) return { reason: 'generation-changed', attempt: null };
         if (ids.some(id => this.#status(current, id) !== 'pending')) return { reason: 'already-settled', attempt: null };
         const queues = memoryFrames(current).filter(f => ids.includes(f.frame_hash));
@@ -312,7 +334,7 @@ export class PrivateChannels {
       });
       if (!sending.attempt) return noSend(sending.reason === 'cancelled' ? 'cancelled' : 'deferred', sending.reason!);
       let status = 'not-submitted', receipt: string | null = null;
-      if (!controller.signal.aborted && !keys.some(key => this.#cancelled.has(key))) {
+      if (!controller.signal.aborted && !keys.some(key => this.#cancelled.has(key)) && this.bots.now() < expiresUtc) {
         try {
           settled = false;
           active = this.port.send({ root, ...privateBinding, deliveryId: sending.attempt.frame_hash, text: sending.text!, signal: controller.signal });
@@ -352,6 +374,7 @@ export class PrivateChannels {
 
   async recap(root: string): Promise<JsonObject> {
     const snapshot = await this.bots.repository.root(root);
+    assertCanonicalSelection(snapshot);
     const frames = memoryFrames(snapshot);
     const queues = frames.filter(f => f.payload.event === 'channel.queued');
     const reviewed = new Set(frames.filter(f => f.payload.event === 'channel.inbound.reviewed').map(f => workEvent(f.payload).data.sourceWave));

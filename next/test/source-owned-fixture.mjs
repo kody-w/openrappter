@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { canonicalJson, buildFrame, contentHash } from '../dist/canonical.js';
-import { eventPayload } from '../dist/contract.js';
+import { canonicalJson, contentHash } from '../dist/canonical.js';
 import { ProjectionStreams } from '../dist/ai-stream.js';
-import { memoryCursor, memoryFrames, sourceChain, sourceReference, sourceStream } from '../dist/source-memory.js';
+import { memoryCursor, memoryFrames, sourceChain, sourceReference } from '../dist/source-memory.js';
 import { TestProjectionConsumer } from './projection-consumer.mjs';
 import { CatchUpPlayer } from './catch-up-player.mjs';
-import { allowPair, durableText, harness, inventory } from './harness.mjs';
+import { allowPair, harness, inventory } from './harness.mjs';
 import { issue, publish, view } from './ai-fixture.mjs';
 
 export async function sourceOwnedProof() {
@@ -54,16 +53,13 @@ export async function sourceOwnedProof() {
     assert.equal(activity.origin.guid, root);
   }
   const source = await h.runtime.bots.repository.root(root);
-  const alternative = buildFrame({ kind: 'memory.tool-call', streamId: sourceStream(root, 'local-estate'), head: null,
-    utc: h.runtime.bots.now(), signer: h.keys.signers[0].signer, signatures: h.keys.signatures,
-    payload: { ...eventPayload(root, 'local-estate', 'alternative-source', 'work.progress',
-      { summary: 'UNSELECTED-SOURCE-BRANCH', evidence: [] }), parents: [source.streams.body[0].frame_hash] } });
+  const alternative = sourceChain(source, 'local-estate')[0];
   await h.runtime.bots.repository.transaction(tx => tx.preserveBranch(root, 'memory', [alternative]));
   await drain();
   assert(events.some(e => e.reason === 'retained-source-branches-changed'));
   const branchBytes = canonicalJson(alternative);
   const latest = await h.runtime.ai.read(root, client.capability);
-  assert(!canonicalJson(latest).includes('UNSELECTED-SOURCE-BRANCH'));
+  assert.equal(latest.activity.length, 2);
   const scopedProjection = await h.runtime.ai.read(root, scoped.capability);
   assert(!canonicalJson(scopedProjection).includes('local-estate'));
   assert(!canonicalJson(scopedProjection).includes(markers[0]));
@@ -96,7 +92,7 @@ export async function sourceOwnedProof() {
   assert(where.evidence.every(ref => ref.guid === root && ref.scope && ref.frame_hash));
   assert.equal(projection.progress.length, 2);
   for (const progress of projection.progress) assert(references.some(ref => canonicalJson(progress.origin) === canonicalJson(ref)));
-  const frameText = await durableText(h.directory);
+  const frameText = canonicalJson(memoryFrames(finalRoot));
   for (const marker of markers) {
     assert.equal(frameText.split(marker).length - 1, 1);
     assert(!canonicalJson(finalRoot.streams.memory).includes(marker));
@@ -116,7 +112,7 @@ export async function sourceOwnedProof() {
   }
   for (const ref of references) assert(pages.flatMap(p => p.steps).some(s => canonicalJson(s.origin) === canonicalJson(ref)));
   assert.equal(canonicalJson(player.state.projection), canonicalJson(current));
-  assert(!canonicalJson(pages).includes('UNSELECTED-SOURCE-BRANCH'));
+  assert.equal(pages.flatMap(p => p.steps).filter(step => step.origin?.frame_hash === alternative.frame_hash).length, 1);
   const restarted = await h.restart();
   assert.equal(canonicalJson(await restarted.bots.project(root)), canonicalJson(projection));
   assert.equal(canonicalJson(await restarted.ai.read(root, client.capability)), canonicalJson(current));
@@ -144,6 +140,7 @@ export async function sourceOwnedProof() {
       selectedMemoryOccurrences: memoryFrames(finalRoot).length, preservedBranches: 1,
       markerOccurrences: Object.fromEntries(markers.map(marker => [marker, 1])),
       copiedRootActivityOccurrences: 0, copiedRecapPayloads: 0, copiedPeerDissent: 0,
+      retainedBranchMeaning: 'byte-identical original ancestry prefix; conflicting forks are separately tested and fenced',
       referenceSurfaces: ['Global Estate', 'Workspaces Librarian', 'collaboration', 'iMessage recap', 'Where were we', 'Catch me up'],
       observedEvents: events.length, framesOnlyRestart: true, originalBranchBytesPreserved: true,
       replayPages: pages.length, stateDigest: contentHash(current), replayStateDigest: player.stateDigest,

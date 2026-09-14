@@ -31,3 +31,9 @@
     original full root GUID, scope, hashes and branches; never centralize copies
     of activity. Existing centralized bytes remain explicitly historical.
     Source scope IDs are not newly minted world GUIDs. See `SOURCE_OWNERSHIP.md`.
+11. Internal scope IDs are mint-once within their root, including retired/
+    corrected creations. The root catalog is bounded to 64 identities, with
+    hidden roots included; a rejected creation publishes nothing.
+12. Retained conflicting branches do not authorize either interpretation.
+    Preserve the exact bytes, fence semantic projections and new work, and
+    require actual canonical owner resolution rather than choosing a directory.

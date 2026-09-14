@@ -105,13 +105,9 @@ export async function migrationFixture(directory) {
       files.set(`scopes/${sourceKey(root, scope)}/frames/${String(frame.seq).padStart(12, '0')}.json`, Buffer.from(canonicalJson(frame)));
     }
     if (index === 0) {
-      const branch = buildFrame({ kind: 'memory.chat-turn', streamId: streamFor(root, 'memory'), head: null, utc: now(),
-        payload: eventPayload(root, 'root', 'source-branch', 'turn.user', { text: 'An alternative source branch is retained, not unified.' }), signer, signatures: keys.signatures });
+      const branch = memory[0];
       files.set(`branches/memory-${branch.frame_hash}/frames/000000000000.json`, Buffer.from(canonicalJson(branch)));
-      const scopedBranch = buildFrame({ kind: 'memory.tool-call', streamId: sourceStream(root, 'source-memory'), head: null, utc: now(),
-        payload: { ...eventPayload(root, 'source-memory', 'source-memory-branch', 'work.progress',
-          { summary: 'An unselected original source-world branch.', evidence: [applied.frame_hash] }), parents: [body.frame_hash] },
-        signer, signatures: keys.signatures });
+      const scopedBranch = scoped.get('source-memory')[0];
       files.set(`scopes/${sourceKey(root, 'source-memory')}/branches/${scopedBranch.frame_hash}/frames/000000000000.json`, Buffer.from(canonicalJson(scopedBranch)));
     }
     const relativeRoot = path.join('canonical', descriptor.id);

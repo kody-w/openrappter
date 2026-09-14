@@ -3,6 +3,7 @@ import { label, list, object, text, workEvent } from './contract.js';
 import { requireThat } from './errors.js';
 import type { RootSnapshot } from './repository.js';
 import { memoryFrames } from './source-memory.js';
+import { foldState } from './state.js';
 
 export interface ChannelPolicy extends JsonObject {
   automaticQuestions: boolean;
@@ -85,6 +86,7 @@ export function questionPending(root: RootSnapshot, source: string): boolean {
   const frames = memoryFrames(root);
   const question = frames.find(f => f.frame_hash === source);
   if (!question || !canonicalClarification(question)) return false;
+  if (foldState(root).proposals.get(source)?.status === 'superseded') return false;
   return !frames.some(f => f.payload.event === 'turn.user' && f.payload.scope === question.payload.scope
     && workEvent(f.payload).data.origin === 'copilot-cli' && workEvent(f.payload).data.answerTo === source);
 }

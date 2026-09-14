@@ -4,8 +4,9 @@ import { requireThat } from './errors.js';
 import { validateDraft, wave, type Draft, type IntentAction, type RoutineAction } from './intent.js';
 import type { RootSnapshot } from './repository.js';
 import { migrationItem } from './migration-contract.js';
-import { memoryFrames, sourceReference } from './source-memory.js';
+import { memoryFrames, sourceReference, scopeCreationOwners } from './source-memory.js';
 import { discoveryEvidence } from './estate-contract.js';
+import { assertCanonicalSelection } from './canonical-forks.js';
 
 export interface InternalState {
   scopes: Scope[];
@@ -20,6 +21,7 @@ export interface InternalState {
 }
 
 export function foldState(root: RootSnapshot, extraCorrections: readonly string[] = []): InternalState {
+  assertCanonicalSelection(root);
   const corrected = new Set(extraCorrections);
   const memory = memoryFrames(root);
   const byWave = new Map(memory.map(f => [f.frame_hash, f]));
@@ -59,6 +61,12 @@ export function foldState(root: RootSnapshot, extraCorrections: readonly string[
       proposal.status = corrected.has(frame.frame_hash) ? 'corrected' : 'applied';
       if (corrected.has(frame.frame_hash)) continue;
       validateResolutions(state, proposal.draft, e.scope);
+      if (proposal.draft.resolves.some(hash => workEvent(state.proposals.get(hash)!.frame.payload).data.clarify !== undefined)) {
+        const input = byWave.get(String(workEvent(proposal.frame.payload).data.replyTo));
+        requireThat(data.actor === 'local-operator' && input?.payload.event === 'turn.user'
+          && input.payload.scope === e.scope && workEvent(input.payload).data.origin === 'copilot-cli',
+        'confirmation-origin', 'Canonical clarification settlement requires the genuine CLI source of the confirmed resolution, never external inbox data.');
+      }
       for (const resolved of proposal.draft.resolves) state.proposals.get(resolved)!.status = 'superseded';
       applyScopedActions(state, proposal.draft.actions, root, frame.frame_hash, e.scope);
     } else if (e.event === 'work.progress' && !corrected.has(frame.frame_hash)) {
@@ -113,9 +121,12 @@ export function validateResolutions(state: InternalState, draft: Draft, scope: s
 }
 
 export function applyActions(state: InternalState, actions: readonly IntentAction[], root: RootSnapshot, source: string): void {
+  const originalOwners = scopeCreationOwners(root);
   for (const action of actions) {
     const id = action.type === 'scope.create' ? action.scope.id : action.id;
     const parent = action.type === 'scope.create' ? action.scope.parent : action.scope;
+    requireThat(!originalOwners.has(id) || originalOwners.get(id) === source, 'scope-identity-reused',
+      'A previously created internal scope ID remains reserved after correction. Choose a new scope ID instead of re-rooting its history.');
     requireThat(!state.scopes.some(s => s.id === id) && state.scopes.some(s => s.id === parent), 'scope',
       'An internal organ needs a unique local ID and an existing parent; identities are not merged.');
     if (action.type === 'scope.create') state.scopes.push({ ...action.scope });

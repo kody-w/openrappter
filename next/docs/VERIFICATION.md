@@ -1,6 +1,45 @@
 # Verified headless milestones
 
-## Current private iMessage acceptance milestone
+## Current independent review follow-up
+
+All five findings against `907f743` are fixed. Six deterministic red
+reproductions first demonstrated the failures; eight focused regressions now
+pass. The complete `npm --prefix next run check` passes **127 tests**, strict
+typecheck/build, and every primitive-mapping/headless/provider-neutral/observed
+migration/browser/Catch-up/source-owned/private-channel gate. The separate
+adopted primitive suite passes **90 tests**. Retained legacy gates pass unchanged.
+
+The fork proof retains **6 signed frame files across 4 source chains**, each
+independently `COMPLIANT`, while proving that their joint unresolved fork cannot
+authorize either projection or successor. Both original conflicting waves
+survive raw reopen; active-directory swapping cannot choose a winner.
+The independent capacity proof retains **64 roots including a hidden root**,
+rejects root 65 before directory/genesis publication, and verifies identical
+files/directories plus readable restart and stable creation retry.
+
+Scope-identity tests use exact creation/correction/recreation/source timestamps
+and demonstrate permanent ID reservation without stale creation parents.
+Channel tests prove original preflight expiry across private binding/readiness/
+final dispatch, canonical no-send with fresh approval, and confirmed genuine-CLI
+`draft.resolves` settlement with no duplicate notification.
+
+All regression gates remain nonzero: foundation 3 frames; headless 39 signed;
+provider-neutral 25 signed; observed migration 113 signed; Catch-up 10 rooted
+and 13 broker-source signed; source ownership 21 signed file occurrences; and
+private channel 12 signed. The current positive retention fixtures carry exact
+shared ancestry prefixes rather than unresolved forks. Physical ancestry copies
+are not additional active logical occurrences. Adversarial fork evidence is
+separate and explicitly fenced.
+
+Evidence: `verification/review-907.json`.
+Details and changed behavior: `REVIEW_FOLLOWUP.md`.
+Current deterministic goldens: `fixtures/review-907/`; earlier fixtures/receipts
+remain immutable historical evidence. No live migration, old implementation
+change, dependency/application install, push or new canonical authority is part
+of this follow-up. Actual canonical owner fork resolution remains unavailable;
+there is no application override or directory-based branch promotion.
+
+## Private iMessage acceptance milestone (`907f743`)
 
 The full new-core check passes **119 tests**, strict typecheck/build and every
 canonical/headless/provider-neutral/migration/browser/Catch-up/source-owned gate,

@@ -99,6 +99,16 @@ irreversible operation. See `CHANNEL_CONTRACT.md`.
 An explicit alternative branch carries its whole canonical chain, preserving
 the exact frame bytes and original stream identity. It is not silently merged,
 flattened, selected, or promoted to a bot. No unification protocol is invented.
+Conflicting active/retained occurrences fence the affected root's semantic
+projections and successors until canonical owner resolution; an `active` directory
+is not authority. Only identical ancestry prefixes can accompany an unambiguous
+selected chain. Raw forensic reopen retains both histories. See
+`REVIEW_FOLLOWUP.md`.
+
+The 64-root catalog bound is enforced inside creation/materialization before
+directories or genesis are written, including hidden roots. Internal scope IDs
+are mint-once per root: correction does not permit recreating another scope under
+an old identity or parenting new work to its retired creator.
 
 All new action exhaust is **source-owned** by its exact original internal
 workspace/world scope. The root memory stream is not a copied central journal.

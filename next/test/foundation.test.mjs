@@ -122,7 +122,7 @@ test('canonical corruption, scope escape and source/native directory writes fail
   await assert.rejects(f.repository.snapshot(), { code: 'canonical-integrity' });
 });
 
-test('byte-identical alternative branch survives restart without selecting or merging', async () => {
+test('byte-identical conflicting branch survives restart while both state interpretations remain fenced', async () => {
   const f = await fixture();
   const a = await f.bots.create({ name: 'Branches', operationId: 'create-branches' });
   await f.bots.visibility(a.root, true, 'hide-main');
@@ -136,7 +136,7 @@ test('byte-identical alternative branch survives restart without selecting or me
   assert.equal(state.streams.memory[0].frame_hash, original.frame_hash);
   assert.equal(canonicalJson(state.branches[0].frames[0]), canonicalJson(alternative));
   assert.deepEqual(await inventory(f.directory), before);
-  assert.equal((await f.bots.project(a.root)).hidden, true);
+  await assert.rejects(f.bots.project(a.root), { code: 'canonical-fork-unresolved' });
 });
 
 test('independent keyed root signatures cannot be substituted across roots', async () => {

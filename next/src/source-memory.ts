@@ -2,6 +2,7 @@ import { canonicalJson, contentHash, frameHead, isBodyStream, snapshotJson, stre
 import { label, object, workEvent } from './contract.js';
 import { requireThat } from './errors.js';
 import type { RootSnapshot } from './repository.js';
+import { assertCanonicalSelection } from './canonical-forks.js';
 
 export interface SourceMemory {
   readonly scope: string;
@@ -111,6 +112,7 @@ function dependenciesFor(root: RootSnapshot): Map<string, Set<string>> {
 /** No journal is written: retain original source occurrences in causal order. */
 export function memoryFrames(root: RootSnapshot): readonly RappFrame[] {
   const frames = rawMemoryFrames(root);
+  scopeCreationOwners(root);
   const byHash = new Map(frames.map(frame => [frame.frame_hash, frame]));
   const dependencies = dependenciesFor(root);
   const children = new Map<string, string[]>();
@@ -134,8 +136,8 @@ export function memoryFrames(root: RootSnapshot): readonly RappFrame[] {
   return result;
 }
 
-export function scopeCreationParent(root: RootSnapshot, scope: string): string {
-  if (root.definition.scopes.some(s => s.id === scope)) return root.streams.body[0]!.frame_hash;
+export function scopeCreationOwners(root: RootSnapshot): ReadonlyMap<string, string> {
+  const owners = new Map(root.definition.scopes.map(s => [s.id, root.streams.body[0]!.frame_hash]));
   const frames = rawMemoryFrames(root);
   const byHash = new Map(frames.map(f => [f.frame_hash, f]));
   for (const frame of frames) {
@@ -146,10 +148,21 @@ export function scopeCreationParent(root: RootSnapshot, scope: string): string {
     for (const value of draft.actions) {
       const action = object(value);
       const id = action.type === 'scope.create' ? object(action.scope).id : action.id;
-      if (id === scope) return frame.frame_hash;
+      label(id);
+      requireThat(!owners.has(String(id)) || owners.get(String(id)) === frame.frame_hash, 'scope-identity-reused',
+        'Internal scope IDs are mint-once within the original root. Correction retires a creation; it does not free its ID for reuse.');
+      owners.set(String(id), frame.frame_hash);
     }
   }
-  requireThat(false, 'source-scope', 'The source workspace/world has no canonical creation authority.');
+  return owners;
+}
+
+export function scopeCreationParent(root: RootSnapshot, scope: string): string {
+  const owner = scopeCreationOwners(root).get(scope);
+  requireThat(owner, 'source-scope', 'The source workspace/world has no canonical creation authority.');
+  requireThat(!rawMemoryFrames(root).some(f => f.payload.event === 'state.corrected' && workEvent(f.payload).data.targetWave === owner),
+    'source-scope-retired', 'A corrected creation cannot authorize new source work or become a replacement identity.');
+  return owner;
 }
 
 export function sourceParents(root: RootSnapshot, scope: string): string[] {
@@ -159,15 +172,18 @@ export function sourceParents(root: RootSnapshot, scope: string): string[] {
 }
 
 export function memoryPrefix(root: RootSnapshot, count: number): RootSnapshot {
+  assertCanonicalSelection(root);
   return memorySubset(root, new Set(memoryFrames(root).slice(0, count).map(f => f.frame_hash)));
 }
 
 function memorySubset(root: RootSnapshot, selected: ReadonlySet<string>): RootSnapshot {
-  const sources = (root.sources ?? []).map(s => ({ ...s, frames: s.frames.filter(f => selected.has(f.frame_hash)) })).filter(s => s.frames.length);
+  const sources = (root.sources ?? []).map(s => ({ ...s, frames: s.frames.filter(f => selected.has(f.frame_hash)),
+    branches: s.branches.filter(b => b.frames.every(f => selected.has(f.frame_hash))) })).filter(s => s.frames.length);
   const { sources: _sources, ...base } = root;
   return {
     ...base,
     streams: { ...root.streams, memory: root.streams.memory.filter(f => selected.has(f.frame_hash)) },
+    branches: root.branches.filter(b => b.family !== 'memory' || b.frames.every(f => selected.has(f.frame_hash))),
     ...(sources.length ? { sources } : {}),
   };
 }
@@ -179,9 +195,11 @@ function assertClosedCut(root: RootSnapshot, cut: RootSnapshot): void {
     && [...dependencies.get(hash)!].every(parent => selected.has(parent))), 'cursor-invalid',
   'A source vector must retain every selected occurrence and its original causal ancestry.');
   memoryFrames(cut);
+  assertCanonicalSelection(cut);
 }
 
 export function memoryPending(root: RootSnapshot, from: RootSnapshot): readonly RappFrame[] {
+  assertCanonicalSelection(root);
   assertClosedCut(root, from);
   const retained = new Set(rawMemoryFrames(from).map(f => f.frame_hash));
   return memoryFrames(root).filter(f => !retained.has(f.frame_hash));
@@ -198,6 +216,7 @@ export function memoryHeadHashes(root: RootSnapshot): string[] {
 }
 
 export function memoryCursor(root: RootSnapshot): JsonObject | null {
+  assertCanonicalSelection(root);
   const sourceHeads = (root.sources ?? []).filter(s => s.frames.length).sort((a, b) => a.scope.localeCompare(b.scope));
   if (!sourceHeads.length) {
     const last = root.streams.memory.at(-1);
@@ -212,6 +231,7 @@ export function memoryCursor(root: RootSnapshot): JsonObject | null {
 }
 
 export function memoryAtCursor(root: RootSnapshot, value: unknown): RootSnapshot {
+  assertCanonicalSelection(root);
   if (value === null) return memoryPrefix(root, 0);
   const candidate = object(value);
   if (candidate.schema !== 'rapp-work.source-cursor/1') {
@@ -240,7 +260,10 @@ export function memoryAtCursor(root: RootSnapshot, value: unknown): RootSnapshot
     heads.set(actual.scope, source.head);
     branches.set(actual.scope, actual.branches.filter(b => (source.branches as unknown[]).includes(b.head)));
   }
-  const prefix: RootSnapshot = { ...root, streams: { ...root.streams, memory: cut(root.streams.memory, candidate.root) },
+  const rootFrames = cut(root.streams.memory, candidate.root);
+  const rootHashes = new Set(rootFrames.map(f => f.frame_hash));
+  const prefix: RootSnapshot = { ...root, streams: { ...root.streams, memory: rootFrames },
+    branches: root.branches.filter(b => b.family !== 'memory' || b.frames.every(f => rootHashes.has(f.frame_hash))),
     sources: (root.sources ?? []).map(s => ({ ...s, frames: cut(s.frames, heads.get(s.scope) ?? null),
       branches: branches.get(s.scope) ?? [] })).filter(s => s.frames.length) };
   try { assertClosedCut(root, prefix); }

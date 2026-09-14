@@ -8,8 +8,7 @@ import { HeadlessRuntime } from '../dist/runtime.js';
 import { CopilotSdkProvider } from '../dist/copilot.js';
 import { FixtureBrainstem, FixtureCopilotTransport, fixtureSigners, readFixture, SyntheticIMessage } from '../dist/fixtures.js';
 import { discoveryEvidence } from '../dist/estate.js';
-import { buildFrame, canonicalJson, contentHash, streamFor } from '../dist/canonical.js';
-import { eventPayload } from '../dist/contract.js';
+import { canonicalJson, contentHash } from '../dist/canonical.js';
 import { foldState } from '../dist/state.js';
 import { memoryFrames, sourceChain } from '../dist/source-memory.js';
 
@@ -81,11 +80,7 @@ assert.equal(transport.requests.length, modelCallsBeforeTick);
 assert.equal((await runtime.recurring.due(a.root)).length, 0);
 
 const preserved = (await runtime.bots.repository.root(a.root)).streams.memory.map(f => canonicalJson(f));
-const alternative = buildFrame({
-  kind: 'memory.save', streamId: streamFor(a.root, 'memory'), head: null, utc: runtime.bots.now(),
-  payload: eventPayload(a.root, 'root', 'alternative-visibility', 'root.visibility', { hidden: true }),
-  signer: keys.signers[0].signer, signatures: keys.signatures,
-});
+const alternative = (await runtime.bots.repository.root(a.root)).streams.memory[0];
 await runtime.bots.repository.transaction(tx => tx.preserveBranch(a.root, 'memory', [alternative]));
 assert.deepEqual((await runtime.bots.repository.root(a.root)).streams.memory.map(f => canonicalJson(f)), preserved);
 
@@ -190,11 +185,11 @@ const channelFixture = {
 };
 await writeFile(path.join(directory, 'multi-bot-transcript.json'), JSON.stringify(transcriptFixture, null, 2) + '\n');
 await writeFile(path.join(directory, 'imessage-outage-recap.json'), JSON.stringify(channelFixture, null, 2) + '\n');
-if (process.argv.includes('--record-channel-fixtures')) {
-  await mkdir(path.join(root, 'fixtures/private-channel'), { recursive: true });
-  await writeFile(path.join(root, 'fixtures/private-channel/multi-bot-transcript.json'), JSON.stringify(transcriptFixture, null, 2) + '\n');
-  await writeFile(path.join(root, 'fixtures/private-channel/imessage-outage-recap.json'), JSON.stringify(channelFixture, null, 2) + '\n');
+if (process.argv.includes('--record-review-fixtures')) {
+  await mkdir(path.join(root, 'fixtures/review-907'), { recursive: true });
+  await writeFile(path.join(root, 'fixtures/review-907/multi-bot-transcript.json'), JSON.stringify(transcriptFixture, null, 2) + '\n');
+  await writeFile(path.join(root, 'fixtures/review-907/imessage-outage-recap.json'), JSON.stringify(channelFixture, null, 2) + '\n');
 }
-assert.equal(canonicalJson(transcriptFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/private-channel/multi-bot-transcript.json'), 'utf8'))));
-assert.equal(canonicalJson(channelFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/private-channel/imessage-outage-recap.json'), 'utf8'))));
+assert.equal(canonicalJson(transcriptFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/review-907/multi-bot-transcript.json'), 'utf8'))));
+assert.equal(canonicalJson(channelFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/review-907/imessage-outage-recap.json'), 'utf8'))));
 console.log(JSON.stringify(result, null, 2));

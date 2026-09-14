@@ -3,6 +3,9 @@
 `projection.get` returns `rapp-work.projection/1`. The TypeScript contract is
 `src/projection.ts`; the machine-readable shape is
 `contracts/projection.schema.json`. There is **no UI implementation**.
+Unresolved active/retained canonical forks refuse semantic projection; a
+directory name or display preference cannot select a branch. Raw forensic
+inventory preserves all occurrences until actual canonical owner resolution.
 
 The projection contains:
 

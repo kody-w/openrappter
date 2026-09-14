@@ -36,6 +36,9 @@ checks the root/scope/stream/path/signature binding, and adds original scope
 creation and previous-head references. Unknown parents/scopes, duplicate
 operations, changed source paths and cycles refuse before publication. No
 aggregate event is additionally emitted.
+Internal scope IDs remain reserved after correction. A retired scope cannot be
+recreated under that ID or authorize new source parents. Creation-owner and
+post-candidate memory checks run before canonical publication.
 
 ## Where each operation belongs
 
@@ -65,10 +68,12 @@ public turns, attention, progress, history and replay retain these origins.
 References do not grant access and cannot change an occurrence's owner.
 
 New iMessage queues use `rapp-work.recap-references/1`: exact source references
-plus contact/permission/binding references, **no copied summary**. Read/delivery
+plus opaque binding references/public policy, **no copied summary**. Read/delivery
 derives transient text from those originals. Missing or changed originals
 refuse; no cached recap substitutes for evidence. The host's outgoing transport
 may deliver that derived text only under its separately bound permission.
+New bindings retain only opaque references/public policy; actual private
+contact, Shortcut and credential material stays in the strict runtime sibling.
 
 Collaboration guidance references its original consent brief. A new synthesis
 contains only the caller's newly authored public perspective and an exact
@@ -114,6 +119,14 @@ Catch-me-up reconstructs source-derived states and publishes original origins,
 source hashes and canonical state/page digests. Branch alternatives are not
 replayed as selected work. No observation, orientation, recap, subscription or
 replay writes a frame or executes a model/tool.
+
+An actual fork is not merely an unselected presentation hint. Same-stream,
+same-sequence, same-predecessor occurrences with different waves are retained
+as evidence but fence both interpretations, cursor projections and successors.
+There is no active-directory winner or carried resolution flag. Raw forensic
+inventory remains readable; actual canonical owner resolution is required.
+Positive retention fixtures use exact shared ancestry prefixes, not unresolved
+forks to authorize subsequent work. See `REVIEW_FOLLOWUP.md`.
 
 ## Historical compatibility and release gate
 

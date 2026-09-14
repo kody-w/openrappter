@@ -4,6 +4,7 @@ import { requireThat } from './errors.js';
 import { projectBot } from './projection.js';
 import { foldState, permittedScopes } from './state.js';
 import { memoryFrames } from './source-memory.js';
+import { assertCanonicalSelection } from './canonical-forks.js';
 
 const WEEK = 7 * 24 * 60 * 60 * 1_000;
 export class RecurringWork {
@@ -30,7 +31,9 @@ export class RecurringWork {
 
   async tick(root: string, routineId: string, occurrence: string): Promise<JsonObject> {
     const operationId = `tick-${contentHash({ root, routineId, occurrence })}`;
-    const prior = memoryFrames(await this.bots.repository.root(root)).find(f => f.payload.operationId === operationId);
+    const snapshot = await this.bots.repository.root(root);
+    assertCanonicalSelection(snapshot);
+    const prior = memoryFrames(snapshot).find(f => f.payload.operationId === operationId);
     if (prior) return { source: prior.frame_hash, duplicate: true };
     requireThat((await this.due(root)).some(d => d.routineId === routineId && d.occurrence === occurrence),
       'routine-not-due', 'Only a due occurrence of a complete reviewed recurring intent may run.');

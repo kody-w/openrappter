@@ -181,7 +181,8 @@ test('two-question late deferral finalizes the entire batch and reconstructs com
   const h = await configured({ quietHours: { startMinute: 22 * 60, endMinute: 8 * 60 }, maxBatch: 2 });
   const one = await question(h, 'batch-one', 'First distinct owner decision?');
   const two = await question(h, 'batch-two', 'Second distinct owner decision?');
-  h.channel.preflight = async () => { h.time('2026-09-13T23:00:00.000Z'); return { status: 'ready' }; };
+  h.time('2026-09-13T21:59:50.000Z');
+  h.channel.preflight = async () => { h.time('2026-09-13T22:00:00.000Z'); return { status: 'ready' }; };
   const ids = [one.queue, two.queue];
   const late = await h.runtime.channels.flush(h.bot.root, ids, 'batch-late-approval');
   assert.equal(late.status, 'deferred');

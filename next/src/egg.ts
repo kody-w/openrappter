@@ -2,6 +2,7 @@ import { canonicalJson, sha256, type JsonObject } from './canonical.js';
 import { Bots } from './bots.js';
 import { Refusal, requireThat } from './errors.js';
 import { memoryFrames, sourceReference } from './source-memory.js';
+import { canonicalForks } from './canonical-forks.js';
 
 export class RootedEgg {
   constructor(readonly bots: Bots) {}
@@ -18,6 +19,7 @@ export class RootedEgg {
       branches: [...snapshot.branches.map(b => ({ family: b.family, head: b.head })),
         ...(snapshot.sources ?? []).flatMap(s => s.branches.map(b => ({ guid: root, scope: s.scope, stream_id: s.stream, family: 'memory', head: b.head })))],
       transformation: false, transferAuthority: false,
+      unresolvedForks: canonicalForks(snapshot),
       canonicalClosureAvailable: false, domainBinding: false, codeLoading: false, sharedRuntime: false,
     };
   }

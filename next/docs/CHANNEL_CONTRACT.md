@@ -53,9 +53,12 @@ clarification, auto-restore a hidden root or acquire an owner capability.
 approval of the text. The pending inbox is bounded to 32 records and 4000 UTF-8
 bytes per public input.
 
-Only genuine owner `conversation.answer` with the exact source-wave reference
-settles a native/CLI clarification. Organization resolutions additionally
-require a genuine CLI input source and exact reviewed confirmation.
+Only genuine CLI authority settles a native/CLI clarification: either owner
+`conversation.answer` with the exact source-wave reference, or a confirmed
+`draft.resolves` through the same canonical organization fold. Organization
+resolution requires a genuine CLI input source and exact reviewed confirmation.
+An unconfirmed proposal or external input does not settle it; a settled
+question cannot trigger duplicate delivery.
 
 ## Canonical reporting and automatic question queueing
 
@@ -94,10 +97,14 @@ the same binding and preflight generation.
 2. Read the strict private runtime and run an explicitly **non-sending**
    preflight. Disabled/unavailable/deferred results record a known no-send
    outcome for the **entire batch**. No physical attempt budget is spent.
+   Both private binding retrieval and readiness consume the original canonical
+   preflight deadline; no fresh lease starts after a slow binding read.
 3. Recheck root visibility, binding, current question/CLI answer state,
    cancellation, quiet hours, expiry, generation and rate immediately before
    issuing an attempt. Late deferral finalizes all selected queue IDs, not only
    the last marker.
+   Final attempt publication also checks the original preflight `expiresUtc`;
+   expiry records a canonical no-send deferral and requires fresh approval.
 4. Commit the irreversible attempt, then invoke the bounded transport with an
    opaque stable attempt ID and source-derived text. Record `delivered`,
    `uncertain`, or a proven `not-submitted` outcome. Only opaque receipts enter

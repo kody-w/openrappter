@@ -57,6 +57,10 @@ rapplications, tasks, routines, memories, artifacts and evidence. The 10 world
 scope occurrences and every selected item are observed in the live display log.
 The source fixture now also includes an explicitly historical centralized scope
 occurrence; it remains byte-identical and is never relabeled source-owned.
+Positive branch retention uses exact original ancestry prefixes. Actual
+conflicting same-stream forks are separately preserved in adversarial fixtures
+and refuse semantic import/publication until canonical owner resolution; the
+active directory is not an implicit resolution rule.
 
 ## Public migration API
 

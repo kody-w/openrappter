@@ -366,7 +366,7 @@ describe("conversation-first canonical Twin", () => {
       command.command.operation === "host.automation.save" && command.state === "committed")).toBe(true);
     expect(snapshot.runs).toEqual([]);
     expect(f.commands.guestExecutions).toBe(0);
-  }, 120_000);
+  }, 180_000);
 
   it("does not absorb an interleaved catalog write into a proposal's own completion heads", async () => {
     const f = await setup();

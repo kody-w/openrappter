@@ -106,6 +106,7 @@ by the connection, not by an `actor` field or these instructions.
 | Tool | Inputs besides `root` | Capability |
 |---|---|---|
 | `rapp_work_read` | none | `projection.read` |
+| `rapp_work_catch_up` | optional exact `from`, `to`, `limit`; separately opted-in private `guest` | `projection.read`; guest additionally needs `guest.replay` |
 | `rapp_work_history` | optional exact `cursor`, `limit` up to 16 | `projection.read` |
 | `rapp_work_artifact` | canonical `artifact` ID | `projection.read` |
 | `rapp_work_publish` | stable `requestId`, `publication` | matching publish right |
@@ -226,6 +227,34 @@ Keep the last **applied** cursor. On reconnect, supply it for bounded replay;
 do not rerun models or tools to reconstruct the UI. A lost local UI cache is
 not lost work: request a fresh snapshot and page canonical history.
 `resync-required` explicitly signals slow output, expiration or a replay gap.
+
+## Catch me up — no regeneration
+
+Use `rapp_work_catch_up` for a deterministic fast-forward timeline built from
+canonical frames/cursors, never a model-generated reconstruction of missing work.
+Omit `from` for a recent window; use `from:null` to begin at genesis. Reuse the
+returned fixed `to` with `from:next` when paging.
+
+Each step has recorded/reconstructed/unavailable presentation grades, original
+source frame hashes and exact state digests. A recorded declarative intent is
+not proof that historical UI pixels were captured. Unavailable material stays
+unavailable. Do not run commands/tools/models, capture a screen, append a replay
+turn, or expose chain-of-thought to fill gaps. The UI is only a passive player.
+
+Omarchy guest replay is **off unless separately authorized**. Even with
+`guest.replay`, the request must opt in to an existing root-signed capture policy:
+
+```json
+{"enabled":true,"dataClass":"godd","visibility":"private","policyWave":"<existing approved policy wave>"}
+```
+
+Only exact canonical ComputerBroker guest artifacts with independently selected
+origin/safety approval can be recorded guest frames. Command/diff visualizations
+are reconstructed summaries; absent display is unavailable. Never include a
+host screen, secrets, keystrokes, raw command/stdout/stderr/diff content, or replay
+execution. Do not mint policy or capture approval from these instructions.
+Missing production guest capture/broker binding is a refusal, not permission to
+record a host screen or rerun the guest.
 
 Bounds: 32 KiB publication; 60 publications/client/minute, surviving restart;
 16 visible history items with pages up to 16; eight cards and sixteen pending

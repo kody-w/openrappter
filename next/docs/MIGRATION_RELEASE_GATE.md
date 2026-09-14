@@ -142,3 +142,8 @@ Each run writes below `next/.test-scratch/migration-observed-…/`:
 The replay embeds the **actual observed passive-client output**, not a fabricated
 animation of expected counts. It performs no runtime fetch/model/store write.
 It is a test artifact, not implementation of a full product UI.
+
+The separate mandatory Catch me up gate (`CATCH_ME_UP.md`) verifies pure
+frame/cursor replay, provenance grades, source hashes and state digests, including
+the optional separately authorized GODD/private Omarchy lane. Neither replay
+gate replaces the approved controlled-local migration requirement.

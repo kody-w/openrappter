@@ -10,14 +10,22 @@ import {
 } from './ai-contract.js';
 import { atCursor, cursorFor, projectAi, publicHistoryFrame, publishedRecords, scopedFrames, validateViewState, viewFrontier } from './ai-projector.js';
 import { reference } from './projection.js';
+import { catchUpTimeline } from './catch-up.js';
+import { CanonicalComputerReplay } from './computer-replay.js';
 
 export class AiProjectionApi {
   readonly authority: ClientAuthority;
-  constructor(readonly bots: Bots) { this.authority = new ClientAuthority(bots); }
+  constructor(readonly bots: Bots, readonly computerReplay?: CanonicalComputerReplay) { this.authority = new ClientAuthority(bots); }
 
   async read(root: string, capability: string, cursor?: unknown): Promise<JsonObject> {
     const selected = await this.authority.authorize(root, capability, ['projection.read']);
     return projectAi(cursor === undefined ? selected.root : atCursor(selected.root, cursor), selected.grant.data.scope);
+  }
+
+  async catchUp(root: string, capability: string, options: unknown = {}): Promise<JsonObject> {
+    const request = object(options);
+    const selected = await this.authority.authorize(root, capability, request.guest === undefined ? ['projection.read'] : ['projection.read', 'guest.replay']);
+    return catchUpTimeline(selected.root, selected.grant.data.scope, request, this.computerReplay);
   }
 
   async artifact(root: string, capability: string, id: string): Promise<JsonObject> {

@@ -14,6 +14,7 @@ export const AI_LIMITS = Object.freeze({
 export const AI_RIGHTS = Object.freeze([
   'projection.read', 'projection.subscribe', 'conversation.publish', 'activity.publish',
   'evidence.publish', 'attention.publish', 'view.publish', 'view.resolve',
+  'guest.replay',
 ] as const);
 export type AiRight = typeof AI_RIGHTS[number];
 export type PublicationKind = 'conversation' | 'activity' | 'evidence' | 'attention' | 'view';

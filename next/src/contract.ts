@@ -153,6 +153,7 @@ const EVENTS = new Set([
   'effect.approved', 'effect.outcome', 'channel.bound', 'channel.queued', 'channel.attempt', 'channel.outcome', 'hive.consented', 'hive.linked',
   'client.granted', 'client.revoked', 'client.conversation', 'client.activity', 'client.evidence', 'client.attention', 'client.view',
   'migration.root.imported', 'migration.pointer.imported',
+  'computer.replay.policy', 'computer.receipt.linked',
 ]);
 
 export function workEvent(value: unknown): WorkEvent {
@@ -172,6 +173,6 @@ export function eventPayload(root: string, scopeId: string, operationId: string,
 export function eventKind(event: string): 'memory.chat-turn' | 'memory.save' | 'memory.tool-call' {
   if (event.startsWith('turn.') || event === 'collaboration.synthesized' || event === 'client.conversation') return 'memory.chat-turn';
   if (['organization.applied', 'work.progress', 'routine.tick', 'provider.unavailable',
-    'operation.interrupted', 'effect.outcome', 'channel.attempt', 'channel.outcome', 'client.activity'].includes(event)) return 'memory.tool-call';
+    'operation.interrupted', 'effect.outcome', 'channel.attempt', 'channel.outcome', 'client.activity', 'computer.receipt.linked'].includes(event)) return 'memory.tool-call';
   return 'memory.save';
 }

@@ -1,6 +1,6 @@
 import { canonicalJson, contentHash, type JsonObject, type RappFrame } from './canonical.js';
 import { Bots, findRoot } from './bots.js';
-import { label, text, workEvent } from './contract.js';
+import { label, object, text, workEvent } from './contract.js';
 import { requireThat } from './errors.js';
 import { validateDraft } from './intent.js';
 import { orient, projectBot, reference, type BotProjection } from './projection.js';
@@ -8,6 +8,8 @@ import type { RootSnapshot } from './repository.js';
 import { applyScopedActions, foldState, permittedScopes, validateEvidence, validateResolutions } from './state.js';
 import type { ModelProvider } from './spine.js';
 import { publicationData } from './ai-contract.js';
+import { catchUpTimeline } from './catch-up.js';
+import { CanonicalComputerReplay } from './computer-replay.js';
 
 export function canonicalContext(root: RootSnapshot, scope = 'root'): JsonObject {
   const state = foldState(root);
@@ -43,15 +45,27 @@ export interface ConversationResult {
   readonly projection: BotProjection;
   readonly proposalWave: string | null;
   readonly text: string;
+  readonly catchUp?: JsonObject;
 }
 
 export class Conversation {
-  constructor(readonly bots: Bots, readonly provider: ModelProvider) {}
+  constructor(readonly bots: Bots, readonly provider: ModelProvider, readonly computerReplay?: CanonicalComputerReplay) {}
+
+  async catchUp(root: string, options: unknown = {}, scope = 'root'): Promise<JsonObject> {
+    return catchUpTimeline(await this.bots.repository.root(root), scope, options, this.computerReplay);
+  }
 
   async converse(root: string, thought: string, operationId: string, scope = 'root'): Promise<ConversationResult> {
     text(thought);
     label(operationId);
     label(scope);
+    if (/^\s*catch me up[?.!]*\s*$/iu.test(thought)) {
+      const snapshot = await this.bots.repository.root(root);
+      const timeline = catchUpTimeline(snapshot, scope);
+      const grades = object(timeline.grades);
+      return { status: 'orientation', projection: projectBot(snapshot), proposalWave: null, catchUp: timeline,
+        text: `Catch me up: a deterministic canonical replay with ${String(grades.recorded)} recorded, ${String(grades.reconstructed)} reconstructed and ${String(grades.unavailable)} unavailable presentation steps. No model, tool or mutation was replayed.` };
+    }
     if (/^\s*(?:where were we|where are we|resume orientation)[?.!]*\s*$/iu.test(thought)) {
       const projection = await this.bots.project(root);
       return { status: 'orientation', projection, proposalWave: null, text: orient(projection).text };

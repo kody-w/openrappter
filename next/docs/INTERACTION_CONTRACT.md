@@ -86,6 +86,7 @@ Selection is transient; an explicit invalid `root` never falls back to it.
 | `bots.hide`, `bots.restore` | Clear/restore the same GUID and history |
 | `conversation.say` | `text`, optional internal `scope` |
 | `conversation.where` | Canonical orientation/resume; no mutation or inference |
+| `conversation.catch-up` | Optional `scope`, `from`, `to`, `limit`, private `guest` opt-in; deterministic graded replay, no execution |
 | `attention.get` | Pending review, question, incomplete work, provider/channel/effect state and observation |
 | `projection.get` | Stable passive projection, distinct signed collaboration speakers |
 | `organization.confirm` | `proposalWave`; exact human confirmation |

@@ -1,5 +1,34 @@
 # Verified headless milestones
 
+## Catch me up / private Omarchy replay gate
+
+The complete suite now passes **83 tests**, strict typecheck/build and all prior
+migration/browser gates, plus the mandatory Catch me up gate. The separate
+adopted primitive suite still passes 90 tests.
+
+The replay gate checks two deterministic pages against the unmodified canonical
+Python `H("rapp/1:particle", value)`: **20 state checkpoints, 4 guest checkpoints
+and all original source frame references** match independently. The exact
+rev-15 checker validates 10 signed rooted frames and 13 signed canonical
+ComputerBroker-source fixture frames, with no findings.
+
+The optional guest lane proves: exact approved recorded PNG bytes →
+`recorded`; safe canonical command result and aggregate diff →
+`reconstructed`; absent display/approval/binding → `unavailable`. It is
+default-off, root-policy-bound, GODD/private, and separately capability gated.
+Tests refuse host display, tampered bytes, wrong producer/owner and revoked
+policy, and exclude raw arguments, output, diff text, secrets and keystrokes.
+
+Replay makes **zero model calls, tool executions, capture operations or canonical
+mutations**. Restart and fixed cursors reproduce identical digests; the
+test-only passive player fast-forwards verified states. No product player UI,
+live guest capture or production origin/safety binding is claimed.
+
+See `CATCH_ME_UP.md` and `verification/catch-up.json`. The requested reference
+agent was contacted; an unreturned result from that agent is not represented
+as incorporated evidence. Prior public `b5cec8a` replay evidence informed
+independent pins and state-vs-presentation separation.
+
 ## Observed migration/display release gate
 
 The current complete check passes **70 tests** (65 previous tests plus five

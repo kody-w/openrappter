@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.omarchy-replay/1",
+  "title": "Optional private canonical ComputerBroker guest replay",
+  "type": "object",
+  "readOnly": true,
+  "additionalProperties": false,
+  "required": ["schema", "grade", "kind", "dataClass", "visibility", "sourceFrameHashes", "reason", "image", "command", "diff", "execution"],
+  "properties": {
+    "schema": { "const": "rapp-work.omarchy-replay/1" },
+    "grade": { "enum": ["recorded", "reconstructed", "unavailable"] },
+    "kind": { "enum": ["guest-frame", "command-summary", "diff-summary", "missing-display"] },
+    "dataClass": { "const": "godd" },
+    "visibility": { "const": "private" },
+    "sourceFrameHashes": { "type": "array", "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" } },
+    "reason": { "type": "string" },
+    "image": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["artifactId", "mediaType", "sha256", "bytes", "base64"],
+          "properties": {
+            "artifactId": { "type": "string" },
+            "mediaType": { "const": "image/png" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "bytes": { "type": "integer", "minimum": 1, "maximum": 65536 },
+            "base64": { "type": "string", "maxLength": 87384 }
+          }
+        }
+      ]
+    },
+    "command": { "type": ["object", "null"] },
+    "diff": { "type": ["object", "null"] },
+    "execution": { "const": false }
+  },
+  "$comment": "Admission also requires root-signed prior opt-in policy, guest.replay capability, exact broker intent/outcome/evidence linkage and host-selected canonical artifact safety/origin approvals. No host display, secrets, keystrokes, raw argv/stdout/stderr/diff content or executable UI is returned."
+}

@@ -14,6 +14,7 @@ import { LocalHive, type CanonicalHivePort } from './hive.js';
 import { RootedEgg } from './egg.js';
 import { Refusal, requireThat } from './errors.js';
 import { AiProjectionApi } from './ai-api.js';
+import { CanonicalComputerReplay } from './computer-replay.js';
 
 export interface RuntimeOptions extends RepositoryOptions {
   brainstem?: BrainstemBinding;
@@ -24,6 +25,7 @@ export interface RuntimeOptions extends RepositoryOptions {
   effects?: ExternalEffectPort;
   hive?: CanonicalHivePort;
   fixture?: boolean;
+  computerReplay?: CanonicalComputerReplay;
 }
 
 export class HeadlessRuntime {
@@ -38,7 +40,7 @@ export class HeadlessRuntime {
   readonly ai: AiProjectionApi;
   private constructor(readonly bots: Bots, readonly options: RuntimeOptions) {
     const provider = options.provider ?? new UnavailableProvider();
-    this.conversation = new Conversation(bots, provider);
+    this.conversation = new Conversation(bots, provider, options.computerReplay);
     this.estate = new NativeEstate(bots);
     this.recurring = new RecurringWork(bots);
     this.collaboration = new Collaboration(bots, provider);
@@ -46,7 +48,7 @@ export class HeadlessRuntime {
     this.effects = new ExternalActions(bots, options.effects);
     this.hive = new LocalHive(bots, options.hive);
     this.egg = new RootedEgg(bots);
-    this.ai = new AiProjectionApi(bots);
+    this.ai = new AiProjectionApi(bots, options.computerReplay);
   }
 
   static async open(options: RuntimeOptions): Promise<HeadlessRuntime> {
@@ -95,6 +97,11 @@ export class HeadlessRuntime {
       case 'conversation.where':
         check([], ['root']);
         return this.bots.whereWereWe(root());
+      case 'conversation.catch-up': {
+        check([], ['root', 'scope', 'from', 'to', 'limit', 'guest']);
+        const options = Object.fromEntries(['from', 'to', 'limit', 'guest'].filter(k => p[k] !== undefined).map(k => [k, p[k]]));
+        return this.conversation.catchUp(root(), options, p.scope === undefined ? 'root' : text(p.scope, 100));
+      }
       case 'attention.get':
         check([], ['root']);
         return { attention: (await this.bots.project(root())).attention, observation: this.bots.spine.status(root()) };

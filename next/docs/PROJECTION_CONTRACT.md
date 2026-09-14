@@ -46,3 +46,16 @@ The UI must subscribe and transform around canonical AI work, rather than turn
 these fields into a parallel control plane. A test-only render-model reducer
 proves real-time transitions, conflict visibility and restart equivalence.
 The UI implementation is still deferred.
+
+## Passive Catch me up / optional guest replay
+
+`rapp_work_catch_up` returns a bounded `rapp-work.catch-up/1` timeline, not a new
+UI state authority. Every step retains canonical cursor/source hashes, explicit
+recorded/reconstructed/unavailable grades and a deterministic state digest.
+The player may fast-forward the returned states but may not regenerate work or
+invoke models/tools. See `CATCH_ME_UP.md`.
+
+Optional `rapp-work.omarchy-replay/1` is separately opted-in GODD/private content.
+Only exact host-approved canonical guest artifacts are recorded frames; safe
+command/diff visualizations are reconstructed; missing display is unavailable.
+No host screen, secrets, keystrokes or executable replay is exposed.

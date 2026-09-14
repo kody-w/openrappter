@@ -23,12 +23,19 @@
    self-contained replay. Sanitized fixtures are mandatory first; an approved
    controlled-local run is required for release. A green core/API alone is
    explicitly incomplete.
-5. **Live binding and cutover qualification** — operator-owned signer custody,
+5. **Catch me up replay gate** — deterministic canonical cursor timeline with
+   recorded/reconstructed/unavailable grades, source frame hashes and exact state
+   digests. No model/tool calls, mutation or hidden reasoning during replay.
+   Future UI only fast-forwards this passive state. Optional Omarchy replay is
+   opt-in GODD/private: exact approved guest frames recorded, command/diff
+   visualizations reconstructed, absent display unavailable; never host screen,
+   secrets, keystrokes or replay execution.
+6. **Live binding and cutover qualification** — operator-owned signer custody,
    verified shared Brainstem and provider bindings where inference is used,
    signed domain/Hive adoption, optional channel permission, independent release
    constitution and reviewed migration. Skill installation is not any of these
    authorizations.
-6. **Optional passive one-chat projection** — only after the preceding headless
+7. **Optional passive one-chat projection** — only after the preceding headless
    behavior is proven. It subscribes and transforms around the AI's work; it may
    not acquire planning, approval, provider, persistence or deletion authority.
 

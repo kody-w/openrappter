@@ -135,3 +135,18 @@ test artifact driven by captured data, not AI-provided HTML or product UI.
 This fixture path is necessary but not sufficient: release remains blocked
 until the same observed controlled-local migration passes under adopted
 authority and final integration approval. See `MIGRATION_RELEASE_GATE.md`.
+
+## Catch me up: passive canonical replay
+
+Catch-up is a release gate over verified canonical frames/cursors, not an
+agentic re-execution path. The pure replay module emits explicit provenance
+grades, original source hashes and `rapp/1:particle` state/page digests.
+The UI may fast-forward those returned states but owns no durable replay state
+and may not call models/tools or mutate history to fill gaps.
+
+The optional Omarchy lane uses an immutable read-only canonical ComputerBroker
+snapshot adapter. Private GODD opt-in, the exact prior root-signed capture policy,
+client capability and independently selected capture-origin/safety approvals
+are mandatory. Actual approved guest bytes are recorded; command/diff summaries
+are reconstructed; missing display remains unavailable. No host-screen, keyboard,
+VM execution or capture method is exposed by replay. See `CATCH_ME_UP.md`.

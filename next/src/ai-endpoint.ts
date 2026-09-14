@@ -16,6 +16,10 @@ function schema(required: string[], properties: JsonObject): JsonObject {
 export const AI_TOOLS = Object.freeze([
   { name: 'rapp_work_read', description: 'Read the authorized canonical root projection; no model call or mutation.',
     inputSchema: schema([], {}) },
+  { name: 'rapp_work_catch_up', description: 'Deterministic read-only fast-forward timeline with recorded/reconstructed/unavailable grades, canonical source hashes and state digests. Never reruns models or tools.',
+    inputSchema: schema([], { from: CURSOR_PROPERTY, to: CURSOR_PROPERTY, limit: { type: 'integer', minimum: 1, maximum: 16 },
+      guest: { type: 'object', required: ['enabled', 'dataClass', 'visibility', 'policyWave'], additionalProperties: false,
+        properties: { enabled: { const: true }, dataClass: { const: 'godd' }, visibility: { const: 'private' }, policyWave: { type: 'string', pattern: '^[0-9a-f]{64}$' } } } }) },
   { name: 'rapp_work_publish', description: 'Publish attributed public work and optional closed declarative view hints. No arbitrary UI code or external effects.',
     inputSchema: schema(['requestId', 'publication'], { requestId: { type: 'string' }, publication: { type: 'object' } }) },
   { name: 'rapp_work_history', description: 'Read a bounded canonical history page for replay; controls expose references only.',
@@ -53,6 +57,10 @@ export class AiEndpoint {
       case 'rapp_work_read':
         exact([]);
         return this.api.read(this.root, this.capability);
+      case 'rapp_work_catch_up':
+        exact([], ['from', 'to', 'limit', 'guest']);
+        return this.api.catchUp(this.root, this.capability,
+          Object.fromEntries(['from', 'to', 'limit', 'guest'].filter(k => p[k] !== undefined).map(k => [k, p[k]])));
       case 'rapp_work_publish':
         exact(['requestId', 'publication']);
         return this.api.publish(this.root, this.capability, p.publication, label(p.requestId));

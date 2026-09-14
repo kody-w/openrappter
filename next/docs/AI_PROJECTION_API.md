@@ -69,7 +69,7 @@ and explicit rights:
 
 `projection.read`, `projection.subscribe`, `conversation.publish`,
 `activity.publish`, `evidence.publish`, `attention.publish`, `view.publish`,
-`view.resolve`.
+`view.resolve`, and the separately opt-in private `guest.replay`.
 
 Each AI connection receives an exact root GUID and a high-entropy capability
 through protected host configuration. Only a capability digest is stored.
@@ -81,6 +81,7 @@ Restricted tool names:
 | Tool | Purpose |
 |---|---|
 | `rapp_work_read` | Scoped deterministic snapshot |
+| `rapp_work_catch_up` | Deterministic graded canonical timeline; optional private guest replay requires extra authority |
 | `rapp_work_artifact` | Already-canonical artifact content, no path/URL access |
 | `rapp_work_history` | Bounded replay/history page; credentials/control payloads are redacted |
 | `rapp_work_publish` | Public work plus an optional validated declarative hint |
@@ -169,7 +170,7 @@ initialized notification, ping, tools/list, tools/call, resources/list,
 resources/read, resources/subscribe and resources/unsubscribe. Resource updates
 use `notifications/resources/updated`; clients then read bounded event content.
 No sampling, roots, shell, owner administration or external approvals are
-advertised. Native stdio uses the same six methods and pushes bounded `event`
+advertised. Native stdio uses the same restricted methods and pushes bounded `event`
 messages alongside responses.
 
 Official protocol references used:
@@ -189,3 +190,8 @@ Only this instruction file is installed. No credential, MCP configuration,
 provider profile, native memory, live root or Mirror Mode file is changed.
 The skill passes the installed RAPP Skills checker as a plain playbook; no
 legacy agent wrapper or alternative runtime is generated.
+
+`rapp_work_catch_up` does not append or execute anything. Its recorded/
+reconstructed/unavailable grades, source hashes, state digests and optional
+GODD/private Omarchy lane are specified in `CATCH_ME_UP.md`. The optional guest
+lane is not enabled by `projection.read` or a skill file alone.

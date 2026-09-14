@@ -33,6 +33,8 @@ Normative text SHA-256:
 | Root migration | Exact original canonical frame files and branch ancestry, atomically published with one authorized successor receipt; never remint/rewrite |
 | Estate/native/archive migration | Canonical pointer successor events with unchanged source identity and honest provider/compatibility classification; no native content copy |
 | Migration display proof | Real application cursor events consumed by a separate passive process; static replay is an observed test artifact, not UI authority |
+| Catch me up | Pure projections of exact canonical cursor ranges, with source wave hashes and state/page digests in existing `rapp/1:particle`; no replay store or execution |
+| Optional guest replay | Existing canonical ComputerBroker intent/outcome/evidence and artifact receipts, plus separately selected private capture policy/safety authority; guest pixels recorded, command/diff views reconstructed, absence unavailable |
 
 Application event names live **inside** payloads. They are not new frame kinds,
 wire fields, protocol registries, or protocol versions. The frame remains exactly

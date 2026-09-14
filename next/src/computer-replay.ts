@@ -6,6 +6,7 @@ import { label, object, text, workEvent } from './contract.js';
 import { requireThat } from './errors.js';
 import { wave } from './intent.js';
 import type { RootSnapshot } from './repository.js';
+import { memoryFrames } from './source-memory.js';
 
 export const GUEST_REPLAY_SCHEMA = 'rapp-work.omarchy-replay/1';
 export interface GuestReplayOptIn extends JsonObject {
@@ -123,10 +124,11 @@ export class CanonicalComputerReplay {
   project(root: RootSnapshot, scope: string, link: RappFrame, optIn: GuestReplayOptIn): JsonObject {
     requireThat(root.definition.root === this.#binding.root && scope === this.#binding.scope,
       'guest-scope', 'Computer replay is bound to one exact canonical root and internal scope.');
-    const policy = root.streams.memory.find(f => f.frame_hash === optIn.policyWave && f.payload.event === 'computer.replay.policy');
-    requireThat(policy && signerOf(policy) === root.definition.root && policy.seq < link.seq,
+    const memory = memoryFrames(root);
+    const policy = memory.find(f => f.frame_hash === optIn.policyWave && f.payload.event === 'computer.replay.policy');
+    requireThat(policy && signerOf(policy) === root.definition.root && memory.indexOf(policy) < memory.indexOf(link),
       'guest-policy', 'An original root-signed private guest capture policy must precede this recorded occurrence.');
-    const selected = root.streams.memory.filter(f => f.payload.event === 'computer.replay.policy'
+    const selected = memory.filter(f => f.payload.event === 'computer.replay.policy'
       && f.payload.scope === scope).at(-1);
     requireThat(selected?.frame_hash === policy.frame_hash, 'guest-policy', 'Guest replay policy changed or was revoked.');
     const permission = object(workEvent(policy.payload).data,

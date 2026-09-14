@@ -9,6 +9,7 @@ import {
   MIGRATION_LIMITS, migrationPlan, verifyFileTable, verifyMigrationApproval, verifyRootFiles,
   type MigrationItem, type MigrationPlan,
 } from './migration-contract.js';
+import { memoryFrames, memoryHeadHashes, sourceChain, sourceReference } from './source-memory.js';
 
 interface Batch { id: string; items: string[]; aborted: boolean }
 interface ControlState {
@@ -100,7 +101,7 @@ export class MigrationService {
     return selected;
   }
   #receipt(root: RootSnapshot | undefined, item: MigrationItem): RappFrame | undefined {
-    return root?.streams.memory.find(frame => ['migration.root.imported', 'migration.pointer.imported'].includes(String(frame.payload.event))
+    return root && memoryFrames(root).find(frame => ['migration.root.imported', 'migration.pointer.imported'].includes(String(frame.payload.event))
       && workEvent(frame.payload).data.planHash === this.planHash && workEvent(frame.payload).data.item === item.id);
   }
   #files(state: ControlState, batch: string, item: MigrationItem): Map<string, Buffer> {
@@ -231,7 +232,8 @@ export class MigrationService {
         const imported = await tx.materializeRoot(item.root, files, {
           root: item.root, family: 'memory', kind: 'memory.save', utc: prepared.utc, signer,
           expectedHead: candidate.streams.memory.at(-1)?.frame_hash ?? null,
-          payload: eventPayload(item.root, 'root', operationId, 'migration.root.imported', data),
+          payload: { ...eventPayload(item.root, 'root', operationId, 'migration.root.imported', data),
+            parents: [candidate.streams.body[0]!.frame_hash, ...memoryHeadHashes(candidate)] },
         }, contentHash({ plan: this.planHash, batch: batch.id, item: item.id }));
         return { committed: true, duplicate: false, item: item.id, root: item.root, source: reference(imported.streams.memory.at(-1)!) };
       }
@@ -240,7 +242,7 @@ export class MigrationService {
         'migration-duplicate', 'This source pointer identity already exists; never normalize a duplicate into a new identity.');
       const frame = await tx.appendRoot({
         root: item.root, family: 'memory', kind: 'memory.save', utc: this.bots.now(), signer,
-        expectedHead: root.streams.memory.at(-1)?.frame_hash ?? null,
+        expectedHead: sourceChain(root, String(item.pointer!.scope)).at(-1)?.frame_hash ?? null,
         payload: eventPayload(item.root, String(item.pointer!.scope), operationId, 'migration.pointer.imported', data),
       });
       return { committed: true, duplicate: false, item: item.id, root: item.root, source: reference(frame) };
@@ -273,15 +275,18 @@ export class MigrationService {
     const state = controls(ledger, this.plan);
     const roots = snapshot.roots.filter(r => this.plan.roots.includes(r.definition.root)).map(r => {
       const p = projectBot(r);
+      const legacy = memoryFrames(r).filter(f => sourceReference(f).ownership === 'legacy-root-stream').length;
       return { root: p.root, name: p.name, hidden: p.hidden, scopes: p.scopes, pointers: p.pointers,
         artifacts: p.artifacts.map(a => ({ id: a.id!, name: a.name!, contentHash: a.contentHash!, mediaType: a.mediaType!, scope: a.scope! })),
-        capability: r.definition.capability, branches: p.branches, heads: p.heads,
-        frameCount: Object.values(r.streams).flat().length + r.branches.reduce((n, b) => n + b.frames.length, 0) };
+        capability: r.definition.capability, branches: p.branches, heads: p.heads, sources: p.sources,
+        sourceOwnership: { sourceOwned: memoryFrames(r).length - legacy, legacyRootStream: legacy, copiedCentralActivity: false },
+        frameCount: r.streams.body.length + r.streams.swarm.length + memoryFrames(r).length
+          + r.branches.reduce((n, b) => n + b.frames.length, 0) + (r.sources ?? []).reduce((n, s) => n + s.branches.reduce((n, b) => n + b.frames.length, 0), 0) };
     });
     const imported = this.plan.items.filter(item => this.#receipt(snapshot.roots.find(r => r.definition.root === item.root), item));
     const pending = this.plan.items.filter(item => !imported.includes(item)).map(i => i.id);
     const cursor = { control: ledger.length ? reference(ledger.at(-1)!) : null,
-      roots: roots.map(r => ({ root: r.root, heads: r.heads, branches: r.branches })) };
+      roots: roots.map(r => ({ root: r.root, heads: r.heads, sources: r.sources, branches: r.branches })) };
     const projection: JsonObject = {
       schema: 'rapp-work.migration-projection/1', root: this.plan.owner, planHash: this.planHash,
       mode: this.plan.mode, cursor, cursorHash: contentHash(cursor), roots,

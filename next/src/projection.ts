@@ -1,15 +1,17 @@
 import { AUTHORITY, frameHead, snapshotJson, type JsonObject, type RappFrame } from './canonical.js';
-import { PROJECTION_SCHEMA, object, text, workEvent, type Scope } from './contract.js';
+import { PROJECTION_SCHEMA, list, object, text, workEvent, type Scope } from './contract.js';
 import type { RootSnapshot } from './repository.js';
 import { requireThat } from './errors.js';
 import { foldState } from './state.js';
 import { publicationData } from './ai-contract.js';
+import { memoryFrames, sourceReference } from './source-memory.js';
 
 export interface PublicTurn extends JsonObject {
   role: 'user' | 'assistant';
   speaker: string;
   text: string;
   source: JsonObject;
+  origin: JsonObject;
   replyTo: string | null;
 }
 export interface Attention extends JsonObject { kind: string; summary: string; source: string }
@@ -30,8 +32,19 @@ export interface BotProjection extends JsonObject {
   pointers: JsonObject[];
   artifacts: JsonObject[];
   progress: JsonObject[];
+  sources: JsonObject[];
 }
 export const reference = (frame: RappFrame): JsonObject => snapshotJson(frameHead(frame)) as JsonObject;
+
+export function publicWorkText(frame: RappFrame): string {
+  const event = workEvent(frame.payload);
+  if (event.event === 'collaboration.synthesized' && event.data.format === 'rapp-work.synthesis-references/1') {
+    const p = object(event.data.public, ['summary', 'disagreements', 'unknowns']);
+    return [text(p.summary, 3_000), ...list(p.disagreements, 8).map(d => `Disagreement: ${text(d, 700)}`),
+      ...list(p.unknowns, 8).map(u => `Unknown: ${text(u, 700)}`)].join('\n');
+  }
+  return text(event.data.text);
+}
 
 export function projectBot(root: RootSnapshot): BotProjection {
   const state = foldState(root);
@@ -41,13 +54,18 @@ export function projectBot(root: RootSnapshot): BotProjection {
     scopes: state.scopes, turns: [], outcomes: [], attention: [],
     heads: Object.fromEntries(Object.entries(root.streams).map(([family, frames]) =>
       [family, frames.length ? reference(frames.at(-1)!) : null])),
-    branches: root.branches.map(b => ({ family: b.family, head: b.head, frames: b.frames.length, selected: false })),
+    branches: [...root.branches.map(b => ({ family: b.family, head: b.head, frames: b.frames.length, selected: false })),
+      ...(root.sources ?? []).flatMap(s => s.branches.map(b => ({ guid: root.definition.root, scope: s.scope, stream_id: s.stream,
+        family: 'memory', head: b.head, frames: b.frames.length, selected: false })))],
     proposals: [...state.proposals].map(([wave, p]) => ({ wave, draft: p.draft, status: p.status })),
     routines: [...state.routines.values()], pointers: [...state.pointers.values()],
     artifacts: [...state.artifacts.values()], progress: state.progress,
+    sources: (root.sources ?? []).map(s => ({ guid: root.definition.root, scope: s.scope, stream_id: s.stream,
+      head: s.frames.length ? reference(s.frames.at(-1)!) : null, branches: s.branches.map(b => ({ head: b.head, frames: b.frames.length })) })),
   };
   const settled = new Set<string>();
-  for (const frame of root.streams.memory) {
+  const memory = memoryFrames(root);
+  for (const frame of memory) {
     const event = workEvent(frame.payload);
     const data = event.data;
     if (event.event === 'root.visibility') {
@@ -57,14 +75,14 @@ export function projectBot(root: RootSnapshot): BotProjection {
     } else if (event.event === 'turn.user' || event.event === 'turn.assistant' || event.event === 'collaboration.synthesized') {
       const role = event.event === 'turn.user' ? 'user' : 'assistant';
       result.turns.push({ role, speaker: role === 'user' ? 'human' : root.definition.root,
-        text: text(data.text), source: reference(frame), replyTo: typeof data.replyTo === 'string' ? data.replyTo : null });
+        text: publicWorkText(frame), source: reference(frame), origin: sourceReference(frame), replyTo: typeof data.replyTo === 'string' ? data.replyTo : null });
       if (typeof data.replyTo === 'string') settled.add(data.replyTo);
     } else if (event.event === 'client.conversation') {
       const p = publicationData('conversation', data);
       result.turns.push({ role: 'assistant', speaker: root.definition.root,
-        text: `[${p.actor.name} / ${p.actor.provider}] ${String(p.content.text)}`, source: reference(frame), replyTo: null });
+        text: `[${p.actor.name} / ${p.actor.provider}] ${String(p.content.text)}`, source: reference(frame), origin: sourceReference(frame), replyTo: null });
     } else {
-      result.outcomes.push({ event: event.event, scope: event.scope, data, source: reference(frame), corrected: state.corrected.has(frame.frame_hash) });
+      result.outcomes.push({ event: event.event, scope: event.scope, data, source: reference(frame), origin: sourceReference(frame), corrected: state.corrected.has(frame.frame_hash) });
       if (typeof data.replyTo === 'string') settled.add(data.replyTo);
       if (event.event === 'provider.unavailable' || event.event === 'operation.interrupted') {
         result.attention.push({ kind: event.event, summary: String(data.summary), source: frame.frame_hash });
@@ -77,9 +95,10 @@ export function projectBot(root: RootSnapshot): BotProjection {
         source: String(turn.source.frame_hash) });
     }
   }
-  if (root.branches.length) result.attention.push({
+  const preserved = [...root.branches, ...(root.sources ?? []).flatMap(s => s.branches)];
+  if (preserved.length) result.attention.push({
     kind: 'preserved-branches', summary: 'Alternative canonical branches are retained, not merged into this perspective.',
-    source: root.branches[0]!.head,
+    source: preserved[0]!.head,
   });
   for (const [hash, proposal] of state.proposals) {
     if (proposal.status === 'review' && (proposal.draft.actions.length || proposal.draft.questions.length || proposal.draft.resolves.length)) {
@@ -87,9 +106,9 @@ export function projectBot(root: RootSnapshot): BotProjection {
         summary: proposal.draft.questions.length ? proposal.draft.questions.map(q => q.question).join(' ') : proposal.draft.summary, source: hash });
     }
   }
-  for (const frame of root.streams.memory) {
+  for (const frame of memory) {
     const e = workEvent(frame.payload);
-    if (e.event === 'effect.approved' && !root.streams.memory.some(f => f.payload.event === 'effect.outcome'
+    if (e.event === 'effect.approved' && !memory.some(f => f.payload.event === 'effect.outcome'
       && workEvent(f.payload).data.approval === frame.frame_hash)) {
       result.attention.push({ kind: 'external-uncertain', summary: 'An approved external action has no outcome. Do not replay it automatically.', source: frame.frame_hash });
     }
@@ -97,17 +116,19 @@ export function projectBot(root: RootSnapshot): BotProjection {
       result.attention.push({ kind: e.data.status === 'uncertain' ? 'external-uncertain' : 'external-unavailable',
         summary: 'An explicitly approved external action is unavailable or uncertain; no automatic retry is authorized.', source: frame.frame_hash });
     }
-    if (e.event === 'channel.queued' && !root.streams.memory.some(f => f.payload.event === 'channel.outcome'
+    if (e.event === 'channel.queued' && !memory.some(f => f.payload.event === 'channel.outcome'
       && workEvent(f.payload).data.deliveryId === frame.frame_hash && workEvent(f.payload).data.status === 'delivered')) {
       result.attention.push({ kind: 'channel-pending', summary: 'A private-channel recap is pending; an explicit retry may be needed.', source: frame.frame_hash });
     }
   }
   for (const request of root.streams.swarm.filter(f => f.kind === 'swarm.guidance')) {
-    if (!root.streams.memory.some(f => f.payload.event === 'collaboration.perspective'
+    if (!memory.some(f => f.payload.event === 'collaboration.perspective'
       && workEvent(f.payload).data.requestWave === request.frame_hash)) {
       result.attention.push({ kind: 'collaboration-pending', summary: 'A signed public request has no recorded response link; restart will not replay it.', source: request.frame_hash });
     }
   }
+  const originals = new Map([...memory, ...root.streams.swarm, ...preserved.flatMap(b => b.frames)].map(f => [f.frame_hash, f]));
+  result.attention = result.attention.map(a => ({ ...a, origin: originals.has(a.source) ? sourceReference(originals.get(a.source)!) : null }));
   return snapshotJson(result) as BotProjection;
 }
 
@@ -124,6 +145,7 @@ export function orient(projection: BotProjection): { text: string; evidence: Jso
   if (projection.attention.length) lines.push(`Needs attention: ${projection.attention.map(a => a.summary).join(' ')}`);
   else lines.push('There are no unresolved recorded decisions.');
   return { text: lines.join('\n'), evidence: [
-    ...(last ? [last.source] : []), ...(outcome ? [outcome.source as JsonObject] : []),
+    ...(last ? [last.origin] : []), ...(outcome ? [outcome.origin as JsonObject] : []),
+    ...(projection.progress.length ? [projection.progress.at(-1)!.origin as JsonObject] : []),
   ] };
 }

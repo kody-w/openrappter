@@ -47,6 +47,16 @@ missing display unavailable. Host screens, secrets and keystrokes are excluded.
 See [Catch me up](docs/CATCH_ME_UP.md). This gate does not replace migration
 qualification or live capture/signer/adoption authority.
 
+## Source-owned lifecycle gate
+
+Every new action's exhaust belongs to its original internal scope's canonical
+stream. Global Estate, Librarian, collaboration, iMessage recap and Catch-me-up
+reference original GUID/scope/frame hashes and branches instead of copying a
+central activity log. Causal source-head vectors support independent clocks,
+bounded live updates and frames-only rebuild. Historical centralized bytes stay
+explicitly historical. `npm --prefix next run source-ownership:gate` is mandatory
+in `check`; see [the binding source contract](docs/SOURCE_OWNERSHIP.md).
+
 ## Development
 
 Node 22.12+; pinned development dependencies and Copilot SDK are declared in this

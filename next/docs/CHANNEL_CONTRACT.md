@@ -14,8 +14,12 @@ memory store, agent runtime, workspace identity or source of tool authority.
 - `DisabledIMessage` always refuses. A production bridge remains an integration
   gate until local OS permission, exact contact mapping and authenticated
   transport provenance are verified outside the carried message.
-- Queuing creates a canonical `memory.save` source containing the exact bounded
-  public recap, source waves and binding wave. It does not send.
+- Queuing creates a root-owned canonical `memory.save` record containing only
+  exact bounded source GUID/scope/stream/hash references and the binding wave.
+  `rapp-work.recap-references/1` has no copied activity summary. Read/delivery
+  derives transient text from the originals; missing sources refuse rather than
+  falling back to a central copy. Immutable historical summary queues are
+  retained as historical records. Queuing does not send.
 - Explicit delivery first appends a write-ahead attempt. The transport receives
   only the selected root, bound contact/permission references, text and a stable
   canonical delivery ID. A separate outcome records a bounded opaque receipt,

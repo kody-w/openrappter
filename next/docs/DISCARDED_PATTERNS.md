@@ -29,6 +29,10 @@ The old code remains reference evidence until cutover is qualified.
 | AI supplies HTML/JS/CSS, DOM selectors, coordinates or executable components | Closed enum/reference hints validated against authorized canonical state |
 | Latest client silently wins focus/layout or mixes native memory | Explicit causal view heads, attributed public work, visible conflicts and separate resolution authority |
 | Subscriber state, reconnect cache or skill text becomes authority | Disposable bounded event stream reconstructed from canonical frames; exact root capability remains mandatory |
+| Root/Librarian/Global Estate becomes a copied central activity journal | Original scope-owned streams with reference-based aggregate projections |
+| Recap queues or caller synthesis duplicate source/peer exhaust | Exact source references, transient recap text and distinct authored public perspectives |
+| Comparing local sequence numbers or global array offsets across independent sources | Causally closed source-head vectors and unseen-occurrence replay |
+| Retrofitting old centralized history by moving, splitting or relabeling frames | Byte-identical original history labeled `legacy-root-stream`; new successors use proper sources |
 
 Prototype principles retained: bounded historical discovery, root GUID honesty,
 canonical public transcript provenance, observer non-mutation, same-byte Egg

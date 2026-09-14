@@ -1,0 +1,502 @@
+{
+  "schema": "rapp-work.source-owned-milestone/1",
+  "branch": "rewrite/autonomous-agent-first",
+  "baseCommit": "61b084be57084c3858776e9d3b712c67019395f1",
+  "status": "verified-fixture-milestone; not production release",
+  "newCore": {
+    "command": "npm --prefix next run check",
+    "testsPassed": 93,
+    "failed": 0,
+    "skipped": 0,
+    "strictTypecheck": true,
+    "build": true,
+    "allMandatoryGates": true,
+    "log": ".test-scratch/source-full-check.log"
+  },
+  "adoptedPrimitives": {
+    "command": "npm test --workspace @rapp-work/rapp1",
+    "testsPassed": 90,
+    "log": ".test-scratch/source-primitives.log"
+  },
+  "legacy": {
+    "retainedBaseline": "d8601aa91c10f3330ea10b7fa31382137d981dfd",
+    "absence": "passed",
+    "constitution": "passed",
+    "workspaces": 14,
+    "acceptanceScenarios": 9,
+    "log": ".test-scratch/source-legacy-check.log",
+    "wholeTreeSourceGate": "expected refusal: eight intentional canonical/target-owned Python files; no rules relaxed",
+    "wholeTreeLog": ".test-scratch/source-legacy-whole-tree.log",
+    "wholeTreeConstitution": "expected refusal through the same unchanged eight-file source gate",
+    "wholeTreeConstitutionLog": ".test-scratch/source-legacy-whole-constitution.log"
+  },
+  "portableSkill": {
+    "source": "skills/rapp-work-bot/SKILL.md",
+    "installed": "~/.copilot/skills/rapp-work-bot/SKILL.md",
+    "version": "0.3.0",
+    "sha256": "d37f78ed678c83c2199bf1f0b80e75cdb0c102d6fa1fd324ff854e92777d8e52",
+    "validation": "RAPP Skills check passes; installed bytes identical; instruction-only"
+  },
+  "sourceOwnership": {
+    "schema": "rapp-work.source-ownership-gate/1",
+    "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+    "peer": "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+    "status": "passed",
+    "sourceIdentity": "original full root RAPPID + exact internal scope + original canonical stream",
+    "references": [
+      {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "local-estate",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef80",
+        "seq": 0,
+        "utc": "2026-09-13T20:00:00.000Z",
+        "payload_hash": "eb4fcef15cec694324cc0b73700ba40c73f30aa1ea64fdacfb8df2fa1caa9091",
+        "frame_hash": "f5a4ed571f368159a83673b7d3be893d3507d8c2de26fa3b12362d07f0aac0e8",
+        "ownership": "source-owned"
+      },
+      {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "monorepo",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c",
+        "seq": 1,
+        "utc": "2026-09-13T20:00:00.000Z",
+        "payload_hash": "fc8f2221e456e0148faa7dc8bb47d64af3ee0d6ae1f71f8d6160b03d0800996d",
+        "frame_hash": "888307a7b512f3f70783eea6ba70c756d0f86b9e3e0b2355421791fb7b6350ab",
+        "ownership": "source-owned"
+      }
+    ],
+    "sources": [
+      {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "local-estate",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef80",
+        "head": {
+          "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef80",
+          "seq": 1,
+          "utc": "2026-09-13T20:00:00.000Z",
+          "payload_hash": "6a127c07f534b4d829bb6913e2702eee25e9199d9d626de966933d83aab55e82",
+          "frame_hash": "ff50e5177566eb2d92d88bb869e4d04f2c32db4eda7b42e9ebe19da0da1a09b8"
+        },
+        "branches": [
+          {
+            "head": "07c217f7e788ac47a2b060e0630c591fb0130bbea95ab4a61b5ea339bc651479",
+            "frames": 1
+          }
+        ]
+      },
+      {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "monorepo",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c",
+        "head": {
+          "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c",
+          "seq": 2,
+          "utc": "2026-09-13T20:00:00.000Z",
+          "payload_hash": "0bd6e0b6a21a179d8b87cc18e4c9da47418bac3e0dcbac81f63b6390c092fd6c",
+          "frame_hash": "78ca5506cd3b59f6b9f2d31ff791626eb682e783a1a0cba97fa36778ecf8d5a9"
+        },
+        "branches": []
+      }
+    ],
+    "cursor": {
+      "schema": "rapp-work.source-cursor/1",
+      "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "root": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 9,
+        "utc": "2026-09-13T20:00:00.000Z",
+        "payload_hash": "12846065816f1af6ed5369a2e370d03a8e0810ca4c105dd0190c982067b6f1c8",
+        "frame_hash": "d8e25685782bd205737ee440eeb6951ddb5c89d11c16ad81d865633b14d1d02d"
+      },
+      "sources": [
+        {
+          "key": "14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000",
+          "head": {
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef80",
+            "seq": 1,
+            "utc": "2026-09-13T20:00:00.000Z",
+            "payload_hash": "6a127c07f534b4d829bb6913e2702eee25e9199d9d626de966933d83aab55e82",
+            "frame_hash": "ff50e5177566eb2d92d88bb869e4d04f2c32db4eda7b42e9ebe19da0da1a09b8"
+          },
+          "branches": [
+            "07c217f7e788ac47a2b060e0630c591fb0130bbea95ab4a61b5ea339bc651479"
+          ]
+        },
+        {
+          "key": "753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c4b",
+          "head": {
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c",
+            "seq": 2,
+            "utc": "2026-09-13T20:00:00.000Z",
+            "payload_hash": "0bd6e0b6a21a179d8b87cc18e4c9da47418bac3e0dcbac81f63b6390c092fd6c",
+            "frame_hash": "78ca5506cd3b59f6b9f2d31ff791626eb682e783a1a0cba97fa36778ecf8d5a9"
+          },
+          "branches": []
+        }
+      ]
+    },
+    "selectedMemoryOccurrences": 15,
+    "preservedBranches": 1,
+    "markerOccurrences": {
+      "EXACT-LOCAL-WORLD-EXHAUST": 1,
+      "EXACT-MONOREPO-WORLD-EXHAUST": 1
+    },
+    "copiedRootActivityOccurrences": 0,
+    "copiedRecapPayloads": 0,
+    "copiedPeerDissent": 0,
+    "referenceSurfaces": [
+      "Global Estate",
+      "Workspaces Librarian",
+      "collaboration",
+      "iMessage recap",
+      "Where were we",
+      "Catch me up"
+    ],
+    "observedEvents": 15,
+    "framesOnlyRestart": true,
+    "originalBranchBytesPreserved": true,
+    "replayPages": 1,
+    "stateDigest": "9fd34775f89b5742c51544ce8fe3a42bd141e99faa34ec830e1fd48291a5c089",
+    "replayStateDigest": "1de879b56e7f78e13b23c91fd6fdf43539b7112cb79a4faf7c149fa5e903e717",
+    "replayModelCalls": 0,
+    "replayToolExecutions": 0,
+    "replayMutations": 0,
+    "aggregateDurableStore": false,
+    "uiImplemented": false,
+    "liveProfilesTouched": false,
+    "canonical": {
+      "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+      "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+      "authorityFrames": 16,
+      "verdict": "COMPLIANT",
+      "framesScanned": 21,
+      "signedFrames": 21,
+      "streamsScanned": 9,
+      "findings": [],
+      "evidence": [
+        {
+          "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+          "ok": "10 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/branches/07c217f7e788ac47a2b060e0630c591fb0130bbea95ab4a61b5ea339bc651479/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+          "ok": "2 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c4b/frames",
+          "ok": "3 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        }
+      ]
+    },
+    "independentDigests": {
+      "verifier": "unmodified canonical rapp.py H(rapp/1:particle, value)",
+      "pages": 1,
+      "stateCheckpoints": 16,
+      "guestCheckpoints": 0,
+      "sourceFrames": 21,
+      "digestsVerified": true,
+      "sourceReferencesVerified": true,
+      "writes": 0,
+      "modelCalls": 0,
+      "toolExecutions": 0
+    },
+    "canonicalDirectory": ".test-scratch/use-cases/store-96383-1789351792905-0",
+    "evidenceDirectory": ".test-scratch/source-ownership-96383-1789351794439"
+  },
+  "headless": {
+    "schema": "rapp-work.next/headless-parity/1",
+    "evidenceDirectory": ".test-scratch/e2e-95699-1789351755229",
+    "adapterMode": "explicit-synthetic-fixtures",
+    "roots": [
+      "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a"
+    ],
+    "oneLibrarianPerRoot": true,
+    "observationDurableMutations": 0,
+    "dormantModelCalls": 0,
+    "canonical": {
+      "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+      "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+      "authorityFrames": 16,
+      "verdict": "COMPLIANT",
+      "framesScanned": 38,
+      "signedFrames": 38,
+      "streamsScanned": 10,
+      "findings": [],
+      "evidence": [
+        {
+          "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+          "ok": "3 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/branches/memory-16eb6630dc2cc8211730da7e4eef3a73b02e2ff2926632feca4dc0a2b4a7b5fb/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+          "ok": "24 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/2dec19dc0f96e20509bbea46dc4ab80379b14871b3315c9a39c66bf2e2cca261/frames",
+          "ok": "3 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/58dd0968a9e1a71f92ceccd86e0e61961aee222228366a26b73170b4a14d6391/frames",
+          "ok": "2 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        }
+      ]
+    },
+    "reconstructedFrameCount": 38,
+    "preservedBranches": 1,
+    "deterministicRestart": true,
+    "modelReplayOnRestart": 0,
+    "fixtureModelCalls": 6,
+    "liveModelCalls": 0,
+    "nativeProviderPointers": 5,
+    "sourceOrNativeStoreWrites": 0,
+    "externalEffectsExecuted": 0,
+    "syntheticIMessageDeliveries": 1,
+    "domainSelectionsRefused": 9,
+    "hiveUnboundRefused": true,
+    "transcriptSha256": "ee18c5ce690e116be430e5885b212b061f4d56dd34d6d5bed5b4d02036522c8e",
+    "projectionParticleHash": "86609de33f653ba88496a5027c01214376ce14e9e440a0b51b29a34b7940bd8f",
+    "productionReady": false,
+    "blockers": [
+      "Adopted external root-isolated Brainstem binding",
+      "Explicit empty memory-only SDK host/auth binding and signer custody",
+      "Signed rooted GODD/DOGG closure/transport adoption",
+      "Fresh signed Private Hive rooted-world adoption",
+      "Explicit local iMessage OS permission/contact bridge",
+      "Independent next release constitution and migration qualification"
+    ]
+  },
+  "providerNeutral": {
+    "schema": "rapp-work.ai-projection-evidence/1",
+    "authoritative": false,
+    "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+    "rootCount": 1,
+    "providers": [
+      "copilot",
+      "claude",
+      "hermes",
+      "scout",
+      "grokbot",
+      "future-provider"
+    ],
+    "clientCount": 8,
+    "canonical": {
+      "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+      "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+      "authorityFrames": 16,
+      "verdict": "COMPLIANT",
+      "framesScanned": 25,
+      "signedFrames": 25,
+      "streamsScanned": 2,
+      "findings": [],
+      "evidence": [
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+          "ok": "24 frames conform to \u00a77 envelope"
+        }
+      ]
+    },
+    "observationFrameMutations": 0,
+    "modelCalls": 0,
+    "modelReplayOnRestart": 0,
+    "exactRestartProjection": true,
+    "realTimeTestConsumer": true,
+    "causalConflictObserved": true,
+    "explicitResolutionVerified": true,
+    "unsupportedHintWorkRetained": true,
+    "backpressureResync": true,
+    "reconnectReplayEquivalent": true,
+    "credentialPlaintextPersisted": false,
+    "uiImplemented": false,
+    "attribution": "root-signed scoped-capability attribution; not vendor/client-key non-repudiation",
+    "protocols": [
+      "MCP stdio 2025-11-25",
+      "bounded native stdio events"
+    ],
+    "evidenceDirectory": ".test-scratch/ai-projection-95765-1789351758559",
+    "skillSha256": "d37f78ed678c83c2199bf1f0b80e75cdb0c102d6fa1fd324ff854e92777d8e52",
+    "productionCredentialBindingPerformed": false
+  },
+  "catchUp": {
+    "schema": "rapp-work.catch-up-gate/1",
+    "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+    "status": "passed",
+    "grades": {
+      "recorded": 2,
+      "reconstructed": 3,
+      "unavailable": 4
+    },
+    "guestGrades": [
+      {
+        "grade": "recorded",
+        "kind": "guest-frame"
+      },
+      {
+        "grade": "reconstructed",
+        "kind": "command-summary"
+      },
+      {
+        "grade": "reconstructed",
+        "kind": "diff-summary"
+      },
+      {
+        "grade": "unavailable",
+        "kind": "missing-display"
+      }
+    ],
+    "deterministicAfterRestart": true,
+    "passiveFastForward": true,
+    "sourceFrameHashesRetained": true,
+    "stateDigests": "rapp/1:particle",
+    "independentDigestCheck": {
+      "verifier": "unmodified canonical rapp.py H(rapp/1:particle, value)",
+      "pages": 2,
+      "stateCheckpoints": 20,
+      "guestCheckpoints": 4,
+      "sourceFrames": 23,
+      "digestsVerified": true,
+      "sourceReferencesVerified": true,
+      "writes": 0,
+      "modelCalls": 0,
+      "toolExecutions": 0
+    },
+    "canonicalChecks": [
+      {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 10,
+        "signedFrames": 10,
+        "streamsScanned": 2,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "9 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 13,
+        "signedFrames": 13,
+        "streamsScanned": 1,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "frames",
+            "ok": "13 frames conform to \u00a77 envelope"
+          }
+        ]
+      }
+    ],
+    "replayModelCalls": 0,
+    "replayToolExecutions": 0,
+    "replayMutations": 0,
+    "hiddenReasoningExported": false,
+    "hostScreenIncluded": false,
+    "secretsOrKeystrokesIncluded": false,
+    "guestDefaultOff": true,
+    "guestRequiresExplicitGoddPrivatePolicy": true,
+    "liveGuestCapturePerformed": false,
+    "guestEvidence": "synthetic canonical ComputerBroker fixture; production capture origin/safety binding remains required",
+    "timelineDigest": "fb8f7fb1d6f8513dc459011cca7b132a422861d0424b355d72b359efe174c57b",
+    "finalStateDigest": "3281c284a8a82a9957fb5752d5786fcc5ea3fb7b88cf5e237b888cbd6c005f1f",
+    "replaySourceDigest": "b8c9dcec891f022e7b2805406503369c8ec4e925429e96cf4c6ff38dfc5fab56",
+    "evidenceDirectory": ".test-scratch/catch-up-96306-1789351791945",
+    "uiImplemented": false,
+    "migrationReleaseGateStillRequired": true
+  },
+  "migration": {
+    "receipt": "verification/source-owned-observed-migration.json",
+    "replay": "verification/source-owned-migration-replay.html",
+    "deliveredReplayVerification": "verification/source-owned-replay-browser.json",
+    "fourDeliveredScreenshotsVisuallyInspected": true,
+    "replaySha256": "70dffe3e6ebff1ef37267e40a1d25c960d3d8723b2fca486e5ca50924187b1c5",
+    "sourceReport": ".test-scratch/migration-observed-95821-1789351760226/release-gate.json"
+  },
+  "oldSourceChanged": false,
+  "historicalCommittedReceiptsChanged": false,
+  "liveProfilesTouched": false,
+  "pushed": false,
+  "installedApplicationOrDependencies": false,
+  "referenceAgent": {
+    "id": "c58b0c7b-b34b-4d8c-b16d-05aa80409cf8",
+    "coordinationMessagesDelivered": true,
+    "resultDelivered": false,
+    "incorporationClaimed": false
+  },
+  "blockers": [
+    "Approved controlled-local observed estate migration with adopted source/domain and signer bindings",
+    "Verified external root-isolated Brainstem and authenticated memory-only SDK host",
+    "Independent signer/registry/checkpoint custody and domain/Hive adoption",
+    "Optional local iMessage permission/contact and private guest-capture safety binding",
+    "Independent next release constitution; hard-kill stale-lock recovery remains unqualified"
+  ],
+  "nextIntegrationSteps": [
+    "Bind external authority without altering grail or live profiles",
+    "Follow docs/CONTROLLED_LOCAL_MIGRATION.md after final integration approval",
+    "Run the same public-API-only observed migration and source inventories against the approved local selection",
+    "Require all headless/source/replay/migration gates before cutover or any passive product UI"
+  ]
+}

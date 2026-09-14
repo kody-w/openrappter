@@ -11,6 +11,7 @@ import { discoveryEvidence } from '../dist/estate.js';
 import { buildFrame, canonicalJson, contentHash, streamFor } from '../dist/canonical.js';
 import { eventPayload } from '../dist/contract.js';
 import { foldState } from '../dist/state.js';
+import { memoryFrames, sourceChain } from '../dist/source-memory.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const directory = path.join(root, '.test-scratch', `e2e-${process.pid}-${Date.now()}`);
@@ -68,10 +69,10 @@ const recurring = await runtime.conversation.converse(a.root, 'Make this a world
 await runtime.conversation.confirm(a.root, recurring.proposalWave, 'confirm-weekly');
 const applied = (await runtime.bots.repository.root(a.root)).streams.memory.at(-1);
 await runtime.conversation.recordProgress(a.root, 'weekly-world', 'First internal draft prepared.', [applied.frame_hash], 'first-progress');
-const progress = (await runtime.bots.repository.root(a.root)).streams.memory.at(-1);
+const progress = sourceChain(await runtime.bots.repository.root(a.root), 'weekly-world').at(-1);
 const progressBytes = canonicalJson(progress);
 await runtime.conversation.undo(a.root, progress.frame_hash, 'The draft status needs correction.', 'correct-progress');
-assert.equal(canonicalJson((await runtime.bots.repository.root(a.root)).streams.memory.find(f => f.frame_hash === progress.frame_hash)), progressBytes);
+assert.equal(canonicalJson(memoryFrames(await runtime.bots.repository.root(a.root)).find(f => f.frame_hash === progress.frame_hash)), progressBytes);
 time = Date.parse('2026-09-14T09:00:00.000Z');
 const due = await runtime.recurring.due(a.root);
 const modelCallsBeforeTick = transport.requests.length;
@@ -189,6 +190,11 @@ const channelFixture = {
 };
 await writeFile(path.join(directory, 'multi-bot-transcript.json'), JSON.stringify(transcriptFixture, null, 2) + '\n');
 await writeFile(path.join(directory, 'imessage-outage-recap.json'), JSON.stringify(channelFixture, null, 2) + '\n');
-assert.equal(canonicalJson(transcriptFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/multi-bot-transcript.json'), 'utf8'))));
-assert.equal(canonicalJson(channelFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/imessage-outage-recap.json'), 'utf8'))));
+if (process.argv.includes('--record-source-fixtures')) {
+  await mkdir(path.join(root, 'fixtures/source-owned'), { recursive: true });
+  await writeFile(path.join(root, 'fixtures/source-owned/multi-bot-transcript.json'), JSON.stringify(transcriptFixture, null, 2) + '\n');
+  await writeFile(path.join(root, 'fixtures/source-owned/imessage-outage-recap.json'), JSON.stringify(channelFixture, null, 2) + '\n');
+}
+assert.equal(canonicalJson(transcriptFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/source-owned/multi-bot-transcript.json'), 'utf8'))));
+assert.equal(canonicalJson(channelFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/source-owned/imessage-outage-recap.json'), 'utf8'))));
 console.log(JSON.stringify(result, null, 2));

@@ -18,19 +18,25 @@ The contract is `rapp-work.catch-up/1` (`contracts/catch-up.schema.json`).
 Omitted `from` selects a bounded recent window. Explicit `from:null` starts
 before the first canonical memory occurrence. `to` fixes the high-water cursor;
 reuse it with `from:next` when paging so new appends do not change the selection.
-Every non-null cursor must match this root's exact stream/sequence/UTC/particle/
-wave reference. Wrong-root, missing or reversed cursors refuse; no history repair
-or guessed replacement is attempted.
+Every non-null cursor must match this root's exact source stream/sequence/UTC/
+particle/wave references. Multiple sources use a causally closed source-head
+vector; a closed root-only history can retain its scalar head. Wrong-root,
+missing, causally incomplete or reversed cursors refuse; no history repair or
+guessed replacement is attempted.
 
-State reconstruction uses causal **memory-stream sequence** prefixes. Original
-UTC/wave hashes and explicit references remain intact. It does not claim that a
-cross-stream timestamp is a global causal clock. Alternative canonical branches
-are retained but not silently replayed/merged as the selected history.
+State reconstruction uses original **source-stream ancestry and causal cuts**.
+Paging advances by unseen occurrences, not by comparing independent local
+sequence numbers or a central copied activity offset. Later-arriving earlier-
+clock source work is not skipped. Original UTC/wave hashes, GUID/scope origins
+and explicit references remain intact. Alternative canonical branches are
+retained but not silently replayed/merged as the selected history.
+See `SOURCE_OWNERSHIP.md` and `contracts/source-cursor.schema.json`.
 
 ## Grades and digests
 
 Each step provides `grade`, separate `workGrade` and `stateGrade`, original
-`sourceFrameHashes`, exact cursor/previous cursor, public summary, optional
+`sourceFrameHashes`, original `origin` (GUID/scope/stream/hash/ownership), exact
+cursor/previous cursor, public summary, optional
 reconstructed state, `stateDigest` and an explicit reason:
 
 - **recorded:** an original canonical declarative intent is present. For the

@@ -157,12 +157,15 @@ const EVENTS = new Set([
 ]);
 
 export function workEvent(value: unknown): WorkEvent {
-  const e = object(value, ['schema', 'root', 'scope', 'operationId', 'event', 'data']);
+  const e = object(value, ['schema', 'root', 'scope', 'operationId', 'event', 'data'], ['parents']);
   requireThat(e.schema === EVENT_SCHEMA && isBodyStream(e.root) && EVENTS.has(String(e.event)),
     'event', 'Unknown canonical Work event.');
   label(e.scope);
   label(e.operationId);
   object(e.data);
+  if (e.parents !== undefined) requireThat(Array.isArray(e.parents) && e.parents.length <= MAX_SCOPES + 1
+    && new Set(e.parents).size === e.parents.length
+    && e.parents.every(p => typeof p === 'string' && /^[0-9a-f]{64}$/u.test(p)), 'source-lineage', 'Only bounded unique canonical source parent references are allowed.');
   return e as WorkEvent;
 }
 

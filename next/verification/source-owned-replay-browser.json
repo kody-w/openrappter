@@ -1,0 +1,74 @@
+{
+  "schema": "rapp-work.migration-replay-browser/1",
+  "runtime": "existing Playwright 1.63.0 + system Chrome, isolated profile",
+  "selfContained": true,
+  "liveBrowserProfilesTouched": false,
+  "variants": [
+    {
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "coldLoad": "passed",
+      "offlineReload": "passed",
+      "interactionsRepeated": 2,
+      "keyboard": "passed",
+      "overflowPixels": 0,
+      "errors": [],
+      "failed": [],
+      "network": [],
+      "screenshot": "migration-light-1280.png"
+    },
+    {
+      "theme": "light",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "coldLoad": "passed",
+      "offlineReload": "passed",
+      "interactionsRepeated": 2,
+      "keyboard": "passed",
+      "overflowPixels": 0,
+      "errors": [],
+      "failed": [],
+      "network": [],
+      "screenshot": "migration-light-390.png"
+    },
+    {
+      "theme": "dark",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "coldLoad": "passed",
+      "offlineReload": "passed",
+      "interactionsRepeated": 2,
+      "keyboard": "passed",
+      "overflowPixels": 0,
+      "errors": [],
+      "failed": [],
+      "network": [],
+      "screenshot": "migration-dark-1280.png"
+    },
+    {
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "coldLoad": "passed",
+      "offlineReload": "passed",
+      "interactionsRepeated": 2,
+      "keyboard": "passed",
+      "overflowPixels": 0,
+      "errors": [],
+      "failed": [],
+      "network": [],
+      "screenshot": "migration-dark-390.png"
+    }
+  ],
+  "artifact": "verification/source-owned-migration-replay.html",
+  "evidenceDirectory": ".test-scratch/delivered-source-replay-1987-1789351990614"
+}

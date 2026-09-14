@@ -6,13 +6,14 @@ import { eventKind, label, list, object, rootDefinition, text, workEvent } from 
 import { requireThat } from './errors.js';
 import { wave } from './intent.js';
 import type { RootSnapshot } from './repository.js';
+import { memoryFrames, sourceKey, sourceStream, type SourceMemory } from './source-memory.js';
 
 export const MIGRATION_LIMITS = Object.freeze({
   items: 256, filesPerRoot: 1_024, fileBytes: 1_048_576, rootBytes: 33_554_432,
   chunkBytes: 16_384, requestBytes: 65_536, controlFrames: 8_192,
 });
 export const MIGRATION_SCHEMA = 'rapp-work.migration-plan/1';
-export const CANONICAL_FILE = /^(?:(?:body|memory|swarm)\/frames|branches\/(?:body|memory|swarm)-[0-9a-f]{64}\/frames)\/[0-9]{12}\.json$/u;
+export const CANONICAL_FILE = /^(?:(?:body|memory|swarm)\/frames|branches\/(?:body|memory|swarm)-[0-9a-f]{64}\/frames|scopes\/[0-9a-f]{64}\/(?:frames|branches\/[0-9a-f]{64}\/frames))\/[0-9]{12}\.json$/u;
 export interface FileDescriptor extends JsonObject { path: string; sha256: string; bytes: number }
 export interface MigrationItem extends JsonObject {
   id: string;
@@ -118,28 +119,43 @@ export function verifyRootFiles(root: string, files: ReadonlyMap<string, Buffer>
   }
   const streams: Record<Family, readonly RappFrame[]> = { body: [], memory: [], swarm: [] };
   const branches: { family: Family; head: string; frames: readonly RappFrame[] }[] = [];
+  const sources = new Map<string, { scope: string; stream: string; frames: readonly RappFrame[]; branches: { head: string; frames: readonly RappFrame[] }[] }>();
   for (const [directory, entries] of directories) {
     entries.sort((a, b) => a.path.localeCompare(b.path));
-    const family = (directory.startsWith('branches/') ? directory.slice(9).split('-')[0] : directory.split('/')[0]) as Family;
+    const scoped = directory.startsWith('scopes/');
+    const sourceScope = scoped ? workEvent(object(parseCanonicalJson(entries[0]!.bytes)).payload).scope : null;
+    if (sourceScope) requireThat(sourceScope !== 'root' && directory.split('/')[1] === sourceKey(root, sourceScope), 'migration-source', 'Source scope identity and path must be retained exactly.');
+    const family = (scoped ? 'memory' : directory.startsWith('branches/') ? directory.slice(9).split('-')[0] : directory.split('/')[0]) as Family;
+    const stream = sourceScope ? sourceStream(root, sourceScope) : streamFor(root, family);
     const chain: RappFrame[] = [];
     for (const [index, entry] of entries.entries()) {
       requireThat(entry.path.endsWith(`/${String(index).padStart(12, '0')}.json`), 'migration-lineage', 'No frame gaps, filtering or sequence rewrite is allowed.');
-      const frame = verifiedFrame(entry.bytes, streamFor(root, family), chain.length ? frameHead(chain.at(-1)!) : null, signatures);
+      const frame = verifiedFrame(entry.bytes, stream, chain.length ? frameHead(chain.at(-1)!) : null, signatures);
       requireThat(signerOf(frame) === definition.signer, 'migration-signature', 'All source occurrences must retain the original root signer.');
       if (family === 'memory') requireThat(workEvent(frame.payload).root === root && eventKind(String(frame.payload.event)) === frame.kind,
         'migration-profile', 'Unsupported application histories must remain historical pointers.');
+      if (sourceScope) requireThat(frame.payload.scope === sourceScope, 'migration-source', 'A source stream may not be reassigned to another internal world.');
       chain.push(frame);
     }
-    if (directory.startsWith('branches/')) {
+    if (sourceScope) {
+      const source = sources.get(sourceScope) ?? { scope: sourceScope, stream, frames: [], branches: [] };
+      if (directory.includes('/branches/')) {
+        const head = directory.split('/')[3]!;
+        requireThat(chain.at(-1)!.frame_hash === head, 'migration-source', 'Source branch ancestry/head is incomplete.');
+        source.branches.push({ head, frames: chain });
+      } else source.frames = chain;
+      sources.set(sourceScope, source);
+    } else if (directory.startsWith('branches/')) {
       const head = directory.split('/')[1]!.slice(family.length + 1);
       requireThat(chain.at(-1)!.frame_hash === head, 'migration-lineage', 'Complete original branch ancestry and head are required.');
       branches.push({ family, head, frames: chain });
     } else streams[family] = chain;
   }
   requireThat(streams.body.length === 1 && streams.body[0]!.kind === 'body.pulse', 'migration-root', 'Root identity is its exact immutable genesis.');
-  const ids = [...Object.values(streams).flat()].map(f => f.payload.operationId).filter(id => id !== undefined);
+  const ids = [...Object.values(streams).flat(), ...[...sources.values()].flatMap(s => s.frames)].map(f => f.payload.operationId).filter(id => id !== undefined);
   requireThat(new Set(ids).size === ids.length, 'migration-idempotency', 'An incompatible duplicate operation identity cannot be silently normalized.');
-  const snapshot = { definition, streams, branches };
+  const snapshot: RootSnapshot = { definition, streams, branches, ...(sources.size ? { sources: [...sources.values()] as SourceMemory[] } : {}) };
+  memoryFrames(snapshot);
   return snapshot;
 }
 

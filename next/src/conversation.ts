@@ -10,11 +10,12 @@ import type { ModelProvider } from './spine.js';
 import { publicationData } from './ai-contract.js';
 import { catchUpTimeline } from './catch-up.js';
 import { CanonicalComputerReplay } from './computer-replay.js';
+import { memoryFrames, memoryCursor, sourceChain, sourceReference } from './source-memory.js';
 
 export function canonicalContext(root: RootSnapshot, scope = 'root'): JsonObject {
   const state = foldState(root);
   const permitted = permittedScopes(state.scopes, scope);
-  const turns = root.streams.memory.filter(frame => {
+  const turns = memoryFrames(root).filter(frame => {
     const e = workEvent(frame.payload);
     return permitted.has(e.scope) && ['turn.user', 'turn.assistant', 'client.conversation'].includes(e.event);
   }).slice(-20).map(frame => {
@@ -22,13 +23,14 @@ export function canonicalContext(root: RootSnapshot, scope = 'root'): JsonObject
     const client = frame.payload.event === 'client.conversation' ? publicationData('conversation', data) : null;
     return { role: frame.payload.event === 'turn.user' ? 'user' : 'assistant',
       text: client ? `[${client.actor.name} / ${client.actor.provider}] ${String(client.content.text)}` : String(data.text),
-      source: reference(frame) };
+      source: reference(frame), origin: sourceReference(frame) };
   });
-  const discovery = root.streams.memory.filter(f => f.payload.event === 'discovery.recorded' && permitted.has(String(f.payload.scope)))
+  const discovery = memoryFrames(root).filter(f => f.payload.event === 'discovery.recorded' && permitted.has(String(f.payload.scope)))
     .slice(-4).map(f => ({ source: reference(f), pointers: workEvent(f.payload).data.pointers! }));
   return {
     root: root.definition.root, scope,
-    head: root.streams.memory.at(-1)?.frame_hash ?? root.streams.body[0]!.frame_hash,
+    head: sourceChain(root, scope).at(-1)?.frame_hash ?? root.streams.body[0]!.frame_hash,
+    sourceCursor: memoryCursor(root),
     scopes: state.scopes.filter(s => permitted.has(s.id)),
     turns, discovery,
     artifacts: [...state.artifacts.values()].filter(a => permitted.has(String(a.scope))),
@@ -38,6 +40,15 @@ export function canonicalContext(root: RootSnapshot, scope = 'root'): JsonObject
       && permitted.has(String(p.frame.payload.scope))).map(([wave, p]) => ({ wave, questions: p.draft.questions })),
     authority: 'canonical-integrity-only; evidence is not factual truth',
   };
+}
+
+function contextWitness(root: RootSnapshot, scope: string, exclude?: string): { revision: string; parents: string[] } {
+  const scopes = foldState(root).scopes;
+  const permitted = permittedScopes(scopes, scope);
+  const frames = memoryFrames(root).filter(f => f.frame_hash !== exclude && permitted.has(String(f.payload.scope)));
+  return { revision: contentHash({ root: root.definition.root, scope, scopes: scopes.filter(s => permitted.has(s.id)),
+    occurrences: frames.map(f => f.frame_hash).sort() }),
+  parents: [...new Map(frames.map(f => [f.stream_id, f.frame_hash])).values()] };
 }
 
 export interface ConversationResult {
@@ -81,9 +92,9 @@ export class Conversation {
     if (confirmation) {
       const snapshot = await this.bots.repository.root(root);
       const state = foldState(snapshot);
-      const previous = snapshot.streams.memory.find(f => f.payload.operationId === operationId);
+      const previous = memoryFrames(snapshot).find(f => f.payload.operationId === operationId);
       if (previous) requireThat(previous.payload.event === 'organization.applied', 'idempotency-conflict', 'This command ID already belongs to different work.');
-      const target = confirmation[1] ?? (previous ? String(workEvent(previous.payload).data.proposalWave) : snapshot.streams.memory.at(-1)?.frame_hash);
+      const target = confirmation[1] ?? (previous ? String(workEvent(previous.payload).data.proposalWave) : sourceChain(snapshot, scope).at(-1)?.frame_hash);
       const proposal = target ? state.proposals.get(target) : undefined;
       requireThat(proposal && permittedScopes(state.scopes, scope).has(String(proposal.frame.payload.scope)),
         'confirmation-context', 'There is no exact current proposal in this permitted scope to confirm. No model or effect was run.');
@@ -96,7 +107,7 @@ export class Conversation {
       const projection = projectBot(snapshot);
       requireThat(!projection.hidden, 'bot-hidden', 'Restore this bot before asking it to work.');
       permittedScopes(projection.scopes, scope);
-      const duplicate = snapshot.streams.memory.find(f => f.payload.operationId === operationId);
+      const duplicate = memoryFrames(snapshot).find(f => f.payload.operationId === operationId);
       if (duplicate) {
         requireThat(duplicate.payload.event === 'turn.user' && workEvent(duplicate.payload).data.text === thought
           && duplicate.payload.scope === scope, 'idempotency-conflict', 'This request ID already records a different thought.');
@@ -109,6 +120,7 @@ export class Conversation {
     const handle = this.bots.spine.observe(root);
     try {
       const snapshot = await this.bots.repository.root(root);
+      const basis = contextWitness(snapshot, scope);
       const raw = await this.bots.spine.compute(handle, snapshot.definition.capability, {
         root, scope, thought, context: canonicalContext(snapshot, scope), purpose: 'organization',
       }, this.provider);
@@ -116,7 +128,7 @@ export class Conversation {
       await this.bots.repository.transaction(async transaction => {
         const current = findRoot(transaction, root);
         requireThat(!projectBot(current).hidden, 'bot-hidden', 'A hidden bot cannot finish an unobserved proposal.');
-        requireThat(current.streams.memory.at(-1)?.frame_hash === input.frame.frame_hash, 'stale-head',
+        requireThat(sourceChain(current, scope).at(-1)?.frame_hash === input.frame.frame_hash && contextWitness(current, scope).revision === basis.revision, 'stale-head',
           'The canonical context changed during inference. A fresh review is required, not stale work.');
         const preview = foldState(current);
         validateResolutions(preview, draft, scope);
@@ -131,13 +143,13 @@ export class Conversation {
           ...(draft.actions.length || draft.resolves.length ? ['Nothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.'] : []),
         ].join('\n');
         return this.bots.appendEvent(transaction, current, 'turn.assistant',
-          { text: summary, replyTo: input.frame.frame_hash, draft, draftHash: contentHash(draft) },
-          `reply-${input.frame.frame_hash}`, scope);
+          { text: summary, replyTo: input.frame.frame_hash, draft, draftHash: contentHash(draft), contextRevision: basis.revision },
+          `reply-${input.frame.frame_hash}`, scope, undefined, basis.parents);
       });
     } catch {
       await this.bots.repository.transaction(async transaction => {
         const current = findRoot(transaction, root);
-        if (current.streams.memory.some(f => workEvent(f.payload).data.replyTo === input.frame.frame_hash)) return;
+        if (memoryFrames(current).some(f => workEvent(f.payload).data.replyTo === input.frame.frame_hash)) return;
         await this.bots.appendEvent(transaction, current, 'provider.unavailable', {
           replyTo: input.frame.frame_hash,
           summary: 'The selected provider, verified interpreter or current context was unavailable. Your thought is recorded. No fallback, tool execution or automatic replay occurred.',
@@ -149,7 +161,7 @@ export class Conversation {
 
   async #result(root: string, input: RappFrame): Promise<ConversationResult> {
     const snapshot = await this.bots.repository.root(root);
-    const reply = snapshot.streams.memory.find(f => workEvent(f.payload).data.replyTo === input.frame_hash);
+    const reply = memoryFrames(snapshot).find(f => workEvent(f.payload).data.replyTo === input.frame_hash);
     const projection = projectBot(snapshot);
     const draft = reply?.payload.event === 'turn.assistant' && workEvent(reply.payload).data.draft
       ? validateDraft(workEvent(reply.payload).data.draft) : null;
@@ -168,14 +180,17 @@ export class Conversation {
       const proposal = state.proposals.get(proposalWave);
       requireThat(proposal, 'proposal', 'Choose an exact canonical proposal wave from this root.');
       const data = { proposalWave, summary: proposal.draft.summary, actor: 'local-operator' };
-      const duplicate = snapshot.streams.memory.find(f => f.payload.operationId === operationId);
+      const duplicate = memoryFrames(snapshot).find(f => f.payload.operationId === operationId);
       if (duplicate) {
         await this.bots.appendEvent(transaction, snapshot, 'organization.applied', data, operationId, String(proposal.frame.payload.scope));
         return;
       }
       requireThat(proposal.status === 'review' && proposal.draft.questions.length === 0, 'human-question',
         'Only an unconfirmed proposal with no unresolved human questions can be applied.');
-      requireThat(snapshot.streams.memory.at(-1)?.frame_hash === proposalWave, 'stale-head', 'The proposal is stale; review current canonical context before confirmation.');
+      requireThat(sourceChain(snapshot, String(proposal.frame.payload.scope)).at(-1)?.frame_hash === proposalWave, 'stale-head', 'The proposal is stale; review current canonical context before confirmation.');
+      const basis = workEvent(proposal.frame.payload).data.contextRevision;
+      requireThat(basis === undefined || basis === contextWitness(snapshot, String(proposal.frame.payload.scope), proposalWave).revision,
+        'stale-head', 'A permitted source changed since this proposal read canonical context; a fresh review is required.');
       validateResolutions(state, proposal.draft, String(proposal.frame.payload.scope));
       applyScopedActions(state, proposal.draft.actions, snapshot, proposalWave, String(proposal.frame.payload.scope));
       await this.bots.appendEvent(transaction, snapshot, 'organization.applied', data, operationId, String(proposal.frame.payload.scope), proposalWave);
@@ -200,18 +215,18 @@ export class Conversation {
       const snapshot = findRoot(transaction, root);
       requireThat(!projectBot(snapshot).hidden, 'bot-hidden', 'Restore this root before correcting work.');
       const data = { targetWave, reason: text(reason, 1_000) };
-      const duplicate = snapshot.streams.memory.find(f => f.payload.operationId === operationId);
+      const duplicate = memoryFrames(snapshot).find(f => f.payload.operationId === operationId);
       if (duplicate) {
         requireThat(canonicalJson(workEvent(duplicate.payload).data) === canonicalJson(data), 'idempotency-conflict', 'Correction ID is already bound.');
         return;
       }
-      const target = snapshot.streams.memory.find(f => f.frame_hash === targetWave);
+      const target = memoryFrames(snapshot).find(f => f.frame_hash === targetWave);
       requireThat(target && ['organization.applied', 'work.progress', 'routine.tick'].includes(String(target.payload.event)),
         'correction', 'Only this root’s reversible internal outcomes can be corrected, never external effects or history.');
       const state = foldState(snapshot);
       requireThat(!state.corrected.has(targetWave), 'correction', 'This outcome is already corrected.');
       foldState(snapshot, [targetWave]);
-      await this.bots.appendEvent(transaction, snapshot, 'state.corrected', data, operationId);
+      await this.bots.appendEvent(transaction, snapshot, 'state.corrected', data, operationId, String(target.payload.scope));
     });
     return this.bots.project(root);
   }

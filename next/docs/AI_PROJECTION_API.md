@@ -49,10 +49,17 @@ retain multiple heads and expose a conflict; the UI never silently chooses the
 last writer. Consuming other clients' view heads requires explicit `view.resolve`
 authority. This does not merge identities, native memory or histories.
 
-All visible state is reconstructed from the same signed canonical frames.
-Observation/subscription appends nothing. Reconnect cursors bind root stream,
-sequence and wave; replay advances through those occurrences, without any model
-or tool execution. Expired/revoked credentials and invalid cursors refuse.
+All visible state is reconstructed from the same signed original source frames.
+New publications live in the authorized event scope's memory stream, not a
+copied root activity log. `view.focus` does not change that ownership. A
+root-authorized Global Estate/Librarian view can reference multiple worlds;
+the surface name does not grant sibling access to a child-scoped client.
+
+Observation/subscription appends nothing. Reconnect cursors bind the root GUID
+and a causally closed vector of original source heads/branches; closed root-only
+histories retain scalar heads. Replay advances by unseen original occurrences,
+so independent source clocks cannot skip work or displace a prior selection.
+No model or tool executes. Expired/revoked credentials and invalid cursors refuse.
 Backpressure closes a slow subscriber with an explicit resync requirement;
 canonical work stays intact and can be read through bounded history pages.
 
@@ -113,6 +120,8 @@ unimplemented rather than being exposed with weaker authentication.
 
 Machine-readable contracts:
 `contracts/ai-publication.schema.json` and `contracts/view-intent.schema.json`.
+Original occurrence addresses and reconnect cuts are defined by
+`contracts/source-reference.schema.json` and `contracts/source-cursor.schema.json`.
 The envelope's optional hint is untrusted input; the latter schema and canonical
 state validation define what can actually be accepted.
 
@@ -134,6 +143,13 @@ reconstructed snapshot, optional reason and replay flag. The snapshot has
 explicit client attribution, scoped artifact metadata, bounded public history,
 activity/evidence/attention and a view status:
 `none`, `resolved`, `conflict`, or `invalidated`.
+
+Turns/contributions/history retain their original `origin` and source hashes;
+authorized `sources` exposes source heads and unselected branches. Source
+catalogues are reconstructed references, not a new store. A branch-only update
+may report `retained-source-branches-changed`; it never selects/replays the
+branch. These are additions to the unreleased `/1` contracts, not rewrites of
+historical frames or an adoption path for older profiles.
 
 Corrections that remove a referenced artifact invalidate its projection hint,
 not its recorded work. Pending view heads are bounded; reaching the bound

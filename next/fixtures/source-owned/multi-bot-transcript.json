@@ -1,0 +1,259 @@
+{
+  "fixture": "synthetic-canonical-public-turns",
+  "canonicalOrdering": "UTC then wave hash",
+  "turns": [
+    {
+      "role": "user",
+      "speaker": "human",
+      "text": "I need a place to build the Copilot bridge",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 0,
+        "utc": "2026-09-13T20:00:00.002Z",
+        "payload_hash": "00a396cb056177f99cc42a11a904b06763a559dc9e770e6e688c3b0f3039f5a9",
+        "frame_hash": "0c8c715573548b415a393f8af9c3f59aee1e63baf571381fc740736a883933ac"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 0,
+        "utc": "2026-09-13T20:00:00.002Z",
+        "payload_hash": "00a396cb056177f99cc42a11a904b06763a559dc9e770e6e688c3b0f3039f5a9",
+        "frame_hash": "0c8c715573548b415a393f8af9c3f59aee1e63baf571381fc740736a883933ac",
+        "ownership": "source-owned"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Make Copilot Builder a coherent internal world, with a briefing artifact and a clear RAPP/1 boundary.\nTradeoff: Keep one visible root bot and one Librarian; Builder is an internal world, not another bot.\nTradeoff: The briefing is canonical inert text. No host source file, native profile, model configuration or external service is changed.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 1,
+        "utc": "2026-09-13T20:00:00.004Z",
+        "payload_hash": "a097c3196aa9091d284fadc48b6f85e6c27ebb1ec67bea9e26e07ea27f535f3d",
+        "frame_hash": "9e0f2d1b516fdd24c0664fd8c21768c2a67b580fc57eadcb93277743a61285c5"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 1,
+        "utc": "2026-09-13T20:00:00.004Z",
+        "payload_hash": "a097c3196aa9091d284fadc48b6f85e6c27ebb1ec67bea9e26e07ea27f535f3d",
+        "frame_hash": "9e0f2d1b516fdd24c0664fd8c21768c2a67b580fc57eadcb93277743a61285c5",
+        "ownership": "source-owned"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "user",
+      "speaker": "human",
+      "text": "RAPP Up: organize the explicitly discovered local native estate inside this one complete root world.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 3,
+        "utc": "2026-09-13T20:00:00.007Z",
+        "payload_hash": "edc255fa5b0bab2e370a6dadc7b0256b925f4c2e5587af27de615d6e43d7e6a7",
+        "frame_hash": "0a6352d2aa32e55fb51ec62d8c5e391132997153b532d64c2398f3916f542ed7"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 3,
+        "utc": "2026-09-13T20:00:00.007Z",
+        "payload_hash": "edc255fa5b0bab2e370a6dadc7b0256b925f4c2e5587af27de615d6e43d7e6a7",
+        "frame_hash": "0a6352d2aa32e55fb51ec62d8c5e391132997153b532d64c2398f3916f542ed7",
+        "ownership": "source-owned"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Establish one complete Local Projects world inside this bot, keeping every native provider shape as a pointer.\nTradeoff: Discovery is historical metadata, not current native-store truth or ownership.\nTradeoff: One visible bot and one Librarian remain; no native data is copied, normalized, mounted or modified.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 4,
+        "utc": "2026-09-13T20:00:00.009Z",
+        "payload_hash": "6d529b7302aa9e20d412191efca9692c40a503499d0feffeb7544e27ad2ea3d8",
+        "frame_hash": "7350a580a195ea6910aa1a70d344003d7d32906a20a068e7cbd9efa5d52e551d"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 4,
+        "utc": "2026-09-13T20:00:00.009Z",
+        "payload_hash": "6d529b7302aa9e20d412191efca9692c40a503499d0feffeb7544e27ad2ea3d8",
+        "frame_hash": "7350a580a195ea6910aa1a70d344003d7d32906a20a068e7cbd9efa5d52e551d",
+        "ownership": "source-owned"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "user",
+      "speaker": "human",
+      "text": "Make this a world and recap progress every Monday",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 6,
+        "utc": "2026-09-13T20:00:00.011Z",
+        "payload_hash": "40f1a89aab8772f11e25ad9a758ef5a29d2a964747399809879781fc60424935",
+        "frame_hash": "7ad6c2107bbd3ab456ef3bce5c3ef602c33a788323e6f4276d47c85793134a47"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 6,
+        "utc": "2026-09-13T20:00:00.011Z",
+        "payload_hash": "40f1a89aab8772f11e25ad9a758ef5a29d2a964747399809879781fc60424935",
+        "frame_hash": "7ad6c2107bbd3ab456ef3bce5c3ef602c33a788323e6f4276d47c85793134a47",
+        "ownership": "source-owned"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Create an internal Weekly Work world and produce its canonical progress recap every Monday.\nTradeoff: Monday at 09:00 UTC is an explicit reviewable default, not a guessed local timezone.\nTradeoff: The routine is hidden implementation of this complete reviewed intent. It reads canonical context first and appends a reversible internal recap; it does not infer with a model, send messages or execute arbitrary instructions.\nRecurring intent: Recap this world's canonical progress; every Monday at 09:00 UTC, first 2026-09-14T09:00:00.000Z.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 7,
+        "utc": "2026-09-13T20:00:00.013Z",
+        "payload_hash": "70235424f4879fe726c01b750b8b63e2ba3fe22456ced06084fc15e17b84fe08",
+        "frame_hash": "114f5107a0043c1a04b5b424dc479d212d843183bf8c245b0961be52710406d5"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 7,
+        "utc": "2026-09-13T20:00:00.013Z",
+        "payload_hash": "70235424f4879fe726c01b750b8b63e2ba3fe22456ced06084fc15e17b84fe08",
+        "frame_hash": "114f5107a0043c1a04b5b424dc479d212d843183bf8c245b0961be52710406d5",
+        "ownership": "source-owned"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Review the public plan and preserve disagreement.",
+      "source": {
+        "stream_id": "net:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "seq": 0,
+        "utc": "2026-09-14T09:00:00.008Z",
+        "payload_hash": "6dac0318e804d6dcc440e0a9f634ff2356b163b4ace2b3211fc8f8f29e7beab5",
+        "frame_hash": "04cc0b58e58d2607b10ad5c5f024b665abecfbc6b5dfe899bd7586d445f2e248"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "net:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "seq": 0,
+        "utc": "2026-09-14T09:00:00.008Z",
+        "payload_hash": "6dac0318e804d6dcc440e0a9f634ff2356b163b4ace2b3211fc8f8f29e7beab5",
+        "frame_hash": "04cc0b58e58d2607b10ad5c5f024b665abecfbc6b5dfe899bd7586d445f2e248",
+        "ownership": "source-owned"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+      "text": "Independent reviewer perspective: preserve native pointers and confirm bounded internal work before acting.\nDisagreement: Do not normalize the native stores into a new shared workspace database.\nUnknown: Live external Brainstem and channel permission bindings have not been established.",
+      "source": {
+        "stream_id": "net:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+        "seq": 0,
+        "utc": "2026-09-14T09:00:00.009Z",
+        "payload_hash": "c993a7c02c2e3cb332e1d275d882044fc4c8df49a984a93297e4335833b4f426",
+        "frame_hash": "cf15b8a494441ceca8095de05b6b6adc5bc3554c922026b25b0715e051340b2a"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+        "scope": "root",
+        "stream_id": "net:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+        "seq": 0,
+        "utc": "2026-09-14T09:00:00.009Z",
+        "payload_hash": "c993a7c02c2e3cb332e1d275d882044fc4c8df49a984a93297e4335833b4f426",
+        "frame_hash": "cf15b8a494441ceca8095de05b6b6adc5bc3554c922026b25b0715e051340b2a",
+        "ownership": "source-owned"
+      },
+      "replyTo": "04cc0b58e58d2607b10ad5c5f024b665abecfbc6b5dfe899bd7586d445f2e248"
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Two distinct public perspectives support a reviewed pointer-first plan; no external action is authorized.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 11,
+        "utc": "2026-09-14T09:00:00.011Z",
+        "payload_hash": "3ed733a2273a33835dd40dfeca49f0ff377aa5000ea18c7d5f371bff3c6ff03d",
+        "frame_hash": "d6cc2ff6676aa599a34c16e72f3622f7d4a5ae7609ee80ec2622b180c2acc6e8"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 11,
+        "utc": "2026-09-14T09:00:00.011Z",
+        "payload_hash": "3ed733a2273a33835dd40dfeca49f0ff377aa5000ea18c7d5f371bff3c6ff03d",
+        "frame_hash": "d6cc2ff6676aa599a34c16e72f3622f7d4a5ae7609ee80ec2622b180c2acc6e8",
+        "ownership": "source-owned"
+      },
+      "replyTo": "04cc0b58e58d2607b10ad5c5f024b665abecfbc6b5dfe899bd7586d445f2e248"
+    },
+    {
+      "role": "user",
+      "speaker": "human",
+      "text": "Prepare an external message request, do not send it",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 18,
+        "utc": "2026-09-14T09:00:00.018Z",
+        "payload_hash": "19283a7d831590735d343dc852917f47ae9bbb4d59fcc3c56de59559bda638d9",
+        "frame_hash": "0d9334a095cc0b0ac0a4ce5bc3395695203d1c48373ff99ddb5b0d2d1ad12e77"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 18,
+        "utc": "2026-09-14T09:00:00.018Z",
+        "payload_hash": "19283a7d831590735d343dc852917f47ae9bbb4d59fcc3c56de59559bda638d9",
+        "frame_hash": "0d9334a095cc0b0ac0a4ce5bc3395695203d1c48373ff99ddb5b0d2d1ad12e77",
+        "ownership": "source-owned"
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "text": "Prepare a bounded message request, without sending it.\nTradeoff: Confirming organization only records this request. A second exact local approval is required to call an external adapter.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 19,
+        "utc": "2026-09-14T09:00:00.020Z",
+        "payload_hash": "f800296fcbb51220a4cf40e57429319c431bb8cb13f7068acea47861688c357b",
+        "frame_hash": "808b15e14d2094b44682a1682b403fcf1d0179cd121a1420e8a4a4471ba190dc"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 19,
+        "utc": "2026-09-14T09:00:00.020Z",
+        "payload_hash": "f800296fcbb51220a4cf40e57429319c431bb8cb13f7068acea47861688c357b",
+        "frame_hash": "808b15e14d2094b44682a1682b403fcf1d0179cd121a1420e8a4a4471ba190dc",
+        "ownership": "source-owned"
+      },
+      "replyTo": null
+    }
+  ]
+}

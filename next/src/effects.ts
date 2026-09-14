@@ -4,6 +4,7 @@ import { workEvent } from './contract.js';
 import { Refusal, requireThat } from './errors.js';
 import { projectBot } from './projection.js';
 import { foldState } from './state.js';
+import { memoryFrames } from './source-memory.js';
 
 export interface ExternalEffectPort {
   readonly available: boolean;
@@ -24,13 +25,13 @@ export class ExternalActions {
       const effect = foldState(snapshot).effects.get(effectId);
       requireThat(effect && effect.requestHash === requestHash && effect.target === target,
         'approval-binding', 'Approval must name the exact reviewed effect hash, target and root.');
-      const existing = snapshot.streams.memory.find(f => f.payload.event === 'effect.approved' && workEvent(f.payload).data.effectId === effectId);
+      const existing = memoryFrames(snapshot).find(f => f.payload.event === 'effect.approved' && workEvent(f.payload).data.effectId === effectId);
       if (existing) {
         requireThat(existing.payload.operationId === operationId, 'approval-used', 'This effect already has an approval; an uncertain action is never retried automatically.');
         return { approval: existing, effect, started: false };
       }
       const approval = await this.bots.appendEvent(transaction, snapshot, 'effect.approved',
-        { effectId, requestHash, target, actor: 'local-operator' }, operationId, String(effect.scope));
+        { effectId, requestHash, target, requestWave: effect.source!, actor: 'local-operator' }, operationId, String(effect.scope));
       return { approval, effect, started: true };
     });
     if (!prepared.started) return { status: 'already-recorded-or-uncertain', approval: prepared.approval.frame_hash, replayed: false };

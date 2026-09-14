@@ -5,6 +5,7 @@ import { Refusal, requireThat } from './errors.js';
 import { wave } from './intent.js';
 import { projectBot } from './projection.js';
 import type { RootSnapshot } from './repository.js';
+import { memoryFrames } from './source-memory.js';
 
 export const HIVE_AUTHORITY = Object.freeze({
   repository: 'https://github.com/kody-w/RAPP',
@@ -32,7 +33,7 @@ export class UnavailablePrivateHive implements CanonicalHivePort {
 }
 
 function consent(root: RootSnapshot, peer: string, room: string, objectWave: string) {
-  const selected = root.streams.memory.filter(f => f.payload.event === 'hive.consented'
+  const selected = memoryFrames(root).filter(f => f.payload.event === 'hive.consented'
     && workEvent(f.payload).data.peer === peer && workEvent(f.payload).data.room === room
     && workEvent(f.payload).data.objectWave === objectWave).at(-1);
   return selected && workEvent(selected.payload).data.mode === 'allow' ? selected : undefined;

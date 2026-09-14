@@ -69,6 +69,8 @@ The disk adapter stores ordinary eleven-field RAPP/1 frames:
   memory/frames/000000000000.json …
   swarm/frames/000000000000.json …
   branches/<family>-<head-wave>/frames/000000000000.json …
+  scopes/<canonical-source-key>/frames/000000000000.json …
+  scopes/<canonical-source-key>/branches/<head-wave>/frames/000000000000.json …
 ```
 
 No message database, workspace database, identity alias, task database, schedule
@@ -89,6 +91,16 @@ or stale expected head refuses; no lock stealing or history “repair” occurs.
 An explicit alternative branch carries its whole canonical chain, preserving
 the exact frame bytes and original stream identity. It is not silently merged,
 flattened, selected, or promoted to a bot. No unification protocol is invented.
+
+All new action exhaust is **source-owned** by its exact original internal
+workspace/world scope. The root memory stream is not a copied central journal.
+Global Estate, Librarian, collaboration, iMessage recap and Catch-me-up resolve
+original source GUID/scope/stream/hash references. New recaps retain references
+instead of copied activity text; peer dissent stays in the peer's signed public
+turn. Causally closed source-head vectors drive paging/reconnect/replay, including
+independently clocked streams and preserved source branches. Immutable old
+centralized scope records remain explicitly `legacy-root-stream`. See
+[source ownership](SOURCE_OWNERSHIP.md) for the binding invariant and gate.
 
 ## Observer and Brainstem
 

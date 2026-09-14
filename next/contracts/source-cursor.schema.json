@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.source-cursor/1",
+  "title": "Causally closed original source heads",
+  "oneOf": [
+    { "type": "null" },
+    { "$ref": "projection.schema.json#/$defs/reference" },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "guid", "root", "sources"],
+      "properties": {
+        "schema": { "const": "rapp-work.source-cursor/1" },
+        "guid": { "$ref": "projection.schema.json#/$defs/rappid" },
+        "root": { "oneOf": [{ "$ref": "projection.schema.json#/$defs/reference" }, { "type": "null" }] },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 127,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "head", "branches"],
+            "properties": {
+              "key": { "$ref": "projection.schema.json#/$defs/hash" },
+              "head": { "$ref": "projection.schema.json#/$defs/reference" },
+              "branches": {
+                "type": "array", "uniqueItems": true,
+                "items": { "$ref": "projection.schema.json#/$defs/hash" }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$comment": "A scalar root-memory head is retained only for a causally closed root-only history. Vectors bind every selected source head and branch catalogue; keys conceal scope names but grant no authority. Pagination advances by set difference, never by comparing source-local seq values."
+}

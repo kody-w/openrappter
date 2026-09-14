@@ -10,17 +10,17 @@
     "schema": { "const": "rapp-work.catch-up/1" },
     "root": { "type": "string" },
     "scope": { "type": "string" },
-    "from": { "type": ["object", "null"] },
-    "to": { "type": ["object", "null"] },
+    "from": { "$ref": "source-cursor.schema.json" },
+    "to": { "$ref": "source-cursor.schema.json" },
     "baseline": { "type": "object", "required": ["cursor", "grade", "stateDigest", "state", "reason", "sourceFrameHashes"] },
     "steps": {
       "type": "array", "maxItems": 16,
       "items": {
         "type": "object", "additionalProperties": false,
-        "required": ["cursor", "previousCursor", "event", "grade", "workGrade", "stateGrade", "sourceFrameHashes", "publicSummary", "stateDigest", "state", "reason", "guest", "guestDigest"],
+        "required": ["cursor", "previousCursor", "event", "grade", "workGrade", "stateGrade", "sourceFrameHashes", "publicSummary", "stateDigest", "state", "reason", "guest", "guestDigest", "origin"],
         "properties": {
-          "cursor": { "type": "object" },
-          "previousCursor": { "type": ["object", "null"] },
+          "cursor": { "$ref": "source-cursor.schema.json" },
+          "previousCursor": { "$ref": "source-cursor.schema.json" },
           "event": { "type": "string" },
           "grade": { "enum": ["recorded", "reconstructed", "unavailable"] },
           "workGrade": { "enum": ["recorded", "unavailable"] },
@@ -31,11 +31,12 @@
           "state": { "type": ["object", "null"] },
           "reason": { "type": ["string", "null"] },
           "guest": { "type": ["object", "null"] },
-          "guestDigest": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+          "guestDigest": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+          "origin": { "oneOf": [{ "$ref": "source-reference.schema.json" }, { "type": "null" }] }
         }
       }
     },
-    "next": { "type": ["object", "null"] },
+    "next": { "$ref": "source-cursor.schema.json" },
     "more": { "type": "boolean" },
     "selectionDigest": { "$ref": "#/$defs/hash" },
     "digestSpace": { "const": "rapp/1:particle" },

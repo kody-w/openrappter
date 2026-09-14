@@ -12,6 +12,7 @@ import { atCursor, cursorFor, projectAi, publicHistoryFrame, publishedRecords, s
 import { reference } from './projection.js';
 import { catchUpTimeline } from './catch-up.js';
 import { CanonicalComputerReplay } from './computer-replay.js';
+import { memoryAdvance, memoryFrames, memoryPending, sourceChain } from './source-memory.js';
 
 export class AiProjectionApi {
   readonly authority: ClientAuthority;
@@ -55,16 +56,16 @@ export class AiProjectionApi {
       const allowed = permittedScopes(state.scopes, grant.data.scope);
       requireThat(allowed.has(scope), 'client-scope', 'The publication cannot leave its canonical grant scope.');
       const operationId = `ai-${contentHash({ client: grant.data.client, requestId })}`;
-      const duplicate = snapshot.streams.memory.find(f => f.payload.operationId === operationId);
+      const duplicate = memoryFrames(snapshot).find(f => f.payload.operationId === operationId);
       if (duplicate) {
         requireThat(object(duplicate.payload.data).requestHash === digest, 'idempotency-conflict', 'This client request ID already records different work.');
         return { receipt: reference(duplicate), attribution: object(duplicate.payload.data).actor!, duplicate: true };
       }
-      const recent = snapshot.streams.memory.filter(f => f.payload.event?.toString().startsWith('client.')
+      const recent = memoryFrames(snapshot).filter(f => f.payload.event?.toString().startsWith('client.')
         && object(f.payload.data).actor && object(object(f.payload.data).actor).id === grant.data.client
         && Date.parse(f.utc) > Date.parse(utc) - 60_000);
       requireThat(recent.length < AI_LIMITS.publicationsPerMinute, 'client-rate', 'The canonical per-client publication rate is exhausted; retries must wait, not drop work.');
-      const known = new Set([...snapshot.streams.body, ...snapshot.streams.memory, ...snapshot.streams.swarm].map(f => f.frame_hash));
+      const known = new Set([...snapshot.streams.body, ...memoryFrames(snapshot), ...snapshot.streams.swarm].map(f => f.frame_hash));
       requireThat(causes.every(cause => known.has(cause)), 'causality', 'Causal references must be prior occurrences of this exact root.');
       const material = scopedFrames(snapshot, scope);
       const refs = kind === 'activity' ? hashes(content.evidence, 8)
@@ -100,7 +101,7 @@ export class AiProjectionApi {
       requireThat(signer, 'signing-authority-unavailable', 'The root publication signer is unavailable; unsigned attribution is refused.');
       const frame = await tx.append({ root, family: 'memory', kind: eventKind(`client.${kind}`), utc,
         payload: eventPayload(root, scope, operationId, `client.${kind}`, data),
-        expectedHead: snapshot.streams.memory.at(-1)?.frame_hash ?? null, signer });
+        expectedHead: sourceChain(snapshot, scope).at(-1)?.frame_hash ?? null, signer });
       return { receipt: reference(frame), attribution: data.actor, duplicate: false, viewAccepted: data.view !== null, viewRefusal: data.viewRefusal };
     });
   }
@@ -109,13 +110,13 @@ export class AiProjectionApi {
     requireThat(Number.isInteger(limit) && limit >= 1 && limit <= AI_LIMITS.pageEvents, 'page-bound', 'History pages contain at most sixteen canonical occurrences.');
     const selected = await this.authority.authorize(root, capability, ['projection.read']);
     const before = atCursor(selected.root, cursor);
-    const start = before.streams.memory.length;
-    const segment = selected.root.streams.memory.slice(start, start + limit);
+    const pending = memoryPending(selected.root, before);
+    const segment = pending.slice(0, limit);
     const allowed = permittedScopes(foldState(selected.root).scopes, selected.grant.data.scope);
     const records = segment.filter(f => allowed.has(String(f.payload.scope))).map(publicHistoryFrame);
     const result: JsonObject = {
-      root, from: cursor === null ? null : cursorFor(before), cursor: segment.length ? reference(segment.at(-1)!) : cursorFor(before),
-      records, more: start + segment.length < selected.root.streams.memory.length,
+      root, from: cursor === null ? null : cursorFor(before), cursor: segment.length ? cursorFor(memoryAdvance(selected.root, before, segment.length)) : cursorFor(before),
+      records, more: segment.length < pending.length,
       canonicalWorkPreserved: true,
     };
     requireThat(Buffer.byteLength(canonicalJson(result)) <= AI_LIMITS.snapshotBytes, 'page-size', 'Reduce the page limit to stay within the bounded response size.');

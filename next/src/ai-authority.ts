@@ -6,11 +6,12 @@ import { Refusal, requireThat } from './errors.js';
 import { foldState, permittedScopes } from './state.js';
 import type { RootSnapshot } from './repository.js';
 import { AI_LIMITS, grantData, type AiRight, type ClientActor, type ClientGrant } from './ai-contract.js';
+import { memoryFrames } from './source-memory.js';
 
 export interface ActiveGrant { data: ClientGrant; frame: RappFrame; active: boolean }
 export function clientGrants(root: RootSnapshot): Map<string, ActiveGrant> {
   const grants = new Map<string, ActiveGrant>();
-  for (const frame of root.streams.memory) {
+  for (const frame of memoryFrames(root)) {
     const e = workEvent(frame.payload);
     if (e.event === 'client.granted') {
       const data = grantData(e.data);
@@ -45,7 +46,7 @@ export class ClientAuthority {
       const state = foldState(snapshot);
       permittedScopes(state.scopes, String(input.scope));
       const grants = clientGrants(snapshot);
-      const existing = snapshot.streams.memory.find(f => f.payload.operationId === operationId);
+      const existing = memoryFrames(snapshot).find(f => f.payload.operationId === operationId);
       if (existing) {
         requireThat(existing.payload.event === 'client.granted', 'idempotency-conflict', 'This request ID is already used.');
         const data = grantData(workEvent(existing.payload).data);
@@ -90,7 +91,7 @@ export class ClientAuthority {
     requireThat(selected?.active && Date.parse(selected.data.expiresUtc) > Date.parse(atUtc)
       && rights.every(right => selected.data.rights.includes(right)), 'client-unauthorized',
     'The root-scoped credential is absent, expired, revoked or lacks this exact capability.');
-    const visibility = snapshot.streams.memory.filter(f => f.payload.event === 'root.visibility').at(-1);
+    const visibility = memoryFrames(snapshot).filter(f => f.payload.event === 'root.visibility').at(-1);
     requireThat(!visibility || workEvent(visibility.payload).data.hidden === false, 'bot-hidden', 'Hidden roots do not serve AI clients.');
     permittedScopes(foldState(snapshot).scopes, selected.data.scope);
     return selected;

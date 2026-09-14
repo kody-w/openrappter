@@ -5,7 +5,7 @@
   "type": "object",
   "readOnly": true,
   "additionalProperties": false,
-  "required": ["schema", "root", "name", "hidden", "authority", "scopes", "turns", "outcomes", "attention", "heads", "branches", "proposals", "routines", "pointers", "artifacts", "progress"],
+  "required": ["schema", "root", "name", "hidden", "authority", "scopes", "turns", "outcomes", "attention", "heads", "branches", "proposals", "routines", "pointers", "artifacts", "progress", "sources"],
   "properties": {
     "schema": { "const": "rapp-work.projection/1" },
     "root": { "$ref": "#/$defs/rappid" },
@@ -29,11 +29,12 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind", "summary", "source"],
+        "required": ["kind", "summary", "source", "origin"],
         "properties": {
           "kind": { "type": "string" },
           "summary": { "type": "string" },
-          "source": { "$ref": "#/$defs/hash" }
+          "source": { "$ref": "#/$defs/hash" },
+          "origin": { "oneOf": [{ "$ref": "source-reference.schema.json" }, { "type": "null" }] }
         }
       }
     },
@@ -52,7 +53,8 @@
     "routines": { "$ref": "#/$defs/objects" },
     "pointers": { "$ref": "#/$defs/objects" },
     "artifacts": { "$ref": "#/$defs/objects" },
-    "progress": { "$ref": "#/$defs/objects" }
+    "progress": { "$ref": "#/$defs/objects" },
+    "sources": { "$ref": "#/$defs/objects" }
   },
   "$defs": {
     "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
@@ -85,12 +87,13 @@
     "turn": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["role", "speaker", "text", "source", "replyTo"],
+      "required": ["role", "speaker", "text", "source", "origin", "replyTo"],
       "properties": {
         "role": { "enum": ["user", "assistant"] },
         "speaker": { "oneOf": [{ "const": "human" }, { "$ref": "#/$defs/rappid" }] },
         "text": { "type": "string" },
         "source": { "$ref": "#/$defs/reference" },
+        "origin": { "$ref": "source-reference.schema.json" },
         "replyTo": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
       }
     }

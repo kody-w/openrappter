@@ -46,7 +46,11 @@ test('two signed public perspectives use exact canonical streams, preserve disag
   const synthesis = state.roots.find(r => r.definition.root === a.root).streams.memory.find(f => f.payload.event === 'collaboration.synthesized');
   assert.equal(synthesis.payload.data.consensus, false);
   assert.equal(synthesis.payload.data.actions, 'review-required');
-  assert(synthesis.payload.data.public.disagreements.includes(echo.payload.public.disagreements[0]));
+  assert.equal(synthesis.payload.data.format, 'rapp-work.synthesis-references/1');
+  assert.equal(synthesis.payload.data.responseRef.frame_hash, echo.frame_hash);
+  assert.equal(synthesis.payload.data.responseRef.guid, b.root);
+  assert(!synthesis.payload.data.public.disagreements.includes(echo.payload.public.disagreements[0]));
+  assert(result.transcript.find(t => t.source.frame_hash === echo.frame_hash).text.includes(echo.payload.public.disagreements[0]));
   for (let i = 1; i < result.transcript.length; i++) {
     const x = result.transcript[i - 1].source, y = result.transcript[i].source;
     assert(x.utc < y.utc || (x.utc === y.utc && x.frame_hash < y.frame_hash));

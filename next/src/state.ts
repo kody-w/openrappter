@@ -4,6 +4,7 @@ import { requireThat } from './errors.js';
 import { validateDraft, wave, type Draft, type IntentAction, type RoutineAction } from './intent.js';
 import type { RootSnapshot } from './repository.js';
 import { migrationItem } from './migration-contract.js';
+import { memoryFrames, sourceReference } from './source-memory.js';
 
 export interface InternalState {
   scopes: Scope[];
@@ -19,14 +20,18 @@ export interface InternalState {
 
 export function foldState(root: RootSnapshot, extraCorrections: readonly string[] = []): InternalState {
   const corrected = new Set(extraCorrections);
-  const byWave = new Map(root.streams.memory.map(f => [f.frame_hash, f]));
-  for (const frame of root.streams.memory) {
+  const memory = memoryFrames(root);
+  const byWave = new Map(memory.map(f => [f.frame_hash, f]));
+  const positions = new Map(memory.map((f, i) => [f.frame_hash, i]));
+  for (const frame of memory) {
     const e = workEvent(frame.payload);
     if (e.event === 'state.corrected') {
       object(e.data, ['targetWave', 'reason']);
       const target = byWave.get(wave(e.data.targetWave));
-      requireThat(target && target.seq < frame.seq && ['organization.applied', 'work.progress', 'routine.tick'].includes(String(target.payload.event)),
+      requireThat(target && positions.get(target.frame_hash)! < positions.get(frame.frame_hash)! && ['organization.applied', 'work.progress', 'routine.tick'].includes(String(target.payload.event)),
         'correction', 'Only prior reversible internal outcomes can be corrected.');
+      requireThat(target.payload.scope === e.scope || (target.stream_id.endsWith(':work') && frame.stream_id.endsWith(':work')),
+        'source-ownership', 'A new correction must be owned by the same exact source scope as its original outcome.');
       requireThat(!corrected.has(target.frame_hash), 'correction', 'An outcome has already been corrected.');
       text(e.data.reason, 1_000);
       corrected.add(target.frame_hash);
@@ -36,7 +41,7 @@ export function foldState(root: RootSnapshot, extraCorrections: readonly string[
     scopes: root.definition.scopes.map(s => ({ ...s })), proposals: new Map(), routines: new Map(),
     pointers: new Map(), artifacts: new Map(), effects: new Map(), progress: [], corrected, ticked: new Set(),
   };
-  for (const frame of root.streams.memory) {
+  for (const [position, frame] of memory.entries()) {
     const e = workEvent(frame.payload);
     requireThat(state.scopes.some(s => s.id === e.scope), 'scope-dependency',
       'An outcome has a dependent scope; correction may not orphan canonical work.');
@@ -58,18 +63,18 @@ export function foldState(root: RootSnapshot, extraCorrections: readonly string[
     } else if (e.event === 'work.progress' && !corrected.has(frame.frame_hash)) {
       object(data, ['summary', 'evidence']);
       text(data.summary, 2_000);
-      validateEvidence(data.evidence, root, frame.seq);
-      state.progress.push({ scope: e.scope, summary: text(data.summary, 2_000), evidence: data.evidence!, source: frame.frame_hash });
+      validateEvidence(data.evidence, root, position);
+      state.progress.push({ scope: e.scope, summary: text(data.summary, 2_000), evidence: data.evidence!, source: frame.frame_hash, origin: sourceReference(frame) });
     } else if (e.event === 'routine.tick') {
       object(data, ['routineId', 'occurrence', 'summary', 'evidence']);
       const routine = state.routines.get(label(data.routineId));
-      requireThat(routine, 'routine', 'A tick requires a reviewed active routine.');
+      requireThat(routine && (routine.scope === e.scope || frame.stream_id.endsWith(':work')), 'routine', 'A tick requires a reviewed active routine in its original source scope.');
       const occurrence = text(data.occurrence, 32);
       requireThat(!state.ticked.has(`${routine.id}:${occurrence}`), 'idempotency', 'A routine occurrence was already recorded.');
       state.ticked.add(`${routine.id}:${occurrence}`);
-      validateEvidence(data.evidence, root, frame.seq);
+      validateEvidence(data.evidence, root, position);
       if (!corrected.has(frame.frame_hash)) {
-        state.progress.push({ scope: routine.scope, summary: text(data.summary, 2_000), evidence: data.evidence!, source: frame.frame_hash });
+        state.progress.push({ scope: routine.scope, summary: text(data.summary, 2_000), evidence: data.evidence!, source: frame.frame_hash, origin: sourceReference(frame) });
       }
     } else if (e.event === 'migration.pointer.imported') {
       object(data, ['planHash', 'batch', 'item', 'source', 'approvalWave']);
@@ -78,7 +83,7 @@ export function foldState(root: RootSnapshot, extraCorrections: readonly string[
         && item.pointer!.scope === e.scope && ![...state.pointers.values()].some(p => p.sourceIdentity === item.sourceIdentity),
       'migration-pointer', 'Imported pointer identities, scopes and provenance must remain exact and unique.');
       state.pointers.set(`migration-${item.id}`, {
-        id: item.id, scope: e.scope, source: frame.frame_hash, sourceIdentity: item.sourceIdentity,
+        id: item.id, scope: e.scope, source: frame.frame_hash, origin: sourceReference(frame), sourceIdentity: item.sourceIdentity,
         classification: item.classification, provider: item.provider, sourceDigest: item.sourceDigest,
         pointer: { title: item.title, locator: item.sourceLocator, ...item.pointer! },
       });
@@ -91,7 +96,7 @@ export function foldState(root: RootSnapshot, extraCorrections: readonly string[
 export function validateEvidence(value: unknown, root: RootSnapshot, beforeSeq = Number.MAX_SAFE_INTEGER): string[] {
   const entries = list(value as never, 16).map(wave);
   requireThat(new Set(entries).size === entries.length, 'evidence', 'Evidence references must be unique.');
-  const available = new Set([...root.streams.body, ...root.streams.memory.filter(f => f.seq < beforeSeq),
+  const available = new Set([...root.streams.body, ...memoryFrames(root).slice(0, beforeSeq),
     ...root.streams.swarm].map(f => f.frame_hash));
   requireThat(entries.every(hash => available.has(hash)), 'evidence-isolation', 'Evidence must refer to existing canonical frames of this root.');
   return entries;
@@ -124,7 +129,7 @@ export function applyActions(state: InternalState, actions: readonly IntentActio
     if (action.type === 'artifact.save') state.artifacts.set(id, { ...action, source, contentHash: contentHash({ content: action.content }) });
     if (action.type === 'external.request') state.effects.set(id, { ...action, source, requestHash: contentHash(action) });
     if (action.type === 'pointer.register') {
-      const evidence = root.streams.memory.find(f => f.frame_hash === action.evidenceWave && f.payload.event === 'discovery.recorded');
+      const evidence = memoryFrames(root).find(f => f.frame_hash === action.evidenceWave && f.payload.event === 'discovery.recorded');
       requireThat(evidence, 'discovery-evidence', 'Only this root’s explicitly recorded discovery evidence can establish a pointer.');
       const data = workEvent(evidence.payload).data;
       const pointer = list(data.pointers, 32).map(v => object(v)).find(p => p.id === action.pointerId);
@@ -141,7 +146,7 @@ export function applyScopedActions(state: InternalState, actions: readonly Inten
     const permitted = permittedScopes(state.scopes, scope);
     requireThat(parent !== null && permitted.has(parent), 'scope-isolation', 'A proposed action may not escape the selected internal scope.');
     if (action.type === 'pointer.register') {
-      const evidence = root.streams.memory.find(f => f.frame_hash === action.evidenceWave);
+      const evidence = memoryFrames(root).find(f => f.frame_hash === action.evidenceWave);
       requireThat(evidence && permitted.has(String(evidence.payload.scope)), 'scope-isolation', 'Discovery evidence is outside this request’s permitted scope.');
     }
     applyActions(state, [action], root, source);

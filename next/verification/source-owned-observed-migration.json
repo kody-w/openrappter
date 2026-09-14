@@ -1,0 +1,277 @@
+{
+  "schema": "rapp-work.observed-migration-gate/1",
+  "fixtureGate": "passed",
+  "releaseGate": "pending-approved-controlled-local-run",
+  "application": "NEW next/dist/migration-app.js",
+  "initialProfileEmpty": true,
+  "destinationWritesByHarness": 0,
+  "populationChannel": "public provider-neutral stdio migration API only",
+  "passiveClient": "separately launched next/test/migration-consumer.mjs",
+  "providerModelCalls": 0,
+  "uiImplemented": false,
+  "expected": {
+    "roots": 2,
+    "items": 23,
+    "pointers": 21,
+    "scopes": 44,
+    "artifacts": 4,
+    "branches": 2,
+    "forms": {
+      "world": 10,
+      "librarian": 2,
+      "workspace": 8,
+      "memory": 4,
+      "evidence": 2,
+      "agent": 2,
+      "twin": 2,
+      "neighborhood": 2,
+      "factory": 2,
+      "rapplication": 2,
+      "task": 2,
+      "artifact": 4,
+      "routine": 2
+    },
+    "sourceFrames": 16,
+    "classifications": {
+      "compatible-canonical": 2,
+      "historical-derived": 14,
+      "native-pointer": 5,
+      "historical-unavailable": 2
+    },
+    "providers": {
+      "rapp-1": 2,
+      "workspace-manager": 14,
+      "copilot": 1,
+      "claude": 1,
+      "hermes": 1,
+      "scout": 1,
+      "grokbot": 1,
+      "legacy-rapp": 2
+    },
+    "managerPointers": [
+      "workspace-manager",
+      "global-estate",
+      "monorepo",
+      "copilot-builder",
+      "microsoft-ceo",
+      "llc-autofile",
+      "llc-private",
+      "rapp",
+      "rar",
+      "ambient-context",
+      "aideate",
+      "herdr",
+      "copilot-harness-sdk",
+      "rapp-factory"
+    ],
+    "nativeProviders": [
+      "copilot",
+      "claude",
+      "hermes",
+      "scout",
+      "grokbot"
+    ]
+  },
+  "actual": {
+    "activeFrames": 39,
+    "artifacts": 4,
+    "branches": 2,
+    "controlFrames": 73,
+    "items": 23,
+    "pointers": 21,
+    "roots": 2,
+    "scopes": 44
+  },
+  "rootGuids": [
+    "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+    "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a"
+  ],
+  "canonical": {
+    "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+    "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+    "authorityFrames": 16,
+    "verdict": "COMPLIANT",
+    "framesScanned": 113,
+    "signedFrames": 113,
+    "streamsScanned": 17,
+    "findings": [],
+    "evidence": [
+      {
+        "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+        "ok": "1 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+        "ok": "5 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/scopes/c2f74e2f7159168d927b9d7c8670693734f044adf5817a1c11bd8a1e69411e0e/frames",
+        "ok": "1 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+        "ok": "1 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+        "ok": "1 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/branches/memory-6ff0f28c0d9cf303f17f5d491c4af07cab432f83c9f472d3d0ad8e9203fcec65/frames",
+        "ok": "1 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+        "ok": "6 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+        "ok": "5 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/3d3175f45a1397c948f596e13df80655cdfc9542f746a185de00de7da48a072a/frames",
+        "ok": "3 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c4b/frames",
+        "ok": "10 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/7a470104beabea10e3fbfe8a724e8ac96613f55a331b970806da411d601a17ae/branches/495b5a68477bda8cfc30c875500178704102461d02ccbb36d0c488abfbe82168/frames",
+        "ok": "1 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/7a470104beabea10e3fbfe8a724e8ac96613f55a331b970806da411d601a17ae/frames",
+        "ok": "1 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/8e9b8e8b7a77825d9602644f429a7448bfc9726365b3b7131fcc6925f8af2354/frames",
+        "ok": "1 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/c803daf5f88f45923547877852fc9372ba4c813d9800ea978b2dd629165dad14/frames",
+        "ok": "1 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+        "ok": "1 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "migration/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/frames",
+        "ok": "73 frames conform to \u00a77 envelope"
+      },
+      {
+        "artifact": "migration/materialized/8113b29f12625cfbdaf2c1ea70201ea0a720d41c83a7bd5fc4f4201977448bdb/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+        "ok": "1 frames conform to \u00a77 envelope"
+      }
+    ]
+  },
+  "exactOriginalFrameBytesPreserved": true,
+  "hiddenRootPreserved": true,
+  "fullHiddenScopesAndForms": true,
+  "originalScopedStreamsPreserved": 2,
+  "originalSourceBranchesPreserved": 1,
+  "legacySourceOccurrencesHonestAndUnchanged": 1,
+  "copiedCentralActivity": false,
+  "sourceWrites": 0,
+  "sourceMoves": 0,
+  "sourceDeletes": 0,
+  "sourceFilesCompared": 45,
+  "sourceDirectoriesCompared": 36,
+  "nativePrivateContentImported": false,
+  "historicalUnavailableItems": 2,
+  "duplicateImports": 0,
+  "interruptionResume": true,
+  "interruptionMode": "SIGTERM with filesystem critical-section drain; no stale-lock stealing",
+  "replayedChunksDeduplicated": 1,
+  "incompleteTransactionRollback": true,
+  "unpublishedMaterializationFaultExercised": true,
+  "rollbackDeletesCommittedData": false,
+  "serviceAndProjectionRestartIdentical": true,
+  "observedEvents": 99,
+  "observedUniqueItems": 23,
+  "observedWorlds": 10,
+  "finalCursorHash": "696e51b2e99b002cb6c9ec92a50a0d66b238d2c3981724bdb54315dbd172f584",
+  "planHash": "7a6b5c90e4d2b9f5a7fb82eeb4cfdc79ea8537cb3ea1b8e6aa9eaa47924f5f44",
+  "evidenceDirectory": ".test-scratch/migration-observed-95821-1789351760226",
+  "sourceDirectory": ".test-scratch/migration-observed-95821-1789351760226/source",
+  "destinationDirectory": ".test-scratch/migration-observed-95821-1789351760226/destination",
+  "liveCurrentProfilesTouched": false,
+  "liveCanonicalAdoptionPerformed": false,
+  "replay": "migration-replay.html",
+  "browser": {
+    "schema": "rapp-work.migration-replay-browser/1",
+    "runtime": "existing Playwright 1.63.0 + system Chrome, isolated profile",
+    "selfContained": true,
+    "liveBrowserProfilesTouched": false,
+    "variants": [
+      {
+        "theme": "light",
+        "viewport": {
+          "width": 1280,
+          "height": 900
+        },
+        "coldLoad": "passed",
+        "offlineReload": "passed",
+        "interactionsRepeated": 2,
+        "keyboard": "passed",
+        "overflowPixels": 0,
+        "errors": [],
+        "failed": [],
+        "network": [],
+        "screenshot": "migration-light-1280.png"
+      },
+      {
+        "theme": "light",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "coldLoad": "passed",
+        "offlineReload": "passed",
+        "interactionsRepeated": 2,
+        "keyboard": "passed",
+        "overflowPixels": 0,
+        "errors": [],
+        "failed": [],
+        "network": [],
+        "screenshot": "migration-light-390.png"
+      },
+      {
+        "theme": "dark",
+        "viewport": {
+          "width": 1280,
+          "height": 900
+        },
+        "coldLoad": "passed",
+        "offlineReload": "passed",
+        "interactionsRepeated": 2,
+        "keyboard": "passed",
+        "overflowPixels": 0,
+        "errors": [],
+        "failed": [],
+        "network": [],
+        "screenshot": "migration-dark-1280.png"
+      },
+      {
+        "theme": "dark",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "coldLoad": "passed",
+        "offlineReload": "passed",
+        "interactionsRepeated": 2,
+        "keyboard": "passed",
+        "overflowPixels": 0,
+        "errors": [],
+        "failed": [],
+        "network": [],
+        "screenshot": "migration-dark-390.png"
+      }
+    ]
+  },
+  "fixtureReleaseGate": "observed-migration-and-display-passed",
+  "liveReleaseGate": "not-run; final integration approval and adopted live bindings required",
+  "deliveredReplay": "verification/source-owned-migration-replay.html"
+}

@@ -11,6 +11,7 @@ import { targetCapability } from '../dist/spine.js';
 import { nativeMetadataPointer } from '../dist/native-metadata.js';
 import { approvalStream, MIGRATION_SCHEMA, migrationPlan, verifyRootFiles } from '../dist/migration-contract.js';
 import { projectBot } from '../dist/projection.js';
+import { sourceKey, sourceStream, memoryFrames } from '../dist/source-memory.js';
 
 const source = fileURLToPath(new URL('../fixtures/migration-estate.json', import.meta.url));
 export async function sourceInventory(directory, includeDirectories = false) {
@@ -72,10 +73,13 @@ export async function migrationFixture(directory) {
     };
     const body = buildFrame({ kind: 'body.pulse', streamId: root, head: null, utc: now(), payload: definition, signer, signatures: keys.signatures });
     const memory = [];
-    const append = (event, data, id, scope = 'root') => {
-      const frame = buildFrame({ kind: eventKind(event), streamId: streamFor(root, 'memory'), head: memory.length ? frameHead(memory.at(-1)) : null,
-        utc: now(), payload: eventPayload(root, scope, id, event, data), signer, signatures: keys.signatures });
-      memory.push(frame); return frame;
+    const scoped = new Map();
+    const append = (event, data, id, scope = 'root', legacy = false) => {
+      const frames = scope === 'root' || legacy ? memory : scoped.get(scope) ?? [];
+      const payload = eventPayload(root, scope, id, event, data);
+      const frame = buildFrame({ kind: eventKind(event), streamId: sourceStream(root, legacy ? 'root' : scope), head: frames.length ? frameHead(frames.at(-1)) : null,
+        utc: now(), payload: scope === 'root' || legacy ? payload : { ...payload, parents: [body.frame_hash] }, signer, signatures: keys.signatures });
+      frames.push(frame); if (scope !== 'root' && !legacy) scoped.set(scope, frames); return frame;
     };
     const user = append('turn.user', { text: 'Retain our complete canonical source world and public evidence.' }, `source-user-${index}`);
     const draft = validateDraft({
@@ -89,16 +93,26 @@ export async function migrationFixture(directory) {
     const proposed = append('turn.assistant', { text: draft.summary, draft, draftHash: contentHash(draft), replyTo: user.frame_hash }, `source-plan-${index}`);
     const applied = append('organization.applied', { proposalWave: proposed.frame_hash, summary: draft.summary, actor: 'local-operator' }, `source-applied-${index}`);
     append('work.progress', { summary: 'Existing memory and artifact evidence remain rooted.', evidence: [applied.frame_hash] }, `source-progress-${index}`, 'source-memory');
+    if (index === 0) append('work.progress', { summary: 'Historical centralized source work remains byte-identical and honestly classified.',
+      evidence: [applied.frame_hash] }, 'source-legacy-progress', 'source-workspace', true);
     if (descriptor.hidden) append('root.visibility', { hidden: true }, `source-hidden-${index}`);
     const swarm = buildFrame({ kind: 'swarm.telemetry', streamId: streamFor(root, 'swarm'), head: null, utc: now(),
       payload: { root, operationId: `source-telemetry-${index}`, summary: 'Existing signed source telemetry.' }, signer, signatures: keys.signatures });
     const files = new Map();
     const put = (family, frame) => files.set(`${family}/frames/${String(frame.seq).padStart(12, '0')}.json`, Buffer.from(canonicalJson(frame)));
     put('body', body); for (const frame of memory) put('memory', frame); put('swarm', swarm);
+    for (const [scope, frames] of scoped) for (const frame of frames) {
+      files.set(`scopes/${sourceKey(root, scope)}/frames/${String(frame.seq).padStart(12, '0')}.json`, Buffer.from(canonicalJson(frame)));
+    }
     if (index === 0) {
       const branch = buildFrame({ kind: 'memory.chat-turn', streamId: streamFor(root, 'memory'), head: null, utc: now(),
         payload: eventPayload(root, 'root', 'source-branch', 'turn.user', { text: 'An alternative source branch is retained, not unified.' }), signer, signatures: keys.signatures });
       files.set(`branches/memory-${branch.frame_hash}/frames/000000000000.json`, Buffer.from(canonicalJson(branch)));
+      const scopedBranch = buildFrame({ kind: 'memory.tool-call', streamId: sourceStream(root, 'source-memory'), head: null, utc: now(),
+        payload: { ...eventPayload(root, 'source-memory', 'source-memory-branch', 'work.progress',
+          { summary: 'An unselected original source-world branch.', evidence: [applied.frame_hash] }), parents: [body.frame_hash] },
+        signer, signatures: keys.signatures });
+      files.set(`scopes/${sourceKey(root, 'source-memory')}/branches/${scopedBranch.frame_hash}/frames/000000000000.json`, Buffer.from(canonicalJson(scopedBranch)));
     }
     const relativeRoot = path.join('canonical', descriptor.id);
     for (const [name, bytes] of files) {
@@ -165,8 +179,9 @@ export async function migrationFixture(directory) {
   const expected = {
     roots: roots.length, items: items.length, pointers: items.filter(i => i.kind === 'estate-pointer').length,
     scopes: projected.reduce((n, p) => n + p.scopes.length, 0), artifacts: projected.reduce((n, p) => n + p.artifacts.length, 0),
-    branches: snapshots.reduce((n, r) => n + r.branches.length, 0), forms,
-    sourceFrames: snapshots.reduce((n, r) => n + Object.values(r.streams).flat().length + r.branches.reduce((n, b) => n + b.frames.length, 0), 0),
+    branches: projected.reduce((n, r) => n + r.branches.length, 0), forms,
+    sourceFrames: snapshots.reduce((n, r) => n + r.streams.body.length + r.streams.swarm.length + memoryFrames(r).length
+      + r.branches.reduce((n, b) => n + b.frames.length, 0) + (r.sources ?? []).reduce((n, s) => n + s.branches.reduce((n, b) => n + b.frames.length, 0), 0), 0),
     classifications: Object.fromEntries([...new Set(items.map(i => i.classification))].map(k => [k, items.filter(i => i.classification === k).length])),
     providers: Object.fromEntries([...new Set(items.map(i => i.provider))].map(k => [k, items.filter(i => i.provider === k).length])),
     managerPointers: coverage.managerPointers.map(p => p.id), nativeProviders: coverage.nativeProviders,

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.source-reference/1",
+  "title": "Original canonical source occurrence, not copied activity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["guid", "scope", "stream_id", "seq", "utc", "payload_hash", "frame_hash", "ownership"],
+  "properties": {
+    "guid": { "$ref": "projection.schema.json#/$defs/rappid" },
+    "scope": { "type": "string", "maxLength": 100 },
+    "stream_id": { "type": "string" },
+    "seq": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "utc": { "type": "string" },
+    "payload_hash": { "$ref": "projection.schema.json#/$defs/hash" },
+    "frame_hash": { "$ref": "projection.schema.json#/$defs/hash" },
+    "ownership": { "enum": ["source-owned", "legacy-root-stream"] }
+  },
+  "$comment": "guid is the original full root RAPPID; scope is its original internal scope, not a reminted world GUID. The stream and hashes must resolve exactly. References grant no access."
+}

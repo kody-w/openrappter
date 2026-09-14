@@ -4,7 +4,7 @@ import { AI_LIMITS } from './ai-contract.js';
 import { AiProjectionApi } from './ai-api.js';
 import { atCursor, cursorFor, projectAi } from './ai-projector.js';
 import { Refusal, requireThat } from './errors.js';
-import { reference } from './projection.js';
+import { memoryAdvance, memoryFrames, memoryPending } from './source-memory.js';
 
 export interface ProjectionEvent extends JsonObject {
   schema: 'rapp-work.projection-event/1';
@@ -27,7 +27,7 @@ interface Subscription {
   bytes: number;
   expires: number;
   closed: boolean;
-  initialHead: number;
+  initialFrames: ReadonlySet<string>;
 }
 export interface StreamOptions { queuedEvents?: number; queuedBytes?: number; replayEvents?: number; clock?: () => number }
 
@@ -53,7 +53,7 @@ export class ProjectionStreams {
     requireThat(this.#subscriptions.size < AI_LIMITS.subscriptions, 'subscription-limit', 'The bounded subscription limit is reached.');
     const selected = await this.api.authority.authorize(root, capability, ['projection.read', 'projection.subscribe']);
     const base = cursor === null ? selected.root : atCursor(selected.root, cursor);
-    requireThat(selected.root.streams.memory.length - base.streams.memory.length <= this.#replayLimit,
+    requireThat(memoryFrames(selected.root).length - memoryFrames(base).length <= this.#replayLimit,
       'resync-required', 'The reconnect gap exceeds the replay window; request a fresh snapshot and page retained history explicitly.');
     const projection = projectAi(base, selected.grant.data.scope);
     requireThat(this.#subscriptions.size < AI_LIMITS.subscriptions, 'subscription-limit', 'The bounded subscription limit is reached.');
@@ -62,12 +62,12 @@ export class ProjectionStreams {
     const subscription: Subscription = {
       id, root, capability, scope: selected.grant.data.scope, queuedCursor: source, deliveredCursor: source,
       queue: [], bytes: 0, expires: this.#clock() + AI_LIMITS.subscriptionMs, closed: false,
-      initialHead: selected.root.streams.memory.at(-1)?.seq ?? -1,
+      initialFrames: new Set(memoryFrames(selected.root).map(f => f.frame_hash)),
     };
     this.#subscriptions.set(id, subscription);
     this.#enqueue(subscription, { schema: 'rapp-work.projection-event/1', subscription: id, type: 'snapshot',
       cursor: source, previous: null, snapshot: projection, reason: null, replay: cursor !== null });
-    return { subscription: id, root, cursor: source, replayPending: base.streams.memory.length < selected.root.streams.memory.length,
+    return { subscription: id, root, cursor: source, replayPending: memoryFrames(base).length < memoryFrames(selected.root).length,
       limits: { events: this.#queueLimit, bytes: this.#byteLimit, replay: this.#replayLimit, lifetimeMs: AI_LIMITS.subscriptionMs } };
   }
 
@@ -107,16 +107,22 @@ export class ProjectionStreams {
       try {
         const selected = await this.api.authority.authorize(subscription.root, subscription.capability, ['projection.read', 'projection.subscribe']);
         const prefix = atCursor(selected.root, subscription.queuedCursor);
-        const pending = selected.root.streams.memory.slice(prefix.streams.memory.length);
+        const pending = memoryPending(selected.root, prefix);
         if (pending.length > this.#replayLimit) { this.#close(subscription, 'replay-window-exceeded'); continue; }
         if (pending.length && subscription.queue.length >= this.#queueLimit) { this.#close(subscription, 'backpressure'); continue; }
         const room = this.#queueLimit - subscription.queue.length;
-        for (const frame of pending.slice(0, room)) {
+        for (const [offset, frame] of pending.slice(0, room).entries()) {
           const previous = subscription.queuedCursor;
-          const cursor = reference(frame);
-          const snapshot = projectAi(atCursor(selected.root, cursor), subscription.scope);
+          const state = memoryAdvance(selected.root, prefix, offset + 1);
+          const cursor = cursorFor(state);
+          const snapshot = projectAi(state, subscription.scope);
           if (!this.#enqueue(subscription, { schema: 'rapp-work.projection-event/1', subscription: subscription.id,
-            type: 'update', cursor, previous, snapshot, reason: null, replay: frame.seq <= subscription.initialHead })) break;
+            type: 'update', cursor, previous, snapshot, reason: null, replay: subscription.initialFrames.has(frame.frame_hash) })) break;
+        }
+        if (!pending.length && canonicalJson(cursorFor(selected.root)) !== canonicalJson(subscription.queuedCursor)) {
+          this.#enqueue(subscription, { schema: 'rapp-work.projection-event/1', subscription: subscription.id,
+            type: 'update', cursor: cursorFor(selected.root), previous: subscription.queuedCursor,
+            snapshot: projectAi(selected.root, subscription.scope), reason: 'retained-source-branches-changed', replay: false });
         }
       } catch (error) {
         this.#close(subscription, error instanceof Refusal && ['cursor-invalid', 'projection-size'].includes(error.code)

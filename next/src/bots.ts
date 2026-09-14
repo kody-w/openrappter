@@ -9,6 +9,7 @@ import { requireThat } from './errors.js';
 import { orient, projectBot, type BotProjection } from './projection.js';
 import { CanonicalRepository, type RootSnapshot, type Transaction } from './repository.js';
 import type { SharedBrainstem } from './spine.js';
+import { memoryFrames, sourceChain } from './source-memory.js';
 
 export interface RootSigner { readonly root: string; readonly signer: FrameSigner }
 export interface BotOptions {
@@ -88,20 +89,22 @@ export class Bots {
   }
 
   async appendEvent(transaction: Transaction, root: RootSnapshot, event: string, data: JsonObject,
-    operationId: string, scope = 'root', expectedHead?: string | null): Promise<RappFrame> {
+    operationId: string, scope = 'root', expectedHead?: string | null, parents?: readonly string[]): Promise<RappFrame> {
     const payload = eventPayload(root.definition.root, scope, operationId, event, data);
-    const duplicate = root.streams.memory.find(f => f.payload.operationId === operationId);
+    const duplicate = memoryFrames(root).find(f => f.payload.operationId === operationId);
     if (duplicate) {
-      requireThat(canonicalJson(duplicate.payload) === canonicalJson(payload), 'idempotency-conflict',
+      const { parents: _parents, ...original } = duplicate.payload;
+      requireThat(canonicalJson(original) === canonicalJson(payload), 'idempotency-conflict',
         'This operation ID already records a different bounded outcome.');
       return duplicate;
     }
     const signer = this.signer(root.definition.root);
     requireThat(root.definition.signer === null || signer, 'signing-authority-unavailable', 'The root signer is unavailable; unsigned continuation is refused.');
-    const previous = root.streams.memory.at(-1);
+    const previous = sourceChain(root, scope).at(-1);
     const utc = this.now();
     requireThat(!previous || utc >= previous.utc, 'clock', 'The host clock regressed; canonical time will not be rewritten.');
-    return transaction.append({ root: root.definition.root, family: 'memory', kind: eventKind(event), payload, utc,
+    return transaction.append({ root: root.definition.root, family: 'memory', kind: eventKind(event),
+      payload: parents ? { ...payload, parents: [...parents] } : payload, utc,
       expectedHead: expectedHead === undefined ? previous?.frame_hash ?? null : expectedHead, ...(signer ? { signer } : {}) });
   }
 

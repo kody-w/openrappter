@@ -1,11 +1,12 @@
-import { contentHash, type JsonObject, type RappFrame } from './canonical.js';
+import { canonicalJson, contentHash, type JsonObject, type RappFrame } from './canonical.js';
 import { Bots, findRoot } from './bots.js';
 import { object, text, workEvent } from './contract.js';
 import { Conversation, type ConversationResult } from './conversation.js';
 import { Refusal, requireThat } from './errors.js';
 import { wave } from './intent.js';
-import { projectBot } from './projection.js';
+import { projectBot, publicWorkText } from './projection.js';
 import type { RootSnapshot } from './repository.js';
+import { memoryFrames, sourceReference } from './source-memory.js';
 
 export interface PrivateChannelPort {
   readonly channel: 'imessage';
@@ -25,7 +26,31 @@ export class DisabledIMessage implements PrivateChannelPort {
 }
 
 function binding(root: RootSnapshot): RappFrame | undefined {
-  return root.streams.memory.filter(f => f.payload.event === 'channel.bound').at(-1);
+  return memoryFrames(root).filter(f => f.payload.event === 'channel.bound').at(-1);
+}
+
+export function referenceRecap(root: RootSnapshot, queued: JsonObject): { summary: string; sources: JsonObject[] } {
+  if (queued.format !== 'rapp-work.recap-references/1') {
+    requireThat(queued.format === undefined && queued.sourceRefs === undefined, 'recap-source', 'Unknown recap references cannot become a legacy summary.');
+    return { summary: text(queued.summary, 3_000), sources: [] }; // immutable historical record, never rewritten
+  }
+  const refs = queued.sourceRefs;
+  requireThat(Array.isArray(refs) && refs.length <= 6, 'recap-source', 'A recap contains bounded canonical source references only.');
+  const byHash = new Map(memoryFrames(root).map(f => [f.frame_hash, f]));
+  const frames = refs.map(value => {
+    const ref = object(value);
+    const frame = byHash.get(String(ref.frame_hash));
+    requireThat(frame && canonicalJson(sourceReference(frame)) === canonicalJson(ref), 'recap-source',
+      'The original source GUID/scope/stream occurrence is unavailable; no copied activity fallback is permitted.');
+    return frame;
+  });
+  const summary = frames.length ? frames.map(frame => {
+    const event = workEvent(frame.payload);
+    const value = event.event === 'client.conversation' ? object(event.data.content).text
+      : event.event === 'collaboration.synthesized' ? publicWorkText(frame) : event.data.text ?? event.data.summary;
+    return `[${event.scope}] ${event.event}: ${String(value ?? 'Recorded source outcome').slice(0, 260)}`;
+  }).join('\n') : `${root.definition.name}: no completed source work is referenced.`;
+  return { summary, sources: refs.map(value => object(value)) };
 }
 
 export class PrivateChannels {
@@ -52,24 +77,19 @@ export class PrivateChannels {
       const selected = binding(snapshot);
       requireThat(!projection.hidden && selected && workEvent(selected.payload).data.enabled === true,
         'channel-binding', 'An explicit current root/contact/permission binding is required.');
-      const duplicate = snapshot.streams.memory.find(f => f.payload.operationId === operationId);
+      const duplicate = memoryFrames(snapshot).find(f => f.payload.operationId === operationId);
       if (duplicate) {
         requireThat(duplicate.payload.event === 'channel.queued', 'idempotency-conflict', 'This request ID is already used.');
-        return { deliveryId: duplicate.frame_hash, summary: workEvent(duplicate.payload).data.summary! };
+        return { deliveryId: duplicate.frame_hash, ...referenceRecap(snapshot, workEvent(duplicate.payload).data) };
       }
-      const meaningful = snapshot.streams.memory.filter(f =>
-        ['turn.assistant', 'work.progress', 'routine.tick', 'organization.applied', 'collaboration.synthesized'].includes(String(f.payload.event))).slice(-6);
-      const summary = meaningful.length
-        ? meaningful.map(f => {
-          const d = workEvent(f.payload).data;
-          return `${String(f.payload.event)}: ${String(d.text ?? d.summary).slice(0, 260)}`;
-        }).join('\n')
-        : `${projection.name}: the same canonical root is ready; no completed public work is recorded.`;
+      const meaningful = memoryFrames(snapshot).filter(f =>
+        ['turn.assistant', 'client.conversation', 'work.progress', 'routine.tick', 'organization.applied', 'collaboration.synthesized'].includes(String(f.payload.event))).slice(-6);
       const frame = await this.bots.appendEvent(transaction, snapshot, 'channel.queued', {
         channel: 'imessage', bindingWave: selected.frame_hash, contactRef: workEvent(selected.payload).data.contactRef!,
-        permissionRef: workEvent(selected.payload).data.permissionRef!, summary, sources: meaningful.map(f => f.frame_hash),
+        permissionRef: workEvent(selected.payload).data.permissionRef!,
+        format: 'rapp-work.recap-references/1', sourceRefs: meaningful.map(sourceReference),
       }, operationId);
-      return { deliveryId: frame.frame_hash, summary };
+      return { deliveryId: frame.frame_hash, ...referenceRecap(snapshot, workEvent(frame.payload).data) };
     });
   }
 
@@ -77,15 +97,15 @@ export class PrivateChannels {
     const prepared = await this.bots.repository.transaction(async transaction => {
       const snapshot = findRoot(transaction, root);
       requireThat(!projectBot(snapshot).hidden, 'bot-hidden', 'Hidden roots do not send private-channel messages.');
-      const queue = snapshot.streams.memory.find(f => f.frame_hash === deliveryId && f.payload.event === 'channel.queued');
+      const queue = memoryFrames(snapshot).find(f => f.frame_hash === deliveryId && f.payload.event === 'channel.queued');
       const selected = binding(snapshot);
       requireThat(queue && selected && workEvent(selected.payload).data.enabled === true
         && workEvent(queue.payload).data.bindingWave === selected.frame_hash, 'channel-binding',
       'Delivery must match the exact current root, permission and contact binding.');
-      const completed = snapshot.streams.memory.find(f => f.payload.event === 'channel.outcome'
+      const completed = memoryFrames(snapshot).find(f => f.payload.event === 'channel.outcome'
         && workEvent(f.payload).data.deliveryId === deliveryId && workEvent(f.payload).data.status === 'delivered');
       if (completed) return { queued: workEvent(queue.payload).data, attempt: completed, send: false };
-      const duplicate = snapshot.streams.memory.find(f => f.payload.operationId === operationId);
+      const duplicate = memoryFrames(snapshot).find(f => f.payload.operationId === operationId);
       if (duplicate) {
         requireThat(duplicate.payload.event === 'channel.attempt' && workEvent(duplicate.payload).data.deliveryId === deliveryId,
           'idempotency-conflict', 'This delivery attempt ID is already bound.');
@@ -105,7 +125,7 @@ export class PrivateChannels {
           'channel-binding', 'Private-channel authority changed before dispatch.');
         const result = await this.port.send({
           root, deliveryId, contactRef: String(prepared.queued.contactRef), permissionRef: String(prepared.queued.permissionRef),
-          text: String(prepared.queued.summary),
+          text: referenceRecap(current, prepared.queued).summary,
         });
         requireThat(/^[A-Za-z0-9._:-]{1,200}$/u.test(result.receipt), 'channel-receipt', 'Only an opaque bounded delivery receipt may be persisted.');
         receipt = result.receipt;
@@ -122,14 +142,15 @@ export class PrivateChannels {
 
   async recap(root: string): Promise<JsonObject> {
     const snapshot = await this.bots.repository.root(root);
-    const queued = snapshot.streams.memory.filter(f => f.payload.event === 'channel.queued');
-    const delivered = new Set(snapshot.streams.memory.filter(f => f.payload.event === 'channel.outcome'
+    const queued = memoryFrames(snapshot).filter(f => f.payload.event === 'channel.queued');
+    const delivered = new Set(memoryFrames(snapshot).filter(f => f.payload.event === 'channel.outcome'
       && workEvent(f.payload).data.status === 'delivered').map(f => workEvent(f.payload).data.deliveryId));
     return {
       channel: 'imessage', transportAvailable: this.port.available,
-      pending: queued.filter(f => !delivered.has(f.frame_hash)).map(f => ({
-        deliveryId: f.frame_hash, summary: workEvent(f.payload).data.summary!, sources: workEvent(f.payload).data.sources!,
-      })),
+      pending: queued.filter(f => !delivered.has(f.frame_hash)).map(f => {
+        try { return { deliveryId: f.frame_hash, ...referenceRecap(snapshot, workEvent(f.payload).data), available: true }; }
+        catch { return { deliveryId: f.frame_hash, summary: 'Original source work is unavailable; no copied recap is substituted.', sources: [], available: false }; }
+      }),
       automaticReplay: false,
     };
   }

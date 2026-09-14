@@ -189,12 +189,20 @@ export async function runObservedMigration(options = {}) {
       const migrated = final.roots.find(r => r.root === original.definition.root);
       assert.equal(migrated.name, original.definition.name);
       assert.equal(migrated.capability.sha256, original.definition.capability.sha256);
+      for (const source of original.sources ?? []) {
+        const preserved = migrated.sources.find(s => s.scope === source.scope && s.guid === original.definition.root && s.stream_id === source.stream);
+        assert(preserved, 'An original scoped stream disappeared from the public projection');
+        assert.equal(preserved.head.frame_hash, source.frames.at(-1).frame_hash);
+        for (const branch of source.branches) assert(preserved.branches.some(b => b.head === branch.head && b.frames === branch.frames.length));
+      }
       for (const [relative, originalBytes] of fixture.sourceByItem.get(fixture.plan.items.find(i => i.kind === 'canonical-root' && i.root === original.definition.root).id).files) {
         const actual = await readFile(path.join(destination, 'bots', original.definition.root.split(':').at(-1), relative));
         assert(actual.equals(originalBytes), `Source occurrence bytes changed: ${relative}`);
       }
     }
     assert.equal(final.roots.find(r => r.root === fixture.roots[1]).hidden, true);
+    assert.equal(final.roots.reduce((n, r) => n + r.sourceOwnership.legacyRootStream, 0), 1);
+    assert(final.roots.every(r => r.sourceOwnership.copiedCentralActivity === false));
     const visibleAdds = record.displays.flatMap(d => d.additions);
     assert.equal(new Set(visibleAdds.filter(a => a.kind === 'root').map(a => a.id)).size, 2);
     assert.equal(new Set(visibleAdds.filter(a => a.kind === 'world').map(a => a.id)).size, fixture.plan.expected.forms.world);
@@ -244,6 +252,9 @@ export async function runObservedMigration(options = {}) {
       passiveClient: 'separately launched next/test/migration-consumer.mjs', providerModelCalls: 0, uiImplemented: false,
       expected: fixture.plan.expected, actual: final.counts, rootGuids: fixture.roots, canonical,
       exactOriginalFrameBytesPreserved: true, hiddenRootPreserved: true, fullHiddenScopesAndForms: true,
+      originalScopedStreamsPreserved: fixture.snapshots.reduce((n, r) => n + (r.sources?.length ?? 0), 0),
+      originalSourceBranchesPreserved: fixture.snapshots.reduce((n, r) => n + (r.sources ?? []).reduce((n, s) => n + s.branches.length, 0), 0),
+      legacySourceOccurrencesHonestAndUnchanged: 1, copiedCentralActivity: false,
       sourceWrites: 0, sourceMoves: 0, sourceDeletes: 0,
       sourceFilesCompared: Object.values(before).filter(e => e.type === 'file').length,
       sourceDirectoriesCompared: Object.values(before).filter(e => e.type === 'directory').length,

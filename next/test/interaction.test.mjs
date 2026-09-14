@@ -5,6 +5,7 @@ import { findRoot } from '../dist/bots.js';
 import { canonicalContext } from '../dist/conversation.js';
 import { foldState } from '../dist/state.js';
 import { harness, inventory, durableText, readFixture } from './harness.mjs';
+import { memoryFrames, sourceChain } from '../dist/source-memory.js';
 
 test('incomplete thought -> complete public review -> atomic confirmed organization -> restart without model replay', async () => {
   const h = await harness();
@@ -176,15 +177,15 @@ test('correction appends a successor, retains original bytes, and refuses depend
   await h.runtime.conversation.confirm(a.root, proposal.proposalWave, 'builder-confirm');
   const applied = (await h.runtime.bots.repository.root(a.root)).streams.memory.at(-1);
   await h.runtime.conversation.recordProgress(a.root, 'copilot-builder', 'Draft completed.', [applied.frame_hash], 'draft-progress');
-  const progress = (await h.runtime.bots.repository.root(a.root)).streams.memory.at(-1);
+  const progress = sourceChain(await h.runtime.bots.repository.root(a.root), 'copilot-builder').at(-1);
   const original = canonicalJson(progress);
   await assert.rejects(h.runtime.conversation.undo(a.root, applied.frame_hash, 'Would orphan dependent work', 'invalid-undo'), { code: 'scope-dependency' });
   const projection = await h.runtime.conversation.undo(a.root, progress.frame_hash, 'Correct the draft status', 'undo-progress');
   assert.equal(projection.progress.length, 0);
   assert(projection.outcomes.find(o => o.source.frame_hash === progress.frame_hash).corrected);
   const snapshot = await h.runtime.bots.repository.root(a.root);
-  assert.equal(canonicalJson(snapshot.streams.memory.find(f => f.frame_hash === progress.frame_hash)), original);
-  assert.equal(snapshot.streams.memory.at(-1).payload.event, 'state.corrected');
+  assert.equal(canonicalJson(memoryFrames(snapshot).find(f => f.frame_hash === progress.frame_hash)), original);
+  assert.equal(sourceChain(snapshot, 'copilot-builder').at(-1).payload.event, 'state.corrected');
   assert.deepEqual(await (await h.restart()).bots.project(a.root), projection);
   await assert.rejects(h.runtime.conversation.undo(a.root, proposal.proposalWave, 'Cannot erase dialogue', 'undo-turn'), { code: 'correction' });
 });

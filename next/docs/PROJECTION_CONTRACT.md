@@ -15,13 +15,18 @@ The projection contains:
   source stream/sequence/UTC/particle/wave and optional reply binding;
 - review proposals, resolved/superseded human questions, internal artifacts,
   native pointers, recurring work, progress, outcomes and attention;
-- original canonical heads and explicitly unselected preserved branch heads.
+- original canonical heads and explicitly unselected preserved branch heads,
+  including source scopes' own streams and branches;
+- exact original GUID/scope/stream/particle/wave `origin` references on turns,
+  outcomes, progress and attention, with honest historical ownership grades.
 
 Cross-bot turns are included only through verified, signed, scoped request and
 response occurrences. Full private peer memory is not merged into the view.
 Canonical UTC/wave ordering does not rewrite the original stream order, sequence,
 parent particle, wave link or identity. Disagreements and unknowns remain public;
 synthesis is always `consensus:false` and `actions:review-required`.
+New synthesis retains only its caller's authored public work plus a reference
+to the peer's signed original; peer dissent is not copied into caller memory.
 
 Projection, selection, observer status and Where-were-we are non-authoritative
 read-only views. Consuming a projection adds no event and runs no model.
@@ -46,6 +51,10 @@ The UI must subscribe and transform around canonical AI work, rather than turn
 these fields into a parallel control plane. A test-only render-model reducer
 proves real-time transitions, conflict visibility and restart equivalence.
 The UI implementation is still deferred.
+Global Estate/Librarian focus and evidence cards reference source-owned work
+without becoming its owner. Source-head vectors preserve causal cuts across
+independent streams, not a central copied activity order. See
+`SOURCE_OWNERSHIP.md` and the source-reference/source-cursor machine contracts.
 
 ## Passive Catch me up / optional guest replay
 

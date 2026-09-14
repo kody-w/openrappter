@@ -1,13 +1,14 @@
 import { AUTHORITY, canonicalJson, snapshotJson, type JsonObject, type RappFrame } from './canonical.js';
 import { workEvent } from './contract.js';
 import { requireThat } from './errors.js';
-import { reference } from './projection.js';
+import { publicWorkText, reference } from './projection.js';
 import type { RootSnapshot } from './repository.js';
 import { foldState, permittedScopes } from './state.js';
 import {
   AI_LIMITS, AI_PROJECTION_SCHEMA, grantData, publicationData, publicationKind, publicationRight,
   type ClientGrant, type PublicationData, type PublicationKind, type ViewIntent,
 } from './ai-contract.js';
+import { memoryAtCursor, memoryCursor, memoryFrames, sourceReference } from './source-memory.js';
 
 export interface PublishedRecord {
   frame: RappFrame;
@@ -21,7 +22,7 @@ export function publishedRecords(root: RootSnapshot): PublishedRecord[] {
   const publications: PublishedRecord[] = [];
   const scopes = foldState(root).scopes;
   const priorViews = new Map<string, PublishedRecord>();
-  for (const frame of root.streams.memory) {
+  for (const frame of memoryFrames(root)) {
     const e = workEvent(frame.payload);
     if (e.event === 'client.granted') {
       const data = grantData(e.data);
@@ -57,7 +58,7 @@ export function publishedRecords(root: RootSnapshot): PublishedRecord[] {
 
 export function scopedFrames(root: RootSnapshot, scope: string): Map<string, RappFrame> {
   const permitted = permittedScopes(foldState(root).scopes, scope);
-  const frames = root.streams.memory.filter(f => permitted.has(String(f.payload.scope)));
+  const frames = memoryFrames(root).filter(f => permitted.has(String(f.payload.scope)));
   if (scope === 'root') frames.push(...root.streams.body, ...root.streams.swarm);
   return new Map(frames.map(f => [f.frame_hash, f]));
 }
@@ -99,22 +100,17 @@ export function viewFrontier(records: readonly PublishedRecord[]): PublishedReco
 }
 
 export function cursorFor(root: RootSnapshot): JsonObject | null {
-  const frame = root.streams.memory.at(-1);
-  return frame ? reference(frame) : null;
+  return memoryCursor(root);
 }
 export function atCursor(root: RootSnapshot, cursor: unknown): RootSnapshot {
-  if (cursor === null) return { ...root, streams: { ...root.streams, memory: [] } };
-  const candidate = snapshotJson(cursor) as JsonObject;
-  const found = root.streams.memory.find(f => canonicalJson(reference(f)) === canonicalJson(candidate));
-  requireThat(found, 'cursor-invalid', 'The reconnect cursor must match an exact occurrence in this root’s canonical memory stream.');
-  return { ...root, streams: { ...root.streams, memory: root.streams.memory.slice(0, found.seq + 1) } };
+  return memoryAtCursor(root, cursor);
 }
 
 export function projectAi(root: RootSnapshot, scope: string): JsonObject {
   const state = foldState(root);
   const allowed = permittedScopes(state.scopes, scope);
   const records = publishedRecords(root).filter(r => allowed.has(r.scope));
-  const visible = root.streams.memory.filter(f => allowed.has(String(f.payload.scope)));
+  const visible = memoryFrames(root).filter(f => allowed.has(String(f.payload.scope)));
   const turnFrames = visible.filter(f => ['turn.user', 'turn.assistant', 'collaboration.synthesized', 'client.conversation'].includes(String(f.payload.event)));
   const byWave = new Map(records.map(r => [r.frame.frame_hash, r]));
   const turns = turnFrames.slice(-AI_LIMITS.windowItems).map(frame => {
@@ -123,11 +119,11 @@ export function projectAi(root: RootSnapshot, scope: string): JsonObject {
     return {
       bot: root.definition.root, role: e.event === 'turn.user' ? 'user' : 'assistant',
       actor: client ? client.data.actor : { id: e.event === 'turn.user' ? 'human' : root.definition.root, name: e.event === 'turn.user' ? 'Human' : root.definition.name, provider: 'canonical-core' },
-      text: client ? client.data.content.text! : e.data.text!, source: reference(frame),
+      text: client ? client.data.content.text! : publicWorkText(frame), source: reference(frame), origin: sourceReference(frame),
     };
   });
   const contribution = (kind: PublicationKind): JsonObject[] => records.filter(r => r.kind === kind)
-    .slice(-AI_LIMITS.windowItems).map(r => ({ actor: r.data.actor, content: r.data.content, source: reference(r.frame), causes: r.data.causes }));
+    .slice(-AI_LIMITS.windowItems).map(r => ({ actor: r.data.actor, content: r.data.content, source: reference(r.frame), origin: sourceReference(r.frame), causes: r.data.causes }));
   const heads = viewFrontier(records);
   const candidates = heads.map(r => {
     let valid = true;
@@ -141,6 +137,10 @@ export function projectAi(root: RootSnapshot, scope: string): JsonObject {
     schema: AI_PROJECTION_SCHEMA, root: root.definition.root, name: root.definition.name, scope,
     authority: { ...AUTHORITY, factualTruth: false, clientAssurance: 'root-signed-scoped-capability-attribution' },
     cursor: cursorFor(root),
+    sources: (root.sources ?? []).filter(s => allowed.has(s.scope)).map(s => ({
+      guid: root.definition.root, scope: s.scope, stream_id: s.stream,
+      head: s.frames.length ? reference(s.frames.at(-1)!) : null, branches: s.branches.map(b => b.head),
+    })),
     scopes: state.scopes.filter(s => allowed.has(s.id)).map(s => ({ id: s.id, parent: s.parent, name: s.name, kind: s.kind })),
     artifacts: [...state.artifacts.values()].filter(a => allowed.has(String(a.scope))).map(a => ({
       id: a.id!, scope: a.scope!, name: a.name!, mediaType: a.mediaType!, contentHash: a.contentHash!, source: a.source!,
@@ -170,6 +170,6 @@ export function publicHistoryFrame(frame: RappFrame): JsonObject {
   const e = workEvent(frame.payload);
   const publicKinds = ['turn.user', 'turn.assistant', 'collaboration.synthesized', 'work.progress', 'routine.tick',
     'client.conversation', 'client.activity', 'client.evidence', 'client.attention', 'client.view'];
-  return { source: reference(frame), event: e.event, scope: e.scope,
+  return { source: reference(frame), origin: sourceReference(frame), event: e.event, scope: e.scope,
     frame: publicKinds.includes(e.event) ? snapshotJson(frame) : null, controlRecord: !publicKinds.includes(e.event) };
 }

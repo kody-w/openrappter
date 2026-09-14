@@ -1,8 +1,71 @@
 # Verified headless milestones
 
+## Current source-owned lifecycle milestone
+
+`npm --prefix next run check` passes strict typecheck/build, **93 core tests**
+with zero failures/skips, and every mandatory headless/projection/migration/
+browser/replay/source-ownership gate. `npm test --workspace @rapp-work/rapp1`
+passes **90 adopted primitive tests**. The retained legacy absence and release
+constitution both pass at unchanged `d8601aa91c10f3330ea10b7fa31382137d981dfd`.
+Their current whole-tree invocations still refuse eight intentional canonical/
+target-owned Python files; no legacy rule or allowlist is relaxed.
+
+New-source proof: **21 signed frames across 9 streams**, including a retained
+source branch, pass the exact rev-15 checker. The independent canonical Python
+digest checker verifies **16 reconstructed state checkpoints** and every
+original source reference. Fifteen passive events show source-attributed
+activity and Global Estate/Librarian reference transforms. Unique world exhaust
+appears once, never in a copied root/recap/peer journal. Frames-only restart,
+same-UTC authority, independent source clocks, scoped review freshness,
+correction/approval ownership and initial-write fault/idempotency tests pass.
+
+The updated observed migration gate launches the **new application** and
+separate passive process: **23 items, 2 exact root GUIDs, 44 internal scopes,
+21 pointers, 4 artifacts and 2 preserved branches**. Two original scoped streams,
+one source branch and one honestly labeled legacy centralized occurrence remain
+byte-identical. **113 signed frames across 17 streams** check `COMPLIANT`:
+39 active, 73 control/staging and 1 retained unpublished rollback frame.
+All **45 source files and 36 directories** remain unchanged. The client captures
+99 events, all 23 items and all 10 world scopes. Restart, interruption/resume,
+deduplication and incomplete-only rollback pass.
+
+The current headless proof still checks 38 signed frames (now 10 source-aware
+streams); provider-neutral proof checks 25. Catch-me-up/guest proof checks 10
+rooted + 13 broker-source frames and independently verifies 20 state/4 guest
+digests. Replay makes no model/tool call, capture or canonical mutation.
+
+Persistent evidence:
+
+- `verification/source-ownership.json` — exact commands, results, source
+  references, earlier use-case reruns, skill hash and remaining blockers.
+- `verification/source-owned-observed-migration.json` — current API-only
+  migration/zero-source-write proof and source evidence paths.
+- `verification/source-owned-migration-replay.html` — actual observed log,
+  **1,331,968 bytes**, SHA-256
+  `70dffe3e6ebff1ef37267e40a1d25c960d3d8723b2fca486e5ca50924187b1c5`.
+- `verification/source-owned-replay-browser.json` — the delivered file itself
+  cold-loaded and offline-reloaded in isolated existing Playwright/system Chrome:
+  light/dark, 1280/390 widths, every control twice, keyboard operation, zero
+  errors/network/overflow. All four screenshots were visually inspected.
+
+The portable instruction-only skill is updated byte-identically to version
+0.3.0 and passes the RAPP Skills checker. SHA-256:
+`d37f78ed678c83c2199bf1f0b80e75cdb0c102d6fa1fd324ff854e92777d8e52`.
+No application/dependency installation or live-profile mutation occurred.
+
+**Still release-blocking:** approved controlled-local migration under adopted
+source/domain/signer authority, verified external Brainstem/SDK hosting,
+independent release qualification and applicable optional transport/capture
+permissions. Hard-kill stale-lock recovery is not claimed. The requested
+reference agent was contacted again; no undelivered result is claimed as
+incorporated. See `SOURCE_OWNERSHIP.md` and `CONTROLLED_LOCAL_MIGRATION.md`.
+
+The sections and committed receipts below are **historical milestone evidence**,
+not replacements for the current results above.
+
 ## Catch me up / private Omarchy replay gate
 
-The complete suite now passes **83 tests**, strict typecheck/build and all prior
+At `61b084b`, the complete suite passed **83 tests**, strict typecheck/build and all prior
 migration/browser gates, plus the mandatory Catch me up gate. The separate
 adopted primitive suite still passes 90 tests.
 
@@ -31,7 +94,7 @@ independent pins and state-vs-presentation separation.
 
 ## Observed migration/display release gate
 
-The current complete check passes **70 tests** (65 previous tests plus five
+At `3b29dc3`, the complete check passed **70 tests** (65 previous tests plus five
 migration acceptance/boundary tests), strict typecheck/build, and all prior
 canonical gates. The migration gate launches the **new application** and a
 separate passive projection process against an initially empty isolated profile.
@@ -69,7 +132,7 @@ the old implementation stay untouched. See `MIGRATION_RELEASE_GATE.md`,
 
 ## Provider-neutral projection extension
 
-The complete new-core run now passes **65 tests** (18 provider-neutral additions
+At `12ceaa5`, the complete new-core run passed **65 tests** (18 provider-neutral additions
 plus 47 previous tests), strict typecheck/build and all canonical gates.
 `scripts/ai-projection-proof.mjs` scans **25 signed emitted frames** for one root
 with six provider labels plus separate observer/resolver clients. The exact

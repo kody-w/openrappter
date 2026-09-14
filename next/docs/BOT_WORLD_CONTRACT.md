@@ -25,3 +25,9 @@
    new app archive. GODD/DOGG/both is the only domain pivot. Without adopted
    signed domain declarations and closure/transport bindings, transfer refuses.
    No frame selection, data transformation or reminting is allowed.
+10. All new work exhaust belongs to its original internal source scope and
+    canonical stream. Global Estate, Librarian, collaboration, iMessage recap
+    and Catch-me-up only project references across those streams. Preserve the
+    original full root GUID, scope, hashes and branches; never centralize copies
+    of activity. Existing centralized bytes remain explicitly historical.
+    Source scope IDs are not newly minted world GUIDs. See `SOURCE_OWNERSHIP.md`.

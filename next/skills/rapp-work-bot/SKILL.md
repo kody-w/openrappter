@@ -5,7 +5,7 @@ compatibility: "Any AI host that can read this file and call MCP stdio or newlin
 metadata:
   api: "rapp-work.ai-projection/1"
   protocol: "RAPP/1 rev-15"
-  version: "0.2.0"
+  version: "0.3.0"
   authority: "instructions-only; exact-root-capability-required"
 ---
 
@@ -146,6 +146,21 @@ your publications. You do the AI work in your current host.
    canonical state. Publish activity first to obtain the signed source wave
    used by a progress/card reference. The UI is a disposable subscriber.
 
+## Source-owned work
+
+Publish action exhaust with the **exact authorized internal `scope` where it
+happened**. The original full root GUID + internal scope + canonical stream is
+the source identity; scope names/hashes are not new world GUIDs. Never remint,
+copy, centralize or silently relocate work into root/Librarian/Global Estate.
+
+Global Estate/Librarian focus, collaboration, iMessage recap and Catch-me-up
+reference original source frames. `view.focus` changes presentation, not the
+event's owner. A root-authorized view can display references across its worlds;
+a child-scoped capability cannot acquire sibling authority through a view name.
+Keep original GUID/scope/stream/particle/wave references and unselected branches.
+Historical `legacy-root-stream` records remain byte-identical and historical.
+Recap text is derived transiently, never copied into a new activity store.
+
 Publication shapes:
 
 ```json
@@ -222,6 +237,10 @@ For MCP, read that resource for the initial event, use `resources/subscribe`,
 and respond to `notifications/resources/updated` with `resources/read`.
 For native stdio, `event` messages arrive alongside request responses.
 Events contain the root-bound canonical cursor and reconstructed snapshot.
+Multi-source cursors are causally closed vectors of original heads/branches.
+Retain the complete returned cursor verbatim; never replace it with a summed
+sequence number, wall-clock timestamp or guessed last event. Original source
+`origin` references accompany public work. Independent source clocks can differ.
 
 Keep the last **applied** cursor. On reconnect, supply it for bounded replay;
 do not rerun models or tools to reconstruct the UI. A lost local UI cache is

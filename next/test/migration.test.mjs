@@ -36,7 +36,11 @@ test('a complete observed estate migration launches the new application and pass
   assert.equal(result.evidence.destinationWritesByHarness, 0);
   assert.equal(result.evidence.unpublishedMaterializationFaultExercised, true);
   assert.equal(result.evidence.serviceAndProjectionRestartIdentical, true);
-  assert.equal(result.evidence.sourceFilesCompared, 43);
+  assert.equal(result.evidence.sourceFilesCompared, 45);
+  assert.equal(result.evidence.actual.branches, 2);
+  assert.equal(result.evidence.originalScopedStreamsPreserved, 2);
+  assert.equal(result.evidence.originalSourceBranchesPreserved, 1);
+  assert.equal(result.evidence.legacySourceOccurrencesHonestAndUnchanged, 1);
   assert(result.evidence.sourceDirectoriesCompared > 0);
   assert(result.evidence.canonical.framesScanned > 0);
   assert.equal(result.evidence.canonical.verdict, 'COMPLIANT');

@@ -37,7 +37,7 @@ empty destination and mutates it in response to public stdio operations.
 
 - 2 existing compatible, signed canonical root fixtures, retaining their original
   full GUIDs, one hidden root, complete scopes, memories, artifacts, capability
-  references and a branch;
+  references, scoped source streams and both root/source branches;
 - 14 selected Workspace Manager pointers: manager, Global Estate, Monorepo,
   Copilot Builder, Microsoft CEO, LLC Autofile, LLC Private, RAPP, RAR,
   ambient-context, AIdeate, herdr, Copilot Harness SDK and RAPP Factory;
@@ -51,10 +51,12 @@ existing legacy Work payloads have become compatible. Unsupported source
 profiles remain pointers; they are never reinterpreted or rewritten.
 
 The full fixture has **23 items, 2 root GUIDs, 44 scoped organs, 21 pointers,
-4 canonical artifacts and 1 branch**. All requested recursive forms occur:
+4 canonical artifacts and 2 branches**. All requested recursive forms occur:
 worlds/workspaces, one Librarian/root, agents, Twins, neighborhoods, factories,
 rapplications, tasks, routines, memories, artifacts and evidence. The 10 world
 scope occurrences and every selected item are observed in the live display log.
+The source fixture now also includes an explicitly historical centralized scope
+occurrence; it remains byte-identical and is never relabeled source-owned.
 
 ## Public migration API
 
@@ -95,7 +97,9 @@ canonical tree, appends one signed successor migration receipt to that root's
 original memory head, fsyncs, then atomically renames the complete tree into
 the active bot catalog. All original source files remain byte-identical.
 Pointers append ordinary canonical successor events with original provenance,
-classification and source identity; they do not copy native private content.
+classification and source identity in the exact target source scope's stream;
+they do not copy native private content or emit a duplicate central activity.
+Complete scoped frame/branch directories are part of the approved byte closure.
 
 An aborted unpublished tree is retained as evidence and is not an active bot.
 Rollback appends canonical correction/control evidence, never a deletion.
@@ -128,6 +132,9 @@ The executable gate verifies:
 12. The actual delivered replay is cold-loaded and reloaded offline with zero
     page/resource/network errors, both themes, desktop/mobile widths, keyboard
     controls and repeated playback/reset/seek interactions.
+13. Source scope heads/branches and legacy ownership are reconstructed from
+    original frames. Global Estate/Librarian/recap/Catch-up may reference these
+    streams, never replace them with a copied activity store.
 
 ## Evidence
 

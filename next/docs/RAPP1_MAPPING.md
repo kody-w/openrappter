@@ -35,12 +35,20 @@ Normative text SHA-256:
 | Migration display proof | Real application cursor events consumed by a separate passive process; static replay is an observed test artifact, not UI authority |
 | Catch me up | Pure projections of exact canonical cursor ranges, with source wave hashes and state/page digests in existing `rapp/1:particle`; no replay store or execution |
 | Optional guest replay | Existing canonical ComputerBroker intent/outcome/evidence and artifact receipts, plus separately selected private capture policy/safety authority; guest pixels recorded, command/diff views reconstructed, absence unavailable |
+| Source-owned action exhaust | Existing root-signed memory streams, one exact original internal scope per new stream; no duplicated central journal |
+| Global Estate/Librarian/recap/collaboration continuity | References to original source GUID/scope/particle/wave and branches, resolved transiently |
+| Multi-source cursors | Exact canonical source head and branch references; causally closed cuts and set-difference replay, not a new global clock/store |
+| Historical centralized exhaust | Original immutable root-memory bytes, explicitly `legacy-root-stream`; no transformation or retroactive reassignment |
 
 Application event names live **inside** payloads. They are not new frame kinds,
 wire fields, protocol registries, or protocol versions. The frame remains exactly
 the canonical eleven keys. A body frame cannot be replayed on a memory or swarm
 stream. Each bot's keyed signer must match its full root identity; another
 otherwise trusted registry key cannot impersonate it.
+
+The source key is an existing particle digest used only as a disk locator.
+The full original root RAPPID plus exact internal scope remains the identity;
+no world GUID is derived or reminted for logging. See `SOURCE_OWNERSHIP.md`.
 
 ## Deliberate adoption, not compatibility
 

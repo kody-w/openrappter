@@ -34,6 +34,7 @@ transformed, adopted or written.
 | Source protection | Full source file/directory inventories unchanged; no native private-content import; unavailable archives stay honest pointers |
 | Display evidence | Captured canonical cursor/event log and self-contained replay exercised offline in both themes and desktop/mobile widths |
 | Catch me up | Deterministic scoped frame/cursor timeline; recorded/reconstructed/unavailable grades, exact source hashes and independently verified state/page digests; no model/tool calls, mutation or hidden reasoning |
+| Source-owned exhaust | Exact original root GUID/scope/stream for each action; no central copied activity/recap/peer dissent; causal source vectors, scoped branches, legacy honesty and frames-only rebuild |
 | Optional Omarchy replay | Opt-in GODD/private canonical ComputerBroker evidence only; recorded guest frame bytes, reconstructed command/diff summaries, unavailable absence; no host screen/secrets/keystrokes or execution |
 | Canonical authority | Exact current rev-15 checkpoint, complete sixteen-frame bootstrap verification and frozen registry agreement |
 | Emitted data | Nonzero emitted frames scanned by the exact reference checker; signed collaboration included, `COMPLIANT`, no findings |

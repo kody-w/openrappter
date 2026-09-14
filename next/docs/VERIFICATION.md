@@ -1,6 +1,21 @@
 # Verified headless milestones
 
-## Current independent review follow-up
+## Unattended recurrence follow-up
+
+The complete `npm --prefix next run check` passes **133 tests**, strict
+typecheck/build and every existing gate. Six focused scheduler regressions
+prove immediate startup catch-up without a user `work.tick` request, exact
+source-owned canonical occurrence claims, durable lease fencing across process
+restart, concurrency convergence, lost-acknowledgement deduplication, hidden
+root/fork fencing and explicit signed-root owner custody. A pending external
+request remains unapproved and no model, channel or effect adapter is invoked.
+
+The scheduler runtime sibling contains only bounded owner-only lease records.
+All reviewed routines, due reconstruction, occurrence receipts and outcomes
+remain canonical RAPP/1 frames. No provider API, transcript projection, release
+workflow, live credential or live profile was changed or exercised.
+
+## Prior independent review follow-up
 
 All five findings against `907f743` are fixed. Six deterministic red
 reproductions first demonstrated the failures; eight focused regressions now
@@ -360,10 +375,12 @@ unchanged; `next/` still requires its own release constitution before cutover.
 The immutable external Brainstem was not modified, imported or launched. Actual
 root-isolated hotload, authenticated memory-only SDK hosting, persistent signer
 custody, signed rooted domain/Hive adoption and optional local iMessage
-permission/contact bridge remain integration gates. The recurring capability is
-a bounded canonical recap, not an arbitrary scheduler/executor or installed
-daemon. Whole-store rollback and hostile same-UID mutation require independent
-signed checkpoints/enforced isolation before production.
+permission/contact bridge remain integration gates. The owner-launched
+recurrence process is limited to the bounded canonical recap and is not an
+arbitrary scheduler/executor or automatically installed service. Production
+service-manager installation and persistent signed-root signer custody remain
+owner integration work. Whole-store rollback and hostile same-UID mutation
+require independent signed checkpoints/enforced isolation before production.
 
 No push, merge, publication, dependency installation, application installation,
 live bot/provider profile mutation or UI implementation was performed. The

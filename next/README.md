@@ -78,6 +78,27 @@ preflight generations, batch deferral, quiet/rate bounds and restart recap are
 canonical; no uncertain send is replayed. Live TCC/contact setup stays disabled.
 See [the channel contract](docs/CHANNEL_CONTRACT.md).
 
+## Unattended recurring work
+
+Reviewed `canonical-recap` routines can run without a caller issuing
+`work.due`/`work.tick`. An owner launches the separate scheduler with an exact
+root allowlist:
+
+```sh
+npm --prefix next run build
+node next/dist/scheduler-cli.js --store next/.state \
+  --root "<full canonical RAPPID>"
+```
+
+The process performs an immediate restart catch-up scan, then polls. Bounded
+same-user lease records live only in `<store>.scheduler/`; canonical routines,
+occurrence claims and outcomes remain in the original source-owned RAPP/1
+streams. Hidden or forked roots are fenced, concurrent processes converge on
+the same deterministic occurrence receipt, and no model, provider, delivery or
+external approval is invoked. Signed roots require signer custody injected by
+the trusted owner host; the packaged process does not discover live credentials.
+Use `--once` for an owner-managed timer/service invocation.
+
 ## Development
 
 Node 22.12+; pinned development dependencies and Copilot SDK are declared in this
@@ -97,6 +118,7 @@ Run the CLI/stdio boundary:
 ```sh
 node next/dist/cli.js --store next/.state --id create-my-bot bots.create '{"name":"My Work"}'
 node next/dist/cli.js --store next/.state stdio
+node next/dist/scheduler-cli.js --store next/.state --root "<full canonical RAPPID>"
 ```
 
 This creates a canonical local root, not a live model session. Real provider,

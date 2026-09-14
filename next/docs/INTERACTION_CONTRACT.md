@@ -13,6 +13,9 @@ node next/dist/cli.js --store next/.state --id create-my-bot \
   bots.create '{"name":"My Work"}'
 
 node next/dist/cli.js --store next/.state stdio
+
+node next/dist/scheduler-cli.js --store next/.state \
+  --root "<full canonical RAPPID>"
 ```
 
 The store must have an existing real parent, be dedicated to canonical state,
@@ -140,16 +143,38 @@ are shown together. The initial bounded operation is `canonical-recap`;
 arbitrary work is not silently translated into a claim of successful execution.
 Monday **09:00 UTC** is explicit and reviewable, not an inferred timezone.
 
-The routine is an internal organ. `work.tick` reads canonical context first and
-appends a reversible, evidence-grounded recap. It makes **zero model calls**
-and cannot send messages or execute arbitrary instructions. Repeating a tick
-does not repeat work. Hidden roots have no due work. The backlog is bounded.
+The routine is an internal organ. Its canonical occurrence claim reads scoped
+canonical context first and appends one reversible, evidence-grounded
+`routine.tick` in the routine's original source stream. It makes **zero model
+calls** and cannot send messages, approve effects or execute arbitrary
+instructions. The claim operation ID is derived from the exact root, routine
+and scheduled UTC occurrence, so concurrent execution and lost acknowledgements
+resolve to the same canonical receipt. The backlog is bounded.
 
-There is no installed daemon or host scheduler in this milestone. A permitted
-scheduler can invoke this same hidden tick boundary; a standalone observation
-or restart does not start a catch-up model run. A running external model that
-ignores cancellation is reported as **quiescing**, not falsely called dormant;
-that root is fenced against a replacement call until it settles.
+`scheduler-cli.js` is a separate, opt-in owner process rather than a public
+stdio method. Launch requires an explicit canonical store and exact root
+allowlist. The owner-only store plus that allowlist authorizes unsigned local
+roots; a signed root additionally requires its exact signer to be injected into
+the trusted scheduler host. The packaged non-fixture process does not discover
+or load signer credentials. `--fixture` remains synthetic test material only.
+
+The scheduler runs one catch-up scan immediately at startup, then polls. It
+keeps bounded durable per-root leases in the same-user 0700 sibling
+`<store>.scheduler/`; those files coordinate processes only and never contain
+schedule state, work outcomes or authorization to change canonical history.
+After a crash, an unexpired lease fences a replacement until its bounded expiry;
+the replacement then reconstructs every still-due occurrence from canonical
+frames. Hidden roots are skipped. Any unresolved retained fork or unselected
+head fences that root without changing canonical bytes. The canonical
+transaction lock and deterministic occurrence receipt remain the final
+idempotency boundary even if process leases overlap at expiry.
+
+`work.due` and `work.tick` remain available for inspection, diagnostics and
+explicit recovery, but normal recurrence no longer depends on a caller issuing
+either request. A standalone observation or scheduler restart never starts a
+model run. A running external model that ignores cancellation is reported as
+**quiescing**, not falsely called dormant; that root is fenced against a
+replacement call until it settles.
 
 ## Explicit fixture dogfood
 

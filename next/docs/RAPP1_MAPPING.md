@@ -17,6 +17,7 @@ Normative text SHA-256:
 | Continuity and attention | Reconstruction of verified frames; no secondary store |
 | Clear / restore | Successor visibility particles; same root and history |
 | Corrections / undo | Successor correction particles; original evidence remains |
+| Unattended recurring recap | Owner-launched operational scheduler lease plus deterministic root/routine/UTC operation ID; completed work is one source-owned `memory.tool-call`, never lease state |
 | Cross-bot public requests and perspectives | Signed `swarm.guidance` / `swarm.echo`, original roots and stream ancestry |
 | Read-only transcript projection | Canonical Dream Catcher ordering (UTC then wave), distinct GUID speakers |
 | Native AI estate | Inert canonical evidence referencing native handles; no copied native schema/store |

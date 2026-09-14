@@ -13,6 +13,12 @@ CLI / stdio / future passive projection
                   ↓
  rev-15 authority + adopted wire/crypto primitives
 
+owner-launched recurrence scheduler
+        ↓ exact root allowlist + durable operational lease
+ recurring canonical-recap boundary
+        ↓ deterministic occurrence operation ID
+ same canonical frame repository
+
 outbound ports: Copilot SDK, shared Brainstem, estate pointers,
                explicit external effects, private channels, canonical Hive
 ```
@@ -80,6 +86,14 @@ visibility, conversation, internal scopes, routine state and attention are
 reconstructed projections. All hashes, signatures, kinds, sequences, predecessor
 particles and wave links are verified before use.
 
+The optional recurrence process has one non-authoritative operational sibling,
+`<store>.scheduler/`, containing only bounded same-user per-root lease records.
+It is not a schedule, claim or outcome database. Reviewed routines and completed
+occurrences remain canonical source-owned frames. Startup reconstructs due work
+from those frames, so restart catch-up does not replay a model or trust lease
+contents as application state. Exact root allowlisting and available root signer
+custody authorize the process; leases only fence competing scheduler hosts.
+
 One reviewed internal operation publishes one complete successor frame. A
 private process-shared lock serializes read/compare/append. A fsynced staged file
 is published by non-overwriting hard link, its staging link is removed, and the
@@ -87,6 +101,10 @@ directory is fsynced. Durable frame files are never unlinked or replaced. A lost
 acknowledgement is resolved by the canonical operation receipt, not re-execution.
 An interrupted writer, incomplete root, stream gap, unknown file, invalid frame
 or stale expected head refuses; no lock stealing or history “repair” occurs.
+Recurring claims use the exact root/routine/occurrence tuple for that receipt.
+Hidden roots and unresolved retained forks cannot produce scheduler successors.
+No scheduler path enters provider, transcript, channel-delivery or external
+effect approval code.
 
 Private iMessage transport custody is a separate strict same-user runtime
 sibling, not product state or an Egg component. Only an opaque reference and

@@ -15,6 +15,7 @@ are historical implementation evidence, not authority over the new root data.
 | `domain-authority/rapp_hive.py` and `bundle.py` | Structural labels are not signed authority; use existing registry/acceptance and exact-byte protection boundaries |
 | `greenfield-rooted-estate-contracts/README.md` and associated contracts/matrix, frozen at `68923b4c326fcaf26fad59fa1b87c91d1890802f` | Full original body-stream GUID; complete recursive estate; byte-identical Egg; explicit unavailable adoption/domain/code/shared-runtime bindings, not imported app schemas or inherited test success |
 | `greenfield-multibot-architecture-b5cec8a.md`, `multibot-review-fixes-validation.json`, and final `source-owned-exhaust-validation.json` through `ef86c6551baa7446648e184f45e8426c5c8185d8` | Source-owned signed GUID exchanges and synthesis references, independent clocks, immutable replay, authority rechecks, bounded headless entry and passive Catch-up; 271 reference frames/6 signed are not new-core acceptance |
+| Private ignored iMessage handoff, frozen at `e36d9116402af87f94f12c40c25015666a1ea2a2` | External non-CLI ingress, exact full-root binding, same-publication clarification markers, private runtime custody, cancellation/preflight/batch reconstruction and separate irreversible delivery; UUID codecs/schemas and historical 318-test/180-frame counts are not adopted |
 
 Current canonical protocol selection was verified independently against
 `kody-w/rapp-1` main: `dda32d741c7218f41443a5bd17eebfe0eae82cb7`, rev-15,

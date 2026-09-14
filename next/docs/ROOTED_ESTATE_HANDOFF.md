@@ -77,12 +77,12 @@ or silently promoted. Greenfield retains its already independently verified
 rev-15 selection at `dda32d741c7218f41443a5bd17eebfe0eae82cb7`, head
 `83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818`.
 
-Private contact/credential/runtime state is not portable truth. Current
-canonical channel records contain inert local binding references, not actual
-private contact or credential material; hashing a reference grants no export
-authority. Transfer remains refused until actual adopted protection and private
-runtime bindings settle that boundary. No old records are filtered or rewritten
-to disguise missing adoption.
+Private contact/credential/runtime state is not portable truth. New channel
+bindings keep all private material in a strict same-user runtime sibling;
+canonical records retain only an opaque root/operation reference and public
+policy. Old contact-bearing test/history records cannot activate delivery.
+Hashing a contact is not a privacy or export grant. Transfer remains refused;
+no old records are filtered or rewritten to disguise missing adoption.
 
 Reference checksums verify handoff-file integrity only. Its compile-only type
 tests and historical app tests are not counted as greenfield behavioral,

@@ -5,6 +5,7 @@ import { requireThat } from './errors.js';
 import { foldState } from './state.js';
 import { publicationData } from './ai-contract.js';
 import { memoryFrames, sourceReference } from './source-memory.js';
+import { questionPending, turnAttribution } from './channel-contract.js';
 
 export interface PublicTurn extends JsonObject {
   role: 'user' | 'assistant';
@@ -13,6 +14,7 @@ export interface PublicTurn extends JsonObject {
   source: JsonObject;
   origin: JsonObject;
   replyTo: string | null;
+  attribution: JsonObject;
 }
 export interface Attention extends JsonObject { kind: string; summary: string; source: string }
 export interface BotProjection extends JsonObject {
@@ -75,12 +77,13 @@ export function projectBot(root: RootSnapshot): BotProjection {
     } else if (event.event === 'turn.user' || event.event === 'turn.assistant' || event.event === 'collaboration.synthesized') {
       const role = event.event === 'turn.user' ? 'user' : 'assistant';
       result.turns.push({ role, speaker: role === 'user' ? 'human' : root.definition.root,
-        text: publicWorkText(frame), source: reference(frame), origin: sourceReference(frame), replyTo: typeof data.replyTo === 'string' ? data.replyTo : null });
+        text: publicWorkText(frame), source: reference(frame), origin: sourceReference(frame), attribution: turnAttribution(frame), replyTo: typeof data.replyTo === 'string' ? data.replyTo : null });
       if (typeof data.replyTo === 'string') settled.add(data.replyTo);
     } else if (event.event === 'client.conversation') {
       const p = publicationData('conversation', data);
       result.turns.push({ role: 'assistant', speaker: root.definition.root,
-        text: `[${p.actor.name} / ${p.actor.provider}] ${String(p.content.text)}`, source: reference(frame), origin: sourceReference(frame), replyTo: null });
+        text: `[${p.actor.name} / ${p.actor.provider}] ${String(p.content.text)}`, source: reference(frame), origin: sourceReference(frame),
+        attribution: { origin: 'ai-client', approvalAuthority: false }, replyTo: null });
     } else {
       result.outcomes.push({ event: event.event, scope: event.scope, data, source: reference(frame), origin: sourceReference(frame), corrected: state.corrected.has(frame.frame_hash) });
       if (typeof data.replyTo === 'string') settled.add(data.replyTo);
@@ -90,6 +93,13 @@ export function projectBot(root: RootSnapshot): BotProjection {
     }
   }
   for (const turn of result.turns) {
+    if (turn.attribution.origin === 'external') {
+      if (!memory.some(f => f.payload.event === 'channel.inbound.reviewed' && workEvent(f.payload).data.sourceWave === turn.source.frame_hash)) {
+        result.attention.push({ kind: 'external-inbox', summary: 'External iMessage input awaits genuine CLI review; it cannot confirm work or answer a gauntlet.',
+          source: String(turn.source.frame_hash) });
+      }
+      continue;
+    }
     if (turn.role === 'user' && !settled.has(String(turn.source.frame_hash))) {
       result.attention.push({ kind: 'incomplete-turn', summary: 'A recorded thought has no completed response. It will not be replayed automatically.',
         source: String(turn.source.frame_hash) });
@@ -116,8 +126,14 @@ export function projectBot(root: RootSnapshot): BotProjection {
       result.attention.push({ kind: e.data.status === 'uncertain' ? 'external-uncertain' : 'external-unavailable',
         summary: 'An explicitly approved external action is unavailable or uncertain; no automatic retry is authorized.', source: frame.frame_hash });
     }
-    if (e.event === 'channel.queued' && !memory.some(f => f.payload.event === 'channel.outcome'
-      && workEvent(f.payload).data.deliveryId === frame.frame_hash && workEvent(f.payload).data.status === 'delivered')) {
+    if (e.event === 'channel.queued' && !memory.some(f => {
+      const data = workEvent(f.payload).data;
+      return (f.payload.event === 'channel.cancelled' && data.deliveryId === frame.frame_hash)
+        || (f.payload.event === 'channel.outcome' && data.status === 'delivered'
+          && (data.deliveryId === frame.frame_hash || (Array.isArray(data.deliveryIds) && data.deliveryIds.includes(frame.frame_hash))));
+    })) {
+      if (e.data.kind === 'question' && Array.isArray(e.data.sourceRefs)
+        && (e.data.sourceRefs as JsonObject[]).some(ref => !questionPending(root, String(ref.frame_hash)))) continue;
       result.attention.push({ kind: 'channel-pending', summary: 'A private-channel recap is pending; an explicit retry may be needed.', source: frame.frame_hash });
     }
   }

@@ -7,6 +7,7 @@ import type { RootSnapshot, StoreSnapshot } from './repository.js';
 import type { ModelProvider, Observation } from './spine.js';
 import { publicationData } from './ai-contract.js';
 import { memoryFrames, sourceReference } from './source-memory.js';
+import { turnAttribution } from './channel-contract.js';
 
 const SCHEMA = 'rapp-work.next/collaboration/1';
 export interface PublicPerspective extends JsonObject {
@@ -242,7 +243,9 @@ export class Collaboration {
           return `[${p.actor.name} / ${p.actor.provider}] ${String(p.content.text)}`;
         })() : publicWorkText(frame);
       return { role, speaker: role === 'user' ? 'human' : String(frame.payload.root),
-        text: publicText, source: reference(frame), origin: sourceReference(frame), replyTo: typeof data.requestWave === 'string' ? data.requestWave : null };
+        text: publicText, source: reference(frame), origin: sourceReference(frame),
+        attribution: frame.kind.startsWith('memory.') ? turnAttribution(frame) : { origin: 'canonical-collaboration', approvalAuthority: false },
+        replyTo: typeof data.requestWave === 'string' ? data.requestWave : null };
     });
   }
 }

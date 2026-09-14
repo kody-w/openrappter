@@ -46,6 +46,7 @@ transformed, adopted or written.
 | Privacy/authority | No cross-root or sibling-scope context leakage, no source/native writes, deny-all SDK tools, no secret/reasoning persistence, no unauthorized effects |
 | Failure/concurrency | Provider/channel outages, non-cooperative cancellation, lost acknowledgements, signed response substitution, concurrent writers, idempotency, correction dependencies |
 | Private transport | Default-off production adapter; synthetic contact, outage recap, retry and idempotency tests |
+| iMessage authority/custody | Owner-only external inbox, no CLI/gauntlet confirmation, same-publication question markers, private same-user runtime sibling, separate delivery approval, cancellation/preflight/batch/rate/DST/restart gates |
 | Domain/Hive | Missing canonical adoption fails closed; no Egg transformation, inference-based classifier, unsigned sharing or identity merge |
 | Provider-neutral publication | Copilot/Claude/Hermes/Scout/Grokbot/future labels publish through identical authenticated root APIs; zero model calls and no native-memory import |
 | Closed projection | Exact existing-scope/reference validation; no HTML/JS/CSS, DOM selectors, coordinates or executable UI; unsupported hints retain useful work |

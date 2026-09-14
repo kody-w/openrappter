@@ -41,14 +41,15 @@ test('private continuity input is contact-bound, idempotent and enters the same 
     { code: 'channel-authentication' });
   assert.deepEqual(await inventory(h.directory), before);
   const orientation = await h.runtime.channels.receive(a.root, { contactRef: contact, messageId: 'where', text: 'Where were we?', fixtureAuthenticated: true });
-  assert.equal(orientation.status, 'orientation');
+  assert.equal(orientation.status, 'pending');
+  assert.equal(orientation.attribution.origin, 'external');
   assert.equal(h.transport.requests.length, 0);
-  assert.deepEqual(await inventory(h.directory), before);
+  assert.notDeepEqual(await inventory(h.directory), before);
   const envelope = { contactRef: contact, messageId: 'message-one', text: 'Create the Builder workspace', fixtureAuthenticated: true };
   const response = await h.runtime.channels.receive(a.root, envelope);
-  assert.equal(response.status, 'review');
+  assert.equal(response.status, 'pending');
   await (await h.restart()).channels.receive(a.root, envelope);
-  assert.equal(h.transport.requests.length, 1);
+  assert.equal(h.transport.requests.length, 0);
   await assert.rejects(h.runtime.channels.receive(a.root, { ...envelope, text: 'Rebind the same transport message ID' }), { code: 'idempotency-conflict' });
 });
 

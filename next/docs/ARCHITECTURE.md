@@ -88,6 +88,14 @@ acknowledgement is resolved by the canonical operation receipt, not re-execution
 An interrupted writer, incomplete root, stream gap, unknown file, invalid frame
 or stale expected head refuses; no lock stealing or history “repair” occurs.
 
+Private iMessage transport custody is a separate strict same-user runtime
+sibling, not product state or an Egg component. Only an opaque reference and
+public policy enter canonical frames; contacts, Shortcut selection and
+credentials do not. Queues, preflight generations, cancellations, inbox
+attention and outcomes remain source-owned canonical data. Reporting/invalidation
+can authorize bounded internal queueing only; delivery is a separate explicit
+irreversible operation. See `CHANNEL_CONTRACT.md`.
+
 An explicit alternative branch carries its whole canonical chain, preserving
 the exact frame bytes and original stream identity. It is not silently merged,
 flattened, selected, or promoted to a bot. No unification protocol is invented.

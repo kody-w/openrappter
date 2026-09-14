@@ -94,6 +94,12 @@ export class HeadlessRuntime {
       case 'conversation.say':
         check(['text'], ['root', 'scope']);
         return this.conversation.converse(root(), text(p.text), operationId, p.scope === undefined ? 'root' : text(p.scope, 100));
+      case 'conversation.report':
+        check(['root', 'report'], ['scope']);
+        return this.conversation.report(root(), p.scope === undefined ? 'root' : text(p.scope, 100), p.report, operationId);
+      case 'conversation.answer':
+        check(['root', 'sourceWave', 'text']);
+        return this.conversation.answer(root(), text(p.sourceWave, 64), text(p.text), operationId);
       case 'conversation.where':
         check([], ['root']);
         return this.bots.whereWereWe(root());
@@ -144,20 +150,33 @@ export class HeadlessRuntime {
         check(['effectId', 'requestHash', 'target'], ['root']);
         return this.effects.approve(root(), text(p.effectId, 100), text(p.requestHash, 64), text(p.target, 200), operationId);
       case 'channels.bind':
-        check(['contactRef', 'permissionRef', 'enabled'], ['root']);
-        return this.channels.bind(root(), text(p.contactRef, 64), text(p.permissionRef, 64), p.enabled as boolean, operationId);
+        check(['root', 'contactRef', 'permissionRef', 'enabled'], ['policy', 'shortcut', 'credential']);
+        return this.channels.bind(root(), text(p.contactRef, 300), text(p.permissionRef, 300), p.enabled as boolean, operationId, p.policy,
+          { ...(p.shortcut === undefined ? {} : { shortcut: text(p.shortcut, 120) }), ...(p.credential === undefined ? {} : { credential: text(p.credential, 512) }) });
+      case 'channels.consider':
+        check(['root']);
+        return this.channels.consider(root());
       case 'channels.queue-recap':
         check([], ['root']);
         return this.channels.queueRecap(root(), operationId);
       case 'channels.deliver':
-        check(['deliveryId'], ['root']);
+        check(['root', 'deliveryId']);
         return this.channels.deliver(root(), text(p.deliveryId, 64), operationId);
+      case 'channels.flush':
+        check(['root', 'deliveryIds']);
+        return this.channels.flush(root(), p.deliveryIds as string[], operationId);
+      case 'channels.cancel':
+        check(['root', 'deliveryId']);
+        return this.channels.cancel(root(), text(p.deliveryId, 64), operationId);
       case 'channels.recap':
         check([], ['root']);
         return this.channels.recap(root());
       case 'channels.receive':
-        check(['envelope'], ['root']);
+        check(['root', 'envelope']);
         return this.channels.receive(root(), p.envelope);
+      case 'channels.review-inbound':
+        check(['root', 'sourceWave']);
+        return this.channels.reviewInbound(root(), text(p.sourceWave, 64), operationId);
       case 'egg.at-rest':
         check([], ['root']);
         return this.egg.atRest(root());

@@ -85,6 +85,8 @@ Selection is transient; an explicit invalid `root` never falls back to it.
 | `bots.select` | `root`; read-only selection |
 | `bots.hide`, `bots.restore` | Clear/restore the same GUID and history |
 | `conversation.say` | `text`, optional internal `scope` |
+| `conversation.report` | Explicit `root`, `report:{text,clarify?}`, optional `scope`; same-publication CLI/gauntlet reporting, zero model/guest/channel effects |
+| `conversation.answer` | Explicit `root`, `sourceWave`, `text`; genuine CLI answer to an exact clarification; zero inference/effects |
 | `conversation.where` | Canonical orientation/resume; no mutation or inference |
 | `conversation.catch-up` | Optional `scope`, `from`, `to`, `limit`, private `guest` opt-in; deterministic graded replay, no execution |
 | `attention.get` | Pending review, question, incomplete work, provider/channel/effect state and observation |
@@ -100,11 +102,14 @@ Selection is transient; an explicit invalid `root` never falls back to it.
 | `collaboration.ask` | `peer`, `question`; requires independent bilateral signed grants |
 | `collaboration.transcript` | Canonical UTC/wave order, distinct original GUID speakers |
 | `effects.approve` | `effectId`, exact `requestHash`, exact `target`; separate external-action approval |
-| `channels.bind` | `contactRef`, `permissionRef`, `enabled`; does not itself grant OS permission |
+| `channels.bind` | Explicit `root`, private `contactRef`/`permissionRef`, `enabled`, optional bounded `policy`/private `shortcut`/`credential`; strict runtime sibling only, no OS permission |
+| `channels.consider` | Explicit `root`; canonical clarification reconstruction and policy-approved internal queueing only |
 | `channels.queue-recap` | Canonical bounded public recap |
-| `channels.deliver` | `deliveryId`; explicit delivery attempt |
+| `channels.deliver`, `channels.flush` | Explicit `root` and `deliveryId`/`deliveryIds`; separate irreversible owner approval, preflight and bounded delivery |
+| `channels.cancel` | Explicit `root`, `deliveryId`; immediate cancellation fence then canonical successor, not effect recall |
 | `channels.recap` | Read-only outage/missed-delivery continuity |
-| `channels.receive` | `envelope`; trusted transport authentication and contact binding required |
+| `channels.receive` | Explicit `root`, `envelope`; owner-only authenticated external inbox, role user/non-CLI/no replyTo or confirmation/model effects |
+| `channels.review-inbound` | Explicit `root`, `sourceWave`; owner review of pending external input, not text-derived approval |
 | `hive.consent` | `peer`, `room`, `objectWave`, `mode:allow|revoke`; exact per-world consent |
 | `hive.link` | `peer`, `room`, `objectWave`; also requires existing signed canonical Hive authority |
 | `egg.at-rest` | Read-only byte commitments, exact `identity.body_stream`, and explicitly false closure/domain/code/shared-runtime adoption diagnostics |

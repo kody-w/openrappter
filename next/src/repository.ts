@@ -26,6 +26,7 @@ export interface RootSnapshot {
   readonly sources?: readonly SourceMemory[];
 }
 export interface StoreSnapshot { readonly roots: readonly RootSnapshot[]; readonly frameCount: number }
+export interface PublicationNotice { readonly root: string; readonly event: string | null; readonly frameHash: string }
 export interface Append {
   root: string;
   family: Family;
@@ -87,9 +88,22 @@ async function syncDirectory(directory: string): Promise<void> {
 export class CanonicalRepository {
   readonly directory: string;
   readonly #options: RepositoryOptions;
+  readonly #publicationListeners = new Set<(notice: PublicationNotice) => void | Promise<void>>();
   private constructor(options: RepositoryOptions) {
     this.directory = path.resolve(options.directory);
     this.#options = options;
+  }
+
+  onPublication(listener: (notice: PublicationNotice) => void | Promise<void>): () => void {
+    this.#publicationListeners.add(listener);
+    return () => { this.#publicationListeners.delete(listener); };
+  }
+  #notify(notice: PublicationNotice): void {
+    const failed = (): void => { process.stderr.write('Canonical publication observer failed; committed work is unchanged. Reconstruct from canonical sources.\n'); };
+    for (const listener of this.#publicationListeners) {
+      try { void Promise.resolve(listener(notice)).catch(failed); }
+      catch { failed(); }
+    }
   }
 
   static async open(options: RepositoryOptions): Promise<CanonicalRepository> {
@@ -340,7 +354,8 @@ export class CanonicalRepository {
   }
 
   async transaction<T>(operation: (transaction: Transaction) => Promise<T>): Promise<T> {
-    return this.#locked(async () => {
+    let publication: PublicationNotice | null = null;
+    const result = await this.#locked(async () => {
       const snapshot = await this.#scan();
       let written = false;
       const once = (): void => {
@@ -368,11 +383,14 @@ export class CanonicalRepository {
           await mkdir(path.join(directory, 'branches'), { mode: 0o700 });
           await this.#publish(this.#framesDirectory(definition.root, 'body'), frame);
           await syncDirectory(path.join(this.directory, 'bots'));
+          publication = { root: definition.root, event: null, frameHash: frame.frame_hash };
           return frame;
         },
         append: async input => {
           once();
-          return this.#appendRoot(snapshot, input);
+          const frame = await this.#appendRoot(snapshot, input);
+          publication = { root: input.root, event: typeof input.payload.event === 'string' ? input.payload.event : null, frameHash: frame.frame_hash };
+          return frame;
         },
         preserveBranch: async (root, family, frames) => {
           once();
@@ -406,6 +424,8 @@ export class CanonicalRepository {
         },
       });
     });
+    if (publication) this.#notify(publication);
+    return result;
   }
 
   async root(root: string): Promise<RootSnapshot> {

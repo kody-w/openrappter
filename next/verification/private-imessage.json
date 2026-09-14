@@ -1,0 +1,382 @@
+{
+  "schema": "rapp-work.private-channel-milestone/1",
+  "baseCommit": "4ccf46a415e6cf7f2834be78159cae48b3d6b584",
+  "branch": "rewrite/autonomous-agent-first",
+  "status": "verified synthetic private-channel acceptance; live setup remains disabled",
+  "reference": {
+    "commit": "e36d9116402af87f94f12c40c25015666a1ea2a2",
+    "privateHandoffRead": true,
+    "privateHandoffCopied": false,
+    "referenceSchemasOrUuidCodecMerged": false,
+    "reportedHistoricalTests": 318,
+    "reportedHistoricalDogfoodFrames": 180,
+    "referenceResultsCountedAsGreenfield": false
+  },
+  "validation": {
+    "command": "npm --prefix next run check",
+    "testsPassed": 119,
+    "failed": 0,
+    "skipped": 0,
+    "strictTypecheck": true,
+    "build": true,
+    "allMandatoryGates": true,
+    "log": ".test-scratch/imessage-full-check.log",
+    "dedicatedAcceptanceTests": 12,
+    "dedicatedLog": ".test-scratch/imessage-acceptance.log",
+    "primitiveTests": 90,
+    "primitiveLog": ".test-scratch/imessage-primitives.log",
+    "retainedLegacyGates": "passed unchanged at d8601aa91c10f3330ea10b7fa31382137d981dfd",
+    "legacyLog": ".test-scratch/imessage-legacy.log"
+  },
+  "proof": {
+    "schema": "rapp-work.private-imessage-proof/1",
+    "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+    "canonical": {
+      "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+      "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+      "authorityFrames": 16,
+      "verdict": "COMPLIANT",
+      "framesScanned": 12,
+      "signedFrames": 12,
+      "streamsScanned": 2,
+      "findings": [],
+      "evidence": [
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+          "ok": "11 frames conform to \u00a77 envelope"
+        }
+      ]
+    },
+    "exactOriginalRootAndConversation": true,
+    "reportingViaActualOwnerStdio": true,
+    "oneSamePublicationGauntletQuestion": true,
+    "externalAttribution": {
+      "origin": "external",
+      "channel": "imessage",
+      "approvalAuthority": false
+    },
+    "externalRole": "user",
+    "externalReplyTo": null,
+    "externalConfirmationAccepted": false,
+    "canonicalQuestionSource": "57198ccd5924ca7664c4c9b38d1018038a025866a88aacfab2c01cb2fd97f1b4",
+    "canonicalQueueSource": "1eca17887355173d00e00e76c44f79f62979a08a13a0181214cebb6ea790c131",
+    "preflightGenerations": [
+      1,
+      2
+    ],
+    "producerModelCalls": 0,
+    "producerGuestEffects": 0,
+    "producerChannelEffects": 0,
+    "modelCalls": 0,
+    "syntheticDeliveriesAfterSeparateApproval": 1,
+    "liveDeliveries": 0,
+    "privateMaterialInCanonicalTree": false,
+    "privateRuntimeSibling": ".test-scratch/imessage-headless-98776-1789360714515/canonical.runtime",
+    "restartProjectionAndRecapIdentical": true,
+    "uncertainOrDeliveredReplay": false,
+    "ownerTccSetupPerformed": false,
+    "sourceOrLiveProfilesTouched": false,
+    "evidenceDirectory": ".test-scratch/imessage-headless-98776-1789360714515",
+    "canonicalDirectory": ".test-scratch/imessage-headless-98776-1789360714515/canonical"
+  },
+  "acceptance": {
+    "exactCanonicalFullRootAndExistingConversation": true,
+    "externalNonCliUserAttribution": true,
+    "externalReplyToOrAnswerAuthority": false,
+    "externalInputCanConfirmOrClearGauntlet": false,
+    "ownerOnlyIngress": true,
+    "pendingInboxAttentionAndRestartRecap": true,
+    "samePublicationClarifyMarkerRequired": true,
+    "arbitraryProgressNotification": false,
+    "secondModelInferenceForNotification": false,
+    "reportingProducerEffects": 0,
+    "deliverySeparateIrreversibleApproval": true,
+    "commonCanonicalPublicationReconstruction": true,
+    "callbackFailureChangesCommittedResult": false,
+    "notificationFeedback": false,
+    "privateBindingSameUserRuntimeSibling": true,
+    "privateMaterialInFramesArtifactsSettingsEgg": false,
+    "cancellationFenceBeforeLocksAndReadiness": true,
+    "compatiblePreflightGenerationResume": true,
+    "wholeBatchLateDeferralReconstructs": true,
+    "uncertainOrDeliveredReplay": false,
+    "quietHoursDstDigestRateExpiryBounds": true,
+    "liveTccContactSetupActivated": false
+  },
+  "regressions": {
+    "rapp-work.next/foundation-gates/1": {
+      "evidenceDirectory": null,
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 3,
+        "signedFrames": 0,
+        "streamsScanned": 2,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/f721894bf7f4fdaf4268eafe156e2c4a880dee690c2a9515052a2627ad3a681b/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/f721894bf7f4fdaf4268eafe156e2c4a880dee690c2a9515052a2627ad3a681b/memory/frames",
+            "ok": "2 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.next/headless-parity/1": {
+      "evidenceDirectory": ".test-scratch/e2e-97972-1789360672979",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 39,
+        "signedFrames": 39,
+        "streamsScanned": 10,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/branches/memory-16eb6630dc2cc8211730da7e4eef3a73b02e2ff2926632feca4dc0a2b4a7b5fb/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "25 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/2dec19dc0f96e20509bbea46dc4ab80379b14871b3315c9a39c66bf2e2cca261/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/58dd0968a9e1a71f92ceccd86e0e61961aee222228366a26b73170b4a14d6391/frames",
+            "ok": "2 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.ai-projection-evidence/1": {
+      "evidenceDirectory": ".test-scratch/ai-projection-98051-1789360677622",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 25,
+        "signedFrames": 25,
+        "streamsScanned": 2,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "24 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.observed-migration-gate/1": {
+      "evidenceDirectory": ".test-scratch/migration-observed-98103-1789360679651",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 113,
+        "signedFrames": 113,
+        "streamsScanned": 17,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+            "ok": "5 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/scopes/c2f74e2f7159168d927b9d7c8670693734f044adf5817a1c11bd8a1e69411e0e/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/branches/memory-6ff0f28c0d9cf303f17f5d491c4af07cab432f83c9f472d3d0ad8e9203fcec65/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "6 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+            "ok": "5 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/3d3175f45a1397c948f596e13df80655cdfc9542f746a185de00de7da48a072a/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c4b/frames",
+            "ok": "10 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/7a470104beabea10e3fbfe8a724e8ac96613f55a331b970806da411d601a17ae/branches/495b5a68477bda8cfc30c875500178704102461d02ccbb36d0c488abfbe82168/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/7a470104beabea10e3fbfe8a724e8ac96613f55a331b970806da411d601a17ae/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/8e9b8e8b7a77825d9602644f429a7448bfc9726365b3b7131fcc6925f8af2354/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/c803daf5f88f45923547877852fc9372ba4c813d9800ea978b2dd629165dad14/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "migration/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/frames",
+            "ok": "73 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "migration/materialized/f953afa9048b33ecf5c4ff2225129b361eada11fa13f317e7ed9054b09a957b7/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.catch-up-gate/1": {
+      "evidenceDirectory": ".test-scratch/catch-up-98593-1789360711456",
+      "canonical": null,
+      "status": "passed"
+    },
+    "rapp-work.source-ownership-gate/1": {
+      "evidenceDirectory": ".test-scratch/source-ownership-98699-1789360714227",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 21,
+        "signedFrames": 21,
+        "streamsScanned": 9,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "10 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/branches/07c217f7e788ac47a2b060e0630c591fb0130bbea95ab4a61b5ea339bc651479/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+            "ok": "2 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c4b/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    }
+  },
+  "portableSkill": {
+    "version": "0.4.0",
+    "sha256": "567d01035be8ae331af434821beae7be0743e9c4076559cb615767aa023bd1db",
+    "source": "skills/rapp-work-bot/SKILL.md",
+    "installed": "~/.copilot/skills/rapp-work-bot/SKILL.md",
+    "byteIdentical": true,
+    "validation": "RAPP Skills plain instruction-file check passed"
+  },
+  "contracts": [
+    "docs/CHANNEL_CONTRACT.md",
+    "contracts/clarify.schema.json",
+    "contracts/channel-policy.schema.json",
+    "contracts/external-inbox.schema.json"
+  ],
+  "historicalFixturesPreserved": true,
+  "currentGoldens": "fixtures/private-channel/",
+  "noReferenceAppChanges": true,
+  "noLiveProfileWrites": true,
+  "noDependencyOrApplicationInstall": true,
+  "noPush": true,
+  "remaining": [
+    "Controlled owner TCC/contact/Shortcut setup and an actually adopted narrow private transport",
+    "Approved controlled-local observed estate migration",
+    "Independent owner/registry/form/domain/interpreter and release qualification; synthetic success grants none of these"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.channel-policy/1",
+  "title": "Owner-reviewed private channel bounds; no private credentials",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["automaticQuestions", "timezone", "quietHours", "maxPerHour", "minIntervalSeconds", "maxBatch", "maxPending", "ttlSeconds", "retrySeconds", "preflightSeconds"],
+  "properties": {
+    "automaticQuestions": { "type": "boolean" },
+    "timezone": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "quietHours": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["startMinute", "endMinute"],
+          "properties": {
+            "startMinute": { "type": "integer", "minimum": 0, "maximum": 1439 },
+            "endMinute": { "type": "integer", "minimum": 0, "maximum": 1439 }
+          }
+        }
+      ]
+    },
+    "maxPerHour": { "type": "integer", "minimum": 1, "maximum": 8 },
+    "minIntervalSeconds": { "type": "integer", "minimum": 0, "maximum": 3600 },
+    "maxBatch": { "type": "integer", "minimum": 1, "maximum": 4 },
+    "maxPending": { "type": "integer", "minimum": 1, "maximum": 32 },
+    "ttlSeconds": { "type": "integer", "minimum": 60, "maximum": 86400 },
+    "retrySeconds": { "type": "integer", "minimum": 0, "maximum": 3600 },
+    "preflightSeconds": { "type": "integer", "minimum": 1, "maximum": 30 }
+  },
+  "$comment": "Runtime validates IANA timezone, nonempty quiet interval and local DST using UTC source times. Policy authorizes internal queueing only; exact owner delivery approval, private binding, preflight/generation/cancellation/rate checks remain separate. No contact, Shortcut or credential field is allowed."
+}

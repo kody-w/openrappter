@@ -121,8 +121,11 @@ export class SyntheticIMessage implements PrivateChannelPort {
   readonly idempotentDelivery = true;
   available = false;
   readonly sent = new Map<string, { root: string; contactRef: string; text: string }>();
+  async preflight(input: Parameters<PrivateChannelPort['preflight']>[0]): Promise<{ status: 'ready' | 'unavailable' | 'deferred' }> {
+    return { status: input.signal.aborted ? 'deferred' : this.available ? 'ready' : 'unavailable' };
+  }
   async send(input: Parameters<PrivateChannelPort['send']>[0]): Promise<{ receipt: string }> {
-    requireThat(this.available, 'channel-unavailable', 'Synthetic outage.');
+    requireThat(this.available && !input.signal.aborted, 'channel-unavailable', 'Synthetic outage or cancelled dispatch.');
     const previous = this.sent.get(input.deliveryId);
     if (previous) requireThat(previous.root === input.root && previous.contactRef === input.contactRef && previous.text === input.text,
       'channel-idempotency', 'A delivery ID cannot be rebound.');

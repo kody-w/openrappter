@@ -87,13 +87,14 @@
     "turn": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["role", "speaker", "text", "source", "origin", "replyTo"],
+      "required": ["role", "speaker", "text", "source", "origin", "replyTo", "attribution"],
       "properties": {
         "role": { "enum": ["user", "assistant"] },
         "speaker": { "oneOf": [{ "const": "human" }, { "$ref": "#/$defs/rappid" }] },
         "text": { "type": "string" },
         "source": { "$ref": "#/$defs/reference" },
         "origin": { "$ref": "source-reference.schema.json" },
+        "attribution": { "type": "object", "required": ["origin", "approvalAuthority"] },
         "replyTo": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
       }
     }

@@ -1,6 +1,50 @@
 # Verified headless milestones
 
-## Current frozen multi-bot semantic integration
+## Current private iMessage acceptance milestone
+
+The full new-core check passes **119 tests**, strict typecheck/build and every
+canonical/headless/provider-neutral/migration/browser/Catch-up/source-owned gate,
+plus the new mandatory `imessage:gate`. The adopted primitive suite passes
+**90 tests** and retained legacy gates remain unchanged.
+
+The new real owner-stdio proof emits **12 signed frames across 2 streams**, all
+`COMPLIANT`. CLI/gauntlet reporting makes **zero model, guest or channel effects**;
+one same-publication marker/assistant source queues one reference-only question.
+An authenticated external “yes” is a non-CLI `user` inbox turn with no reply
+reference or confirmation authority. Only a genuine CLI answer settles the
+clarification. A separately approved synthetic delivery succeeds after a
+known-no-send preflight generation; restart reproduces the same projection and
+recap without another send or model call.
+
+Twelve dedicated acceptance tests cover strict same-user private sibling
+custody/modes/links, no private material in canonical data/Egg, exact-root
+owner-only ingress, pending attribution, native and CLI publication hooks,
+no callback/result corruption or feedback, quiet hours/DST, cancellation before
+locks/readiness, two-question late deferral and restart, preflight generations,
+rate budgets and uncertain non-cooperative no-replay.
+
+The ordinary headless proof now emits **39 signed frames** because eligible
+delivery has a separate canonical preflight. The prior source-owned fixtures
+and receipts remain historical and unchanged; current deterministic goldens are
+under `fixtures/private-channel/`. Other regression proof counts remain:
+provider-neutral 25, observed migration 113, Catch-up 10 rooted + 13 broker-source,
+and source-ownership 21 signed frames.
+
+The private stopped `e36d911` handoff was read as semantic evidence only.
+Its 318-test/180-frame claims and incompatible UUID codec are not adopted or
+counted as greenfield proof. No private handoff contents, contact, Shortcut,
+credential, reference schema or current-app implementation is copied into the
+canonical product or committed evidence.
+
+Receipt: `verification/private-imessage.json`.
+Contract: `CHANNEL_CONTRACT.md`.
+The portable instruction-only skill is version **0.4.0**, validated and installed
+byte-identically, SHA-256
+`567d01035be8ae331af434821beae7be0743e9c4076559cb615767aa023bd1db`.
+Actual TCC/contact/Shortcut setup and live effects remain disabled and unrun;
+controlled-local migration/adoption/release approval is still required.
+
+## Frozen multi-bot semantic integration (`4ccf46a`)
 
 The complete independent check passes **107 core tests**, strict typecheck/build
 and every prior headless, native-federation, provider-neutral, observed

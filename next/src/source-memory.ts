@@ -67,11 +67,11 @@ function dependenciesFor(root: RootSnapshot): Map<string, Set<string>> {
     }
     const add = (hash: unknown): void => { if (typeof hash === 'string' && byHash.has(hash)) parents.add(hash); };
     for (const name of ['replyTo', 'proposalWave', 'targetWave', 'approval', 'bindingWave', 'requestWave',
-      'responseWave', 'grantWave', 'deliveryId', 'attempt', 'policyWave'] as const) {
+      'responseWave', 'grantWave', 'deliveryId', 'attempt', 'policyWave', 'answerTo', 'sourceWave', 'preflight'] as const) {
       const hash = e.data[name];
       add(hash);
     }
-    for (const name of ['evidence', 'causes', 'viewParents'] as const) {
+    for (const name of ['evidence', 'causes', 'viewParents', 'deliveryIds'] as const) {
       const values = e.data[name];
       if (Array.isArray(values)) for (const value of values) add(value);
     }

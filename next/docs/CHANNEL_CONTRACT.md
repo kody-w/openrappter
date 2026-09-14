@@ -4,57 +4,147 @@ Copilot CLI/stdio is primary. iMessage is optional and **default off**. It is a
 continuity transport into the same selected root conversation, not another bot,
 memory store, agent runtime, workspace identity or source of tool authority.
 
-## Authority and delivery
+## Exact identity and private runtime custody
 
-- The local operator explicitly records one contact commitment, one local
-  permission reference and the bounded conversation/public-recap scope.
-- Those references are inert canonical data. `channels.bind` does not request
-  macOS permission, access Messages databases, resolve contacts, launch an app
-  or make the production adapter available.
-- `DisabledIMessage` always refuses. A production bridge remains an integration
-  gate until local OS permission, exact contact mapping and authenticated
-  transport provenance are verified outside the carried message.
-- Queuing creates a root-owned canonical `memory.save` record containing only
-  exact bounded source GUID/scope/stream/hash references and the binding wave.
-  `rapp-work.recap-references/1` has no copied activity summary. Read/delivery
-  derives transient text from the originals; missing sources refuse rather than
-  falling back to a central copy. Immutable historical summary queues are
-  retained as historical records. Queuing does not send.
-- Explicit delivery first appends a write-ahead attempt. The transport receives
-  only the selected root, bound contact/permission references, text and a stable
-  canonical delivery ID. A separate outcome records a bounded opaque receipt,
-  `delivered`, `unavailable`, or `uncertain`.
-- Rebinding a contact, disabling the binding, or hiding the root prevents
-  delivery under an old queue's authority. No contact is guessed from prose.
-- Restart never sends or retries. An explicit retry uses the original delivery
-  ID; an enabled transport must guarantee idempotent delivery. A completed
-  delivery is not sent again.
+The owner binds the **existing full canonical body-stream RAPPID** and its
+existing root conversation. No UUID, `scope.agentId`, child locator, contact,
+thread or source directory can mint/select a replacement root. The frozen
+iMessage reference's UUID convention is explicitly not adopted.
 
-An outage recap is a read-only projection of pending canonical queues/outcomes.
-It retains exact source references, preserves continuity and makes no model
-request. It is not a second message database or a synthesized account of
-messages that were never delivered.
+Actual contact/permission material, private Shortcut selection and credentials
+live only in `<canonical-profile>.runtime`, a same-parent **runtime sibling**.
+The directory must be same-user 0700; files must be bounded, same-user,
+non-linked 0600 with real ancestors. Symlinks, hard links, foreign profile/root
+bindings and permissive modes refuse; permissions are never silently repaired.
+This directory stores no conversation, queue, policy, attention or outcome.
+
+Canonical `channel.bound` stores only an opaque binding reference, public
+bounded policy and exact root authority. The reference is derived from the
+root/owner operation, **not** an enumerable contact, and grants no permission.
+Private material never enters new frames, artifacts, settings, projections or
+Egg. Old contact-bearing fixture/history frames remain immutable but cannot
+activate delivery; a fresh owner/runtime binding is required. General Egg
+transfer still refuses without adopted authority.
+
+`channels.bind` does not request TCC permission, inspect Messages, resolve a
+contact, invoke a Shortcut or enable the production port. `DisabledIMessage`
+remains the production default. A real bridge requires separate controlled
+owner setup, exact contact/root mapping and authenticated transport provenance.
 
 ## Incoming continuity
 
-The injected transport verifies the incoming envelope; the core then requires
-the explicitly bound contact and active root. A stable contact/message identity
-becomes a canonical idempotency key. The text enters `Conversation.converse`,
-not a separate channel agent. A repeated message cannot produce another model
-call, and another contact cannot select a bot by claiming its GUID.
+`channels.receive` is **owner-only** local ingress, not a restricted AI/MCP tool.
+The injected transport authenticates; the core checks the exact private binding
+and active full root again at canonical publication. Raw authentication,
+sender/thread and credential metadata are stripped.
 
-“Where were we?” remains read-only even when it arrives through iMessage.
-Transport ingress cannot call `effects.approve` or acquire SDK tools. Irreducible
-human/external authority remains explicit in the primary reviewed interaction.
+The accepted `memory.chat-turn` data has `origin:external-imessage`, `role:user`,
+`proposalId:null`, public text and the canonical binding wave. It has **no**
+`replyTo` or `answerTo`. Projections retain explicit
+`attribution:{origin:external,channel:imessage,approvalAuthority:false}` and
+pending `external-inbox` attention. A repeated bound transport message returns
+the original occurrence; changed payload under that ID refuses.
+
+External text never enters the CLI `Conversation.converse` dispatcher. “yes”,
+“confirm”, a gauntlet answer and “Where were we?” are inbox data, not commands.
+They make no model/tool/channel call, cannot confirm organization, clear a
+clarification, auto-restore a hidden root or acquire an owner capability.
+`channels.review-inbound` is a separate genuine owner acknowledgment, not an
+approval of the text. The pending inbox is bounded to 32 records and 4000 UTF-8
+bytes per public input.
+
+Only genuine owner `conversation.answer` with the exact source-wave reference
+settles a native/CLI clarification. Organization resolutions additionally
+require a genuine CLI input source and exact reviewed confirmation.
+
+## Canonical reporting and automatic question queueing
+
+`conversation.report` is a pure owner/CLI producer: one bounded assistant
+publication, **zero model, guest or channel effects**. An optional
+`rapp-work.clarify/1` marker names `human-question` or `gauntlet`, one to three
+irreducible questions and `requires:copilot-cli`. Its `turnId` must equal the
+assistant's operation ID in the **same canonical frame**. Native conversation
+proposals with human questions emit the equivalent marker in their own
+assistant publication; they do not invoke a second notification model.
+
+The shared repository post-publication signal runs only after canonical
+publication and lock release. A coalescing root-local consumer reconstructs
+verified sources. Both CLI reports and native/gauntlet publications use this
+path; no LocalTwin-only hook or UI callback is authority. Callback failure is
+reported without altering the committed result. Channel-owned publications
+are filtered, and canonical source/binding IDs deduplicate queues to prevent
+feedback loops.
+
+Only explicitly enabled owner policy permits automatic **internal queueing**.
+Ordinary assistant/progress text, external replies, success/reversal/outcome
+records or an unpaired marker cannot become automatic questions. Queue frames
+contain exact original source references, not copied question/activity bodies.
+`channels.consider` reconstructs eligible source markers explicitly after a
+missed invalidation/restart. Read-only recap/inspection never queues or sends.
+
+## Delivery, cancellation and preflight generations
+
+Delivery is a **separate approval-gated irreversible operation**. The owner
+supplies exact queue IDs to `channels.deliver` or `channels.flush`; no background
+pump invokes either. A digest contains at most four compatible questions under
+the same binding and preflight generation.
+
+1. Commit an owner-approved canonical preflight intent with exact IDs, binding,
+   generation and expiry. Reserving this intent is not a physical attempt.
+2. Read the strict private runtime and run an explicitly **non-sending**
+   preflight. Disabled/unavailable/deferred results record a known no-send
+   outcome for the **entire batch**. No physical attempt budget is spent.
+3. Recheck root visibility, binding, current question/CLI answer state,
+   cancellation, quiet hours, expiry, generation and rate immediately before
+   issuing an attempt. Late deferral finalizes all selected queue IDs, not only
+   the last marker.
+4. Commit the irreversible attempt, then invoke the bounded transport with an
+   opaque stable attempt ID and source-derived text. Record `delivered`,
+   `uncertain`, or a proven `not-submitted` outcome. Only opaque receipts enter
+   frames; raw errors and private transport material do not.
+
+Cancellation sets its in-memory fence and abort signal **before awaiting a
+lock, private runtime or readiness**. Its canonical successor preserves the
+original queue/source. An already-dispatched effect cannot be recalled by
+internal correction. A non-cooperative preflight/send retains its local fence
+until it settles; a recorded uncertain attempt blocks replacement across restart.
+
+Only proven no-send state can advance a fresh preflight generation. An expired
+abandoned preflight with no attempt can be resumed under a new explicit approval;
+an uncertain physical attempt cannot. Duplicate approval IDs do not rerun work.
+Mixed-generation digests refuse rather than silently excluding a question.
+
+## Bounds and read-only recap
+
+Owner policy specifies an IANA timezone and optional partial-day quiet interval;
+UTC source times and timezone conversion handle DST, including repeated hours.
+It also sets 1–8 physical attempts/hour, 0–3600 second minimum interval/backoff,
+1–4 batch entries, 1–32 pending notifications, 60–86400 second source expiry and
+1–30 second preflight/transport deadline. Preflight generations cap at 32;
+outbound source-derived text caps at 8192 UTF-8 bytes. No-send generations do not
+spend physical rate budget; uncertain attempts do.
+
+Recap reconstructs original public sources, external pending input, delivery
+status, preflight generation and batch outcomes from canonical frames. It is not
+a copied message/queue database. Restart, read, Catch-me-up and inspection do not
+send, infer or replay an uncertain effect.
 
 ## Synthetic evidence and future channels
 
 `SyntheticIMessage` is an injected **test-only** port: no Apple APIs, private
 scanning, contact lookup, native database access or real sending occurs.
-Tests cover outage, persistent recap, contact substitution, authentication,
-rebinding, hidden roots, duplicate input, concurrent delivery, and one actual
-synthetic delivery after an explicit retry. The committed outage fixture is
-labeled synthetic.
+Tests additionally cover same-publication markers, external confirmation/gauntlet
+refusal, private sibling modes/links/root custody, callback failure, native and
+CLI publication coverage, cancellation before lock/readiness, late two-question
+deferral/restart, no-send generations, uncertainty, quiet hours/DST and rate
+budgets. `npm --prefix next run imessage:gate` launches the real owner stdio
+producer, checks nonzero signed canonical frames and demonstrates only a
+separately approved **synthetic** delivery. No live TCC/contact setup is run.
+
+The private stopped handoff at `e36d9116402af87f94f12c40c25015666a1ea2a2`
+informed these semantics. Its 318 relevant tests and guarded 180-frame dogfood
+are historical evidence, not greenfield acceptance. No UUID codec, schema,
+current-app implementation or private handoff contents are merged.
 
 Future channels must feed this same conversation and canonical delivery
 boundary with explicitly adopted capabilities. Adding a new transport is not

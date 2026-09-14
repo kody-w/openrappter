@@ -68,6 +68,16 @@ The [frozen rooted-estate handoff](docs/ROOTED_ESTATE_HANDOFF.md) is reference
 evidence only. Full body-stream RAPPIDs remain identity; closure, domain,
 code-loading and shared-runtime adoption flags remain false until real bindings.
 
+## Private continuity acceptance
+
+`npm --prefix next run imessage:gate` proves pure CLI/gauntlet reporting,
+source-reference question queueing, external non-CLI pending input and separate
+approval-gated synthetic delivery. Private transport material stays in a strict
+same-user runtime sibling, never canonical data or Egg. Cancellation,
+preflight generations, batch deferral, quiet/rate bounds and restart recap are
+canonical; no uncertain send is replayed. Live TCC/contact setup stays disabled.
+See [the channel contract](docs/CHANNEL_CONTRACT.md).
+
 ## Development
 
 Node 22.12+; pinned development dependencies and Copilot SDK are declared in this

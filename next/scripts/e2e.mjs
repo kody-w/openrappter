@@ -190,11 +190,11 @@ const channelFixture = {
 };
 await writeFile(path.join(directory, 'multi-bot-transcript.json'), JSON.stringify(transcriptFixture, null, 2) + '\n');
 await writeFile(path.join(directory, 'imessage-outage-recap.json'), JSON.stringify(channelFixture, null, 2) + '\n');
-if (process.argv.includes('--record-source-fixtures')) {
-  await mkdir(path.join(root, 'fixtures/source-owned'), { recursive: true });
-  await writeFile(path.join(root, 'fixtures/source-owned/multi-bot-transcript.json'), JSON.stringify(transcriptFixture, null, 2) + '\n');
-  await writeFile(path.join(root, 'fixtures/source-owned/imessage-outage-recap.json'), JSON.stringify(channelFixture, null, 2) + '\n');
+if (process.argv.includes('--record-channel-fixtures')) {
+  await mkdir(path.join(root, 'fixtures/private-channel'), { recursive: true });
+  await writeFile(path.join(root, 'fixtures/private-channel/multi-bot-transcript.json'), JSON.stringify(transcriptFixture, null, 2) + '\n');
+  await writeFile(path.join(root, 'fixtures/private-channel/imessage-outage-recap.json'), JSON.stringify(channelFixture, null, 2) + '\n');
 }
-assert.equal(canonicalJson(transcriptFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/source-owned/multi-bot-transcript.json'), 'utf8'))));
-assert.equal(canonicalJson(channelFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/source-owned/imessage-outage-recap.json'), 'utf8'))));
+assert.equal(canonicalJson(transcriptFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/private-channel/multi-bot-transcript.json'), 'utf8'))));
+assert.equal(canonicalJson(channelFixture), canonicalJson(JSON.parse(await readFile(path.join(root, 'fixtures/private-channel/imessage-outage-recap.json'), 'utf8'))));
 console.log(JSON.stringify(result, null, 2));

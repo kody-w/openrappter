@@ -9,6 +9,7 @@ import {
   type ClientGrant, type PublicationData, type PublicationKind, type ViewIntent,
 } from './ai-contract.js';
 import { memoryAtCursor, memoryCursor, memoryFrames, sourceReference } from './source-memory.js';
+import { turnAttribution } from './channel-contract.js';
 
 export interface PublishedRecord {
   frame: RappFrame;
@@ -118,8 +119,11 @@ export function projectAi(root: RootSnapshot, scope: string): JsonObject {
     const e = workEvent(frame.payload);
     return {
       bot: root.definition.root, role: e.event === 'turn.user' ? 'user' : 'assistant',
-      actor: client ? client.data.actor : { id: e.event === 'turn.user' ? 'human' : root.definition.root, name: e.event === 'turn.user' ? 'Human' : root.definition.name, provider: 'canonical-core' },
+      actor: client ? client.data.actor : e.data.origin === 'external-imessage'
+        ? { id: 'external-imessage', name: 'External iMessage participant', provider: 'external-imessage' }
+        : { id: e.event === 'turn.user' ? 'human' : root.definition.root, name: e.event === 'turn.user' ? 'Human' : root.definition.name, provider: 'canonical-core' },
       text: client ? client.data.content.text! : publicWorkText(frame), source: reference(frame), origin: sourceReference(frame),
+      attribution: client ? { origin: 'ai-client', approvalAuthority: false } : turnAttribution(frame),
     };
   });
   const contribution = (kind: PublicationKind): JsonObject[] => records.filter(r => r.kind === kind)

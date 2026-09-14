@@ -11,6 +11,7 @@ import { publicationData } from './ai-contract.js';
 import { catchUpTimeline } from './catch-up.js';
 import { CanonicalComputerReplay } from './computer-replay.js';
 import { memoryFrames, memoryCursor, sourceChain, sourceReference } from './source-memory.js';
+import { canonicalClarification, clarifyMarker, questionPending, turnAttribution } from './channel-contract.js';
 
 export function canonicalContext(root: RootSnapshot, scope = 'root'): JsonObject {
   const state = foldState(root);
@@ -23,7 +24,7 @@ export function canonicalContext(root: RootSnapshot, scope = 'root'): JsonObject
     const client = frame.payload.event === 'client.conversation' ? publicationData('conversation', data) : null;
     return { role: frame.payload.event === 'turn.user' ? 'user' : 'assistant',
       text: client ? `[${client.actor.name} / ${client.actor.provider}] ${String(client.content.text)}` : String(data.text),
-      source: reference(frame), origin: sourceReference(frame) };
+      source: reference(frame), origin: sourceReference(frame), attribution: turnAttribution(frame) };
   });
   const discovery = memoryFrames(root).filter(f => f.payload.event === 'discovery.recorded' && permitted.has(String(f.payload.scope)))
     .slice(-4).map(f => {
@@ -67,6 +68,57 @@ export class Conversation {
 
   async catchUp(root: string, options: unknown = {}, scope = 'root'): Promise<JsonObject> {
     return catchUpTimeline(await this.bots.repository.root(root), scope, options, this.computerReplay);
+  }
+
+  async report(root: string, scope: string, value: unknown, operationId: string): Promise<JsonObject> {
+    const report = object(value, ['text'], ['clarify']);
+    const data: JsonObject = { text: text(report.text), origin: 'copilot-cli' };
+    requireThat(Buffer.byteLength(String(data.text), 'utf8') <= 12_000, 'report-bound', 'A public report is bounded in UTF-8 bytes.');
+    if (report.clarify !== undefined) data.clarify = clarifyMarker(report.clarify, operationId);
+    const frame = await this.bots.repository.transaction(async tx => {
+      const current = findRoot(tx, root);
+      requireThat(!projectBot(current).hidden, 'bot-hidden', 'Hidden roots do not publish new reports.');
+      permittedScopes(foldState(current).scopes, scope);
+      return this.bots.appendEvent(tx, current, 'turn.assistant', data, operationId, scope);
+    });
+    return { root, receipt: sourceReference(frame), modelCalls: 0, guestEffects: 0, channelEffects: 0 };
+  }
+
+  async answer(root: string, sourceWave: string, value: string, operationId: string): Promise<JsonObject> {
+    const frame = await this.bots.repository.transaction(async tx => {
+      const current = findRoot(tx, root);
+      requireThat(!projectBot(current).hidden, 'bot-hidden', 'Restore this root before a CLI answer.');
+      const source = memoryFrames(current).find(f => f.frame_hash === sourceWave);
+      requireThat(source && canonicalClarification(source), 'clarify-binding', 'A genuine CLI answer names an exact canonical clarification.');
+      const duplicate = memoryFrames(current).find(f => f.payload.operationId === operationId);
+      requireThat(duplicate || questionPending(current, sourceWave), 'clarify-binding', 'The exact clarification is already answered.');
+      return this.bots.appendEvent(tx, current, 'turn.user',
+        { text: text(value), origin: 'copilot-cli', answerTo: sourceWave }, operationId, String(source.payload.scope));
+    });
+    return { root, receipt: sourceReference(frame), modelCalls: 0, channelEffects: 0 };
+  }
+
+  async externalInbox(root: string, value: string, operationId: string, bindingWave: string): Promise<JsonObject> {
+    requireThat(Buffer.byteLength(text(value, 4_000), 'utf8') <= 4_000, 'inbox-bound', 'External public input is bounded to 4000 UTF-8 bytes.');
+    const frame = await this.bots.repository.transaction(async tx => {
+      const current = findRoot(tx, root);
+      requireThat(!projectBot(current).hidden, 'bot-hidden', 'External traffic cannot restore or write through a hidden root.');
+      const frames = memoryFrames(current);
+      const binding = frames.filter(f => f.payload.event === 'channel.bound').at(-1);
+      requireThat(binding?.frame_hash === bindingWave && workEvent(binding.payload).data.enabled === true,
+        'channel-binding', 'External input must retain the exact active binding at canonical publication.');
+      const reviewed = new Set(frames.filter(f => f.payload.event === 'channel.inbound.reviewed').map(f => workEvent(f.payload).data.sourceWave));
+      const duplicate = frames.find(f => f.payload.operationId === operationId);
+      requireThat(duplicate || frames.filter(f => f.payload.event === 'turn.user'
+        && workEvent(f.payload).data.origin === 'external-imessage' && !reviewed.has(f.frame_hash)).length < 32,
+      'inbox-bound', 'The pending external inbox requires owner review before more input.');
+      return this.bots.appendEvent(tx, current, 'turn.user', {
+        text: text(value, 4_000), origin: 'external-imessage', role: 'user', proposalId: null, bindingWave,
+      }, operationId);
+    });
+    return { root, status: 'pending', receipt: sourceReference(frame), proposalWave: null,
+      attribution: turnAttribution(frame), projection: await this.bots.project(root),
+      modelCalls: 0, channelEffects: 0, confirmationAccepted: false };
   }
 
   async converse(root: string, thought: string, operationId: string, scope = 'root'): Promise<ConversationResult> {
@@ -116,7 +168,7 @@ export class Conversation {
           && duplicate.payload.scope === scope, 'idempotency-conflict', 'This request ID already records a different thought.');
         return { frame: duplicate, started: false };
       }
-      const frame = await this.bots.appendEvent(transaction, snapshot, 'turn.user', { text: thought }, operationId, scope);
+      const frame = await this.bots.appendEvent(transaction, snapshot, 'turn.user', { text: thought, origin: 'copilot-cli' }, operationId, scope);
       return { frame, started: true };
     });
     if (!input.started) return this.#result(root, input.frame);
@@ -145,9 +197,15 @@ export class Conversation {
             `Recurring intent: ${a.instruction}; every Monday at 09:00 UTC, first ${a.firstDueUtc}.`),
           ...(draft.actions.length || draft.resolves.length ? ['Nothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.'] : []),
         ].join('\n');
+        const turnId = `reply-${input.frame.frame_hash}`;
+        const clarify = draft.questions.length ? clarifyMarker({
+          schema: 'rapp-work.clarify/1', kind: 'human-question', turnId, requires: 'copilot-cli',
+          questions: draft.questions.map((q, i) => ({ id: `question-${i + 1}`, reason: q.reason, text: q.question })),
+        }, turnId) : null;
         return this.bots.appendEvent(transaction, current, 'turn.assistant',
-          { text: summary, replyTo: input.frame.frame_hash, draft, draftHash: contentHash(draft), contextRevision: basis.revision },
-          `reply-${input.frame.frame_hash}`, scope, undefined, basis.parents);
+          { text: summary, origin: 'canonical-core', replyTo: input.frame.frame_hash, draft, draftHash: contentHash(draft), contextRevision: basis.revision,
+            ...(clarify ? { clarify } : {}) },
+          turnId, scope, undefined, basis.parents);
       });
     } catch {
       await this.bots.repository.transaction(async transaction => {
@@ -190,6 +248,11 @@ export class Conversation {
       }
       requireThat(proposal.status === 'review' && proposal.draft.questions.length === 0, 'human-question',
         'Only an unconfirmed proposal with no unresolved human questions can be applied.');
+      if (proposal.draft.resolves.length) {
+        const answer = memoryFrames(snapshot).find(f => f.frame_hash === workEvent(proposal.frame.payload).data.replyTo);
+        requireThat(answer?.payload.event === 'turn.user' && workEvent(answer.payload).data.origin === 'copilot-cli',
+          'confirmation-origin', 'Only a genuine CLI answer can support a reviewed human-question resolution.');
+      }
       requireThat(sourceChain(snapshot, String(proposal.frame.payload.scope)).at(-1)?.frame_hash === proposalWave, 'stale-head', 'The proposal is stale; review current canonical context before confirmation.');
       const basis = workEvent(proposal.frame.payload).data.contextRevision;
       requireThat(basis === undefined || basis === contextWitness(snapshot, String(proposal.frame.payload.scope), proposalWave).revision,

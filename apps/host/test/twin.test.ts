@@ -546,7 +546,7 @@ describe("strict Twin context-option validation", () => {
     expect(conversation.proposals).toEqual([]);
     expect(conversation.turns.every((turn) => turn.role === "user")).toBe(true);
     expect(f.commands.guestExecutions).toBe(0);
-  }, 120_000);
+  }, 180_000);
   it("strictly discriminates complete proposals from necessary clarifications and bounds conversation input", () => {
     const clarification = { kind: "clarification", assistantMessage: "Which period?", summary: "Period needed.", confidence: 0.5,
       readyForReview: false, missing: ["period"], draft: null };

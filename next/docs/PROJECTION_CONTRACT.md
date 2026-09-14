@@ -27,6 +27,10 @@ parent particle, wave link or identity. Disagreements and unknowns remain public
 synthesis is always `consensus:false` and `actions:review-required`.
 New synthesis retains only its caller's authored public work plus a reference
 to the peer's signed original; peer dissent is not copied into caller memory.
+Reconstruction binds that source to the synthesis's exact original request,
+not merely another valid signed response in the same root pair. Canonical
+UTC/wave presentation can show a clock-skewed reply before its request without
+rewriting source time or invalidating its exact hash dependency.
 
 Projection, selection, observer status and Where-were-we are non-authoritative
 read-only views. Consuming a projection adds no event and runs no model.

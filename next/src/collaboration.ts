@@ -4,7 +4,7 @@ import { label, list, object, text, workEvent } from './contract.js';
 import { requireThat } from './errors.js';
 import { projectBot, publicWorkText, reference, type PublicTurn } from './projection.js';
 import type { RootSnapshot, StoreSnapshot } from './repository.js';
-import type { ModelProvider } from './spine.js';
+import type { ModelProvider, Observation } from './spine.js';
 import { publicationData } from './ai-contract.js';
 import { memoryFrames, sourceReference } from './source-memory.js';
 
@@ -75,13 +75,14 @@ export class Collaboration {
     text(question, 2_000);
     label(operationId);
     const prepared = await this.bots.repository.transaction(async transaction => {
-      const selected = pair(transaction.snapshot, from, to);
-      const existing = selected.caller.streams.swarm.find(f => f.payload.operationId === operationId);
+      const caller = findRoot(transaction, from);
+      const existing = caller.streams.swarm.find(f => f.payload.operationId === operationId);
       if (existing) {
         const p = assertRequest(existing);
         requireThat(p.to === to && p.question === question, 'idempotency-conflict', 'A collaboration request ID is already bound.');
-        return { ...selected, request: existing, started: false };
+        return { request: existing, started: false as const };
       }
+      const selected = pair(transaction.snapshot, from, to);
       const signer = this.bots.signer(from);
       requireThat(signer && this.bots.signer(to), 'signing-authority-unavailable', 'Both selected root signers must be available; unsigned requests are refused.');
       const request = await transaction.append({ root: from, family: 'swarm', kind: 'swarm.guidance',
@@ -90,7 +91,7 @@ export class Collaboration {
           briefRef: sourceReference(selected.callerGrant),
           callerGrant: selected.callerGrant.frame_hash, recipientGrant: selected.recipientGrant.frame_hash,
         }, utc: this.bots.now(), expectedHead: selected.caller.streams.swarm.at(-1)?.frame_hash ?? null, signer });
-      return { ...selected, request, started: true };
+      return { ...selected, request, started: true as const };
     });
     if (!prepared.started) return { status: 'recorded-not-replayed', transcript: await this.transcript(from), request: prepared.request.frame_hash };
     const recipientObservation = this.bots.spine.observe(to);
@@ -136,10 +137,16 @@ export class Collaboration {
         { requestWave: prepared.request.frame_hash, responseWave: response.frame_hash, peer: to, status },
         `perspective-${prepared.request.frame_hash}`);
     });
+    let synthesisStatus = 'not-requested';
     if (status === 'completed') {
-      const callerObservation = this.bots.spine.observe(from);
+      let callerObservation: Observation | null = null;
       try {
-        const summary = publicPerspective(await this.bots.spine.compute(callerObservation, prepared.caller.definition.capability, {
+        const dispatch = pair(await this.bots.repository.snapshot(), from, to);
+        requireThat(dispatch.callerGrant.frame_hash === prepared.callerGrant.frame_hash
+          && dispatch.recipientGrant.frame_hash === prepared.recipientGrant.frame_hash,
+        'collaboration-approval', 'Synthesis requires the unchanged original authority before starting a new model call.');
+        callerObservation = this.bots.spine.observe(from);
+        const summary = publicPerspective(await this.bots.spine.compute(callerObservation, dispatch.caller.definition.capability, {
           root: from, scope: 'root', thought: question, purpose: 'synthesis',
           context: { root: from, scope: 'root', publicRequest: prepared.request.payload, publicPerspective: response.payload,
             sources: [reference(prepared.request), reference(response)], consensus: false, actions: 'review-required' },
@@ -154,16 +161,19 @@ export class Collaboration {
             public: summary, consensus: false, actions: 'review-required',
           }, `synthesis-${prepared.request.frame_hash}`);
         });
+        synthesisStatus = 'completed';
       } catch {
+        synthesisStatus = 'unavailable';
         await this.bots.repository.transaction(async transaction => {
           const current = findRoot(transaction, from);
           await this.bots.appendEvent(transaction, current, 'provider.unavailable', {
-            requestWave: prepared.request.frame_hash, summary: 'Public perspectives remain intact. Caller synthesis is unavailable; no agreement, action or retry was fabricated.',
+            requestWave: prepared.request.frame_hash, summary: 'Public perspectives remain intact. Caller synthesis is unavailable or no longer authorized; no agreement, action or retry was fabricated.',
           }, `synthesis-failed-${prepared.request.frame_hash}`);
         });
-      } finally { await this.bots.spine.unobserve(callerObservation); }
+      } finally { if (callerObservation) await this.bots.spine.unobserve(callerObservation); }
     }
-    return { status, request: prepared.request.frame_hash, response: response.frame_hash, transcript: await this.transcript(from) };
+    return { status: status === 'completed' && synthesisStatus !== 'completed' ? 'partial' : status,
+      responseStatus: status, synthesisStatus, request: prepared.request.frame_hash, response: response.frame_hash, transcript: await this.transcript(from) };
   }
 
   async transcript(root: string): Promise<PublicTurn[]> {
@@ -196,7 +206,9 @@ export class Collaboration {
       object(f.payload, ['schema', 'root', 'to', 'requestWave', 'requestParticle', 'recipientGrant', 'public', 'status', 'operationId']);
       requireThat(f.payload.root === request.payload.to && f.payload.to === request.payload.root
         && f.payload.requestParticle === request.payload_hash && f.payload.recipientGrant === request.payload.recipientGrant
-        && signerOf(f) === f.payload.root && f.payload.schema === SCHEMA,
+        && signerOf(f) === f.payload.root && f.payload.schema === SCHEMA
+        && f.payload.operationId === `echo-${request.frame_hash}`
+        && (f.payload.status === 'completed' || f.payload.status === 'unavailable'),
       'collaboration-binding', 'A public echo must bind the exact signed request particle, occurrence, recipient and grant.');
       publicPerspective(f.payload.public);
       return true;
@@ -207,6 +219,19 @@ export class Collaboration {
     const selected = await this.bots.repository.orderSelection(new Set([...requests, ...echoes, ...syntheses, ...ordinary].map(f => f.frame_hash)));
     return selected.map(frame => {
       const data = frame.kind.startsWith('memory.') ? workEvent(frame.payload).data : frame.payload;
+      if (frame.payload.event === 'collaboration.synthesized') {
+        const original = echoes.find(f => f.frame_hash === data.responseWave);
+        const request = authorized.get(String(data.requestWave));
+        requireThat(original && request?.root === own.definition.root && original.payload.requestWave === data.requestWave
+          && data.consensus === false && data.actions === 'review-required',
+        'collaboration-binding', 'A caller synthesis must bind this exact request/response pair without consensus or action authority.');
+        publicPerspective(data.public);
+        if (data.format !== undefined) {
+          requireThat(data.format === 'rapp-work.synthesis-references/1'
+            && canonicalJson(sourceReference(original)) === canonicalJson(data.responseRef),
+          'collaboration-binding', 'A synthesis must retain its peer’s exact original source, not copied dissent or substituted history.');
+        }
+      }
       const role = frame.payload.event === 'turn.user' ? 'user' : 'assistant';
       const publicText = frame.kind === 'swarm.guidance' ? String(data.question)
         : frame.kind === 'swarm.echo' ? (() => {
@@ -216,11 +241,6 @@ export class Collaboration {
           const p = publicationData('conversation', data);
           return `[${p.actor.name} / ${p.actor.provider}] ${String(p.content.text)}`;
         })() : publicWorkText(frame);
-      if (frame.payload.event === 'collaboration.synthesized' && data.format === 'rapp-work.synthesis-references/1') {
-        const original = echoes.find(f => f.frame_hash === data.responseWave);
-        requireThat(original && canonicalJson(sourceReference(original)) === canonicalJson(data.responseRef),
-          'collaboration-binding', 'A synthesis must retain its peer’s exact original source, not copied dissent or substituted history.');
-      }
       return { role, speaker: role === 'user' ? 'human' : String(frame.payload.root),
         text: publicText, source: reference(frame), origin: sourceReference(frame), replyTo: typeof data.requestWave === 'string' ? data.requestWave : null };
     });

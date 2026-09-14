@@ -89,7 +89,7 @@ export class SharedBrainstem {
     provider: ModelProvider): Promise<JsonObject> {
     const lease = this.#lease(handle);
     requireThat(!this.#pending.has(lease.root), 'spine-busy', 'An uncompleted call still owns this root; no concurrent replacement or replay is allowed.');
-    requireThat(request.root === lease.root && canonicalJson(request.context).length <= 96_000,
+    requireThat(request.root === lease.root && Buffer.byteLength(canonicalJson(request.context), 'utf8') <= 96_000,
       'root-isolation', 'Only this root’s bounded permitted canonical context may enter its interpreter.');
     const ref = capabilityReference(reference);
     const bytes = this.#catalog.get(ref.sha256);

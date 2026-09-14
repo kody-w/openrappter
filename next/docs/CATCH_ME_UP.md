@@ -131,8 +131,10 @@ presentation position and recorded state. No legacy replay implementation is
 imported.
 
 The requested reference agent `c58b0c7b-b34b-4d8c-b16d-05aa80409cf8` was contacted
-for semantic coordination; its returned result must be reviewed when delivered.
-Do not claim that an unavailable/unreturned agent result has been incorporated.
+for semantic coordination. The user subsequently supplied the frozen multi-bot
+architecture extraction and final source-owned evidence through `ef86c655`;
+they are mapped in `MULTIBOT_REFERENCE.md`. This does not retroactively change
+earlier receipts or claim an unseen direct agent reply.
 
 Catch-up is an additional release gate, not a substitute for the required
 observed controlled-local estate migration and final integration approval.

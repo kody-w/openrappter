@@ -1,6 +1,38 @@
 # Verified headless milestones
 
-## Current native federation / frozen rooted-estate handoff
+## Current frozen multi-bot semantic integration
+
+The complete independent check passes **107 core tests**, strict typecheck/build
+and every prior headless, native-federation, provider-neutral, observed
+migration/browser, Catch-up/guest and source-ownership gate. The adopted
+primitive suite passes **90 tests**; retained legacy gates remain unchanged and
+passing on their clean baseline.
+
+Five reference-informed regressions were reproduced before fixing them:
+immutable replay after grant revocation, clear-before-synthesis computation,
+wrong request/synthesis correlation, aliased duplicate echo identity, and
+character-count versus UTF-8 context bounds. All five now pass. A sixth check
+preserves negated consensus and peer-owned dissent verbatim without copying it
+into caller memory.
+
+The new independent clock/replay proof emits **9 signed frames across 6 streams**,
+all `COMPLIANT`. Its reply UTC precedes the request UTC; original bytes and exact
+request/wave links remain intact through restart. Revoked grants, absent private
+signers and a regressed host clock allow only the exact historical owner replay:
+zero model calls or mutations; changed replay/new unauthorized work refuse.
+
+The user supplied the final frozen `ef86c655` source-owned evidence and
+architecture extraction. Its **271 total frames / 6 signed frames** remain
+historical reference results, not greenfield acceptance. No reference UI,
+runtime, storage or lifecycle implementation is imported. Current exact rev-15
+authority and false estate/domain/code/shared-runtime adoption flags are unchanged.
+
+Evidence: `verification/multibot-reference.json`.
+Mapping and explicit remaining adapter gaps: `MULTIBOT_REFERENCE.md`.
+The observed controlled-local release gate remains unrun and approval/adoption
+blocked; no live profile changes, installation, merge or push are implied.
+
+## Native federation / frozen rooted-estate handoff (`f04e89a`)
 
 The complete new-core check now passes **101 tests**, strict typecheck/build,
 and every prior headless, provider-neutral, observed migration/browser,

@@ -120,6 +120,13 @@ and Grok app-only observations are not workspace candidates. The frozen
 framework-neutral reference and unavailable adoption flags are mapped in
 `ROOTED_ESTATE_HANDOFF.md`.
 
+`collaboration.ask` returns separate `responseStatus` and `synthesisStatus`.
+An approved peer response with unavailable or no-longer-authorized synthesis is
+`partial`. Exact recorded owner retries remain read-only even after peer grant
+revocation or loss of a private signer; a changed request or new delegation
+does not inherit that exception. Every new synthesis rechecks authority before
+model dispatch. See `MULTIBOT_REFERENCE.md`.
+
 ## Recurring and away work
 
 “Make this a world and recap progress every Monday” is one complete reviewed

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.clarify/1",
+  "title": "Same-publication native/CLI clarification marker",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "kind", "turnId", "requires", "questions"],
+  "properties": {
+    "schema": { "const": "rapp-work.clarify/1" },
+    "kind": { "enum": ["human-question", "gauntlet"] },
+    "turnId": { "type": "string", "maxLength": 100 },
+    "requires": { "const": "copilot-cli" },
+    "questions": {
+      "type": "array", "minItems": 1, "maxItems": 3,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "reason", "text"],
+        "properties": {
+          "id": { "type": "string", "maxLength": 100 },
+          "reason": { "enum": ["human-authority", "irreducible-ambiguity"] },
+          "text": { "type": "string", "minLength": 1, "maxLength": 700 }
+        }
+      }
+    }
+  },
+  "$comment": "A marker alone is not authority. Runtime requires a matching assistant turn in the same canonical frame, turnId equal to its operation ID, and a native/CLI producer. External inbox text, progress and channel outcomes cannot substitute. Only genuine CLI answerTo references settle it."
+}

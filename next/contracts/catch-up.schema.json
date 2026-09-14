@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.catch-up/1",
+  "title": "Read-only canonical Catch me up timeline",
+  "type": "object",
+  "readOnly": true,
+  "additionalProperties": false,
+  "required": ["schema", "root", "scope", "from", "to", "baseline", "steps", "next", "more", "selectionDigest", "digestSpace", "grades", "contract", "timelineDigest"],
+  "properties": {
+    "schema": { "const": "rapp-work.catch-up/1" },
+    "root": { "type": "string" },
+    "scope": { "type": "string" },
+    "from": { "$ref": "source-cursor.schema.json" },
+    "to": { "$ref": "source-cursor.schema.json" },
+    "baseline": { "type": "object", "required": ["cursor", "grade", "stateDigest", "state", "reason", "sourceFrameHashes"] },
+    "steps": {
+      "type": "array", "maxItems": 16,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["stepKind", "cursor", "previousCursor", "event", "grade", "workGrade", "stateGrade", "sourceFrameHashes", "publicSummary", "stateDigest", "state", "reason", "guest", "guestDigest", "origin"],
+        "properties": {
+          "stepKind": { "enum": ["occurrence", "state-only"] },
+          "cursor": { "$ref": "source-cursor.schema.json" },
+          "previousCursor": { "$ref": "source-cursor.schema.json" },
+          "event": { "type": "string" },
+          "grade": { "enum": ["recorded", "reconstructed", "unavailable"] },
+          "workGrade": { "enum": ["recorded", "unavailable"] },
+          "stateGrade": { "enum": ["reconstructed", "unavailable"] },
+          "sourceFrameHashes": { "type": "array", "items": { "$ref": "#/$defs/hash" } },
+          "publicSummary": { "type": ["string", "null"] },
+          "stateDigest": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+          "state": { "type": ["object", "null"] },
+          "reason": { "type": ["string", "null"] },
+          "guest": { "type": ["object", "null"] },
+          "guestDigest": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+          "origin": { "oneOf": [{ "$ref": "source-reference.schema.json" }, { "type": "null" }] }
+        }
+      }
+    },
+    "next": { "$ref": "source-cursor.schema.json" },
+    "more": { "type": "boolean" },
+    "selectionDigest": { "$ref": "#/$defs/hash" },
+    "digestSpace": { "const": "rapp/1:particle" },
+    "grades": { "type": "object", "required": ["recorded", "reconstructed", "unavailable"] },
+    "contract": { "type": "object" },
+    "timelineDigest": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": { "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } },
+  "$comment": "Cursors must match exact authorized canonical source occurrences. A retained branch-catalogue-only transition is an explicit state-only step and completed pages set next equal to to. Client activity/evidence/attention content references remain in sourceFrameHashes. Recorded public/view intent is not a historical screen recording. Only the explicitly opted-in, independently approved canonical Omarchy guest lane can include recorded guest PNG bytes. Hashes do not grant authority."
+}

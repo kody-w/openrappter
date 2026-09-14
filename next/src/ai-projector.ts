@@ -1,0 +1,230 @@
+import { AUTHORITY, canonicalJson, snapshotJson, type JsonObject, type RappFrame } from './canonical.js';
+import { workEvent } from './contract.js';
+import { requireThat } from './errors.js';
+import { reference } from './projection.js';
+import type { RootSnapshot, StoreSnapshot } from './repository.js';
+import { foldState, permittedScopes } from './state.js';
+import {
+  AI_LIMITS, AI_PROJECTION_SCHEMA, clientProposalData, grantData, publicationData, publicationKind, publicationRight,
+  type AiRight, type ClientActor, type ClientGrant, type ClientProposalData, type PublicationData, type PublicationKind, type ViewIntent,
+} from './ai-contract.js';
+import { memoryAtCursor, memoryCursor, memoryFrames, sourceReference } from './source-memory.js';
+import { projectTranscript, transcriptMetadata, TRANSCRIPT_LIMITS, type TranscriptOptions } from './transcript.js';
+
+export interface PublishedRecord {
+  frame: RappFrame;
+  kind: PublicationKind;
+  scope: string;
+  data: PublicationData;
+}
+export interface ProposalRecord {
+  frame: RappFrame;
+  scope: string;
+  data: ClientProposalData;
+}
+
+function clientRecords(root: RootSnapshot, scopes = foldState(root).scopes): {
+  publications: PublishedRecord[];
+  proposals: ProposalRecord[];
+} {
+  const grants = new Map<string, { data: ClientGrant; wave: string; active: boolean }>();
+  const publications: PublishedRecord[] = [];
+  const proposals: ProposalRecord[] = [];
+  const priorViews = new Map<string, PublishedRecord>();
+  const attributedGrant = (actor: ClientActor, frame: RappFrame, right: AiRight): ClientGrant => {
+    const grant = grants.get(actor.id);
+    requireThat(grant?.active && grant.wave === actor.grantWave && grant.data.name === actor.name
+      && grant.data.provider === actor.provider && grant.data.issuedUtc <= frame.utc && frame.utc < grant.data.expiresUtc
+      && grant.data.rights.includes(right), 'client-attribution',
+    'A client record must bind an active canonical grant at its occurrence, not a claimed identity.');
+    return grant.data;
+  };
+  for (const frame of memoryFrames(root)) {
+    const e = workEvent(frame.payload);
+    if (e.event === 'client.granted') {
+      const data = grantData(e.data);
+      grants.set(data.client, { data, wave: frame.frame_hash, active: true });
+    } else if (e.event === 'client.revoked') {
+      const grant = grants.get(String(e.data.client));
+      requireThat(grant && grant.wave === e.data.grantWave, 'client-authority', 'A client revocation does not match its grant.');
+      grant.active = false;
+    } else if (e.event === 'client.proposal') {
+      const data = clientProposalData(e.data);
+      const grant = attributedGrant(data.actor, frame, 'proposal.publish');
+      requireThat(permittedScopes(scopes, grant.scope).has(e.scope), 'client-attribution',
+        'A signed proposal may not exceed its attributed grant scope.');
+      proposals.push({ frame, scope: e.scope, data });
+    } else if (e.event.startsWith('client.')) {
+      const kind = publicationKind(e.event.slice('client.'.length));
+      const data = publicationData(kind, e.data);
+      const grant = attributedGrant(data.actor, frame, publicationRight(kind));
+      const permitted = permittedScopes(scopes, grant.scope);
+      requireThat(permitted.has(e.scope), 'client-attribution', 'A signed publication may not exceed its attributed grant scope.');
+      if (data.view !== null) {
+        const publicationScope = permittedScopes(scopes, e.scope);
+        requireThat(grant.rights.includes('view.publish'), 'client-attribution', 'View authority is not implicit in conversation authority.');
+        requireThat(data.viewParents.every(hash => priorViews.has(hash) && publicationScope.has(priorViews.get(hash)!.scope)
+          && (grant.rights.includes('view.resolve') || priorViews.get(hash)!.data.actor.id === data.actor.id)),
+        'view-causality', 'View history cannot silently consume another client’s unacknowledged intent.');
+      }
+      const record = { frame, kind, scope: e.scope, data };
+      publications.push(record);
+      if (data.view !== null) priorViews.set(frame.frame_hash, record);
+    }
+  }
+  return { publications, proposals };
+}
+
+export function publishedRecords(root: RootSnapshot): PublishedRecord[] {
+  return clientRecords(root).publications;
+}
+
+export function proposalRecords(root: RootSnapshot): ProposalRecord[] {
+  return clientRecords(root).proposals;
+}
+
+export function scopedFrames(root: RootSnapshot, scope: string): Map<string, RappFrame> {
+  const permitted = permittedScopes(foldState(root).scopes, scope);
+  const frames = memoryFrames(root).filter(f => permitted.has(String(f.payload.scope)));
+  if (scope === 'root') frames.push(...root.streams.body, ...root.streams.swarm);
+  return new Map(frames.map(f => [f.frame_hash, f]));
+}
+
+export function validateViewState(root: RootSnapshot, scope: string, view: ViewIntent): void {
+  const state = foldState(root);
+  const permitted = permittedScopes(state.scopes, scope);
+  const visible = scopedFrames(root, scope);
+  requireThat(permitted.has(view.focus), 'view-scope', 'Focus cannot leave the client’s authorized canonical scope.');
+  const artifact = (id: string): void => {
+    const a = state.artifacts.get(id);
+    requireThat(a && permitted.has(String(a.scope)), 'view-reference', 'A visible artifact must exist in this authorized canonical scope.');
+  };
+  const frame = (id: string, event?: string): void => {
+    const f = visible.get(id);
+    requireThat(f && (!event || f.payload.event === event)
+      && f.payload.event !== 'client.granted' && f.payload.event !== 'client.revoked',
+    'view-reference', 'A displayed occurrence must be an authorized canonical work/evidence record.');
+  };
+  for (const card of view.cards) {
+    if (card.kind === 'artifact') artifact(card.ref);
+    else if (card.kind === 'routine') {
+      const routine = state.routines.get(card.ref);
+      requireThat(routine && permitted.has(routine.scope), 'view-reference', 'The selected routine is not available in this scope.');
+    } else frame(card.ref, card.kind === 'activity' ? 'client.activity' : card.kind === 'attention' ? 'client.attention' : undefined);
+  }
+  if (view.progress !== null) frame(view.progress, 'client.activity');
+  if (view.screenArtifact !== null) artifact(view.screenArtifact);
+}
+
+export function viewFrontier(records: readonly PublishedRecord[]): PublishedRecord[] {
+  const heads = new Map<string, PublishedRecord>();
+  for (const record of records) {
+    if (record.data.view === null) continue;
+    for (const parent of record.data.viewParents) heads.delete(parent);
+    heads.set(record.frame.frame_hash, record);
+  }
+  return [...heads.values()];
+}
+
+export function cursorFor(root: RootSnapshot): JsonObject | null {
+  return memoryCursor(root);
+}
+export function atCursor(root: RootSnapshot, cursor: unknown): RootSnapshot {
+  return memoryAtCursor(root, cursor);
+}
+export function withSelectedRoot(snapshot: StoreSnapshot, root: RootSnapshot): StoreSnapshot {
+  requireThat(snapshot.roots.some(candidate => candidate.definition.root === root.definition.root),
+    'root-not-found', 'The selected projection root is not present in this canonical store.');
+  return { ...snapshot, roots: snapshot.roots.map(candidate =>
+    candidate.definition.root === root.definition.root ? root : candidate) };
+}
+export function withHistoricalTranscript(snapshot: StoreSnapshot, root: RootSnapshot): StoreSnapshot {
+  const anchoredRequests = new Set(memoryFrames(root)
+    .filter(frame => ['collaboration.perspective', 'collaboration.synthesized'].includes(String(frame.payload.event)))
+    .map(frame => String(workEvent(frame.payload).data.requestWave)));
+  const selected = withSelectedRoot(snapshot, root);
+  return { ...selected, roots: selected.roots.map(candidate => ({
+    ...candidate,
+    streams: {
+      ...candidate.streams,
+      swarm: candidate.streams.swarm.filter(frame =>
+        (frame.kind === 'swarm.guidance' && anchoredRequests.has(frame.frame_hash))
+        || (frame.kind === 'swarm.echo' && anchoredRequests.has(String(frame.payload.requestWave)))),
+    },
+  })) };
+}
+
+export function projectAi(snapshot: StoreSnapshot, root: RootSnapshot, scope: string,
+  options: TranscriptOptions = {}): JsonObject {
+  const state = foldState(root);
+  const allowed = permittedScopes(state.scopes, scope);
+  const client = clientRecords(root, state.scopes);
+  const records = client.publications.filter(r => allowed.has(r.scope));
+  const proposals = client.proposals.filter(r => allowed.has(r.scope));
+  const byWave = new Map(records.map(r => [r.frame.frame_hash, r]));
+  const transcript = projectTranscript(snapshot, root.definition.root, scope,
+    { ...options, limit: options.limit ?? TRANSCRIPT_LIMITS.ai });
+  const turns = transcript.turns;
+  const contribution = (kind: PublicationKind): JsonObject[] => records.filter(r => r.kind === kind)
+    .slice(-AI_LIMITS.windowItems).map(r => ({ actor: r.data.actor, content: r.data.content, source: reference(r.frame), origin: sourceReference(r.frame), causes: r.data.causes }));
+  const heads = viewFrontier(records);
+  const candidates = heads.map(r => {
+    let valid = true;
+    try { validateViewState(root, r.scope, r.data.view!); } catch { valid = false; }
+    return { source: reference(r.frame), actor: r.data.actor, parents: r.data.viewParents, intent: r.data.view, valid };
+  });
+  const status = heads.length > 1 ? 'conflict' : candidates.length && !candidates[0]!.valid ? 'invalidated' : heads.length ? 'resolved' : 'none';
+  const progressFrame = status === 'resolved' && heads[0]!.data.view!.progress
+    ? byWave.get(heads[0]!.data.view!.progress) : undefined;
+  const projection: JsonObject = {
+    schema: AI_PROJECTION_SCHEMA, root: root.definition.root, name: root.definition.name, scope,
+    authority: { ...AUTHORITY, factualTruth: false, clientAssurance: 'root-signed-scoped-capability-attribution',
+      confirmationAuthority: 'owner-only', mutationAuthority: 'owner-only' },
+    cursor: cursorFor(root),
+    sources: (root.sources ?? []).filter(s => allowed.has(s.scope)).map(s => ({
+      guid: root.definition.root, scope: s.scope, stream_id: s.stream,
+      head: s.frames.length ? reference(s.frames.at(-1)!) : null, branches: s.branches.map(b => b.head),
+    })),
+    scopes: state.scopes.filter(s => allowed.has(s.id)).map(s => ({ id: s.id, parent: s.parent, name: s.name, kind: s.kind })),
+    artifacts: [...state.artifacts.values()].filter(a => allowed.has(String(a.scope))).map(a => ({
+      id: a.id!, scope: a.scope!, name: a.name!, mediaType: a.mediaType!, contentHash: a.contentHash!, source: a.source!,
+    })),
+    proposals: proposals.slice(-AI_LIMITS.windowItems).map(record => {
+      const proposal = state.proposals.get(record.frame.frame_hash);
+      requireThat(proposal, 'proposal', 'An attributed client proposal must be reconstructible from canonical state.');
+      return {
+        wave: record.frame.frame_hash, scope: record.scope, actor: record.data.actor,
+        draft: record.data.draft, draftHash: record.data.draftHash, contextRevision: record.data.contextRevision,
+        status: proposal.status, confirmationAuthority: 'owner-only', mutationAuthority: 'owner-only',
+      };
+    }),
+    transcript: transcriptMetadata(transcript), turns,
+    activity: contribution('activity'), evidence: contribution('evidence'), attention: contribution('attention'),
+    view: {
+      status, heads: heads.map(h => h.frame.frame_hash), candidates,
+      effective: status === 'resolved' ? heads[0]!.data.view! : null,
+      progress: progressFrame ? progressFrame.data.content : null,
+      conflicts: status === 'conflict' ? [{ kind: 'concurrent-view-intents', heads: heads.map(h => h.frame.frame_hash), resolutionRequired: true }] : [],
+    },
+    refusedHints: records.filter(r => r.data.viewRefusal !== null).slice(-AI_LIMITS.windowItems)
+      .map(r => ({ source: reference(r.frame), actor: r.data.actor, diagnostic: r.data.viewRefusal })),
+    history: {
+      conversationRecords: transcript.total, clientPublications: records.length, clientProposals: proposals.length,
+      windowItems: AI_LIMITS.windowItems,
+      truncated: transcript.truncatedBefore || transcript.truncatedAfter
+        || records.length > AI_LIMITS.windowItems || proposals.length > AI_LIMITS.windowItems,
+      pagingAvailable: true,
+    },
+  };
+  requireThat(Buffer.byteLength(canonicalJson(projection)) <= AI_LIMITS.snapshotBytes, 'projection-size',
+    'This authorized projection exceeds the bounded snapshot size; canonical work remains available by scope/history page.');
+  return snapshotJson(projection) as JsonObject;
+}
+
+export function publicHistoryFrame(frame: RappFrame): JsonObject {
+  const e = workEvent(frame.payload);
+  const publicKinds = ['turn.user', 'turn.assistant', 'collaboration.synthesized', 'work.progress', 'routine.tick',
+    'client.conversation', 'client.activity', 'client.evidence', 'client.attention', 'client.proposal', 'client.view'];
+  return { source: reference(frame), origin: sourceReference(frame), event: e.event, scope: e.scope,
+    frame: publicKinds.includes(e.event) ? snapshotJson(frame) : null, controlRecord: !publicKinds.includes(e.event) };
+}

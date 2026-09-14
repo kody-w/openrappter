@@ -1,0 +1,14 @@
+{
+  "source": "packages/rapp1/src",
+  "sourceCommit": "d8601aa91c10f3330ea10b7fa31382137d981dfd",
+  "boundary": "next/src/canonical.ts; wire primitives only, not rev-14 authority/trust reports",
+  "files": {
+    "authority.ts": "63bba2e026c6bc456f64ef90dcd345ac537d7f52ce9051123673623ced957a91",
+    "evidence.ts": "b4859a83995f8dc26cc8eb05d044dc7815149ca73fc2ed9393d3f4a7f8d06e47",
+    "frame.ts": "a6552af9809cd97a935d141918ce3448bbbcb81e76220b9629a7b345ac9be5ce",
+    "identity.ts": "783b65bd80e4a110857fb2060d48d7677400e6b45103e3392a3656a2e33cd361",
+    "index.ts": "bb2c9b0cf95bcca34ec13e6a50e1cfcde70729b5bc31fa3245e02f5122bd9e22",
+    "json.ts": "abbfaca4bb613afdcec4cf587a7d6ee28c378af6d318cfe87f788e089ad40f54",
+    "signature.ts": "30f5a31d5d1a2d7d8ecf14fb23fdcf4afc13a6bcdb267b1809d3f553f216ff62"
+  }
+}

@@ -1,0 +1,472 @@
+{
+  "schema": "rapp-work.multibot-reference-milestone/1",
+  "baseCommit": "f04e89ae62590faefc5ecb31656011f8387b751c",
+  "branch": "rewrite/autonomous-agent-first",
+  "status": "verified independent semantic integration; no live adoption",
+  "reference": {
+    "schema": "rapp-work.frozen-multibot-reference/1",
+    "referenceCommit": "ef86c6551baa7446648e184f45e8426c5c8185d8",
+    "referenceOnly": true,
+    "codeImported": false,
+    "referenceTestsInherited": false,
+    "reportedReferenceFrames": 271,
+    "reportedSignedFrames": 6,
+    "files": [
+      {
+        "path": "/Users/kodywildfeuer/.copilot/session-state/a707dede-bf95-4c62-ae1c-f4e1cce271d8/files/greenfield-multibot-architecture-b5cec8a.md",
+        "sha256": "e3f9a7666f1e742153b74eb93c0d027b1ef44dc59d9f34dc607102c6b02743b9"
+      },
+      {
+        "path": "/Users/kodywildfeuer/.copilot/session-state/a707dede-bf95-4c62-ae1c-f4e1cce271d8/files/source-owned-exhaust-validation.json",
+        "sha256": "982ab5c4fede97e3ab95ebf0afbe32c907982742caed009820fc14414ad687c1"
+      },
+      {
+        "path": "/Users/kodywildfeuer/.copilot/session-state/a707dede-bf95-4c62-ae1c-f4e1cce271d8/files/multibot-review-fixes-validation.json",
+        "sha256": "4731e1b7ac49aa4598f3576ca98046ff0dca583e33ba5b992c7b394e4519085d"
+      }
+    ]
+  },
+  "validation": {
+    "command": "npm --prefix next run check",
+    "testsPassed": 107,
+    "failed": 0,
+    "skipped": 0,
+    "strictTypecheck": true,
+    "build": true,
+    "allMandatoryGates": true,
+    "log": ".test-scratch/multibot-full-check.log",
+    "primitiveTests": 90,
+    "primitiveLog": ".test-scratch/multibot-primitives.log",
+    "retainedLegacy": "passed at unchanged d8601aa91c10f3330ea10b7fa31382137d981dfd",
+    "legacyLog": ".test-scratch/multibot-legacy.log"
+  },
+  "reproducedAndFixed": [
+    "historical receipt replay incorrectly required an active peer grant",
+    "cleared caller could start new synthesis after peer response",
+    "synthesis could bind another question's signed response",
+    "aliased operation ID could duplicate one request's echo",
+    "context ceiling counted characters instead of UTF-8 bytes"
+  ],
+  "before": ".test-scratch/multibot-reference-before.log",
+  "targetedAfter": ".test-scratch/multibot-reference-after.log",
+  "independentProof": {
+    "schema": "rapp-work.multibot-reference-proof/1",
+    "roots": [
+      "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a"
+    ],
+    "canonicalDirectory": ".test-scratch/use-cases/store-7716-1789356416818-0",
+    "canonical": {
+      "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+      "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+      "authorityFrames": 16,
+      "verdict": "COMPLIANT",
+      "framesScanned": 9,
+      "signedFrames": 9,
+      "streamsScanned": 6,
+      "findings": [],
+      "evidence": [
+        {
+          "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+          "ok": "2 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+          "ok": "3 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        }
+      ]
+    },
+    "request": {
+      "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "scope": "root",
+      "stream_id": "net:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "seq": 0,
+      "utc": "2026-09-13T20:00:02.000Z",
+      "payload_hash": "e069a134d8a1421104f8c1bfe21e139a1d24ebb58a49c0f40f8c4b544c36b70e",
+      "frame_hash": "9ed061f1f457f1051c1c1ca5ab923e8ac16ad9727b1643042d277b1587f1891d",
+      "ownership": "source-owned"
+    },
+    "response": {
+      "guid": "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+      "scope": "root",
+      "stream_id": "net:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+      "seq": 0,
+      "utc": "2026-09-13T20:00:01.000Z",
+      "payload_hash": "2d475d55812a6d8a18729dff2256e0fedcea7b2481f9a8bd683c873d45bce0db",
+      "frame_hash": "2a1d6ecf1aa875326d4e8735ce3dcb9299ff8966619e83e06cd48ed3452d8b57",
+      "ownership": "source-owned"
+    },
+    "originalClockSkewPreserved": true,
+    "originalBytesPreserved": true,
+    "revokedGrantAndAbsentPrivateKeysAllowOnlyImmutableReplay": true,
+    "newUnauthorizedRequestRefused": true,
+    "changedReplayRefused": true,
+    "replayModelCalls": 0,
+    "replayMutations": 0,
+    "transcript": [
+      {
+        "role": "assistant",
+        "speaker": "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+        "text": "Independent reviewer perspective: preserve native pointers and confirm bounded internal work before acting.\nDisagreement: Do not normalize the native stores into a new shared workspace database.\nUnknown: Live external Brainstem and channel permission bindings have not been established.",
+        "source": {
+          "stream_id": "net:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+          "seq": 0,
+          "utc": "2026-09-13T20:00:01.000Z",
+          "payload_hash": "2d475d55812a6d8a18729dff2256e0fedcea7b2481f9a8bd683c873d45bce0db",
+          "frame_hash": "2a1d6ecf1aa875326d4e8735ce3dcb9299ff8966619e83e06cd48ed3452d8b57"
+        },
+        "origin": {
+          "guid": "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+          "scope": "root",
+          "stream_id": "net:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+          "seq": 0,
+          "utc": "2026-09-13T20:00:01.000Z",
+          "payload_hash": "2d475d55812a6d8a18729dff2256e0fedcea7b2481f9a8bd683c873d45bce0db",
+          "frame_hash": "2a1d6ecf1aa875326d4e8735ce3dcb9299ff8966619e83e06cd48ed3452d8b57",
+          "ownership": "source-owned"
+        },
+        "replyTo": "9ed061f1f457f1051c1c1ca5ab923e8ac16ad9727b1643042d277b1587f1891d"
+      },
+      {
+        "role": "assistant",
+        "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "text": "A bounded question with independent clocks.",
+        "source": {
+          "stream_id": "net:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+          "seq": 0,
+          "utc": "2026-09-13T20:00:02.000Z",
+          "payload_hash": "e069a134d8a1421104f8c1bfe21e139a1d24ebb58a49c0f40f8c4b544c36b70e",
+          "frame_hash": "9ed061f1f457f1051c1c1ca5ab923e8ac16ad9727b1643042d277b1587f1891d"
+        },
+        "origin": {
+          "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+          "scope": "root",
+          "stream_id": "net:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+          "seq": 0,
+          "utc": "2026-09-13T20:00:02.000Z",
+          "payload_hash": "e069a134d8a1421104f8c1bfe21e139a1d24ebb58a49c0f40f8c4b544c36b70e",
+          "frame_hash": "9ed061f1f457f1051c1c1ca5ab923e8ac16ad9727b1643042d277b1587f1891d",
+          "ownership": "source-owned"
+        },
+        "replyTo": null
+      },
+      {
+        "role": "assistant",
+        "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "text": "Two distinct public perspectives support a reviewed pointer-first plan; no external action is authorized.",
+        "source": {
+          "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+          "seq": 2,
+          "utc": "2026-09-13T20:00:04.000Z",
+          "payload_hash": "0695a70e1fa18ebd1956bd11c621ad218b1be4cdb175a4f201d4a25f4d02d5d4",
+          "frame_hash": "b895d8fba9f2d7a006c51bcb9d2432dc43f625d0d0191f3c9410dbb4c05e3bac"
+        },
+        "origin": {
+          "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+          "scope": "root",
+          "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+          "seq": 2,
+          "utc": "2026-09-13T20:00:04.000Z",
+          "payload_hash": "0695a70e1fa18ebd1956bd11c621ad218b1be4cdb175a4f201d4a25f4d02d5d4",
+          "frame_hash": "b895d8fba9f2d7a006c51bcb9d2432dc43f625d0d0191f3c9410dbb4c05e3bac",
+          "ownership": "source-owned"
+        },
+        "replyTo": "9ed061f1f457f1051c1c1ca5ab923e8ac16ad9727b1643042d277b1587f1891d"
+      }
+    ]
+  },
+  "proofFile": ".test-scratch/use-cases/store-7716-1789356416818-0-multibot-reference.json",
+  "regressions": {
+    "rapp-work.next/foundation-gates/1": {
+      "evidenceDirectory": null,
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 3,
+        "signedFrames": 0,
+        "streamsScanned": 2,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/ff2b07736a802dd2d50ad56cc118fc151dd816814b29f7744f633f73d9dcbc99/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/ff2b07736a802dd2d50ad56cc118fc151dd816814b29f7744f633f73d9dcbc99/memory/frames",
+            "ok": "2 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.next/headless-parity/1": {
+      "evidenceDirectory": ".test-scratch/e2e-7868-1789356422636",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 38,
+        "signedFrames": 38,
+        "streamsScanned": 10,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/branches/memory-16eb6630dc2cc8211730da7e4eef3a73b02e2ff2926632feca4dc0a2b4a7b5fb/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "24 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/2dec19dc0f96e20509bbea46dc4ab80379b14871b3315c9a39c66bf2e2cca261/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/58dd0968a9e1a71f92ceccd86e0e61961aee222228366a26b73170b4a14d6391/frames",
+            "ok": "2 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.ai-projection-evidence/1": {
+      "evidenceDirectory": ".test-scratch/ai-projection-7949-1789356425957",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 25,
+        "signedFrames": 25,
+        "streamsScanned": 2,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "24 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.observed-migration-gate/1": {
+      "evidenceDirectory": ".test-scratch/migration-observed-8001-1789356427631",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 113,
+        "signedFrames": 113,
+        "streamsScanned": 17,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+            "ok": "5 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/scopes/c2f74e2f7159168d927b9d7c8670693734f044adf5817a1c11bd8a1e69411e0e/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/branches/memory-6ff0f28c0d9cf303f17f5d491c4af07cab432f83c9f472d3d0ad8e9203fcec65/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "6 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+            "ok": "5 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/3d3175f45a1397c948f596e13df80655cdfc9542f746a185de00de7da48a072a/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c4b/frames",
+            "ok": "10 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/7a470104beabea10e3fbfe8a724e8ac96613f55a331b970806da411d601a17ae/branches/495b5a68477bda8cfc30c875500178704102461d02ccbb36d0c488abfbe82168/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/7a470104beabea10e3fbfe8a724e8ac96613f55a331b970806da411d601a17ae/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/8e9b8e8b7a77825d9602644f429a7448bfc9726365b3b7131fcc6925f8af2354/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/c803daf5f88f45923547877852fc9372ba4c813d9800ea978b2dd629165dad14/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "migration/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/frames",
+            "ok": "73 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "migration/materialized/7913a55c7fc45de4a02249fc2149c60d3b5533d18e119acd2b69f2c5a1601437/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.catch-up-gate/1": {
+      "evidenceDirectory": ".test-scratch/catch-up-8491-1789356460101",
+      "canonical": null,
+      "status": "passed"
+    },
+    "rapp-work.source-ownership-gate/1": {
+      "evidenceDirectory": ".test-scratch/source-ownership-8581-1789356462619",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 21,
+        "signedFrames": 21,
+        "streamsScanned": 9,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "10 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/branches/07c217f7e788ac47a2b060e0630c591fb0130bbea95ab4a61b5ea339bc651479/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+            "ok": "2 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c4b/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    }
+  },
+  "newBehavior": {
+    "immutableOwnerReplayDoesNotDispatch": true,
+    "newWorkRequiresCurrentGrantsAndVisibleRoots": true,
+    "synthesisRechecksBeforeComputeAndPublication": true,
+    "incompleteSynthesisReturnsPartial": true,
+    "exactResponseOperationAndCorrelationRequired": true,
+    "contextBoundUtf8Bytes": 96000,
+    "negatedConsensusRetainedVerbatim": true,
+    "peerDissentCopiedIntoCaller": false
+  },
+  "unchangedBoundaries": {
+    "referenceUiCodeImported": false,
+    "referenceRuntimeCodeImported": false,
+    "historicalFramesRewritten": false,
+    "authorityRepinned": false,
+    "privateHistoryMerged": false,
+    "rootIdentityAliased": false,
+    "nativeOwnerApiExpanded": false,
+    "codeLoadingActivated": false,
+    "sharedRuntimeAdoptionActivated": false,
+    "liveProfilesTouched": false,
+    "pushed": false,
+    "dependenciesOrApplicationsInstalled": false
+  },
+  "docs": "docs/MULTIBOT_REFERENCE.md",
+  "remaining": [
+    "Actual adopted root-scoped existing-interpreter/materialization and disclosure/signing bootstrap",
+    "Keyless-root publication/signer adoption without reminting",
+    "Approved controlled-local observed estate migration and independent release qualification"
+  ]
+}

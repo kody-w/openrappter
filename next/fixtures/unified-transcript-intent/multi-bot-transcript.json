@@ -1,0 +1,358 @@
+{
+  "fixture": "synthetic-canonical-public-turns",
+  "canonicalOrdering": "UTC then wave hash",
+  "turns": [
+    {
+      "role": "user",
+      "speaker": "human",
+      "actor": {
+        "id": "human",
+        "name": "Human",
+        "provider": "local-operator"
+      },
+      "text": "I need a place to build the Copilot bridge",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 0,
+        "utc": "2026-09-13T20:00:00.002Z",
+        "payload_hash": "007c735abd988c405d3994f4931e8a55dda767f02cefe69c6ea0210222f4f108",
+        "frame_hash": "f76410a1501a6ed828275efc5dfa29c9d2b5592e0d42c8b275ef9ae069fd51af"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 0,
+        "utc": "2026-09-13T20:00:00.002Z",
+        "payload_hash": "007c735abd988c405d3994f4931e8a55dda767f02cefe69c6ea0210222f4f108",
+        "frame_hash": "f76410a1501a6ed828275efc5dfa29c9d2b5592e0d42c8b275ef9ae069fd51af",
+        "ownership": "source-owned"
+      },
+      "attribution": {
+        "origin": "copilot-cli",
+        "approvalAuthority": true
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "actor": {
+        "id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "name": "Copilot Builder",
+        "provider": "canonical-core"
+      },
+      "text": "Make Copilot Builder a coherent internal world, with a briefing artifact and a clear RAPP/1 boundary.\nTradeoff: Keep one visible root bot and one Librarian; Builder is an internal world, not another bot.\nTradeoff: The briefing is canonical inert text. No host source file, native profile, model configuration or external service is changed.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 1,
+        "utc": "2026-09-13T20:00:00.004Z",
+        "payload_hash": "30600f699a176eb47ef599b990d3fc8d703a091a12d04cea935f9629f7d4fd38",
+        "frame_hash": "38623e56bed042b80cca111228931c269a584ed499bc6311a06cf5591b2e5eac"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 1,
+        "utc": "2026-09-13T20:00:00.004Z",
+        "payload_hash": "30600f699a176eb47ef599b990d3fc8d703a091a12d04cea935f9629f7d4fd38",
+        "frame_hash": "38623e56bed042b80cca111228931c269a584ed499bc6311a06cf5591b2e5eac",
+        "ownership": "source-owned"
+      },
+      "attribution": {
+        "origin": "canonical-core",
+        "approvalAuthority": false
+      },
+      "replyTo": "f76410a1501a6ed828275efc5dfa29c9d2b5592e0d42c8b275ef9ae069fd51af"
+    },
+    {
+      "role": "user",
+      "speaker": "human",
+      "actor": {
+        "id": "human",
+        "name": "Human",
+        "provider": "local-operator"
+      },
+      "text": "RAPP Up: organize the explicitly discovered local native estate inside this one complete root world.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 3,
+        "utc": "2026-09-13T20:00:00.007Z",
+        "payload_hash": "07e485b5a46dfe7f2f335b34df21b2630e2e684db0c98d0b0510ce8cd648fbca",
+        "frame_hash": "c557b67d59483407af89f84491c320b73c4954a5a7c3ce8c4d5728a66994a30e"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 3,
+        "utc": "2026-09-13T20:00:00.007Z",
+        "payload_hash": "07e485b5a46dfe7f2f335b34df21b2630e2e684db0c98d0b0510ce8cd648fbca",
+        "frame_hash": "c557b67d59483407af89f84491c320b73c4954a5a7c3ce8c4d5728a66994a30e",
+        "ownership": "source-owned"
+      },
+      "attribution": {
+        "origin": "copilot-cli",
+        "approvalAuthority": true
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "actor": {
+        "id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "name": "Copilot Builder",
+        "provider": "canonical-core"
+      },
+      "text": "Establish one complete Local Projects world inside this bot, keeping every native provider shape as a pointer.\nTradeoff: Discovery is historical metadata, not current native-store truth or ownership.\nTradeoff: One visible bot and one Librarian remain; no native data is copied, normalized, mounted or modified.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 4,
+        "utc": "2026-09-13T20:00:00.009Z",
+        "payload_hash": "dcf4b432dce1a83ccdd23ceba240be674cdc765398b36ef9a60e46c07c1b3050",
+        "frame_hash": "46b5d4ef8646d54d95df1dcdfec7bb1bb8360a8d89c31ffdc2da9ce46bcd3c23"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 4,
+        "utc": "2026-09-13T20:00:00.009Z",
+        "payload_hash": "dcf4b432dce1a83ccdd23ceba240be674cdc765398b36ef9a60e46c07c1b3050",
+        "frame_hash": "46b5d4ef8646d54d95df1dcdfec7bb1bb8360a8d89c31ffdc2da9ce46bcd3c23",
+        "ownership": "source-owned"
+      },
+      "attribution": {
+        "origin": "canonical-core",
+        "approvalAuthority": false
+      },
+      "replyTo": "c557b67d59483407af89f84491c320b73c4954a5a7c3ce8c4d5728a66994a30e"
+    },
+    {
+      "role": "user",
+      "speaker": "human",
+      "actor": {
+        "id": "human",
+        "name": "Human",
+        "provider": "local-operator"
+      },
+      "text": "Make this a world and recap progress every Monday",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 6,
+        "utc": "2026-09-13T20:00:00.011Z",
+        "payload_hash": "95a8c2febc96233237dbc67d809d0911bf318d52649e54e92559a0f020627c53",
+        "frame_hash": "efe789b8caad15acbf6fea5fdfeee1dc01c33613dd4a2b2498c0052bc45823bc"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 6,
+        "utc": "2026-09-13T20:00:00.011Z",
+        "payload_hash": "95a8c2febc96233237dbc67d809d0911bf318d52649e54e92559a0f020627c53",
+        "frame_hash": "efe789b8caad15acbf6fea5fdfeee1dc01c33613dd4a2b2498c0052bc45823bc",
+        "ownership": "source-owned"
+      },
+      "attribution": {
+        "origin": "copilot-cli",
+        "approvalAuthority": true
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "actor": {
+        "id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "name": "Copilot Builder",
+        "provider": "canonical-core"
+      },
+      "text": "Create an internal Weekly Work world and produce its canonical progress recap every Monday.\nTradeoff: Monday at 09:00 UTC is an explicit reviewable default, not a guessed local timezone.\nTradeoff: The routine is hidden implementation of this complete reviewed intent. It reads canonical context first and appends a reversible internal recap; it does not infer with a model, send messages or execute arbitrary instructions.\nRecurring intent: Recap this world's canonical progress; every Monday at 09:00 UTC, first 2026-09-14T09:00:00.000Z.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 7,
+        "utc": "2026-09-13T20:00:00.013Z",
+        "payload_hash": "eb77a5f64776a921a6b9b85ab0d5e9fb6eaac25fdf573cded489320757a8a173",
+        "frame_hash": "aef0e61c4956234a1d31d09370cf8ed9cd3408113e37e95bc8379f28bb3793f2"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 7,
+        "utc": "2026-09-13T20:00:00.013Z",
+        "payload_hash": "eb77a5f64776a921a6b9b85ab0d5e9fb6eaac25fdf573cded489320757a8a173",
+        "frame_hash": "aef0e61c4956234a1d31d09370cf8ed9cd3408113e37e95bc8379f28bb3793f2",
+        "ownership": "source-owned"
+      },
+      "attribution": {
+        "origin": "canonical-core",
+        "approvalAuthority": false
+      },
+      "replyTo": "efe789b8caad15acbf6fea5fdfeee1dc01c33613dd4a2b2498c0052bc45823bc"
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "actor": {
+        "id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "name": "Copilot Builder",
+        "provider": "canonical-core"
+      },
+      "text": "Review the public plan and preserve disagreement.",
+      "source": {
+        "stream_id": "net:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "seq": 0,
+        "utc": "2026-09-14T09:00:00.007Z",
+        "payload_hash": "83c3f72fc05f292a7f6c4dd8419511d5853d74a977313a811c5ba42601304a1e",
+        "frame_hash": "5a82199a67cc3ac94c1563ebd22dcdd7dcd34ef294bda7e835b742d6bb5d2467"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "net:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "seq": 0,
+        "utc": "2026-09-14T09:00:00.007Z",
+        "payload_hash": "83c3f72fc05f292a7f6c4dd8419511d5853d74a977313a811c5ba42601304a1e",
+        "frame_hash": "5a82199a67cc3ac94c1563ebd22dcdd7dcd34ef294bda7e835b742d6bb5d2467",
+        "ownership": "source-owned"
+      },
+      "attribution": {
+        "origin": "canonical-collaboration",
+        "approvalAuthority": false
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+      "actor": {
+        "id": "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+        "name": "Independent Reviewer",
+        "provider": "canonical-core"
+      },
+      "text": "Independent reviewer perspective: preserve native pointers and confirm bounded internal work before acting.\nDisagreement: Do not normalize the native stores into a new shared workspace database.\nUnknown: Live external Brainstem and channel permission bindings have not been established.",
+      "source": {
+        "stream_id": "net:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+        "seq": 0,
+        "utc": "2026-09-14T09:00:00.008Z",
+        "payload_hash": "1c5346d2dee7f3308fdc97c452debee90f15750acdf5d097908839fe3e46b628",
+        "frame_hash": "6f31af605a059004889ff913f6512c1b7467b4581e7e3fa7ad3e7c84516cc31c"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+        "scope": "root",
+        "stream_id": "net:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a",
+        "seq": 0,
+        "utc": "2026-09-14T09:00:00.008Z",
+        "payload_hash": "1c5346d2dee7f3308fdc97c452debee90f15750acdf5d097908839fe3e46b628",
+        "frame_hash": "6f31af605a059004889ff913f6512c1b7467b4581e7e3fa7ad3e7c84516cc31c",
+        "ownership": "source-owned"
+      },
+      "attribution": {
+        "origin": "canonical-collaboration",
+        "approvalAuthority": false
+      },
+      "replyTo": "5a82199a67cc3ac94c1563ebd22dcdd7dcd34ef294bda7e835b742d6bb5d2467"
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "actor": {
+        "id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "name": "Copilot Builder",
+        "provider": "canonical-core"
+      },
+      "text": "Two distinct public perspectives support a reviewed pointer-first plan; no external action is authorized.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 11,
+        "utc": "2026-09-14T09:00:00.010Z",
+        "payload_hash": "ee45b2dd56161f6eb245da35d84f2163766b2221b8668b3553106aa9a8d60b04",
+        "frame_hash": "2adbba37e96ff92fc083ffacc32386d481a06cc9f0b40216192ea09d2a49f356"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 11,
+        "utc": "2026-09-14T09:00:00.010Z",
+        "payload_hash": "ee45b2dd56161f6eb245da35d84f2163766b2221b8668b3553106aa9a8d60b04",
+        "frame_hash": "2adbba37e96ff92fc083ffacc32386d481a06cc9f0b40216192ea09d2a49f356",
+        "ownership": "source-owned"
+      },
+      "attribution": {
+        "origin": "canonical-history",
+        "approvalAuthority": false
+      },
+      "replyTo": "5a82199a67cc3ac94c1563ebd22dcdd7dcd34ef294bda7e835b742d6bb5d2467"
+    },
+    {
+      "role": "user",
+      "speaker": "human",
+      "actor": {
+        "id": "human",
+        "name": "Human",
+        "provider": "local-operator"
+      },
+      "text": "Prepare an external message request, do not send it",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 19,
+        "utc": "2026-09-14T09:00:00.025Z",
+        "payload_hash": "102173613151dfb6579dedd0b2cde6f835fde13f6f12f59d5ea1dcb02fe04079",
+        "frame_hash": "42a707568205c0f4b8154af1a1a166c1afe0f587835f0622bb243a2af7787d5a"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 19,
+        "utc": "2026-09-14T09:00:00.025Z",
+        "payload_hash": "102173613151dfb6579dedd0b2cde6f835fde13f6f12f59d5ea1dcb02fe04079",
+        "frame_hash": "42a707568205c0f4b8154af1a1a166c1afe0f587835f0622bb243a2af7787d5a",
+        "ownership": "source-owned"
+      },
+      "attribution": {
+        "origin": "copilot-cli",
+        "approvalAuthority": true
+      },
+      "replyTo": null
+    },
+    {
+      "role": "assistant",
+      "speaker": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "actor": {
+        "id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "name": "Copilot Builder",
+        "provider": "canonical-core"
+      },
+      "text": "Prepare a bounded message request, without sending it.\nTradeoff: Confirming organization only records this request. A second exact local approval is required to call an external adapter.\nNothing has been applied. Confirm this exact proposal to create bounded internal successors. External effects require a separate exact approval.",
+      "source": {
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 20,
+        "utc": "2026-09-14T09:00:00.027Z",
+        "payload_hash": "3c310f5b97a1349c0c90798adc121b8170cc64410364e61d0e4b64de188b4135",
+        "frame_hash": "8f3a4896b632995af536096b2985e0b85d12525c0c75f82977d1fbc97baf4be1"
+      },
+      "origin": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "root",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+        "seq": 20,
+        "utc": "2026-09-14T09:00:00.027Z",
+        "payload_hash": "3c310f5b97a1349c0c90798adc121b8170cc64410364e61d0e4b64de188b4135",
+        "frame_hash": "8f3a4896b632995af536096b2985e0b85d12525c0c75f82977d1fbc97baf4be1",
+        "ownership": "source-owned"
+      },
+      "attribution": {
+        "origin": "canonical-core",
+        "approvalAuthority": false
+      },
+      "replyTo": "42a707568205c0f4b8154af1a1a166c1afe0f587835f0622bb243a2af7787d5a"
+    }
+  ]
+}

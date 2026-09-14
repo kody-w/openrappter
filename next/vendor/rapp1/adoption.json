@@ -1,0 +1,51 @@
+{
+  "repository": "https://github.com/kody-w/rapp-1",
+  "commit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+  "head": {
+    "seq": 15,
+    "revision": "rev-15",
+    "frame_hash": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+    "payload_hash": "1ac47416e9caf174c4fdc00265ca187c244fb701ae2a7fb7211ba1385a951310",
+    "normative_sha256": "348e7d5baa94aaf2ce4c5354f3cb261f389298a04af65e271a686d3b62f7c384",
+    "normative_bytes": 79692
+  },
+  "files": {
+    "LICENSE": {
+      "sha256": "3b1952c1f983b4fc60337137cc6c863e9ea617ce551397c80e5b2d74eb1c476b",
+      "bytes": 1076
+    },
+    "rapp.py": {
+      "sha256": "1a04362b02f14c1e37b70c6b4f72d79e92df1cc9c2b5b394e8e1b141fc0b6050",
+      "bytes": 39186
+    },
+    "rapp_check.py": {
+      "sha256": "a8dbc2dc242b2faabc959a917c23c37db3bd3d28b95dc57891cc8f623698b7c2",
+      "bytes": 7702
+    },
+    "rapp_registry.py": {
+      "sha256": "eec22844a32874cdb21772fc804db29220d2e2f052be9ca8a8049f2162ce95d2",
+      "bytes": 27420
+    },
+    "anchor/bootstrap_verify.py": {
+      "sha256": "4a4c19912063d5ce15cec69b1aca0cebf5df122fb1c481f357f1cf21bc0a07ff",
+      "bytes": 15802
+    },
+    "anchor/chain.jsonl": {
+      "sha256": "4d9b0e389395bfb2a61ff907e58efd12241c78e167ffd9be0f7f1452cd05b523",
+      "bytes": 290463
+    },
+    "anchor/index.json": {
+      "sha256": "5f19ed2739c48e799ee142152f09da99488c06ee7a9100d6b67de7cf7618ca93",
+      "bytes": 7748
+    },
+    "anchor/bootstrap/index.json": {
+      "sha256": "6237f88d91c5932f761159ed052b0c058f58e29a6ef9b166e2f927a5280c1881",
+      "bytes": 434
+    },
+    "anchor/bootstrap/sha256-1666e44acf532f854d4bf74868c9af9f9b362055692189ac858a7c8b52dcd5bb.json": {
+      "sha256": "1666e44acf532f854d4bf74868c9af9f9b362055692189ac858a7c8b52dcd5bb",
+      "bytes": 1731
+    }
+  },
+  "rule": "Unmodified public MIT-licensed reference bytes. Not an application protocol."
+}

@@ -1,0 +1,38 @@
+{
+  "summary": "Make Copilot Builder a coherent internal world, with a briefing artifact and a clear RAPP/1 boundary.",
+  "tradeoffs": [
+    "Keep one visible root bot and one Librarian; Builder is an internal world, not another bot.",
+    "The briefing is canonical inert text. No host source file, native profile, model configuration or external service is changed."
+  ],
+  "tradeoffLinks": [
+    {
+      "actionId": "copilot-builder",
+      "tradeoff": 0
+    },
+    {
+      "actionId": "builder-brief",
+      "tradeoff": 1
+    }
+  ],
+  "questions": [],
+  "actions": [
+    {
+      "type": "scope.create",
+      "scope": {
+        "id": "copilot-builder",
+        "parent": "monorepo",
+        "kind": "world",
+        "name": "Copilot Builder",
+        "description": "An internal workspace world for the headless Copilot bridge."
+      }
+    },
+    {
+      "type": "artifact.save",
+      "id": "builder-brief",
+      "scope": "copilot-builder",
+      "name": "Builder brief",
+      "mediaType": "text/plain",
+      "content": "Build outcomes from reviewed intent. Use exact canonical context, a pinned Copilot SDK model, and verified root-scoped capabilities. No source or native-store writes are authorized."
+    }
+  ]
+}

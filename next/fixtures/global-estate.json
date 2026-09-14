@@ -1,0 +1,10 @@
+{
+  "name": "RAPP Global Estate",
+  "classification": "historical-derived-map",
+  "currentOwnershipVerified": false,
+  "liveInventoryVerified": false,
+  "entries": [
+    { "label": "RAPP foundation", "reference": "https://github.com/kody-w/RAPP", "relationship": "historical-public-reference" },
+    { "label": "RAPP/1 protocol", "reference": "https://github.com/kody-w/rapp-1", "relationship": "exact-rev15-authority-selected-separately" }
+  ]
+}

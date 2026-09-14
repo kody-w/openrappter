@@ -25,7 +25,14 @@ export async function checkReleaseConstitution(root) {
   const workflows = (await readdir(path.join(root, '.github/workflows'))).filter(name => /\.ya?ml$/u.test(name)).sort();
   invariant(canonical(workflows) === canonical(['ci.yml', 'release-constitution-check.yml', 'release-macos.yml']), 'Only the three clean workflows may exist');
   const release = await readFile(path.join(root, '.github/workflows/release-macos.yml'), 'utf8');
-  invariant(release.includes('environment: production') && release.includes('node scripts/release-macos.mjs') && release.includes('node scripts/verify-release.mjs'), 'Production release requires the protected environment, builder and independent artifact verifier');
+  const ancestryCommand = 'node scripts/check-release-tag-ancestry.mjs --tag "$GITHUB_REF_NAME"';
+  const ancestryGate = release.indexOf(ancestryCommand);
+  invariant(release.includes('environment: production') && release.includes('fetch-depth: 0') && ancestryGate >= 0
+    && release.includes('node scripts/release-macos.mjs') && release.includes('node scripts/verify-release.mjs'),
+  'Production release requires the protected environment, complete history, origin/main tag ancestry gate, builder and independent artifact verifier');
+  for (const command of ['npm ci', 'node scripts/release-macos.mjs', 'gh release create']) {
+    invariant(ancestryGate < release.indexOf(command), 'Production tag ancestry must pass before dependency installation, build, signing and publication');
+  }
   invariant(!release.includes('--development-unsigned') && !/continue-on-error|pull_request_target|\|\|\s*true/u.test(release), 'Production release must not bypass verification or use unsigned development mode');
   invariant((await readFile(path.join(root, 'README.md'), 'utf8')).startsWith('# RAPP Work\n'), 'The root README must describe RAPP Work');
   for (const filename of ['tests/acceptance/runtime.test.ts', 'tests/acceptance/release-artifacts.test.mjs', 'tests/macos-arm64/atomic-replacement.test.mjs', 'tests/macos-arm64/dmg.test.mjs']) {

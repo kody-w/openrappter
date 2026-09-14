@@ -1,0 +1,97 @@
+# Binding passive projection contract
+
+`projection.get` returns `rapp-work.projection/1`. The TypeScript contract is
+`src/projection.ts`; the machine-readable shape is
+`contracts/projection.schema.json`. There is **no UI implementation**.
+Unresolved active/retained canonical forks refuse semantic projection; a
+directory name or display preference cannot select a branch. Raw forensic
+inventory preserves all occurrences until actual canonical owner resolution.
+
+The projection contains:
+
+- exact full root GUID, name and hidden status;
+- selected rev-15 authority, integrity-only classification and explicit
+  `factualTruth:false` / `externalAdoption:false`;
+- the complete recursive internal scope tree, not a roster of visible child
+  bots;
+- public user/assistant turns with distinct original root speakers, canonical
+  source stream/sequence/UTC/particle/wave and optional reply binding;
+- explicit transcript page metadata: total, offset, limit, returned count,
+  earlier/later truncation, navigation offsets and deterministic revision;
+- review proposals, resolved/superseded human questions, internal artifacts,
+  native pointers, recurring work, progress, outcomes and attention;
+- original canonical heads and explicitly unselected preserved branch heads,
+  including source scopes' own streams and branches;
+- exact original GUID/scope/stream/particle/wave `origin` references on turns,
+  outcomes, progress and attention, with honest historical ownership grades.
+
+Cross-bot turns are included only through verified, signed, scoped request and
+response occurrences. Full private peer memory is not merged into the view.
+Canonical UTC/wave ordering does not rewrite the original stream order, sequence,
+parent particle, wave link or identity. Disagreements and unknowns remain public;
+synthesis is always `consensus:false` and `actions:review-required`.
+New synthesis retains only its caller's authored public work plus a reference
+to the peer's signed original; peer dissent is not copied into caller memory.
+Reconstruction binds that source to the synthesis's exact original request,
+not merely another valid signed response in the same root pair. Canonical
+UTC/wave presentation can show a clock-skewed reply before its request without
+rewriting source time or invalidating its exact hash dependency.
+
+Projection, selection, observer status and Where-were-we are non-authoritative
+read-only views. Consuming a projection adds no event and runs no model.
+Discarding one view does not dispose another root's observation.
+
+The owner projection, conversation result, provider-neutral snapshot/subscription,
+model context and private recap all use the same verified scoped transcript
+projector. Cross-bot request/echo/synthesis turns therefore cannot disappear at
+an adapter boundary. Private recap follows a synthesis's exact peer response
+reference, and any bounded text excerpt is visibly marked with
+`… [truncated]` plus machine-readable source/truncation metadata.
+
+A future one-chat UI may display this contract and forward human intents. It
+must not implement its own planner, registry, provider routing, durable message
+history, scheduling authority, capability loader, approval policy or deletion.
+It must not promote a carried integrity flag or source hash into execution
+permission. Mutations remain exact headless commands and canonical successors.
+
+## Provider-neutral AI-driven extension
+
+`rapp-work.ai-projection/1` is the authenticated provider-neutral projection
+contract, described in [AI_PROJECTION_API.md](AI_PROJECTION_API.md). It preserves
+the underlying canonical root and adds structured client attribution, public
+activity/evidence/attention, explicit multi-head view conflicts and bounded
+cursor events. It also exposes attributed structured client proposals with
+their exact context revision, Draft digest and `review|applied|corrected` state;
+both confirmation and mutation authority are explicitly owner-only. The older
+owner-facing `projection.get` remains available; it is not the credentialed
+multi-client transport. `rapp_work_read` accepts optional
+`transcriptOffset` and `transcriptLimit`; subscriptions carry the same transcript
+page and emit a `transcript-changed` update when a signed peer request/echo
+changes without a local memory append.
+
+The UI must subscribe and transform around canonical AI work, rather than turn
+these fields into a parallel control plane. A test-only render-model reducer
+proves real-time transitions, conflict visibility and restart equivalence.
+The UI implementation is still deferred.
+Global Estate/Librarian focus and evidence cards reference source-owned work
+without becoming its owner. Source-head vectors preserve causal cuts across
+independent streams, not a central copied activity order. See
+`SOURCE_OWNERSHIP.md` and the source-reference/source-cursor machine contracts.
+
+## Passive Catch me up / optional guest replay
+
+`rapp_work_catch_up` returns a bounded `rapp-work.catch-up/1` timeline, not a new
+UI state authority. Every step retains canonical cursor/source hashes, explicit
+recorded/reconstructed/unavailable grades and a deterministic state digest.
+Retained branch-catalogue-only changes are explicit state-only steps and a
+completed page has `next === to`; unresolved conflicting branches still refuse.
+Client activity/evidence/attention references remain in step provenance.
+The player may fast-forward the returned states but may not regenerate work or
+invoke models/tools. Replay import verification requires canonical frames plus
+the separate trusted-input manifest, never an embedded self-authenticating
+digest alone. See `CATCH_ME_UP.md`.
+
+Optional `rapp-work.omarchy-replay/1` is separately opted-in GODD/private content.
+Only exact host-approved canonical guest artifacts are recorded frames; safe
+command/diff visualizations are reconstructed; missing display is unavailable.
+No host screen, secrets, keystrokes or executable replay is exposed.

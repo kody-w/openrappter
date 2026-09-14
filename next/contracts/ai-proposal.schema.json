@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.ai-proposal/1",
+  "title": "Capability-scoped external AI proposal request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contextRevision", "draft"],
+  "properties": {
+    "scope": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 100 },
+    "contextRevision": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "draft": { "$ref": "draft.schema.json" }
+  },
+  "$comment": "The authenticated connection supplies root, client attribution and capability. The server rejects stale context, out-of-scope actions, resolves, no-op proposals and unsupported actions. Publication does not confirm or apply the Draft."
+}

@@ -1,0 +1,91 @@
+{
+  "fixture": "synthetic-private-channel-outage",
+  "source": "canonical channel queue and outcome frames",
+  "recapDuringOutage": {
+    "channel": "imessage",
+    "transportAvailable": false,
+    "inbox": [],
+    "resolvedQuestions": [],
+    "pending": [
+      {
+        "deliveryId": "4a87c4a6cdc9ac5a38e28fa1ed166cd58a0648632bcf94d6ebe647f115b4fc88",
+        "summary": "[root] organization.applied: Establish one complete Local Projects world inside this bot, keeping every native provider shape as a pointer.\n[root] turn.assistant: Create an internal Weekly Work world and produce its canonical progress recap every Monday.\nTradeoff: Monday at 09:00 UTC is an explicit reviewable default, not a guessed local timezone.\nTradeoff: The routine is hidden implementation of this complete reviewed \n[root] organization.applied: Create an internal Weekly Work world and produce its canonical progress recap every Monday.\n[weekly-world] work.progress: First internal draft prepared.\n[weekly-world] routine.tick: Canonical recap for Recap this world's canonical progress: 2 recent scoped public records read first. Source work remains in the referenced canonical occurrences, not copied into this recap. Reversible internal recap completed; no model, native-store write, de\n[root] collaboration.synthesized: Two distinct public perspectives support a reviewed pointer-first plan; no external action is authorized.",
+        "sources": [
+          {
+            "frame_hash": "cc1a04ada9988677f8d3edd52b8de3f2e282be380c6a3536f01866ece3e2f8ad",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "d5def5762a706a553a624a6918aa25d1e550f3feeafb431512762dae092c8e2e",
+            "scope": "root",
+            "seq": 5,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+            "utc": "2026-09-13T20:00:00.010Z"
+          },
+          {
+            "frame_hash": "a726f10a1e38458066f6bf9ddfeffad5bca7511485dd1ff5be291a1277af4e1f",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "47e087f92d46dfa12850aa26a3ff2fc85815862f9787b0178c4fd045fe08adbd",
+            "scope": "root",
+            "seq": 7,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+            "utc": "2026-09-13T20:00:00.013Z"
+          },
+          {
+            "frame_hash": "bb21d1696a0254af01451db34bdaca3be9792f0415bad036f46ab54e67725d88",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "4e8b8310bdc28349a79fefa8c62d708192d486dfd4c2c92c9430995f92f1cd75",
+            "scope": "root",
+            "seq": 8,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+            "utc": "2026-09-13T20:00:00.014Z"
+          },
+          {
+            "frame_hash": "31cd12811b7a1bac7ab343eaf2fa64118aac741a9458cb3a1bcb951cc1b4fe73",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "5ee5c23bfd53f6dacbf8c244f3d4e5f03770a0ad2b98b0f369519faafaa59b24",
+            "scope": "weekly-world",
+            "seq": 0,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-2dec19dc0f96e20509bbea46dc4ab80379b14871b3315c9a39c66bf2e2cca2",
+            "utc": "2026-09-13T20:00:00.015Z"
+          },
+          {
+            "frame_hash": "1b0f1499df9f48fefd8ad42b039468e873296863f238e4f88ff62c6df139293b",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "139910cdc85d8f1f59ff22049e48728a75b8ebc879aff72ad7f343f87c218495",
+            "scope": "weekly-world",
+            "seq": 2,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-2dec19dc0f96e20509bbea46dc4ab80379b14871b3315c9a39c66bf2e2cca2",
+            "utc": "2026-09-14T09:00:00.002Z"
+          },
+          {
+            "frame_hash": "5907602cba211c0870cce29f5cb0573856cc1edb154c4a5a1da28c97c851cc78",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "760425cdaa211550f3d11cfdc0db25c3bb5802bbe210b5ac14d99034fc75b455",
+            "scope": "root",
+            "seq": 11,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+            "utc": "2026-09-14T09:00:00.011Z"
+          }
+        ],
+        "available": true,
+        "status": "pending",
+        "preflightGeneration": 1,
+        "preflightOutcome": "unavailable"
+      }
+    ],
+    "automaticReplay": false
+  },
+  "recapAfterExplicitRetry": {
+    "channel": "imessage",
+    "transportAvailable": true,
+    "inbox": [],
+    "resolvedQuestions": [],
+    "pending": [],
+    "automaticReplay": false
+  }
+}

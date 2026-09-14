@@ -1,0 +1,9 @@
+{
+ "schema": "rapp-anchor-bootstrap-index/1",
+ "profile_path": "anchor/bootstrap/sha256-1666e44acf532f854d4bf74868c9af9f9b362055692189ac858a7c8b52dcd5bb.json",
+ "profile_sha256": "1666e44acf532f854d4bf74868c9af9f9b362055692189ac858a7c8b52dcd5bb",
+ "profile_bytes": 1731,
+ "verifier_path": "anchor/bootstrap_verify.py",
+ "verifier_sha256": "4a4c19912063d5ce15cec69b1aca0cebf5df122fb1c481f357f1cf21bc0a07ff",
+ "verifier_bytes": 15802
+}

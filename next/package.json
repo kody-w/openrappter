@@ -1,0 +1,31 @@
+{
+  "name": "@rapp-work/next",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Autonomous Agent First: isolated canonical headless core",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "browser:install": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium",
+    "build": "tsc -b ../packages/rapp1 --force && tsc -p tsconfig.json",
+    "typecheck": "tsc -b ../packages/rapp1 --force && tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs",
+    "check": "npm run typecheck && npm test && npm run gates",
+    "gates": "node scripts/gates.mjs && node scripts/e2e.mjs && node scripts/ai-projection-proof.mjs && node scripts/run-migration-gate.mjs && node scripts/catch-up-proof.mjs && node scripts/source-ownership-proof.mjs && node scripts/imessage-proof.mjs",
+    "imessage:gate": "npm run build && node scripts/imessage-proof.mjs",
+    "proposal:controlled-local": "npm run build && node scripts/controlled-local-provider-proposal.mjs",
+    "source-ownership:gate": "npm run build && node scripts/source-ownership-proof.mjs",
+    "catch-up:gate": "npm run build && node scripts/catch-up-proof.mjs",
+    "migration:gate": "npm run build && node scripts/run-migration-gate.mjs",
+    "start": "node dist/cli.js",
+    "scheduler": "node dist/scheduler-cli.js"
+  },
+  "dependencies": {
+    "@github/copilot-sdk": "1.0.13"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "playwright": "1.63.0",
+    "typescript": "5.9.3"
+  }
+}

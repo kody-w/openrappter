@@ -64,13 +64,36 @@ jobs:
       - run: npm --workspace @rapp-work/host run build
       - run: npm --workspace @rapp-work/host test -- --run ${{ matrix.files }}
 
+  greenfield-core:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            next/package-lock.json
+      - name: Require Apple Silicon
+        run: test "$(uname -m)" = arm64
+      - run: npm ci
+      - run: npm ci --prefix next
+      - run: npm --prefix next run browser:install
+      - run: npm --prefix next run check
+
   check:
     if: always()
-    needs: [quality, host-tests]
+    needs: [quality, host-tests, greenfield-core]
     runs-on: ubuntu-latest
     steps:
       - name: Require every CI shard
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
           HOST_TESTS_RESULT: ${{ needs.host-tests.result }}
-        run: test "$QUALITY_RESULT" = success && test "$HOST_TESTS_RESULT" = success
+          GREENFIELD_CORE_RESULT: ${{ needs.greenfield-core.result }}
+        run: |
+          test "$QUALITY_RESULT" = success
+          test "$HOST_TESTS_RESULT" = success
+          test "$GREENFIELD_CORE_RESULT" = success

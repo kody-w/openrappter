@@ -1,0 +1,132 @@
+{
+  "schema": "rapp-work.ai-projection-evidence/1",
+  "authoritative": false,
+  "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+  "rootCount": 1,
+  "providers": [
+    "copilot",
+    "claude",
+    "hermes",
+    "scout",
+    "grokbot",
+    "future-provider"
+  ],
+  "clientCount": 8,
+  "canonical": {
+    "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+    "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+    "authorityFrames": 16,
+    "verdict": "COMPLIANT",
+    "framesScanned": 25,
+    "signedFrames": 25,
+    "streamsScanned": 2,
+    "findings": [],
+    "evidence": [
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+        "ok": "1 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+        "ok": "24 frames conform to §7 envelope"
+      }
+    ]
+  },
+  "observationFrameMutations": 0,
+  "modelCalls": 0,
+  "modelReplayOnRestart": 0,
+  "exactRestartProjection": true,
+  "realTimeTestConsumer": true,
+  "causalConflictObserved": true,
+  "explicitResolutionVerified": true,
+  "unsupportedHintWorkRetained": true,
+  "backpressureResync": true,
+  "reconnectReplayEquivalent": true,
+  "credentialPlaintextPersisted": false,
+  "uiImplemented": false,
+  "attribution": "root-signed scoped-capability attribution; not vendor/client-key non-repudiation",
+  "protocols": [
+    "MCP stdio 2025-11-25",
+    "bounded native stdio events"
+  ],
+  "evidenceDirectory": ".test-scratch/ai-projection-6817-1789337762354",
+  "skillSha256": "6b264669886332d9a8fd1c25ae499a0a792e9bff82a58246a5c27dbede9c9665",
+  "productionCredentialBindingPerformed": false,
+  "tests": {
+    "passed": 65,
+    "failed": 0,
+    "skipped": 0,
+    "newProviderNeutralTests": 18
+  },
+  "primitiveTests": {
+    "passed": 90,
+    "failed": 0
+  },
+  "typecheck": "passed",
+  "build": "passed",
+  "dependencyBoundary": {
+    "importsChecked": 190,
+    "adoptedPrimitiveFiles": 7,
+    "oldAppImports": 0,
+    "uiModules": 0
+  },
+  "preservedHeadlessScenario": {
+    "signedFrames": 38,
+    "streams": 7,
+    "verdict": "COMPLIANT",
+    "goldenFixturesIdentical": true
+  },
+  "skill": {
+    "name": "RAPP Work Bot",
+    "source": "next/skills/rapp-work-bot/SKILL.md",
+    "installed": "~/.copilot/skills/rapp-work-bot/SKILL.md",
+    "sha256": "6b264669886332d9a8fd1c25ae499a0a792e9bff82a58246a5c27dbede9c9665",
+    "byteIdentical": true,
+    "checker": "RAPP Skills check: source and installed copy passed",
+    "grantsAuthority": false,
+    "mirrorModeChanged": false
+  },
+  "ownerBoundary": "Local owner grant/revoke methods are not exposed by the restricted AI endpoint; capability comes from protected connection environment.",
+  "limits": {
+    "publicationBytes": 32768,
+    "publishPerMinute": 60,
+    "viewHeads": 16,
+    "cards": 8,
+    "historyPage": 16,
+    "streamQueueEvents": 8,
+    "streamQueueBytes": 524288,
+    "replayEvents": 32,
+    "subscriptionLifetimeMs": 300000,
+    "connectionRequestsPerMinute": 120,
+    "outputBytes": 1048576,
+    "drainMs": 2000
+  },
+  "legacyGates": {
+    "retainedBaseline": "d8601aa91c10f3330ea10b7fa31382137d981dfd",
+    "baselineLegacyAbsence": "passed",
+    "baselineConstitution": "passed",
+    "fullTreeStatus": "The unchanged blanket Python ban remains incompatible with isolated next/ reference/contract files; no rule was relaxed."
+  },
+  "scope": {
+    "uiDeferred": true,
+    "loopbackHttpListenerAdded": false,
+    "nativeModelCalls": 0,
+    "nativeMemoryImported": false,
+    "rootOrClientCredentialsInstalled": false,
+    "hostMcpConfigurationModified": false,
+    "otherProfilesModified": false,
+    "packagesInstalled": false,
+    "pushed": false,
+    "merged": false,
+    "published": false
+  },
+  "setup": "See next/skills/rapp-work-bot/SKILL.md and next/docs/AI_PROJECTION_API.md. Fixture CLI is synthetic; production attaches an operator-owned runtime with verified registry/signer custody.",
+  "commands": [
+    "npm --prefix next run check",
+    "npm test --workspace @rapp-work/rapp1",
+    "RAPP Skills check next/skills/rapp-work-bot",
+    "RAPP Skills check ~/.copilot/skills/rapp-work-bot",
+    "legacy source and release constitution gates on retained baseline",
+    "git diff --check"
+  ]
+}

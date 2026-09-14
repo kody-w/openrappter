@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.proposal-context/1",
+  "title": "Bounded capability-scoped canonical proposal context",
+  "type": "object",
+  "readOnly": true,
+  "additionalProperties": false,
+  "required": ["schema", "root", "scope", "revision", "context", "authority"],
+  "properties": {
+    "schema": { "const": "rapp-work.proposal-context/1" },
+    "root": { "type": "string", "pattern": "^rappid:@[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*:[0-9a-f]{64}$" },
+    "scope": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 100 },
+    "revision": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "context": { "type": "object", "readOnly": true },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposalPublication", "confirmation", "mutation"],
+      "properties": {
+        "proposalPublication": { "const": "capability-scoped" },
+        "confirmation": { "const": "owner-only" },
+        "mutation": { "const": "owner-only" }
+      }
+    }
+  }
+}

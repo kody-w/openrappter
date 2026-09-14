@@ -15,5 +15,47 @@
       "path": "tests/fixtures/migration/rejected-inputs.json",
       "reason": "Inert negative-test inputs for removed modules, assets, executable data, and paths."
     }
+  ],
+  "greenfieldPython": [
+    {
+      "path": "next/agent.py",
+      "sha256": "0b88695e7bcc9ed26a7fc80f33045bce483e70c966c4aae41d4813ad9edabf69",
+      "reason": "The reviewed single-file bot capability for the isolated Autonomous Agent First core."
+    },
+    {
+      "path": "next/scripts/adopt-reference.py",
+      "sha256": "5ba19a31ce7f13ed171246312725a1dd1824363c3714b496a92446d391aa1415",
+      "reason": "A bounded reference-adoption verifier used only by greenfield qualification."
+    },
+    {
+      "path": "next/scripts/check-replay-digests.py",
+      "sha256": "ca8bf44ea174191ce55d97433fedddf17291c64002c99070da0a155122c4b9f6",
+      "reason": "An independent digest checker for deterministic Catch-me-up evidence."
+    },
+    {
+      "path": "next/scripts/reference-check.py",
+      "sha256": "451244e9beb27702d40705d88be06e40f4add4a1ef1362299a31e9b059a99307",
+      "reason": "A bounded verifier for pinned greenfield reference evidence."
+    },
+    {
+      "path": "next/vendor/rapp1/anchor/bootstrap_verify.py",
+      "sha256": "4a4c19912063d5ce15cec69b1aca0cebf5df122fb1c481f357f1cf21bc0a07ff",
+      "reason": "Pinned canonical RAPP/1 rev-15 bootstrap verification bytes."
+    },
+    {
+      "path": "next/vendor/rapp1/rapp.py",
+      "sha256": "1a04362b02f14c1e37b70c6b4f72d79e92df1cc9c2b5b394e8e1b141fc0b6050",
+      "reason": "Pinned canonical RAPP/1 rev-15 implementation bytes."
+    },
+    {
+      "path": "next/vendor/rapp1/rapp_check.py",
+      "sha256": "a8dbc2dc242b2faabc959a917c23c37db3bd3d28b95dc57891cc8f623698b7c2",
+      "reason": "Pinned canonical RAPP/1 rev-15 checker bytes."
+    },
+    {
+      "path": "next/vendor/rapp1/rapp_registry.py",
+      "sha256": "eec22844a32874cdb21772fc804db29220d2e2f052be9ca8a8049f2162ce95d2",
+      "reason": "Pinned canonical RAPP/1 rev-15 registry verification bytes."
+    }
   ]
 }

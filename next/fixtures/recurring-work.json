@@ -1,0 +1,41 @@
+{
+  "thought": "Make this a world and recap our internal progress every Monday.",
+  "draft": {
+    "summary": "Create an internal Weekly Work world and produce its canonical progress recap every Monday.",
+    "tradeoffs": [
+      "Monday at 09:00 UTC is an explicit reviewable default, not a guessed local timezone.",
+      "The routine is hidden implementation of this complete reviewed intent. It reads canonical context first and appends a reversible internal recap; it does not infer with a model, send messages or execute arbitrary instructions."
+    ],
+    "tradeoffLinks": [
+      {
+        "actionId": "weekly-world",
+        "tradeoff": 0
+      },
+      {
+        "actionId": "weekly-recap",
+        "tradeoff": 1
+      }
+    ],
+    "questions": [],
+    "actions": [
+      {
+        "type": "scope.create",
+        "scope": {
+          "id": "weekly-world",
+          "parent": "monorepo",
+          "kind": "world",
+          "name": "Weekly Work",
+          "description": "Scoped internal work with an explicitly reviewed recurring recap."
+        }
+      },
+      {
+        "type": "routine.create",
+        "id": "weekly-recap",
+        "scope": "weekly-world",
+        "instruction": "Recap this world's canonical progress",
+        "work": "canonical-recap",
+        "cadence": "monday-0900-utc"
+      }
+    ]
+  }
+}

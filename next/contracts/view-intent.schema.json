@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.view-intent/1",
+  "title": "Accepted bounded declarative view intent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "focus", "emphasis", "cards", "progress", "screenArtifact"],
+  "properties": {
+    "schema": { "const": "rapp-work.view-intent/1" },
+    "focus": { "$ref": "#/$defs/canonicalScope" },
+    "emphasis": { "enum": ["conversation", "work", "evidence", "review"] },
+    "cards": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "ref"],
+        "properties": {
+          "kind": { "enum": ["artifact", "evidence", "activity", "attention", "routine"] },
+          "ref": { "type": "string", "maxLength": 100 }
+        }
+      }
+    },
+    "progress": { "oneOf": [{ "$ref": "#/$defs/wave" }, { "type": "null" }] },
+    "screenArtifact": { "oneOf": [{ "$ref": "#/$defs/canonicalScope" }, { "type": "null" }] }
+  },
+  "$defs": {
+    "canonicalScope": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 100 },
+    "wave": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "$comment": "Shape is necessary but insufficient. Every scope/artifact/occurrence must exist in the client's authorized canonical state. Progress must reference canonical client.activity. No HTML, JS, CSS, coordinates, DOM selectors, arbitrary URLs or executable component definitions."
+}

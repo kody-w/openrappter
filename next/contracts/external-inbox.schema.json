@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.external-inbox/1",
+  "title": "Stripped external iMessage input in the existing root conversation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["text", "origin", "role", "proposalId", "bindingWave"],
+  "properties": {
+    "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "origin": { "const": "external-imessage" },
+    "role": { "const": "user" },
+    "proposalId": { "type": "null" },
+    "bindingWave": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "$comment": "Data inside an existing source-owned memory.chat-turn, not a new envelope or conversation identity. Owner-only ingress validates exact full root and current private binding at publication; raw auth/sender/thread metadata is stripped. UTF-8 <=4000 bytes; no replyTo, answerTo or confirmation authority; pending attention requires genuine CLI handling."
+}

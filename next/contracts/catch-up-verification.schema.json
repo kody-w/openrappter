@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.catch-up-verification-manifest/1",
+  "title": "Out-of-band trusted inputs for independent Catch-me-up verification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "pages"],
+  "properties": {
+    "schema": { "const": "rapp-work.catch-up-verification-manifest/1" },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema", "root", "scope", "request", "visibleScopes", "guestEvidenceDigest", "trustedTimelineDigest"],
+        "properties": {
+          "schema": { "const": "rapp-work.catch-up-verification-input/1" },
+          "root": { "$ref": "projection.schema.json#/$defs/rappid" },
+          "scope": { "type": "string" },
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "from": { "$ref": "source-cursor.schema.json" },
+              "to": { "$ref": "source-cursor.schema.json" },
+              "limit": { "type": "integer", "minimum": 1, "maximum": 16 },
+              "guest": { "type": "object" }
+            }
+          },
+          "visibleScopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 128,
+            "uniqueItems": true,
+            "items": { "type": "string" }
+          },
+          "guestEvidenceDigest": {
+            "oneOf": [
+              { "$ref": "projection.schema.json#/$defs/hash" },
+              { "type": "null" }
+            ]
+          },
+          "trustedTimelineDigest": { "$ref": "projection.schema.json#/$defs/hash" }
+        }
+      }
+    }
+  },
+  "$comment": "The manifest must be obtained through a trusted channel before replay-page import. It is not embedded in, or derived from, the document being verified."
+}

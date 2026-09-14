@@ -27,6 +27,12 @@ test('Release Constitution accepts only the exact clean source, complete locked 
   const result = await checkReleaseConstitution(root);
   assert.equal(result.status, 'passed');
   assert.equal(result.workspaces, 14);
+  const releaseWorkflow = await readFile(new URL('../../../.github/workflows/release-macos.yml', import.meta.url), 'utf8');
+  await put(root, '.github/workflows/release-macos.yml', releaseWorkflow.replace('node scripts/check-release-tag-ancestry.mjs', 'node scripts/release-macos.mjs'));
+  commitFixture(root);
+  await assert.rejects(checkReleaseConstitution(root), /tag ancestry/u);
+  await put(root, '.github/workflows/release-macos.yml', releaseWorkflow);
+  commitFixture(root);
   await put(root, '.github/workflows/unexpected.yml', 'name: Unexpected\n');
   commitFixture(root);
   await assert.rejects(checkReleaseConstitution(root), /three clean workflows/u);

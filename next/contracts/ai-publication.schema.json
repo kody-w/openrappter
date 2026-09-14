@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.ai-publication/1",
+  "title": "Authenticated AI public-work publication",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "content", "causes"],
+  "properties": {
+    "kind": { "enum": ["conversation", "activity", "evidence", "attention", "view"] },
+    "scope": { "type": "string", "maxLength": 100 },
+    "content": { "type": "object" },
+    "causes": { "$ref": "#/$defs/waves" },
+    "view": { "type": "object", "$comment": "Untrusted optional hint. Only view-intent.schema.json and canonical state validation can admit it; unsupported hints retain valid work with a bounded diagnostic." },
+    "viewParents": { "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "$ref": "#/$defs/wave" } }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "conversation" } } },
+      "then": {
+        "properties": { "content": {
+          "type": "object", "additionalProperties": false, "required": ["text"],
+          "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 2000 } }
+        } }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "activity" } } },
+      "then": {
+        "properties": { "content": {
+          "type": "object", "additionalProperties": false,
+          "required": ["summary", "status", "completed", "total", "evidence"],
+          "properties": {
+            "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "status": { "enum": ["working", "blocked", "review", "complete", "idle"] },
+            "completed": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+            "total": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+            "evidence": { "$ref": "#/$defs/references" }
+          }
+        } }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "evidence" } } },
+      "then": {
+        "properties": { "content": {
+          "type": "object", "additionalProperties": false, "required": ["summary", "references"],
+          "properties": {
+            "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "references": { "allOf": [{ "$ref": "#/$defs/references" }, { "minItems": 1 }] }
+          }
+        } }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "attention" } } },
+      "then": {
+        "properties": { "content": {
+          "type": "object", "additionalProperties": false, "required": ["summary", "reason", "references"],
+          "properties": {
+            "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "reason": { "enum": ["human-authority", "irreducible-ambiguity", "blocked", "decision"] },
+            "references": { "$ref": "#/$defs/references" }
+          }
+        } }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "view" } } },
+      "then": { "required": ["view"], "properties": { "content": { "type": "object", "maxProperties": 0 } } }
+    }
+  ],
+  "$defs": {
+    "wave": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "waves": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/wave" } },
+    "references": { "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "$ref": "#/$defs/wave" } }
+  },
+  "$comment": "Credentials/actor identity are transport-owned, never publication fields. Request ID is supplied by the authenticated method. Server checks byte/rate bounds, completed <= total, causal ancestry, authority, scope, references and explicit view conflict resolution."
+}

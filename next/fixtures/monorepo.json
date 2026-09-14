@@ -1,0 +1,9 @@
+{
+  "name": "RAPP Monorepo",
+  "kind": "bare-canonical-world",
+  "rootScope": "monorepo",
+  "organs": ["tasks", "routines", "memory", "artifacts", "evidence"],
+  "hostFilesystemMounted": false,
+  "nativeWorkspacesCopied": false,
+  "visibleBotsCreated": 0
+}

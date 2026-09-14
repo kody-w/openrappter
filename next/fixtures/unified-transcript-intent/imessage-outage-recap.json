@@ -1,0 +1,118 @@
+{
+  "fixture": "synthetic-private-channel-outage",
+  "source": "canonical channel queue and outcome frames",
+  "recapDuringOutage": {
+    "channel": "imessage",
+    "transportAvailable": false,
+    "inbox": [],
+    "resolvedQuestions": [],
+    "pending": [
+      {
+        "deliveryId": "28dec6e5fa005b05428715124de4d8fde61648f377baff169df5f5e72726a381",
+        "summary": "[root] organization.applied: Establish one complete Local Projects world inside this bot, keeping every native provider shape as a pointer.\n[rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9] Create an internal Weekly Work world and produce its canonical progress recap every Monday.\nTradeoff: Monday at 09:00 UTC is an explicit reviewable default, not a guessed local timezone.\nTradeoff: The routine is hidden implementation of this comp … [truncated]\n[root] organization.applied: Create an internal Weekly Work world and produce its canonical progress recap every Monday.\n[weekly-world] work.progress: First internal draft prepared.\n[weekly-world] routine.tick: Canonical recap for Recap this world's canonical progress: 2 recent scoped public records read first. Source work remains in the referenced canonical occurrences, not copied into this recap. Reversible internal recap completed; no model, native-s … [truncated]\n[rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9] Review the public plan and preserve disagreement.\n[rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a] Independent reviewer perspective: preserve native pointers and confirm bounded internal work before acting.\nDisagreement: Do not normalize the native stores into a new shared workspace database.\nUnknown: Live external Brainstem and channel permis … [truncated]\n[rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9] Two distinct public perspectives support a reviewed pointer-first plan; no external action is authorized.",
+        "sources": [
+          {
+            "frame_hash": "bd957c34f0d9aa20191416aeced012287307b77693a2903baa92a78e66e24a64",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "6464e404d360d21a6b4bb2a4b607911024136f0db2b6cf8dd2038725939616d3",
+            "scope": "root",
+            "seq": 5,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+            "utc": "2026-09-13T20:00:00.010Z"
+          },
+          {
+            "frame_hash": "aef0e61c4956234a1d31d09370cf8ed9cd3408113e37e95bc8379f28bb3793f2",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "eb77a5f64776a921a6b9b85ab0d5e9fb6eaac25fdf573cded489320757a8a173",
+            "scope": "root",
+            "seq": 7,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+            "utc": "2026-09-13T20:00:00.013Z"
+          },
+          {
+            "frame_hash": "4624da6421f0daeb34f428a8341c0ffba63f5a7fdd9b96dff6242069ed20a2e4",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "072f5524c32227f3e80221802eb8de198581f58c93c46f876de4ca70a1296a5c",
+            "scope": "root",
+            "seq": 8,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+            "utc": "2026-09-13T20:00:00.014Z"
+          },
+          {
+            "frame_hash": "f2c616c1423fe0e75d92d6409487bc3affb1276c984cc4027a44f310589f8006",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "32f1a37b385f577a2158364a0aad9f0c2c72abb71d618ed863669198ae23c6fb",
+            "scope": "weekly-world",
+            "seq": 0,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-2dec19dc0f96e20509bbea46dc4ab80379b14871b3315c9a39c66bf2e2cca2",
+            "utc": "2026-09-13T20:00:00.015Z"
+          },
+          {
+            "frame_hash": "71bdcac7a6d8ee15901723c7bfc044d93f9bfa0c522ae44cb1c75f3932d34b02",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "37eb0b210f0c41f519fc6a93beb8d5490c405ebe1d1dabfaaf6a337e2d6bbd4a",
+            "scope": "weekly-world",
+            "seq": 2,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-2dec19dc0f96e20509bbea46dc4ab80379b14871b3315c9a39c66bf2e2cca2",
+            "utc": "2026-09-14T09:00:00.002Z"
+          },
+          {
+            "frame_hash": "2adbba37e96ff92fc083ffacc32386d481a06cc9f0b40216192ea09d2a49f356",
+            "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+            "ownership": "source-owned",
+            "payload_hash": "ee45b2dd56161f6eb245da35d84f2163766b2221b8668b3553106aa9a8d60b04",
+            "scope": "root",
+            "seq": 11,
+            "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:work",
+            "utc": "2026-09-14T09:00:00.010Z"
+          }
+        ],
+        "sourceSelection": {
+          "limit": 6,
+          "offset": 3,
+          "returned": 6,
+          "total": 9,
+          "truncatedAfter": false,
+          "truncatedBefore": true
+        },
+        "truncatedSources": [
+          "6f31af605a059004889ff913f6512c1b7467b4581e7e3fa7ad3e7c84516cc31c",
+          "71bdcac7a6d8ee15901723c7bfc044d93f9bfa0c522ae44cb1c75f3932d34b02",
+          "aef0e61c4956234a1d31d09370cf8ed9cd3408113e37e95bc8379f28bb3793f2"
+        ],
+        "transcript": {
+          "schema": "rapp-work.transcript-page/1",
+          "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+          "scope": "root",
+          "total": 4,
+          "offset": 0,
+          "limit": 4,
+          "returned": 4,
+          "truncatedBefore": false,
+          "truncatedAfter": false,
+          "previousOffset": null,
+          "nextOffset": null,
+          "revision": "dbc038681077c28f0ff91fd18a57e3f9831ad0cd45d662abef070a9498f244d7"
+        },
+        "available": true,
+        "status": "pending",
+        "preflightGeneration": 1,
+        "preflightOutcome": "unavailable"
+      }
+    ],
+    "automaticReplay": false
+  },
+  "recapAfterExplicitRetry": {
+    "channel": "imessage",
+    "transportAvailable": true,
+    "inbox": [],
+    "resolvedQuestions": [],
+    "pending": [],
+    "automaticReplay": false
+  }
+}

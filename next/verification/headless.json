@@ -1,0 +1,98 @@
+{
+  "schema": "rapp-work.next/headless-parity/1",
+  "evidenceDirectory": ".test-scratch/e2e-53230-1789333734862",
+  "adapterMode": "explicit-synthetic-fixtures",
+  "roots": [
+    "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+    "rappid:@fixture/reviewer:1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a"
+  ],
+  "oneLibrarianPerRoot": true,
+  "observationDurableMutations": 0,
+  "dormantModelCalls": 0,
+  "canonical": {
+    "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+    "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+    "authorityFrames": 16,
+    "verdict": "COMPLIANT",
+    "framesScanned": 38,
+    "signedFrames": 38,
+    "streamsScanned": 7,
+    "findings": [],
+    "evidence": [
+      {
+        "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+        "ok": "1 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+        "ok": "3 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+        "ok": "1 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+        "ok": "1 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/branches/memory-16eb6630dc2cc8211730da7e4eef3a73b02e2ff2926632feca4dc0a2b4a7b5fb/frames",
+        "ok": "1 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+        "ok": "30 frames conform to §7 envelope"
+      },
+      {
+        "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+        "ok": "1 frames conform to §7 envelope"
+      }
+    ]
+  },
+  "reconstructedFrameCount": 38,
+  "preservedBranches": 1,
+  "deterministicRestart": true,
+  "modelReplayOnRestart": 0,
+  "fixtureModelCalls": 6,
+  "liveModelCalls": 0,
+  "nativeProviderPointers": 5,
+  "sourceOrNativeStoreWrites": 0,
+  "externalEffectsExecuted": 0,
+  "syntheticIMessageDeliveries": 1,
+  "domainSelectionsRefused": 9,
+  "hiveUnboundRefused": true,
+  "transcriptSha256": "a3249f5072af0ccc0d399a57464ec630df1f654ba1861e5f9465cea87a3a3c19",
+  "projectionParticleHash": "7b2c9e3fdf33bf5cb91e31dbf6335924ef3b4cc160c3d63753cd5cb0d098b9e3",
+  "productionReady": false,
+  "blockers": [
+    "Adopted external root-isolated Brainstem binding",
+    "Explicit empty memory-only SDK host/auth binding and signer custody",
+    "Signed rooted GODD/DOGG closure/transport adoption",
+    "Fresh signed Private Hive rooted-world adoption",
+    "Explicit local iMessage OS permission/contact bridge",
+    "Independent next release constitution and migration qualification"
+  ],
+  "tests": {
+    "passed": 47,
+    "failed": 0,
+    "skipped": 0
+  },
+  "adoptedPrimitiveTests": {
+    "passed": 90,
+    "failed": 0
+  },
+  "typecheck": "passed",
+  "build": "passed",
+  "sourceImportGate": {
+    "importsChecked": 129,
+    "adoptedPrimitiveFiles": 7,
+    "oldAppImports": 0,
+    "uiModules": 0
+  },
+  "commands": [
+    "npm --prefix next run check",
+    "npm test --workspace @rapp-work/rapp1",
+    "git diff --check"
+  ],
+  "legacyBaselineReceipt": "verification/legacy-baseline.json"
+}

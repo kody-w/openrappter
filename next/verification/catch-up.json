@@ -1,0 +1,124 @@
+{
+  "schema": "rapp-work.catch-up-gate/1",
+  "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+  "status": "passed",
+  "grades": {
+    "recorded": 2,
+    "reconstructed": 3,
+    "unavailable": 4
+  },
+  "guestGrades": [
+    {
+      "grade": "recorded",
+      "kind": "guest-frame"
+    },
+    {
+      "grade": "reconstructed",
+      "kind": "command-summary"
+    },
+    {
+      "grade": "reconstructed",
+      "kind": "diff-summary"
+    },
+    {
+      "grade": "unavailable",
+      "kind": "missing-display"
+    }
+  ],
+  "deterministicAfterRestart": true,
+  "passiveFastForward": true,
+  "sourceFrameHashesRetained": true,
+  "stateDigests": "rapp/1:particle",
+  "independentDigestCheck": {
+    "verifier": "unmodified canonical rapp.py H(rapp/1:particle, value)",
+    "pages": 2,
+    "stateCheckpoints": 20,
+    "guestCheckpoints": 4,
+    "sourceFrames": 23,
+    "digestsVerified": true,
+    "sourceReferencesVerified": true,
+    "writes": 0,
+    "modelCalls": 0,
+    "toolExecutions": 0
+  },
+  "canonicalChecks": [
+    {
+      "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+      "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+      "authorityFrames": 16,
+      "verdict": "COMPLIANT",
+      "framesScanned": 10,
+      "signedFrames": 10,
+      "streamsScanned": 2,
+      "findings": [],
+      "evidence": [
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+          "ok": "1 frames conform to §7 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+          "ok": "9 frames conform to §7 envelope"
+        }
+      ]
+    },
+    {
+      "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+      "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+      "authorityFrames": 16,
+      "verdict": "COMPLIANT",
+      "framesScanned": 13,
+      "signedFrames": 13,
+      "streamsScanned": 1,
+      "findings": [],
+      "evidence": [
+        {
+          "artifact": "frames",
+          "ok": "13 frames conform to §7 envelope"
+        }
+      ]
+    }
+  ],
+  "replayModelCalls": 0,
+  "replayToolExecutions": 0,
+  "replayMutations": 0,
+  "hiddenReasoningExported": false,
+  "hostScreenIncluded": false,
+  "secretsOrKeystrokesIncluded": false,
+  "guestDefaultOff": true,
+  "guestRequiresExplicitGoddPrivatePolicy": true,
+  "liveGuestCapturePerformed": false,
+  "guestEvidence": "synthetic canonical ComputerBroker fixture; production capture origin/safety binding remains required",
+  "timelineDigest": "1416e197274e147081eedcd7c8ad6a75e91901e89e4e8597e1c88ee01fce7a62",
+  "finalStateDigest": "20a0a244673b8fa185c1b1c0becc52065f30a184816321de1144b581708dd23b",
+  "replaySourceDigest": "865de570a6ed84785e96baeb6587c4345b900af624af610b1a00145e19f09d0d",
+  "evidenceDirectory": ".test-scratch/catch-up-58872-1789345850067",
+  "uiImplemented": false,
+  "migrationReleaseGateStillRequired": true,
+  "tests": {
+    "passed": 83,
+    "failed": 0,
+    "skipped": 0
+  },
+  "primitiveTests": {
+    "passed": 90,
+    "failed": 0
+  },
+  "typecheck": "passed",
+  "build": "passed",
+  "fullCheckLog": "next/.test-scratch/catch-up-full-check.log",
+  "sourceAndInstalledSkillSha256": "f55bf39581f3d61136142ca4b31ca2ed454cdeb7b2d4d9ca90ff8fe04fd6982a",
+  "referenceCoordination": {
+    "agent": "c58b0c7b-b34b-4d8c-b16d-05aa80409cf8",
+    "messageDelivered": true,
+    "directReadVisible": false,
+    "resultDelivered": false,
+    "priorReferenceEvidence": "catch-me-up-replay-validation.json @ b5cec8af4eac2cb73dabe882dcf50e80f8c5b23d",
+    "legacyCodeImported": false
+  },
+  "liveGuestCapture": false,
+  "liveProfilesModified": false,
+  "hostScreenOrKeystrokesCaptured": false,
+  "productUiImplemented": false,
+  "productionCaptureOriginSafetyBindingRequired": true
+}

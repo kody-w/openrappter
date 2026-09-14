@@ -90,7 +90,7 @@ Selection is transient; an explicit invalid `root` never falls back to it.
 | `attention.get` | Pending review, question, incomplete work, provider/channel/effect state and observation |
 | `projection.get` | Stable passive projection, distinct signed collaboration speakers |
 | `organization.confirm` | `proposalWave`; exact human confirmation |
-| `estate.record` | `evidence`; explicit bounded historical native-pointer observation |
+| `estate.record` | `evidence`; closed historical local/native pointer provenance or non-candidate observation; exact source receipt, no registration |
 | `estate.rapp-up` | Complete reviewed organization of already recorded discovery |
 | `work.progress` | `scope`, `summary`, `evidence` wave hashes |
 | `work.undo` | `targetWave`, `reason`; append-only internal correction |
@@ -107,12 +107,18 @@ Selection is transient; an explicit invalid `root` never falls back to it.
 | `channels.receive` | `envelope`; trusted transport authentication and contact binding required |
 | `hive.consent` | `peer`, `room`, `objectWave`, `mode:allow|revoke`; exact per-world consent |
 | `hive.link` | `peer`, `room`, `objectWave`; also requires existing signed canonical Hive authority |
-| `egg.at-rest` | Read-only commitments to complete canonical rooted data |
+| `egg.at-rest` | Read-only byte commitments, exact `identity.body_stream`, and explicitly false closure/domain/code/shared-runtime adoption diagnostics |
 | `egg.transfer` | `operation:inspect|export|restore`, `scope:godd|dogg|both`; refuses without adopted bindings |
 
 There is no delete method, arbitrary shell/tool method, provider switch,
 automatic external approval, native-store write or executable hotload from
 carried data.
+
+Native exporter/receipt details are in `NATIVE_FEDERATION_API.md`. Native union
+provenance is metadata, not a provider switch or native-memory merge; unresolved
+and Grok app-only observations are not workspace candidates. The frozen
+framework-neutral reference and unavailable adoption flags are mapped in
+`ROOTED_ESTATE_HANDOFF.md`.
 
 ## Recurring and away work
 

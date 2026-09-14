@@ -26,7 +26,10 @@ export function canonicalContext(root: RootSnapshot, scope = 'root'): JsonObject
       source: reference(frame), origin: sourceReference(frame) };
   });
   const discovery = memoryFrames(root).filter(f => f.payload.event === 'discovery.recorded' && permitted.has(String(f.payload.scope)))
-    .slice(-4).map(f => ({ source: reference(f), pointers: workEvent(f.payload).data.pointers! }));
+    .slice(-4).map(f => {
+      const data = workEvent(f.payload).data;
+      return { source: reference(f), pointers: data.pointers!, ...(data.observations === undefined ? {} : { observations: data.observations }) };
+    });
   return {
     root: root.definition.root, scope,
     head: sourceChain(root, scope).at(-1)?.frame_hash ?? root.streams.body[0]!.frame_hash,

@@ -1,0 +1,509 @@
+{
+  "schema": "rapp-work.native-federation-milestone/1",
+  "baseCommit": "b7bb1da7050a3ef3b30c3af809cc5950db1afd72",
+  "branch": "rewrite/autonomous-agent-first",
+  "status": "verified synthetic owner-API contract; no live adoption",
+  "contracts": [
+    "docs/NATIVE_FEDERATION_API.md",
+    "contracts/estate-evidence.schema.json",
+    "docs/ROOTED_ESTATE_HANDOFF.md"
+  ],
+  "validation": {
+    "command": "npm --prefix next run check",
+    "testsPassed": 101,
+    "failed": 0,
+    "skipped": 0,
+    "typecheck": true,
+    "build": true,
+    "allMandatoryGates": true,
+    "log": ".test-scratch/federation-full-check.log",
+    "primitiveTests": 90,
+    "primitiveLog": ".test-scratch/federation-primitives.log",
+    "retainedLegacyGates": "passed at unchanged d8601aa91c10f3330ea10b7fa31382137d981dfd",
+    "legacyLog": ".test-scratch/federation-legacy.log"
+  },
+  "publicApiProof": {
+    "schema": "rapp-work.native-federation-proof/1",
+    "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+    "canonicalDirectory": ".test-scratch/use-cases/federation-stdio-43683-1789354506811",
+    "publicApi": "owner rapp-work.stdio/1 estate.record",
+    "requests": [
+      "manifest-item-one",
+      "manifest-app-observation"
+    ],
+    "receipts": [
+      {
+        "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "local-estate",
+        "receipt": {
+          "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+          "scope": "local-estate",
+          "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef80",
+          "seq": 0,
+          "utc": "2026-09-14T02:55:06.932Z",
+          "payload_hash": "8719e9a8bd1de5c7ccdc2f4d87670ab44183689a54c776ae523a857147a64b6c",
+          "frame_hash": "b46e7e1858ca892c90bea160a10423ad411c093e5e18242322879801706ea3b0",
+          "ownership": "source-owned"
+        },
+        "sourceWave": "b46e7e1858ca892c90bea160a10423ad411c093e5e18242322879801706ea3b0",
+        "evidenceHash": "f0027107d24871dbfad238351c21a7e175b0c25ae1c73a26a9bf1a1ed7bf284d",
+        "duplicate": false,
+        "historical": true,
+        "candidates": [
+          {
+            "id": "manager-workspace",
+            "provider": "local",
+            "title": "Selected local workspace",
+            "nativeShape": "Manager workspace with native Copilot and Claude associations; originals stay in the private manifest.",
+            "locator": "local://workspace/opaque-manager-handle",
+            "provenance": {
+              "source": "rapp-workspace-manager",
+              "manifestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "recordSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "providerUnion": [
+                "local",
+                "copilot",
+                "claude"
+              ],
+              "mappingState": "mapped",
+              "evidenceSha256": [
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+              ]
+            }
+          }
+        ],
+        "observations": [],
+        "createdWorlds": 0,
+        "nativeWrites": 0,
+        "next": "Ask for RAPP Up organization, review the full proposal, then confirm once."
+      },
+      {
+        "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "local-estate",
+        "receipt": {
+          "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+          "scope": "local-estate",
+          "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef80",
+          "seq": 1,
+          "utc": "2026-09-14T02:55:07.060Z",
+          "payload_hash": "2492eac5c4d293a223789c8216a8c51c96a5cefeca5e6d15820ed8af1b18cfeb",
+          "frame_hash": "3947f6b99206cbdafc49d9ad2736e5d3977841d0e78d92b76c58d69a3e9511bd",
+          "ownership": "source-owned"
+        },
+        "sourceWave": "3947f6b99206cbdafc49d9ad2736e5d3977841d0e78d92b76c58d69a3e9511bd",
+        "evidenceHash": "0a16d3b8b37c89a6cf4172915dadd3cd565022c4f2fa5d908ea96f23e9a80caa",
+        "duplicate": false,
+        "historical": true,
+        "candidates": [],
+        "observations": [
+          {
+            "id": "grok-app-only",
+            "provider": "grokbot",
+            "title": "Grok observation, not a workspace",
+            "nativeShape": "Application-only or unresolved selected metadata; no workspace binding.",
+            "provenance": {
+              "source": "rapp-workspace-manager",
+              "manifestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "recordSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "providerUnion": [
+                "grokbot"
+              ],
+              "mappingState": "app-only",
+              "evidenceSha256": [
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+              ]
+            }
+          }
+        ],
+        "createdWorlds": 0,
+        "nativeWrites": 0,
+        "next": "Ask for RAPP Up organization, review the full proposal, then confirm once."
+      }
+    ],
+    "duplicateReceipt": {
+      "root": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+      "scope": "local-estate",
+      "receipt": {
+        "guid": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9",
+        "scope": "local-estate",
+        "stream_id": "rappid:@fixture/builder:cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9:s-14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef80",
+        "seq": 0,
+        "utc": "2026-09-14T02:55:06.932Z",
+        "payload_hash": "8719e9a8bd1de5c7ccdc2f4d87670ab44183689a54c776ae523a857147a64b6c",
+        "frame_hash": "b46e7e1858ca892c90bea160a10423ad411c093e5e18242322879801706ea3b0",
+        "ownership": "source-owned"
+      },
+      "sourceWave": "b46e7e1858ca892c90bea160a10423ad411c093e5e18242322879801706ea3b0",
+      "evidenceHash": "f0027107d24871dbfad238351c21a7e175b0c25ae1c73a26a9bf1a1ed7bf284d",
+      "duplicate": true,
+      "historical": true,
+      "candidates": [
+        {
+          "id": "manager-workspace",
+          "provider": "local",
+          "title": "Selected local workspace",
+          "nativeShape": "Manager workspace with native Copilot and Claude associations; originals stay in the private manifest.",
+          "locator": "local://workspace/opaque-manager-handle",
+          "provenance": {
+            "source": "rapp-workspace-manager",
+            "manifestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "recordSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "providerUnion": [
+              "local",
+              "copilot",
+              "claude"
+            ],
+            "mappingState": "mapped",
+            "evidenceSha256": [
+              "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            ]
+          }
+        }
+      ],
+      "observations": [],
+      "createdWorlds": 0,
+      "nativeWrites": 0,
+      "next": "Ask for RAPP Up organization, review the full proposal, then confirm once."
+    },
+    "canonical": {
+      "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+      "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+      "authorityFrames": 16,
+      "verdict": "COMPLIANT",
+      "framesScanned": 3,
+      "signedFrames": 3,
+      "streamsScanned": 2,
+      "findings": [],
+      "evidence": [
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+          "ok": "1 frames conform to \u00a77 envelope"
+        },
+        {
+          "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+          "ok": "2 frames conform to \u00a77 envelope"
+        }
+      ]
+    },
+    "registeredWorkspaces": 0,
+    "modelCalls": 0,
+    "nativeWrites": 0,
+    "destinationPopulationByHarness": false,
+    "originalPrivateManifestImported": false
+  },
+  "publicApiProofFile": ".test-scratch/use-cases/federation-stdio-43683-1789354506811-result.json",
+  "referenceHandoff": {
+    "schema": "rapp-work.rooted-estate-reference-check/1",
+    "referenceCommit": "68923b4c326fcaf26fad59fa1b87c91d1890802f",
+    "handoff": "/Users/kodywildfeuer/.copilot/session-state/a707dede-bf95-4c62-ae1c-f4e1cce271d8/files/greenfield-rooted-estate-contracts",
+    "files": [
+      {
+        "file": "README.md",
+        "sha256": "08b54b02070e3a0e6a069f7a93747e1ff3fd8040aa11ba12206657475b6fe7fd"
+      },
+      {
+        "file": "CONTRACTS.md",
+        "sha256": "52280a5fb3bf3106bf8a6d7071eb2c0e262b943e0f24c281d0c43359b5c52663"
+      },
+      {
+        "file": "rooted-estate-ports.d.ts",
+        "sha256": "d5bc26a5f60c517a752c422c969671fe6d50502f99125e06a04134d37d099d36"
+      },
+      {
+        "file": "acceptance-matrix.json",
+        "sha256": "81848e4fde0ad2bd135b97f911ae6f4414ecbe45efd74cecb1c6a3124d116695"
+      },
+      {
+        "file": "blockers.json",
+        "sha256": "b07afe70da18c819d9fa7371fa3055879cf4d449f1588360065f10c680574e31"
+      },
+      {
+        "file": "reference-evidence.json",
+        "sha256": "97dd4ce171fcae4c757aba8a321e92ab43d82944929ba40d8328b717b6522c43"
+      }
+    ],
+    "authorityGranted": false,
+    "codeImported": false,
+    "historicalTestsCountedAsGreenfield": false,
+    "canonicalClosureAvailable": false,
+    "domainBinding": false,
+    "codeLoading": false,
+    "sharedRuntime": false
+  },
+  "regressions": {
+    "rapp-work.next/foundation-gates/1": {
+      "evidenceDirectory": null,
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 3,
+        "signedFrames": 0,
+        "streamsScanned": 2,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/263656d794afc7bea84542623fe7d1819da1f97f53caea57f13a9917905faa19/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/263656d794afc7bea84542623fe7d1819da1f97f53caea57f13a9917905faa19/memory/frames",
+            "ok": "2 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.next/headless-parity/1": {
+      "evidenceDirectory": ".test-scratch/e2e-63235-1789354540835",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 38,
+        "signedFrames": 38,
+        "streamsScanned": 10,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/branches/memory-16eb6630dc2cc8211730da7e4eef3a73b02e2ff2926632feca4dc0a2b4a7b5fb/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "24 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/2dec19dc0f96e20509bbea46dc4ab80379b14871b3315c9a39c66bf2e2cca261/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/58dd0968a9e1a71f92ceccd86e0e61961aee222228366a26b73170b4a14d6391/frames",
+            "ok": "2 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.ai-projection-evidence/1": {
+      "evidenceDirectory": ".test-scratch/ai-projection-63624-1789354543819",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 25,
+        "signedFrames": 25,
+        "streamsScanned": 2,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "24 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.observed-migration-gate/1": {
+      "evidenceDirectory": ".test-scratch/migration-observed-64236-1789354545276",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 113,
+        "signedFrames": 113,
+        "streamsScanned": 17,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+            "ok": "5 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/scopes/c2f74e2f7159168d927b9d7c8670693734f044adf5817a1c11bd8a1e69411e0e/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/branches/memory-6ff0f28c0d9cf303f17f5d491c4af07cab432f83c9f472d3d0ad8e9203fcec65/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "6 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+            "ok": "5 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/3d3175f45a1397c948f596e13df80655cdfc9542f746a185de00de7da48a072a/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c4b/frames",
+            "ok": "10 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/7a470104beabea10e3fbfe8a724e8ac96613f55a331b970806da411d601a17ae/branches/495b5a68477bda8cfc30c875500178704102461d02ccbb36d0c488abfbe82168/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/7a470104beabea10e3fbfe8a724e8ac96613f55a331b970806da411d601a17ae/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/8e9b8e8b7a77825d9602644f429a7448bfc9726365b3b7131fcc6925f8af2354/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/c803daf5f88f45923547877852fc9372ba4c813d9800ea978b2dd629165dad14/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "migration/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/frames",
+            "ok": "73 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "migration/materialized/2f9f73a59c3a7a0101cd94592be2b6c9e83f70dc9d1ba76364055dbea06d4daa/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    "rapp-work.catch-up-gate/1": {
+      "evidenceDirectory": ".test-scratch/catch-up-71141-1789354576438",
+      "canonical": null,
+      "status": "passed"
+    },
+    "rapp-work.source-ownership-gate/1": {
+      "evidenceDirectory": ".test-scratch/source-ownership-71217-1789354578595",
+      "canonical": {
+        "checkerCommit": "dda32d741c7218f41443a5bd17eebfe0eae82cb7",
+        "authorityHead": "83ca275f35cca96e43d75c99d338326c1a39b2240eabf57eb7c29ac96cc90818",
+        "authorityFrames": 16,
+        "verdict": "COMPLIANT",
+        "framesScanned": 21,
+        "signedFrames": 21,
+        "streamsScanned": 9,
+        "findings": [],
+        "evidence": [
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/memory/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/1addfef35c7c1a00b226ef4b97410ff3e978ee9db9430b0e54787e5a9bd9467a/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/body/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/memory/frames",
+            "ok": "10 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/branches/07c217f7e788ac47a2b060e0630c591fb0130bbea95ab4a61b5ea339bc651479/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/14156e1aa6834c62084d5ebc34bb59cdcf67441cb0b645a5606cc5c753ef8000/frames",
+            "ok": "2 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/scopes/753374a261ac42fa3ef5eefae9f95122cbac00c85e873a661a380d571a6c0c4b/frames",
+            "ok": "3 frames conform to \u00a77 envelope"
+          },
+          {
+            "artifact": "bots/cd5d94f01d29fec36c93a660974b796c08ff5e398ffcb043a271e8ec79769cf9/swarm/frames",
+            "ok": "1 frames conform to \u00a77 envelope"
+          }
+        ]
+      },
+      "status": "passed"
+    }
+  },
+  "semantics": {
+    "exactRootRequiredByExporter": true,
+    "canonicalRootGuid": "full original identity.body_stream RAPPID; no UUID/agentId aliases",
+    "oneRecordPerExporterEnvelope": true,
+    "sourceScope": "local-estate",
+    "recordingIsRegistration": false,
+    "unresolvedAndAppOnlyAreCandidates": false,
+    "originalNativeShapesImported": false,
+    "providerUnionGrantsAuthority": false,
+    "duplicateReplaysModelOrMutation": false,
+    "changedRequestSilentlyOverwrites": false,
+    "managerDestinationWriteAuthority": false,
+    "managerExporterIntegrationTested": false
+  },
+  "readiness": {
+    "canonicalClosureAvailable": false,
+    "domainBinding": false,
+    "codeLoading": false,
+    "sharedRuntime": false,
+    "transferAuthority": false,
+    "transformation": false
+  },
+  "noReferenceAppImport": true,
+  "noReferenceAppMutation": true,
+  "noLiveProfileWrites": true,
+  "noDependencyOrApplicationInstall": true,
+  "noPush": true,
+  "release": "Approved controlled-local observed migration and adopted owner/form/domain/runtime bindings remain required.",
+  "next": "Manager exporter may send the documented closed owner-stdio envelopes; verify matching root/receipt/sourceWave before cursor acknowledgement. Never treat discovery recording as workspace registration."
+}

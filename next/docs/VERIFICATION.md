@@ -1,6 +1,38 @@
 # Verified headless milestones
 
-## Current source-owned lifecycle milestone
+## Current native federation / frozen rooted-estate handoff
+
+The complete new-core check now passes **101 tests**, strict typecheck/build,
+and every prior headless, provider-neutral, observed migration/browser,
+Catch-me-up/guest and source-ownership gate. The adopted primitive suite passes
+**90 tests**; unchanged retained legacy absence/constitution gates pass.
+
+The new owner-stdio federation proof records one mapped local pointer and one
+Grok app-only observation across actual CLI processes, then retries the original
+request. Its **3 signed frames across 2 streams** check `COMPLIANT` against the
+exact rev-15 checker. The duplicate returns its exact original source receipt;
+zero workspaces, models or native writes result from recording. Tests additionally
+cover union provenance, changed-request refusal, explicit registration review,
+duplicate-source refusal, private-field/path rejection, unresolved observation
+isolation and historical app-root non-activation.
+
+The stopped reference handoff at
+`68923b4c326fcaf26fad59fa1b87c91d1890802f` was read and six relevant handoff files
+checked against their supplied SHA-256 inventory. Those are reference-file
+integrity checks, not canonical adoption or inherited behavioral success.
+`egg.at-rest` exposes the exact full `identity.body_stream` RAPPID and keeps
+`canonicalClosureAvailable`, `domainBinding`, `codeLoading`, `sharedRuntime`,
+`transferAuthority` and `transformation` false—even with a synthetic runtime
+binding. All transfer scopes and a carried activation boolean remain refused.
+
+Current evidence: `verification/native-federation.json`.
+Contracts: `NATIVE_FEDERATION_API.md`, `ROOTED_ESTATE_HANDOFF.md` and
+`contracts/estate-evidence.schema.json`. Recording remains distinct from
+workspace registration; no private manifest, native store, reference-app code
+or live owner/runtime/domain binding is imported. Controlled-local release
+qualification remains pending.
+
+## Source-owned lifecycle milestone (`b7bb1da`)
 
 `npm --prefix next run check` passes strict typecheck/build, **93 core tests**
 with zero failures/skips, and every mandatory headless/projection/migration/

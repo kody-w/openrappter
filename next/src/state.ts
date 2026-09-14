@@ -5,6 +5,7 @@ import { validateDraft, wave, type Draft, type IntentAction, type RoutineAction 
 import type { RootSnapshot } from './repository.js';
 import { migrationItem } from './migration-contract.js';
 import { memoryFrames, sourceReference } from './source-memory.js';
+import { discoveryEvidence } from './estate-contract.js';
 
 export interface InternalState {
   scopes: Scope[];
@@ -132,8 +133,14 @@ export function applyActions(state: InternalState, actions: readonly IntentActio
       const evidence = memoryFrames(root).find(f => f.frame_hash === action.evidenceWave && f.payload.event === 'discovery.recorded');
       requireThat(evidence, 'discovery-evidence', 'Only this root’s explicitly recorded discovery evidence can establish a pointer.');
       const data = workEvent(evidence.payload).data;
-      const pointer = list(data.pointers, 32).map(v => object(v)).find(p => p.id === action.pointerId);
+      const captured = discoveryEvidence({ origin: data.origin!, observedUtc: data.observedUtc!, historical: data.historical!, pointers: data.pointers!,
+        ...(data.observations === undefined ? {} : { observations: data.observations }) });
+      const pointer = captured.pointers.find(p => p.id === action.pointerId);
       requireThat(pointer, 'discovery-evidence', 'The chosen native pointer was not present in the discovery observation.');
+      requireThat(![...state.pointers.values()].some(p => {
+        const existing = object(p.pointer);
+        return existing.provider === pointer.provider && existing.locator === pointer.locator;
+      }), 'discovery-duplicate', 'This source context already has a registered pointer; do not mint a duplicate internal workspace.');
       state.pointers.set(id, { ...action, pointer, source });
     }
     validateTree(state.scopes);

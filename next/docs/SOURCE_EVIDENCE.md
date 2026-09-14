@@ -13,6 +13,7 @@ are historical implementation evidence, not authority over the new root data.
 | `shared-runtime-result.json` | One shared spine, independent root scopes; the actual external data-only hotload binding was not established |
 | `copilot-bot-bridge-validation/validation-summary.json` | Injected Copilot transport, canonical emitted-frame/restart evidence, no live-profile changes |
 | `domain-authority/rapp_hive.py` and `bundle.py` | Structural labels are not signed authority; use existing registry/acceptance and exact-byte protection boundaries |
+| `greenfield-rooted-estate-contracts/README.md` and associated contracts/matrix, frozen at `68923b4c326fcaf26fad59fa1b87c91d1890802f` | Full original body-stream GUID; complete recursive estate; byte-identical Egg; explicit unavailable adoption/domain/code/shared-runtime bindings, not imported app schemas or inherited test success |
 
 Current canonical protocol selection was verified independently against
 `kody-w/rapp-1` main: `dda32d741c7218f41443a5bd17eebfe0eae82cb7`, rev-15,
@@ -29,3 +30,7 @@ The Private Hive boundary was checked against the existing public
 `kody-w/RAPP@0a15ebd0d79e0502606755ad4df1432dcb6e1f59`.
 No live Hive, native estate, provider profile, Messages store or external
 Brainstem process was inspected or activated by the new-core tests.
+
+See `ROOTED_ESTATE_HANDOFF.md` for the frozen framework-neutral handoff's
+acceptance mapping and stopping boundary. Its historical authority stays
+historical; it does not repin the independently selected greenfield rev-15 core.

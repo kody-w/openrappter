@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rapp-work.estate-evidence/1",
+  "title": "Historical local/native evidence, not workspace registration or authority",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["origin", "observedUtc", "historical", "pointers"],
+  "properties": {
+    "origin": { "enum": ["sanitized-fixture", "explicit-operator-evidence"] },
+    "observedUtc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$" },
+    "historical": { "const": true },
+    "pointers": {
+      "type": "array", "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "provider", "title", "nativeShape", "locator"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "provider": { "$ref": "#/$defs/provider" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "nativeShape": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "locator": { "type": "string", "maxLength": 220 },
+          "provenance": {
+            "allOf": [
+              { "$ref": "#/$defs/provenance" },
+              { "properties": { "mappingState": { "const": "mapped" } } }
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "provider": { "const": "local" } } },
+            "then": { "required": ["provenance"], "properties": { "locator": { "pattern": "^local://workspace/[A-Za-z0-9._-]{1,180}$" } } },
+            "else": { "properties": { "locator": { "pattern": "^native://(?:copilot|claude|hermes|grokbot|scout)/[A-Za-z0-9._/-]{1,180}$" } } }
+          },
+          {
+            "if": { "properties": { "provider": { "const": "grokbot" } } },
+            "then": { "properties": { "locator": { "pattern": "^native://grokbot/workspace/.+$" } } }
+          }
+        ]
+      }
+    },
+    "observations": {
+      "type": "array", "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "provider", "title", "nativeShape", "provenance"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "provider": { "$ref": "#/$defs/provider" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "nativeShape": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "provenance": {
+            "allOf": [
+              { "$ref": "#/$defs/provenance" },
+              { "properties": { "mappingState": { "enum": ["unresolved", "app-only"] } } }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "provider": { "enum": ["copilot", "claude", "hermes", "grokbot", "scout", "local"] },
+    "provenance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "manifestSha256", "recordSha256", "providerUnion", "mappingState", "evidenceSha256"],
+      "properties": {
+        "source": { "const": "rapp-workspace-manager" },
+        "manifestSha256": { "$ref": "#/$defs/hash" },
+        "recordSha256": { "$ref": "#/$defs/hash" },
+        "providerUnion": { "type": "array", "maxItems": 6, "uniqueItems": true, "items": { "$ref": "#/$defs/provider" } },
+        "mappingState": { "enum": ["mapped", "unresolved", "app-only"] },
+        "evidenceSha256": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/hash" } }
+      }
+    }
+  },
+  "$comment": "Runtime additionally enforces provider/locator agreement, no dot/path traversal segments, unique candidate/observation IDs and source context locators. Metadata/digests are claims, not native authority. A local pointer needs provenance; observations have no locator and never enter pointer.register. Original private native shapes remain outside this API."
+}

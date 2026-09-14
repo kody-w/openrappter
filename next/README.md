@@ -57,6 +57,17 @@ bounded live updates and frames-only rebuild. Historical centralized bytes stay
 explicitly historical. `npm --prefix next run source-ownership:gate` is mandatory
 in `check`; see [the binding source contract](docs/SOURCE_OWNERSHIP.md).
 
+## Native federation and rooted-estate handoff
+
+The owner `estate.record` API accepts bounded local/native provenance and
+separate unresolved/app-only observations, with exact source receipts and
+idempotent restart. Recording never registers a workspace automatically.
+See [the exporter contract](docs/NATIVE_FEDERATION_API.md).
+
+The [frozen rooted-estate handoff](docs/ROOTED_ESTATE_HANDOFF.md) is reference
+evidence only. Full body-stream RAPPIDs remain identity; closure, domain,
+code-loading and shared-runtime adoption flags remain false until real bindings.
+
 ## Development
 
 Node 22.12+; pinned development dependencies and Copilot SDK are declared in this

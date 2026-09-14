@@ -12,11 +12,13 @@ export class RootedEgg {
       ...snapshot.branches.flatMap(b => b.frames), ...(snapshot.sources ?? []).flatMap(s => s.branches.flatMap(b => b.frames))];
     return {
       root: snapshot.definition.root,
+      identity: { body_stream: snapshot.streams.body[0]!.stream_id },
       representation: 'existing-canonical-rooted-data',
       frames: frames.map(f => ({ wave: f.frame_hash, bytesSha256: sha256(canonicalJson(f)), origin: sourceReference(f) })),
       branches: [...snapshot.branches.map(b => ({ family: b.family, head: b.head })),
         ...(snapshot.sources ?? []).flatMap(s => s.branches.map(b => ({ guid: root, scope: s.scope, stream_id: s.stream, family: 'memory', head: b.head })))],
       transformation: false, transferAuthority: false,
+      canonicalClosureAvailable: false, domainBinding: false, codeLoading: false, sharedRuntime: false,
     };
   }
 

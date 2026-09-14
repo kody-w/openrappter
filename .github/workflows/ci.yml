@@ -73,9 +73,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: next/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            next/package-lock.json
       - name: Require Apple Silicon
         run: test "$(uname -m)" = arm64
+      - run: npm ci
       - run: npm ci --prefix next
       - run: npm --prefix next run check
 

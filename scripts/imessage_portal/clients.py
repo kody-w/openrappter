@@ -200,10 +200,11 @@ class NativeClient:
             raise SubmissionUnknown("native_send_unknown", "Native send did not confirm submission.")
         return result
 
-    def history(self, chat_id: int, since: float) -> list[dict]:
+    def history(self, chat_id: int, since: float, until: float) -> list[dict]:
         result = self.request("messages.history", {
             "chat_id": chat_id, "limit": 200, "attachments": True,
             "start": datetime.fromtimestamp(since, timezone.utc).isoformat(),
+            "end": datetime.fromtimestamp(until, timezone.utc).isoformat(),
         })
         messages = result.get("messages")
         if (

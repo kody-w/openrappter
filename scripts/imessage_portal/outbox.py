@@ -134,7 +134,7 @@ class Outbox:
             return False
         try:
             created = datetime.fromisoformat(message["created_at"].replace("Z", "+00:00")).timestamp()
-            if created < part["submitted_at"] - 2:
+            if not part["receipt_created_after"] <= created < part["receipt_created_before"]:
                 return False
         except (KeyError, TypeError, ValueError, AttributeError):
             return False
@@ -152,10 +152,14 @@ class Outbox:
     def reconcile(self, part: dict) -> None:
         if not self._allowed(part):
             raise PortalError("route_changed", "The original authorized chat is no longer available.")
+        if "receipt_created_after" not in part or "receipt_created_before" not in part:
+            part.setdefault("receipt_created_after", part["submitted_at"] - 2)
+            part.setdefault("receipt_created_before", part["submitted_at"] + self.config.receipt_seconds)
+            self.store.save()
         if not part.get("guid"):
             matches = [
                 message for message in self.native.history(
-                    part["target"]["chat_id"], part["submitted_at"] - 2
+                    part["target"]["chat_id"], part["receipt_created_after"], part["receipt_created_before"],
                 )
                 if self._matches(part, message)
             ]
@@ -249,8 +253,11 @@ class Outbox:
                     raise NotSubmitted("receipt_baseline", "Cannot establish a safe pre-send watermark.") from error
                 if type(rowid) is not int or rowid < 0:
                     raise NotSubmitted("receipt_baseline", "The pre-send watermark was invalid.")
+                submitted_at = self.clock()
                 part.update(
-                    state="submitting", submitted_at=now, send_after_rowid=rowid, retryable=False,
+                    state="submitting", submitted_at=submitted_at, send_after_rowid=rowid, retryable=False,
+                    receipt_created_after=submitted_at - 2,
+                    receipt_created_before=submitted_at + self.config.receipt_seconds,
                 )
                 self.store.save()
                 result = self.native.send(
@@ -295,7 +302,8 @@ class Outbox:
                     continue
             part["attempts"].append({
                 key: part[key] for key in (
-                    "state", "submitted_at", "send_after_rowid", "guid", "caption_guid", "error"
+                    "state", "submitted_at", "send_after_rowid", "guid", "caption_guid", "error",
+                    "receipt_created_after", "receipt_created_before",
                 ) if key in part
             })
             part["attempt"] += 1
@@ -315,6 +323,7 @@ class Outbox:
                 part["text"] = f"[RAPP retry {attempt_token}]\n{part['text']}"
             for field in (
                 "guid", "caption_guid", "error", "last_checked", "receipt", "submitted_at", "send_after_rowid",
+                "receipt_created_after", "receipt_created_before",
             ):
                 part.pop(field, None)
             part["state"] = "queued"

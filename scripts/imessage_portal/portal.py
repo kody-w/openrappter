@@ -138,10 +138,75 @@ class Portal:
 
     def _conversation(self, actor: dict, target: dict) -> dict:
         key = token(actor["sender"] + "\0" + actor["chat"] + "\0" + target.get("roster_hash", ""))
-        return self.store.data["conversations"].setdefault(key, {
-            "actor": dict(actor), "target": dict(target), "files": [], "files_expire": 0,
+        conversation = self.store.data["conversations"].setdefault(key, {
+            "actor": dict(actor), "target": dict(target), "uploads": [],
             "capture_until": 0, "approvals": {}, "latest_job": None,
         })
+        if "uploads" not in conversation:
+            legacy_paths = {item["path"] for item in conversation.get("files", [])}
+            conversation["uploads"] = []
+            for identity, upload in self.store.data["inbox"].items():
+                if (
+                    upload["actor"] != actor or not upload.get("capture")
+                    or upload["target"].get("roster_hash") != target.get("roster_hash")
+                ):
+                    continue
+                if upload["state"] in ("receiving", "ready") or any(
+                    item["path"] in legacy_paths for item in upload["staged"].values()
+                ):
+                    conversation["uploads"].append(identity)
+                    upload.setdefault(
+                        "upload_expires",
+                        conversation.get("files_expire") or upload["first_seen"] + self.config.attachment_window_seconds,
+                    )
+            conversation.pop("files", None)
+            conversation.pop("files_expire", None)
+        return conversation
+
+    def _input_snapshot(self, conversation: dict, event: dict) -> list[str]:
+        inbox = self.store.data["inbox"]
+        return sorted({
+            identity for identity in conversation["uploads"]
+            if identity in inbox and inbox[identity]["event"]["id"] < event["id"]
+            and inbox[identity]["state"] not in ("failed", "cancelled", "ignored")
+            and not inbox[identity].get("selected_by")
+            and inbox[identity].get("upload_expires", 0) >= self.clock()
+        }, key=lambda identity: (inbox[identity]["event"]["id"], identity))
+
+    @staticmethod
+    def _task_command(body: str) -> bool:
+        words = body.split(maxsplit=1)
+        command = words[0].casefold() if words else "help"
+        return body.casefold() != "clear files" and command not in {
+            "help", "?", "attach", "1", "2", "approve", "files", "list", "resume", "recover",
+            "status", "result", "stop", "cancel", "retry", "resend",
+        }
+
+    def _freeze_inputs(self, identity: str, record: dict, conversation: dict, snapshot: list[str]) -> None:
+        record["selected_inputs"] = list(snapshot)
+        for selected in snapshot:
+            upload = self.store.data["inbox"].get(selected)
+            if not upload or upload.get("selected_by") not in (None, identity):
+                record["input_selection_error"] = "input_already_selected"
+                continue
+            upload["selected_by"] = identity
+        conversation["uploads"] = [selected for selected in conversation["uploads"] if selected not in snapshot]
+
+    def _release_inputs(self, identity: str, record: dict) -> None:
+        if record.get("job_id"):
+            return
+        conversation = self._conversation(record["actor"], record["target"])
+        for selected in record.get("selected_inputs", []):
+            upload = self.store.data["inbox"].get(selected)
+            if not upload or upload.get("selected_by") != identity:
+                continue
+            upload.pop("selected_by")
+            if (
+                upload["state"] not in ("failed", "cancelled", "ignored")
+                and upload.get("upload_expires", 0) >= self.clock()
+                and selected not in conversation["uploads"]
+            ):
+                conversation["uploads"].append(selected)
 
     def _notice(self, key: str, actor: dict, target: dict, text: str, job_id=None) -> None:
         self.outbox.enqueue(key, actor, target, text, job_id=job_id)
@@ -233,12 +298,18 @@ class Portal:
         if self.outbox.is_echo(event):
             return
         if event.get("needs_native_text"):
+            conversation = self._conversation(actor, target)
+            capture_candidate = bool(event.get("has_attachments")) and conversation["capture_until"] >= self.clock()
             self.store.data["inbox"][identity] = {
                 "event": dict(event), "actor": actor, "target": target, "state": "decoding",
                 "body": "", "capture": False, "first_seen": self.clock(),
                 "deadline": self.clock() + self.config.readiness_seconds,
                 "observations": {}, "staged": {}, "has_files": bool(event.get("has_attachments")),
+                "input_snapshot": self._input_snapshot(conversation, event),
+                "upload_expires": self.clock() + self.config.attachment_window_seconds,
             }
+            if capture_candidate:
+                conversation["uploads"].append(identity)
             self.store.save()
             return identity
         return self._route_event(identity, event, actor, target)
@@ -247,6 +318,7 @@ class Portal:
         # Messages may represent an attachment-only body with U+FFFC.
         text = str(event.get("text") or "").replace("\ufffc", "")
         conversation = self._conversation(actor, target)
+        previous = self.store.data["inbox"].get(identity, {})
         match = ADDRESS.match(text)
         body = text[match.end():].strip() if match else ""
         has_files = event.get("has_attachments") is True or bool(event.get("attachments"))
@@ -266,8 +338,19 @@ class Portal:
             "explicit_address": match is not None,
             "first_seen": self.clock(), "deadline": self.clock() + self.config.readiness_seconds,
             "observations": {}, "staged": {}, "has_files": has_files,
+            "upload_expires": previous.get("upload_expires", self.clock() + self.config.attachment_window_seconds),
         }
+        if previous.get("selected_by"):
+            record["selected_by"] = previous["selected_by"]
         self.store.data["inbox"][identity] = record
+        if record["capture"]:
+            if identity not in conversation["uploads"] and not record.get("selected_by"):
+                conversation["uploads"].append(identity)
+        elif self._task_command(body):
+            snapshot = previous.get("input_snapshot")
+            if snapshot is None:
+                snapshot = self._input_snapshot(conversation, event)
+            self._freeze_inputs(identity, record, conversation, snapshot)
         self.store.save()
         return identity
 
@@ -326,11 +409,18 @@ class Portal:
             if record["capture"]:
                 conversation = self._conversation(record["actor"], record["target"])
                 references = [record["staged"][key] for key in sorted(record["staged"], key=int)]
-                if len(conversation["files"]) + len(references) > self.config.max_files:
+                queued_files = sum(
+                    len(self.store.data["inbox"][key]["staged"]) for key in conversation["uploads"]
+                    if self.store.data["inbox"][key].get("upload_expires", 0) >= self.clock()
+                )
+                if queued_files > self.config.max_files:
                     raise PortalError("too_many_files", "Too many pending files; use RAPP clear files.")
-                conversation["files"].extend(references)
-                conversation["files_expire"] = self.clock() + self.config.attachment_window_seconds
-                conversation["capture_until"] = conversation["files_expire"]
+                record["upload_expires"] = self.clock() + self.config.attachment_window_seconds
+                if not record.get("selected_by"):
+                    conversation["capture_until"] = record["upload_expires"]
+                # The notice commit includes the completed source event and its
+                # staged ordinals. A restart cannot append the same upload again.
+                record["state"] = "done"
                 self._notice(
                     f"input:{identity}:saved", record["actor"], record["target"],
                     f"Saved {len(references)} attachment(s) for your next RAPP task. "
@@ -354,6 +444,7 @@ class Portal:
             )
         except PortalError as error:
             record.update(state="failed", error=error.code)
+            self._release_inputs(identity, record)
             self.store.error(error.code, self.clock())
             self._notice(
                 f"input:{identity}:error", record["actor"], record["target"],
@@ -472,7 +563,7 @@ class Portal:
         if command == "attach":
             self._clear_capture(record["actor"])
             conversation.update(
-                files=[], files_expire=0,
+                uploads=[],
                 capture_until=self.clock() + self.config.attachment_window_seconds,
             )
             self._notice(f"input:{identity}:attach", actor, target,
@@ -481,7 +572,7 @@ class Portal:
             return
         if body.casefold() == "clear files":
             self._clear_capture(record["actor"])
-            conversation.update(files=[], files_expire=0, capture_until=0)
+            conversation.update(uploads=[], capture_until=0)
             self._notice(f"input:{identity}:cleared", actor, target, "Pending RAPP file selection cleared.")
             return
         if command in ("1", "2", "approve"):
@@ -573,24 +664,34 @@ class Portal:
 
     def _submit(self, identity: str, record: dict, conversation: dict, prompt: str) -> None:
         if "submission" not in record:
-            waiting = record.setdefault("waiting_inputs", [
-                key for key, other in self.store.data["inbox"].items()
-                if other["actor"] == record["actor"] and other["capture"]
-                and other["event"]["id"] < record["event"]["id"] and other["state"] == "receiving"
-            ])
-            if any(self.store.data["inbox"][key]["state"] in ("failed", "cancelled") for key in waiting):
+            if "selected_inputs" not in record:
+                self._freeze_inputs(identity, record, conversation, self._input_snapshot(conversation, record["event"]))
+                self.store.save()
+            if record.get("input_selection_error"):
+                raise PortalError("input_already_selected", "A frozen input was already selected by another task.")
+            selected = [self.store.data["inbox"].get(key) for key in record["selected_inputs"]]
+            if any(
+                upload is None or upload["actor"] != record["actor"]
+                or upload["target"].get("roster_hash") != record["target"].get("roster_hash")
+                or upload["event"]["id"] >= record["event"]["id"]
+                or upload["state"] in ("failed", "cancelled", "ignored")
+                or upload.get("selected_by") != identity
+                for upload in selected
+            ):
                 raise PortalError("attachment_failed", "A selected upload failed or was cleared. Resend the file and task.")
-            if any(self.store.data["inbox"][key]["state"] != "done" for key in waiting):
+            if any(upload["state"] != "done" for upload in selected):
                 self._notice(
                     f"input:{identity}:waiting-inputs", record["actor"], record["target"],
                     "Your RAPP task is waiting for the preceding selected uploads. It has not run.",
                 )
                 raise AwaitingInputs
+            if any(not upload["capture"] for upload in selected):
+                raise PortalError("attachment_failed", "A selected source message was not an authorized file-only upload.")
+            sources = sorted([*selected, record], key=lambda upload: upload["event"]["id"])
             references = [
-                record["staged"][key] for key in sorted(record["staged"], key=int)
+                dict(upload["staged"][key])
+                for upload in sources for key in sorted(upload["staged"], key=int)
             ]
-            if conversation["files_expire"] >= self.clock():
-                references = [*conversation["files"], *references]
             if len(references) > self.config.max_files:
                 raise PortalError("too_many_files", "Too many selected files; use RAPP clear files.")
             record["submission"] = {
@@ -626,7 +727,10 @@ class Portal:
             "last_poll": 0, "last_notice": 0, "final_queued": False,
             "stdout_offset": 0, "stderr_offset": 0, "event_offset": 0,
         })
-        conversation.update(latest_job=job_id, files=[], files_expire=0, capture_until=0)
+        record["job_id"] = job_id
+        conversation["latest_job"] = job_id
+        if not conversation["uploads"]:
+            conversation["capture_until"] = 0
         approval = response.get("approval")
         if isinstance(approval, dict) and approval.get("token"):
             expiry = timestamp(approval.get("expires_at"))
@@ -714,14 +818,18 @@ class Portal:
 
     def _recover_jobs(self) -> None:
         instance = os.environ.get("RAPP_PORTAL_WATCHER_INSTANCE", "manual")
-        changed = instance != self.store.data.get("watcher_instance")
         self.store.data["watcher_instance"] = instance
         budget = 4
-        for job_id, job in self.store.data["jobs"].items():
+        jobs = sorted(
+            self.store.data["jobs"].items(),
+            key=lambda item: (item[1].get("last_recovery", 0), item[0]),
+        )
+        for job_id, job in jobs:
             if budget == 0:
                 break
             if job["state"] in TERMINAL or (
-                not changed and self.clock() - job.get("last_recovery", 0) < 60
+                job.get("recovery_instance") == instance
+                and self.clock() - job.get("last_recovery", 0) < 60
             ):
                 continue
             budget -= 1
@@ -735,11 +843,16 @@ class Portal:
                     f"Task {job_id}: recovery is unavailable ({error.code}); no execution was replayed.", job_id,
                 )
             job["last_recovery"] = self.clock()
+            job["recovery_instance"] = instance
         self.store.save()
 
     def _poll_jobs(self) -> None:
         budget = 4
-        for job_id, job in self.store.data["jobs"].items():
+        jobs = sorted(
+            self.store.data["jobs"].items(),
+            key=lambda item: (item[1].get("last_poll", 0), item[0]),
+        )
+        for job_id, job in jobs:
             if budget == 0:
                 break
             if job["final_queued"] or self.clock() - job["last_poll"] < 5:

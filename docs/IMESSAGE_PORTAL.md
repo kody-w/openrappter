@@ -53,9 +53,18 @@ conversation turn, or an intervening status reply requires explicit
 checks the preceding row in the exact chat, including foreign outbound rows
 that are not eligible user commands. Attachment-only messages outside an armed intake window belong to the
 rest of the conversation and are not opened, acknowledged, or executed by this
-portal. A successful task submission consumes the selected files and closes
-the upload window. A task following a still-downloading selected upload waits;
-it does not silently run without that input.
+portal. Task ingestion freezes the preceding upload event identities, rather
+than reading a mutable “most recently downloaded files” list later. Inputs
+resolve in source-message row order and attachment ordinal order. A task
+following a still-downloading selected upload waits; it does not silently run
+without that input or absorb a later upload that downloads faster. Later
+unconsumed uploads remain available for the next requested task.
+
+Capture completion and its acknowledgement enter the same atomic transport
+journal commit. Stable source GUIDs and attachment ordinals prevent a crash
+after acknowledgement from appending the captured references again. A
+successful task consumes only its frozen selection; it closes the upload
+window when no later unconsumed upload remains.
 
 Unprefixed wake/restart/shutdown commands retain their existing Claude
 lifecycle behavior. A RAPP-addressed task mentioning “restart” must bypass the
@@ -216,6 +225,10 @@ The hook passes a watcher-instance marker to its bounded ticks. Owned
 nonterminal tasks are reconciled through the local adapter's `recover` on
 watcher restart and periodically, without replaying execution or signalling
 stored PIDs.
+Status and recovery have finite per-tick budgets and choose the least-recently
+checked eligible jobs, rather than the first inserted jobs. Restart recovery
+is tracked per job so a batch boundary cannot skip the remaining jobs when
+the watcher generation changes.
 
 ```bash
 python3.12 scripts/imessage-portal.py --config /absolute/private-portal.json tick
@@ -330,11 +343,20 @@ they neither establish delivery nor justify a native Swift fork.
 Native text and attachment are separate rows. A returned send GUID can identify
 the **caption**, so it is retained only for echo suppression on a file part.
 Attachment confirmation requires the exact original chat, a row newer than
-the pre-send watermark, an outgoing event within the send window, and the
+the pre-send watermark, an outgoing event created within the persisted attempt window, and the
 unique outbox filename. Only that attachment's GUID is queried with
 `message.send_status`. Native transcoding may change file bytes/size; original
 SHA-256 is used to protect the intentional *input* to Messages, not to demand
 byte identity from the delivered/transcoded attachment.
+
+Each attempt commits its actual start and both creation-time bounds before
+native send: `[submitted_at - 2 seconds, submitted_at + receipt_seconds)`,
+matching the native start-inclusive/end-exclusive filter. Native receipt
+history is queried with both bounds. Later discovery
+of an in-window row may still resolve an unknown attempt after the window has
+elapsed; a row **created** outside the window cannot, even if its filename
+matches. Restart or later configuration changes do not extend a persisted
+attempt window. This does not authorize an automatic resend.
 
 Parts have separate `queued`, `submitting`, `submitted`, `sent`, `delivered`,
 `failed`, and `unknown` states. A crash during submission becomes unknown.

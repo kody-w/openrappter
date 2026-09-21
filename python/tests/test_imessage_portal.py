@@ -137,7 +137,7 @@ class Native:
         self.source.prior_guids[self.source.targets[chat_id]] = guid
         return {"ok": True, "guid": caption_guid if file else guid}
 
-    def history(self, chat_id, since):
+    def history(self, chat_id, since, until):
         self.history_calls.append((chat_id, since))
         return list(self.messages)
 
@@ -1299,6 +1299,312 @@ def test_valid_aac_m4a_manifest_aliases_preserve_the_container_and_native_file_p
     env.clock.advance(10)
     env.portal().tick()
     assert next(part for part in state(env)["outbox"] if "file" in part)["state"] == "delivered"
+
+
+def test_capture_crash_after_ack_commit_does_not_duplicate_selected_references(env, monkeypatch):
+    env.source.events.extend([
+        message(1, "RAPP attach"),
+        message(2, "", has_attachments=True, attachments=[attachment(env, "single.txt", "text/plain")]),
+    ])
+    env.portal().tick()
+    original = Portal._notice
+
+    def crash_after_saved(self, key, *args, **kwargs):
+        original(self, key, *args, **kwargs)
+        if key.endswith(":saved"):
+            raise SystemExit("synthetic crash after acknowledgement journal commit")
+
+    monkeypatch.setattr(Portal, "_notice", crash_after_saved)
+    env.clock.advance(2)
+    with pytest.raises(SystemExit):
+        env.portal().tick()
+    committed_capture = next(record for record in state(env)["inbox"].values() if record["capture"])
+    assert committed_capture["state"] == "done"
+    monkeypatch.setattr(Portal, "_notice", original)
+    env.clock.advance(2)
+    env.portal().tick()
+    env.source.events.append(message(3, "RAPP use the captured input once"))
+    env.portal().tick()
+    assert len(submitted(env)) == 1
+    assert [item["name"] for item in submitted(env)[0]["attachments"]] == ["single.txt"]
+    saved_notices = [part for part in state(env)["outbox"] if part["group"].endswith(":saved")]
+    assert len(saved_notices) == 1
+    env.source.events.append(message(4, "RAPP a later text task"))
+    env.portal().tick()
+    assert submitted(env)[1]["attachments"] == []
+
+
+@pytest.mark.parametrize("native_decode", [False, True])
+def test_task_freezes_preceding_uploads_and_preserves_later_ready_files(env, native_decode):
+    slow = attachment(env, "A.txt", "text/plain", exists=False)
+    later = attachment(env, "B.txt", "text/plain")
+    env.source.events.extend([
+        message(1, "RAPP attach"),
+        message(2, "", has_attachments=True, attachments=[slow]),
+        message(
+            3, "" if native_decode else "RAPP use only the preceding upload",
+            needs_native_text=native_decode,
+        ),
+        message(4, "", has_attachments=True, attachments=[later]),
+    ])
+    env.portal().tick()
+    requesting = next(record for record in state(env)["inbox"].values() if record["event"]["id"] == 3)
+    selection_key = "input_snapshot" if native_decode else "selected_inputs"
+    assert requesting[selection_key] == [hashlib.sha256(b"SYNTHETIC-2").hexdigest()]
+    env.clock.advance(2)
+    env.portal().tick()
+    assert not submitted(env)
+    if native_decode:
+        env.native.decoded["SYNTHETIC-3"] = "RAPP use only the preceding upload"
+    Path(slow["original_path"]).write_text("synthetic A finally downloaded")
+    env.clock.advance(5)
+    env.portal().tick()
+    env.clock.advance(2)
+    env.portal().tick()
+    assert [item["name"] for item in submitted(env)[0]["attachments"]] == ["A.txt"]
+    env.source.events.append(message(5, "RAPP use the next unconsumed upload"))
+    env.clock.advance(2)
+    env.portal().tick()
+    assert [item["name"] for item in submitted(env)[1]["attachments"]] == ["B.txt"]
+
+
+def test_frozen_uploads_resolve_in_source_row_and_attachment_ordinal_order(env):
+    slow = [
+        attachment(env, f"A{index}.txt", "text/plain", exists=False)
+        for index in range(2)
+    ]
+    ready = attachment(env, "B.txt", "text/plain")
+    env.source.events.extend([
+        message(1, "RAPP attach"),
+        message(2, "", has_attachments=True, attachments=slow),
+        message(3, "", has_attachments=True, attachments=[ready]),
+        message(4, "RAPP use all preceding uploads in order"),
+    ])
+    env.portal().tick()
+    env.clock.advance(2)
+    env.portal().tick()
+    for item in slow:
+        Path(item["original_path"]).write_text("synthetic slow input")
+    env.clock.advance(2)
+    env.portal().tick()
+    env.clock.advance(2)
+    env.portal().tick()
+    assert [item["name"] for item in submitted(env)[0]["attachments"]] == ["A0.txt", "A1.txt", "B.txt"]
+
+
+@pytest.mark.parametrize(("operation", "spacing"), [("status", 5), ("recover", 60)])
+def test_job_polling_and_recovery_budgets_do_not_starve_later_jobs(env, operation, spacing):
+    env.source.events.extend(message(index, f"RAPP synthetic task {index}") for index in range(1, 10))
+    env.portal().tick()
+    env.runtime.calls.clear()
+    for _ in range(3):
+        env.clock.advance(spacing)
+        env.portal().tick()
+    seen = {request["job_id"] for request in env.runtime.calls if request["op"] == operation}
+    assert seen == {synthetic_job(index) for index in range(1, 10)}
+
+
+def test_watcher_restart_recovers_every_job_across_the_finite_budget(env, monkeypatch):
+    monkeypatch.setenv("RAPP_PORTAL_WATCHER_INSTANCE", "before-restart")
+    env.source.events.extend(message(index, f"RAPP synthetic task {index}") for index in range(1, 10))
+    env.portal().tick()
+    with Store(env.config().state_dir) as store:
+        for job in store.data["jobs"].values():
+            job["last_recovery"] = env.clock()
+            job["recovery_instance"] = "before-restart"
+        store.save()
+    env.runtime.calls.clear()
+    monkeypatch.setenv("RAPP_PORTAL_WATCHER_INSTANCE", "after-restart")
+    for _ in range(3):
+        env.clock.advance(1)
+        env.portal().tick()
+    seen = {request["job_id"] for request in env.runtime.calls if request["op"] == "recover"}
+    assert seen == {synthetic_job(index) for index in range(1, 10)}
+
+
+def test_receipts_reject_late_creation_but_accept_late_discovery_inside_attempt_window(env):
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        enqueue_native_test_batch(env, outbox, [".m4a"])
+        outbox.pump()
+        part = next(part for part in store.data["outbox"] if "file" in part)
+        original = copy.deepcopy(next(row for row in env.native.messages if row["attachments"]))
+        env.native.messages = [{
+            **original,
+            "created_at": datetime.fromtimestamp(env.clock() + 86400, timezone.utc).isoformat(),
+        }]
+        env.clock.advance(86400)
+        outbox.pump()
+        assert part["state"] == "unknown" and not part.get("guid")
+        assert len([call for call in env.native.calls if call["file"]]) == 1
+        env.native.messages = [original]
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        env.clock.advance(10)
+        outbox.pump()
+        part = next(part for part in store.data["outbox"] if "file" in part)
+        assert part["state"] == "delivered"
+        assert part["guid"] == original["guid"]
+        assert len([call for call in env.native.calls if call["file"]]) == 1
+
+
+def test_capture_upgrade_deduplicates_legacy_refs_by_source_event(env):
+    env.source.events.extend([
+        message(1, "RAPP attach"),
+        message(2, "", has_attachments=True, attachments=[attachment(env, "single.txt", "text/plain")]),
+    ])
+    env.portal().tick()
+    env.clock.advance(2)
+    env.portal().tick()
+    with Store(env.config().state_dir) as store:
+        capture = next(record for record in store.data["inbox"].values() if record["capture"])
+        capture["state"] = "ready"
+        conversation = next(iter(store.data["conversations"].values()))
+        conversation.pop("uploads")
+        reference = capture["staged"]["0"]
+        conversation["files"] = [dict(reference), dict(reference)]
+        conversation["files_expire"] = env.clock() + 600
+        store.save()
+    env.portal().tick()
+    env.source.events.append(message(3, "RAPP use only one source attachment"))
+    env.portal().tick()
+    assert [item["name"] for item in submitted(env)[0]["attachments"]] == ["single.txt"]
+
+
+def test_task_with_its_own_slow_file_cannot_absorb_a_later_upload(env):
+    earlier = attachment(env, "earlier.txt", "text/plain")
+    own = attachment(env, "own.txt", "text/plain", exists=False)
+    later = attachment(env, "later.txt", "text/plain")
+    env.source.events.extend([
+        message(1, "RAPP attach"),
+        message(2, "", has_attachments=True, attachments=[earlier]),
+        message(3, "RAPP use selected files", has_attachments=True, attachments=[own]),
+        message(4, "", has_attachments=True, attachments=[later]),
+    ])
+    env.portal().tick()
+    env.clock.advance(2)
+    env.portal().tick()
+    Path(own["original_path"]).write_text("synthetic mixed-message input")
+    env.clock.advance(2)
+    env.portal().tick()
+    env.clock.advance(2)
+    env.portal().tick()
+    assert [item["name"] for item in submitted(env)[0]["attachments"]] == ["earlier.txt", "own.txt"]
+    env.source.events.append(message(5, "RAPP use the remaining upload"))
+    env.portal().tick()
+    assert [item["name"] for item in submitted(env)[1]["attachments"]] == ["later.txt"]
+
+
+def test_invalid_file_request_releases_its_frozen_upload_for_the_next_task(env):
+    env.source.events.extend([
+        message(1, "RAPP attach"),
+        message(2, "", has_attachments=True, attachments=[attachment(env, "input.txt", "text/plain")]),
+    ])
+    env.portal().tick()
+    env.clock.advance(2)
+    env.portal().tick()
+    env.source.events.append(message(3, "RAPP file ../unsafe.txt | do not run"))
+    env.portal().tick()
+    assert not submitted(env)
+    env.source.events.append(message(4, "RAPP use my selected file"))
+    env.portal().tick()
+    assert [item["name"] for item in submitted(env)[0]["attachments"]] == ["input.txt"]
+
+
+@pytest.mark.parametrize(("offset", "accepted"), [
+    (-2.001, False), (-2, True), (0, True), (179.999, True), (180, False), (180.001, False), (86400, False),
+])
+def test_attachment_creation_window_matches_native_start_inclusive_end_exclusive(env, offset, accepted):
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        enqueue_native_test_batch(env, outbox, [".m4a"])
+        outbox.pump()
+        part = next(part for part in store.data["outbox"] if "file" in part)
+        receipt = next(row for row in env.native.messages if row["attachments"])
+        receipt["created_at"] = datetime.fromtimestamp(
+            part["submitted_at"] + offset, timezone.utc,
+        ).isoformat()
+        assert part["receipt_created_before"] == part["submitted_at"] + 180
+        assert part["receipt_created_after"] == part["submitted_at"] - 2
+        env.clock.advance(86410)
+        outbox.pump()
+        assert (part["state"] == "delivered") is accepted
+        assert len([call for call in env.native.calls if call["file"]]) == 1
+
+
+def test_receipt_window_is_saved_before_send_and_uses_each_parts_actual_start(env):
+    original = env.native.send
+    starts = []
+
+    def send(chat_id, *, text="", file=""):
+        persisted = next(part for part in state(env)["outbox"] if part["state"] == "submitting")
+        assert persisted["submitted_at"] == env.clock()
+        assert persisted["receipt_created_after"] == env.clock() - 2
+        assert persisted["receipt_created_before"] == env.clock() + 180
+        starts.append(persisted["submitted_at"])
+        result = original(chat_id, text=text, file=file)
+        if not file:
+            env.clock.advance(12)
+        return result
+
+    env.native.send = send
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        enqueue_native_test_batch(env, outbox, [".m4a"])
+        outbox.pump()
+    assert starts[1] == starts[0] + 12
+
+
+def test_native_history_query_is_bounded_to_the_persisted_creation_window(env):
+    client = NativeClient(env.config())
+    calls = []
+    client.request = lambda method, params: calls.append((method, params)) or {"messages": []}
+    start, end = env.clock() - 2, env.clock() + 180
+    assert client.history(1, start, end) == []
+    method, params = calls[0]
+    assert method == "messages.history" and params["chat_id"] == 1
+    assert datetime.fromisoformat(params["start"]).timestamp() == start
+    assert datetime.fromisoformat(params["end"]).timestamp() == end
+
+
+def test_receipt_window_does_not_change_when_configuration_changes_after_restart(env):
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        enqueue_native_test_batch(env, outbox, [".m4a"])
+        outbox.pump()
+        part = next(part for part in store.data["outbox"] if "file" in part)
+        original_end = part["receipt_created_before"]
+        row = next(row for row in env.native.messages if row["attachments"])
+        row["created_at"] = datetime.fromtimestamp(part["submitted_at"] + 100, timezone.utc).isoformat()
+    env.raw["receipt_seconds"] = 1
+    env.clock.advance(300)
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        outbox.pump()
+        part = next(part for part in store.data["outbox"] if "file" in part)
+        assert part["receipt_created_before"] == original_end
+        assert part["state"] == "delivered"
+    assert len([call for call in env.native.calls if call["file"]]) == 1
+
+
+def test_repeated_poll_error_cannot_starve_later_jobs(env):
+    env.source.events.extend(message(index, f"RAPP synthetic task {index}") for index in range(1, 10))
+    env.portal().tick()
+    original = env.runtime.request
+
+    def request(value):
+        if value["op"] == "status" and value["job_id"] == JOB1:
+            env.runtime.calls.append(copy.deepcopy(value))
+            raise PortalError("synthetic_status_error", "Synthetic per-job failure.")
+        return original(value)
+
+    env.runtime.request = request
+    env.runtime.calls.clear()
+    for _ in range(3):
+        env.clock.advance(5)
+        env.portal().tick()
+    seen = {request["job_id"] for request in env.runtime.calls if request["op"] == "status"}
+    assert seen == {synthetic_job(index) for index in range(1, 10)}
 
 
 def test_an_intervening_ai_message_invalidates_bare_number_selection(env):

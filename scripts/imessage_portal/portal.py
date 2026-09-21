@@ -40,7 +40,7 @@ HELP = (
     "or provide a continuous livestream. Content processing needs an approved task and suitable configured tools.\n"
     "1. Approve the single pending task\n2. Cancel it\n"
     "Numbers work only for the same sender/thread and unexpired approval. "
-    "An intervening message requires RAPP approve <job-id> instead. "
+    "After an intervening message, explicitly use RAPP 1 / RAPP 2 or RAPP approve <job-id>. "
     "With multiple pending tasks, use RAPP approve <job-id>.\n"
     "RAPP status / list / result / stop / resume [job-id]\n"
     "RAPP retry <job-id> — retry only confirmed failed output parts.\n"
@@ -185,10 +185,10 @@ class Portal:
                     store.save()
                 pending = [
                     (identity, record) for identity, record in store.data["inbox"].items()
-                    if record["state"] in ("receiving", "ready", "runtime_pending")
+                    if record["state"] in ("decoding", "receiving", "ready", "runtime_pending")
                 ]
                 for identity, record in pending[:self.config.events_per_tick]:
-                    if record["state"] in ("receiving", "ready", "runtime_pending"):
+                    if record["state"] in ("decoding", "receiving", "ready", "runtime_pending"):
                         self._advance(identity, record)
                 self._poll_jobs()
                 self.outbox.pump()
@@ -199,7 +199,7 @@ class Portal:
                 return {
                     "ok": failures == 0, "events_observed": len(events),
                     "pending_inputs": sum(
-                        r["state"] in ("receiving", "ready", "runtime_pending")
+                        r["state"] in ("decoding", "receiving", "ready", "runtime_pending")
                         for r in store.data["inbox"].values()
                     ),
                     "delivery_attention": failures,
@@ -232,6 +232,18 @@ class Portal:
             return
         if self.outbox.is_echo(event):
             return
+        if event.get("needs_native_text"):
+            self.store.data["inbox"][identity] = {
+                "event": dict(event), "actor": actor, "target": target, "state": "decoding",
+                "body": "", "capture": False, "first_seen": self.clock(),
+                "deadline": self.clock() + self.config.readiness_seconds,
+                "observations": {}, "staged": {}, "has_files": bool(event.get("has_attachments")),
+            }
+            self.store.save()
+            return identity
+        return self._route_event(identity, event, actor, target)
+
+    def _route_event(self, identity: str, event: dict, actor: dict, target: dict) -> str | None:
         # Messages may represent an attachment-only body with U+FFFC.
         text = str(event.get("text") or "").replace("\ufffc", "")
         conversation = self._conversation(actor, target)
@@ -251,6 +263,7 @@ class Portal:
             "event": dict(event), "actor": actor, "target": target, "body": body,
             "state": "receiving" if has_files else "ready",
             "capture": capture or (has_files and body.casefold() in ("", "attach")),
+            "explicit_address": match is not None,
             "first_seen": self.clock(), "deadline": self.clock() + self.config.readiness_seconds,
             "observations": {}, "staged": {}, "has_files": has_files,
         }
@@ -263,6 +276,28 @@ class Portal:
             if self.authorize(record["event"]) != record["actor"]:
                 record.update(state="failed", error="authorization_changed")
                 self.store.save()
+                return
+            if record["state"] == "decoding":
+                if self.clock() > record["deadline"]:
+                    raise PortalError(
+                        "text_decode_timeout",
+                        "Native text decoding did not become available. No task was run; resend as a plain RAPP text.",
+                    )
+                if self.clock() < record.get("next_decode", 0):
+                    return
+                try:
+                    text = self.native.decode_text(record["event"], record["actor"])
+                except PortalError as error:
+                    record.update(decode_error=error.code, next_decode=self.clock() + 5)
+                    self.store.save()
+                    return
+                event = {**record["event"], "text": text, "needs_native_text": False}
+                routed = self._route_event(identity, event, record["actor"], record["target"])
+                if routed is None:
+                    record["state"] = "ignored"
+                    self.store.save()
+                else:
+                    self._advance(identity, self.store.data["inbox"][identity])
                 return
             if record.get("approval_attempt") and record["state"] == "runtime_pending":
                 attempt = record["approval_attempt"]
@@ -636,10 +671,13 @@ class Portal:
                 or not all(p["state"] in ("sent", "delivered") for p in notices)
             ):
                 raise PortalError("approval_notice_unconfirmed", "Use RAPP approve <job-id> while the approval notice receipt is unconfirmed.")
-            if self.source.latest_prior_guid(record["event"]) != notices[-1].get("guid"):
+            if (
+                not record.get("explicit_address")
+                and self.source.latest_prior_guid(record["event"]) != notices[-1].get("guid")
+            ):
                 raise PortalError(
                     "approval_context_changed",
-                    "Another message intervened after the approval card. Use RAPP approve <job-id> to select it explicitly.",
+                    "Another message intervened after the approval card. Use RAPP 1 / RAPP 2 or RAPP approve <job-id> explicitly.",
                 )
         else:
             job_id = argument

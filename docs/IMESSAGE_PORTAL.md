@@ -32,7 +32,8 @@ Only `RAPP …` / `RAPP: …` addresses this portal. Case does not matter.
 | `RAPP attach` | Open a bounded file-only intake window for this sender/thread. |
 | A photo/video/audio/file after `RAPP attach` | Stage it and acknowledge a useful next step; never execute file contents. |
 | `RAPP <task>` with files attached | Wait for all observed files, then prepare the task with their references. |
-| `1` / `2` | Approve / cancel the **single** unexpired pending task in the same sender/thread, after its notice is confirmed sent. |
+| `1` / `2` | Approve / cancel the **single** unexpired pending task only with confirmed, exact latest approval-card evidence. |
+| `RAPP 1` / `RAPP 2` | Explicit portal approval / cancellation after interleaved conversation, still requiring one unexpired task and a confirmed card. |
 | `RAPP approve <job-id>` | Approve that exact locally pending job using its stored, finite token. |
 | `RAPP status [job-id]` | Worker state and honest native output states. |
 | `RAPP list` | Bounded list of jobs scoped by the local adapter to this actor. |
@@ -48,7 +49,9 @@ When several tasks await approval, bare numbers cannot select one. Use an exact
 job id. Bare numbers also require the immediately preceding message in the
 chat to be that confirmed approval card: another AI's prompt, a different
 conversation turn, or an intervening status reply requires explicit
-`RAPP approve <job-id>` instead. Attachment-only messages outside an armed intake window belong to the
+`RAPP 1` / `RAPP 2`, or `RAPP approve <job-id>` instead. The latest-card lookup
+checks the preceding row in the exact chat, including foreign outbound rows
+that are not eligible user commands. Attachment-only messages outside an armed intake window belong to the
 rest of the conversation and are not opened, acknowledged, or executed by this
 portal. A successful task submission consumes the selected files and closes
 the upload window. A task following a still-downloading selected upload waits;
@@ -224,7 +227,21 @@ tokens, or attachment contents. A corrupt state file fails closed instead of
 resetting deduplication. Do not run a second copy with another state directory.
 A future Claude wake/replay cannot bypass the portal's persisted source GUID
 and task request-id deduplication; portal replies have non-command `[RAPP …]`
-prefixes. Keep the shared-thread ownership rule in any future channel setup.
+prefixes. This protects **this portal** against repeated intake; it does not
+control a different responder's execution.
+
+### Future Claude/plugin overlap boundary
+
+The hook's guard reserves RAPP messages and reply envelopes from the existing
+watcher's lifecycle branches. It does not modify, disable, or filter a cached
+Claude MCP iMessage plugin, and it cannot prevent another program from acting
+on the same text. An idle plugin is not evidence of global exclusivity.
+Before enabling another reader or a Claude channel on this thread, the operator
+must enforce deterministic route exclusion in that channel/dispatcher, or
+leave that channel disabled for the RAPP route. A natural-language instruction
+to “ignore RAPP” is not an enforcement boundary. The parent/reviewer must check
+that future-wake integration; this source-only handoff does not claim it has
+been deployed or proved globally exclusive.
 
 ## Frozen local runtime envelope
 
@@ -336,6 +353,16 @@ It emits an explicit failure rather than inventing file readiness. Optional
 native conversion is not enabled: original media remains available to the
 approved task.
 
+For modern `m.text=NULL` messages, the hook uses the pinned native helper's
+decoder, not its own typedstream string heuristic. Authorization precedes the
+lookup; it is bounded to the exact configured chat/sender, a short timestamp
+window, and the exact row/GUID, with `attachments:false`. The helper is passed
+the configured database explicitly. Decode readiness is journaled across
+ticks/restarts and times out with an explicit error rather than silently
+discarding a potentially addressed message. Known audio-message metadata is
+kept as attachment input and is never promoted from automatic transcription
+into an approval/command. Actual phone-path acceptance remains separate.
+
 ## Synthetic validation, then separately authorized real acceptance
 
 Run the focused suite with an existing Python 3.10+ pytest environment.
@@ -360,6 +387,12 @@ use a mocked native sender. Without that variable they are explicitly skipped.
 Use the runtime revision with working platform-safe worker supervision; a
 platform failure is an actual failed integration, not something to relabel as
 an inference or transport success.
+Set `PORTAL_NATIVE_READER=/absolute/approved/imsg` to additionally exercise the
+installed native UTF-16/typedstream decoder against synthetic fixture SQLite.
+Those tests invoke only native version/read operations, with no message send
+and no private chat database. The ordinary suite also covers a foreign AI's
+intervening outbound SQL row, fresh-tail initialization, and durable pending
+downloads from regular single-link mode-0644 media files.
 
 Tests use synthetic identities, fixture SQLite, project-local HOME/state,
 harmless files, fake native RPC, and a fake job adapter. They do not send,

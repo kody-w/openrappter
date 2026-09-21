@@ -181,7 +181,7 @@ class NativeClient:
         ).encode() + b"\n"
         try:
             return exchange(
-                [str(self.config.imsg_path), "rpc", "--json"],
+                [str(self.config.imsg_path), "rpc", "--db", str(self.config.messages_db), "--json"],
                 payload, self.config.native_timeout, rpc=True, mutating=method == "send",
             )
         except NativeRemoteError as error:
@@ -215,3 +215,29 @@ class NativeClient:
 
     def status(self, guid: str) -> dict:
         return self.request("message.send_status", {"guid": guid})
+
+    def decode_text(self, event: dict, actor: dict) -> str:
+        try:
+            created = datetime.fromisoformat(event["created_at"].replace("Z", "+00:00")).timestamp()
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise PortalError("text_decode_unavailable", "Native message time is unavailable.") from error
+        result = self.request("messages.history", {
+            "chat_id": event["chat_id"], "participants": [actor["sender"]],
+            "attachments": False, "limit": 32,
+            "start": datetime.fromtimestamp(created - 1, timezone.utc).isoformat(),
+            "end": datetime.fromtimestamp(created + 1, timezone.utc).isoformat(),
+        })
+        messages = result.get("messages")
+        if not isinstance(messages, list) or len(messages) > 32:
+            raise PortalError("text_decode_unavailable", "The native text decoder returned an invalid page.")
+        matches = [
+            item for item in messages if isinstance(item, dict)
+            and item.get("guid") == event["guid"] and item.get("id") == event["id"]
+            and item.get("chat_id") == event["chat_id"] and item.get("chat_guid") == actor["chat"]
+        ]
+        if len(matches) != 1 or not isinstance(matches[0].get("text"), str):
+            raise PortalError("text_decode_unavailable", "The native message text is not ready.")
+        text = matches[0]["text"]
+        if not text.strip() and not event.get("has_attachments"):
+            raise PortalError("text_decode_unavailable", "The native message body is not ready.")
+        return text

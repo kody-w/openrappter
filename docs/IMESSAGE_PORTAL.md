@@ -301,6 +301,17 @@ Native RPC sends specify:
 The actual envelope also carries `jsonrpc:"2.0"` and a request id. The code
 passes integer `chat_id`, not the illustrative placeholder above.
 
+MIME is descriptive, not an exact transport gate. A validated approved `.m4a`
+export is accepted with Python's `audio/mp4a-latm`, Messages'
+`audio/x-m4a`, `audio/mp4`, or another advisory alias without changing its
+extension/container. Native `send` receives the verified file, not a MIME
+override. The focused tests independently generate/probe harmless AAC/M4A
+fixtures with existing ffmpeg/ffprobe before checking these aliases.
+The transport does not claim to analyze every file's codecs: production
+content/container qualification remains with the approved media-generation
+tools and the separately verified native transfer, rather than trusting the
+MIME string as proof of valid media.
+
 **Outbox file parts include an identifying caption, but captions are not the
 delivery fix.** An operator's valid file-only audio send returned `-32603`
 after the helper observed an unjoined outgoing row; that **same attempt later

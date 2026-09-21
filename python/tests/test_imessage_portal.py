@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -1259,6 +1260,45 @@ def test_native_decode_timeout_is_explicit_and_never_executes_a_task(env):
     assert next(iter(state(env)["inbox"].values()))["error"] == "text_decode_timeout"
     assert not submitted(env)
     assert any("text_decode_timeout" in call["text"] for call in env.native.calls)
+
+
+@pytest.mark.parametrize("mime", ["audio/mp4a-latm", "audio/x-m4a", "audio/mp4", "audio/m4a"])
+def test_valid_aac_m4a_manifest_aliases_preserve_the_container_and_native_file_path(env, mime):
+    ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("Existing ffmpeg/ffprobe enable the synthetic valid-M4A alias regression.")
+    env.source.events.append(message(text="RAPP file result.m4a | create a short synthetic audio file"))
+    env.portal().tick()
+    artifact = add_output(env, JOB1, ".m4a")
+    path = Path(artifact["path"])
+    generated = subprocess.run(
+        [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.1", "-c:a", "aac", str(path)],
+        capture_output=True, text=True, timeout=20,
+    )
+    assert generated.returncode == 0, generated.stderr
+    probed = subprocess.run(
+        [ffprobe, "-v", "error", "-show_entries", "format=format_name:stream=codec_name,codec_type",
+         "-of", "json", str(path)], capture_output=True, text=True, timeout=10,
+    )
+    assert probed.returncode == 0, probed.stderr
+    media = json.loads(probed.stdout)
+    assert "m4a" in media["format"]["format_name"].split(",")
+    assert any(stream["codec_name"] == "aac" and stream["codec_type"] == "audio" for stream in media["streams"])
+    artifact.update(
+        mime=mime, size_bytes=path.stat().st_size, sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    env.clock.advance(10)
+    env.portal().tick()
+    part = next(part for part in state(env)["outbox"] if "file" in part)
+    assert part["mime"] == mime
+    assert Path(part["file"]["path"]).suffix == ".m4a"
+    assert Path(part["file"]["path"]).read_bytes() == path.read_bytes()
+    assert len([call for call in env.native.calls if call["file"].endswith(".m4a")]) == 1
+    env.clock.advance(10)
+    env.portal().tick()
+    assert next(part for part in state(env)["outbox"] if "file" in part)["state"] == "delivered"
 
 
 def test_an_intervening_ai_message_invalidates_bare_number_selection(env):

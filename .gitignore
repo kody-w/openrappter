@@ -20,6 +20,7 @@ build/
 # Integration tests that bind real sockets keep their scratch data dirs
 # inside the repo rather than the system temp dir.
 .test-scratch/
+.test-artifacts/
 *.swp
 # Python envs
 __pycache__/

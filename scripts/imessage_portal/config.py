@@ -121,21 +121,11 @@ class Config:
             if not roots:
                 raise ValueError("incoming_roots is required")
             output_values = raw.get("artifact_paths", [])
-            if not isinstance(output_values, list) or len(output_values) > 16:
-                raise ValueError("invalid declared outputs")
-            for output in output_values:
-                path = Path(output)
-                if (
-                    not isinstance(output, str)
-                    or not output
-                    or path.is_absolute()
-                    or ".." in path.parts
-                    or "\0" in output
-                ):
-                    raise ValueError("invalid declared output")
-            outputs = tuple(Path(output).as_posix() for output in output_values)
-            if len({Path(output).name for output in outputs}) != len(outputs):
-                raise ValueError("declared outputs need distinct basenames")
+            if not isinstance(output_values, list) or output_values:
+                raise PortalError(
+                    "unsafe_config",
+                    "Leave artifact_paths empty; declare one output explicitly with RAPP file <name> | <task>.",
+                )
             config = cls(
                 state_dir=absolute(raw["state_dir"]),
                 messages_db=absolute(raw.get("messages_db", "~/Library/Messages/chat.db")),
@@ -145,7 +135,6 @@ class Config:
                 artifact_root=absolute(raw["artifact_root"]),
                 routes=routes,
                 profile=str(raw["profile"]),
-                artifact_paths=outputs,
                 **{
                     name: raw[name]
                     for name in (
@@ -164,8 +153,6 @@ class Config:
                     raise ValueError("invalid integer limit")
             if config.max_file_bytes > MAX_FILE_BYTES or config.max_files > 32:
                 raise ValueError("attachment limits exceed safety bounds")
-            if len(outputs) > config.max_files:
-                raise ValueError("too many default output paths")
             if config.events_per_tick > 256 or config.parts_per_tick > 16:
                 raise ValueError("per-tick limits exceed safety bounds")
             for name in (

@@ -32,7 +32,7 @@ OUTPUT_EXTENSIONS = {
 HELP = (
     "RAPP <task> — prepare a task; it runs only after your approval.\n"
     "RAPP file report.txt | <task> — explicitly request one output file. "
-    "RAPP files image.png,clip.mp4 | <task> requests several. Filenames do not grant new permissions.\n"
+    "Ordinary tasks require no output files. A filename does not grant new permissions.\n"
     "RAPP attach — arm a bounded file-only upload window (10 minutes by default). "
     "Then send photos, video, audio, or files and request a task. "
     "A message with RAPP + files also works. Files are never executed by receiving them.\n"
@@ -452,24 +452,21 @@ class Portal:
         if command in ("1", "2", "approve"):
             self._approve_or_cancel(identity, record, conversation, command, argument)
             return
-        if command in ("file", "files"):
+        if command == "files":
+            raise PortalError("output_name_invalid", "This route accepts one output: RAPP file report.txt | task.")
+        if command == "file":
             names_text, separator, prompt = argument.partition("|")
-            names = [name.strip() for name in names_text.split(",")]
+            name = names_text.strip()
             if (
-                not separator or not prompt.strip() or not names
-                or len(names) > min(16, self.config.max_files)
-                or (command == "file" and len(names) != 1) or len(set(names)) != len(names)
-                or any(
-                    not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._ -]{0,119}", name)
-                    or ".." in name or Path(name).suffix.casefold() not in OUTPUT_EXTENSIONS
-                    for name in names
-                )
+                not separator or not prompt.strip()
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._ -]{0,119}", name)
+                or ".." in name or Path(name).suffix.casefold() not in OUTPUT_EXTENSIONS
             ):
                 raise PortalError(
                     "output_name_invalid",
                     "Use RAPP file report.txt | task, with a bounded passive media/document basename, not a path or flag.",
                 )
-            record["requested_artifacts"] = names
+            record["requested_artifacts"] = [name]
             self.store.save()
             self._submit(identity, record, conversation, prompt.strip())
             return
@@ -565,7 +562,7 @@ class Portal:
                 "op": "submit", "actor": record["actor"], "request_id": f"imessage-{identity}",
                 "prompt": prompt, "profile": self.config.profile,
                 "attachments": references,
-                "artifact_paths": record.get("requested_artifacts", list(self.config.artifact_paths)),
+                "artifact_paths": record.get("requested_artifacts", []),
             }
             self.store.save()
         policy = self.runtime.profile_policy(record["submission"]["profile"])

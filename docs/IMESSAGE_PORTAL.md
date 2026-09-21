@@ -29,7 +29,6 @@ Only `RAPP …` / `RAPP: …` addresses this portal. Case does not matter.
 | --- | --- |
 | `RAPP <task>` or `RAPP run <task>` | Prepare a task; **does not execute it**. |
 | `RAPP file report.txt \| <task>` | Explicitly declare one passive output basename for this task. |
-| `RAPP files image.png,clip.mp4 \| <task>` | Explicitly declare a bounded batch of output basenames. |
 | `RAPP attach` | Open a bounded file-only intake window for this sender/thread. |
 | A photo/video/audio/file after `RAPP attach` | Stage it and acknowledge a useful next step; never execute file contents. |
 | `RAPP <task>` with files attached | Wait for all observed files, then prepare the task with their references. |
@@ -62,8 +61,9 @@ The guard also excludes the portal's `[RAPP …]` reply envelopes from lifecycle
 matching, including self-chat echoes of help text that mentions “restart”.
 Those reply envelopes are never parsed as new portal commands.
 
-For a normal deployment, keep local `artifact_paths:[]`: an ordinary
-`RAPP <task>` then requires no report file. Request a file explicitly, for
+Local `artifact_paths` must be omitted or `[]`; a nonempty fixed output list is
+rejected at configuration validation. An ordinary `RAPP <task>` always submits
+`artifact_paths:[]` and requires no report file. Request one file explicitly, for
 example `RAPP file report.txt | summarize the selected input`. The transport
 passes `artifact_paths:["report.txt"]` separately from the task prose, displays
 it in approval, and the runtime's generation instructions tell the worker to
@@ -127,12 +127,12 @@ profile limit. The native fields `original_path`, `total_bytes`, `uti`, etc.
 are never forwarded as task-attachment fields: only the newly staged
 `{path,name,mime,size_bytes,sha256}` reference is passed.
 
-Leave default `artifact_paths:[]` for ordinary text tasks. `RAPP file`/`files`
-creates an explicit per-task declaration without selecting a different
+Leave `artifact_paths:[]` for ordinary text tasks. Only `RAPP file <name> | <task>`
+creates an explicit single-file declaration without selecting a different
 permission profile. Names are bounded basenames with passive media/document
 extensions, not absolute paths, traversal, executables, destinations, or CLI
-flags. Deliberately configured default paths are also supported and must have
-distinct basenames; they are mandatory outputs for tasks that use them.
+flags. The plural `RAPP files` command is not supported in this iteration.
+Receiving multiple attachments remains supported; it does not declare outputs.
 Every declaration appears in the normal finite approval card. A missing tool
 or permission requires a new approved task under a suitable already-configured
 profile, never automatic escalation.

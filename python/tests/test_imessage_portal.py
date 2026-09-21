@@ -212,7 +212,7 @@ def env(tmp_path, monkeypatch):
         "incoming_roots": [str(incoming)], "artifact_root": str(jobs),
         "authorized": [{"sender": SENDER, "chat": CHAT}],
         "profile": "synthetic-workspace",
-        "artifact_paths": ["artifacts/result.png", "artifacts/result.mp4", "artifacts/result.m4a", "artifacts/result.txt"],
+        "artifact_paths": [],
         "stable_seconds": 1, "progress_seconds": 30,
     }
     clock, source = Clock(), Source()
@@ -258,6 +258,16 @@ def add_output(env, job_id, suffix=".png"):
     }
     env.runtime.outputs.setdefault(job_id, []).append(item)
     return item
+
+
+def enqueue_native_test_batch(env, outbox, suffixes):
+    exports = [add_output(env, JOB1, suffix) for suffix in suffixes]
+    artifacts = [{**item, "relative_path": Path(item["path"]).name} for item in exports]
+    outbox.enqueue(
+        "native-test-batch", ACTOR, TARGET, "Synthetic result.",
+        artifacts=artifacts, workspace=env.jobs / JOB1 / "artifacts",
+        declared=tuple(item["relative_path"] for item in artifacts), job_id=JOB1,
+    )
 
 
 def test_import_and_help_do_not_load_brainstem(env):
@@ -463,17 +473,17 @@ def test_expired_numeric_approval_cannot_run_a_task(env):
     assert not [call for call in env.runtime.calls if call["op"] == "approve"]
 
 
-def test_output_manifest_delivers_actual_four_files_and_correlates_transcoded_image(env):
-    env.source.events.append(message())
+@pytest.mark.parametrize("suffix", [".png", ".mp4", ".m4a", ".txt"])
+def test_explicit_output_transports_each_media_type_and_accepts_native_transcoding(env, suffix):
+    env.source.events.append(message(text=f"RAPP file result{suffix} | create synthetic media"))
     env.portal().tick()
-    for suffix in (".png", ".mp4", ".m4a", ".txt"):
-        add_output(env, JOB1, suffix)
+    add_output(env, JOB1, suffix)
     env.runtime.jobs[JOB1]["status"] = "succeeded"
     for _ in range(6):
         env.clock.advance(10)
         env.portal().tick()
     media = [call for call in env.native.calls if call["file"]]
-    assert len(media) == 4
+    assert len(media) == 1
     assert all(call["text"].startswith("[RAPP artifact ") for call in media)
     assert all(Path(call["file"]).is_relative_to(Path(env.raw["state_dir"]) / "outbox") for call in media)
     parts = [part for part in state(env)["outbox"] if "file" in part]
@@ -483,8 +493,7 @@ def test_output_manifest_delivers_actual_four_files_and_correlates_transcoded_im
 
 
 def test_intentionally_declared_artifacts_only(env):
-    env.raw["artifact_paths"] = ["artifacts/result.png"]
-    env.source.events.append(message())
+    env.source.events.append(message(text="RAPP file result.png | create synthetic media"))
     env.portal().tick()
     artifact = add_output(env, JOB1)
     artifact["name"] = "secret.txt"
@@ -733,8 +742,7 @@ def test_interrupted_submission_is_unknown_on_restart(env):
 
 
 def test_file_echo_and_caption_echo_are_suppressed_but_remote_repeat_is_not(env):
-    env.raw["artifact_paths"] = ["artifacts/result.png"]
-    env.source.events.append(message())
+    env.source.events.append(message(text="RAPP file result.png | create synthetic media"))
     env.portal().tick()
     add_output(env, JOB1)
     env.runtime.jobs[JOB1]["status"] = "succeeded"
@@ -772,8 +780,7 @@ def test_ambiguous_approval_is_reconciled_without_resubmission(env):
 
 
 def test_repeated_result_does_not_duplicate_delivered_files(env):
-    env.raw["artifact_paths"] = ["artifacts/result.png"]
-    env.source.events.append(message())
+    env.source.events.append(message(text="RAPP file result.png | create synthetic media"))
     env.portal().tick()
     add_output(env, JOB1)
     env.runtime.jobs[JOB1]["status"] = "succeeded"
@@ -786,8 +793,7 @@ def test_repeated_result_does_not_duplicate_delivered_files(env):
 
 
 def test_artifact_manifest_cannot_cross_job_workspace(env):
-    env.raw["artifact_paths"] = ["artifacts/result.png"]
-    env.source.events.append(message())
+    env.source.events.append(message(text="RAPP file result.png | create synthetic media"))
     env.portal().tick()
     item = add_output(env, JOB1)
     other = env.jobs / "some-other-job" / "artifacts"
@@ -916,30 +922,19 @@ def test_changed_group_roster_cannot_receive_an_old_task_result(env):
 
 
 def test_caption_submission_does_not_unlock_the_next_file(env):
-    env.raw["artifact_paths"] = ["artifacts/result.m4a", "artifacts/result.mp4"]
-    env.source.events.append(message())
-    env.portal().tick()
-    add_output(env, JOB1, ".m4a")
-    add_output(env, JOB1, ".mp4")
-    env.runtime.jobs[JOB1]["status"] = "succeeded"
-    env.clock.advance(10)
-    env.portal().tick()
-    media = [call for call in env.native.calls if call["file"]]
-    assert len(media) == 1
-    # Only the caption remains discoverable, as in an unconfirmed native file send.
-    env.native.messages = [message for message in env.native.messages if not message["attachments"]]
-    env.clock.advance(10)
-    env.portal().tick()
-    assert len([call for call in env.native.calls if call["file"]]) == 1
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        enqueue_native_test_batch(env, outbox, [".m4a", ".mp4"])
+        outbox.pump()
+        assert len([call for call in env.native.calls if call["file"]]) == 1
+        # Only the caption remains discoverable, as in an unconfirmed native file send.
+        env.native.messages = [message for message in env.native.messages if not message["attachments"]]
+        env.clock.advance(10)
+        outbox.pump()
+        assert len([call for call in env.native.calls if call["file"]]) == 1
 
 
 def test_native_exception_then_late_attachment_delivery_resolves_without_resend(env):
-    env.raw["artifact_paths"] = ["artifacts/result.m4a", "artifacts/result.mp4"]
-    env.source.events.append(message())
-    env.portal().tick()
-    add_output(env, JOB1, ".m4a")
-    add_output(env, JOB1, ".mp4")
-    env.runtime.jobs[JOB1]["status"] = "succeeded"
     original = env.native.send
     delayed = []
 
@@ -952,8 +947,10 @@ def test_native_exception_then_late_attachment_delivery_resolves_without_resend(
         return result
 
     env.native.send = send
-    env.clock.advance(10)
-    env.portal().tick()
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        enqueue_native_test_batch(env, outbox, [".m4a", ".mp4"])
+        outbox.pump()
     recorded = next(part for part in state(env)["outbox"] if part.get("mime") == "audio/mp4")
     assert recorded["state"] == "unknown"
     assert "submitted_at" in recorded and "send_after_rowid" in recorded
@@ -962,7 +959,9 @@ def test_native_exception_then_late_attachment_delivery_resolves_without_resend(
     assert not [call for call in env.native.calls if call["file"].endswith(".mp4")]
     env.native.messages.extend(delayed)
     env.clock.advance(10)
-    env.portal().tick()
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        outbox.pump()
     recorded = next(part for part in state(env)["outbox"] if part.get("mime") == "audio/mp4")
     assert recorded["state"] == "delivered"
     assert recorded["guid"] == delayed[0]["guid"]
@@ -1079,6 +1078,7 @@ def test_ordinary_text_task_has_no_forced_output_files(env):
 @pytest.mark.parametrize("name", [
     "../report.txt", "/private/report.txt", "report.sh", "payload.app", ".hidden.txt",
     "report.txt --profile admin", "--allow-all.txt", "subdir/report.txt", "report.html",
+    "other@example.invalid:report.txt", "https://example.invalid/report.png", "first.png,second.png",
 ])
 def test_file_command_cannot_declare_paths_executables_or_flags(env, name):
     env.source.events.append(message(text=f"RAPP file {name} | synthetic task"))
@@ -1087,11 +1087,35 @@ def test_file_command_cannot_declare_paths_executables_or_flags(env, name):
     assert any("output_name_invalid" in call["text"] for call in env.native.calls)
 
 
-def test_multiple_outputs_are_explicit_not_mined_from_worker_text(env):
-    env.raw["artifact_paths"] = []
+def test_plural_output_command_is_rejected_for_the_frozen_single_file_ux(env):
     env.source.events.append(message(text="RAPP files image.png,clip.mp4 | prepare fixture media"))
     env.portal().tick()
-    assert submitted(env)[0]["artifact_paths"] == ["image.png", "clip.mp4"]
+    assert not submitted(env)
+    assert any("output_name_invalid" in call["text"] for call in env.native.calls)
+
+
+def test_fixed_output_defaults_are_rejected_instead_of_breaking_text_tasks(env):
+    env.raw["artifact_paths"] = ["mandatory-report.txt"]
+    with pytest.raises(PortalError, match="Leave artifact_paths empty"):
+        env.config()
+
+
+@pytest.mark.parametrize("text", [
+    "RAPP file report.txt", "RAPP file report.txt | ", "RAPP file | make a report",
+])
+def test_file_form_requires_a_basename_separator_and_nonempty_task(env, text):
+    env.source.events.append(message(text=text))
+    env.portal().tick()
+    assert not submitted(env)
+    assert any("output_name_invalid" in call["text"] for call in env.native.calls)
+
+
+def test_file_task_is_text_after_the_first_separator(env):
+    env.source.events.append(message(text="RAPP file report.txt | describe a | b without executing it"))
+    env.portal().tick()
+    assert submitted(env)[0]["prompt"] == "describe a | b without executing it"
+    assert submitted(env)[0]["artifact_paths"] == ["report.txt"]
+    assert submitted(env)[0]["profile"] == "synthetic-workspace"
 
 
 def test_an_intervening_ai_message_invalidates_bare_number_selection(env):
@@ -1221,8 +1245,7 @@ def test_real_runtime_fake_worker_roundtrip_through_portal_and_mocked_native_del
     "other-job-id", "out-of-range-index", "padded-id-index", "wrong-filename-index", "wrong-filename-name",
 ])
 def test_manifest_requires_exact_frozen_identity_and_snapshot_filename(env, mutation):
-    env.raw["artifact_paths"] = ["artifacts/result.png"]
-    env.source.events.append(message())
+    env.source.events.append(message(text="RAPP file result.png | create synthetic media"))
     env.portal().tick()
     artifact = add_output(env, JOB1)
     if mutation == "other-job-id":

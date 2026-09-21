@@ -991,6 +991,7 @@ def configure_real_runtime_fixture(env, monkeypatch):
         "import pathlib,sys\n"
         "assert '--allow-all' not in sys.argv and '--yolo' not in sys.argv\n"
         "assert 'gpt-6-astra' in sys.argv\n"
+        "assert 'report.txt' in '\\n'.join(sys.argv[1:]), 'approved output missing from generation instructions'\n"
         "pathlib.Path('report.txt').write_text('Synthetic local adapter report.\\n')\n"
         "print('Synthetic fake-CLI completion.',flush=True)\n"
     )

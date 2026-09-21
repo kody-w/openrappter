@@ -62,6 +62,14 @@ The guard also excludes the portal's `[RAPP …]` reply envelopes from lifecycle
 matching, including self-chat echoes of help text that mentions “restart”.
 Those reply envelopes are never parsed as new portal commands.
 
+For a normal deployment, keep local `artifact_paths:[]`: an ordinary
+`RAPP <task>` then requires no report file. Request a file explicitly, for
+example `RAPP file report.txt | summarize the selected input`. The transport
+passes `artifact_paths:["report.txt"]` separately from the task prose, displays
+it in approval, and the runtime's generation instructions tell the worker to
+create that exact file in its isolated workspace. Choosing the basename does
+not add tools, directories, destinations, or permission flags.
+
 ### Transport is not automatic content understanding
 
 Receiving/sending an audio or video file does not itself transcribe, interpret,
@@ -71,6 +79,9 @@ confined file references to an explicitly approved task. Any transcription,
 image/video analysis, extraction, or synthesis requires suitable tools and
 permissions in that task's locally configured runtime profile. Do not infer
 those capabilities merely because native file delivery succeeds.
+Screenshots and short clips can be ordinary attachments when explicitly
+requested, approved, and produced with actually available permitted tools.
+That is not continuous interactive desktop access or a livestream.
 
 ## Private configuration
 

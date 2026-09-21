@@ -35,8 +35,7 @@ class SQLiteSource:
         ).fetchone()
         allowed = bool(
             row and row["guid"] == target["chat_guid"]
-            and str(row["guid"]).startswith("iMessage;")
-            and (not row["service_name"] or str(row["service_name"]).casefold() == "imessage")
+            and str(row["service_name"] or "").strip().casefold() == "imessage"
             and row["style"] == (43 if target.get("is_group") else 45)
         )
         if not allowed:
@@ -87,7 +86,9 @@ class SQLiteSource:
                    c.ROWID AS chat_id,c.guid AS chat_guid,c.style AS chat_style
             FROM message m JOIN chat_message_join j ON j.message_id=m.ROWID
             JOIN chat c ON c.ROWID=j.chat_id LEFT JOIN handle h ON h.ROWID=m.handle_id
-            WHERE ({' OR '.join(routes)}) AND LOWER(TRIM(m.service))='imessage' AND ({condition}) {reactions}
+            WHERE ({' OR '.join(routes)})
+              AND LOWER(TRIM(c.service_name))='imessage'
+              AND LOWER(TRIM(m.service))='imessage' AND ({condition}) {reactions}
             ORDER BY m.ROWID ASC LIMIT ?
         """
         try:

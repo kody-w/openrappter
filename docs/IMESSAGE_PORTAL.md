@@ -102,6 +102,14 @@ must explicitly bind **both** a normalized sender handle and an exact Messages
 chat GUID. Never populate these fields from message text, a model response,
 attachment metadata, or display names. Existing allowlist policy is not
 expanded by this feature. Obtain and validate the real binding locally.
+Preserve the native GUID exactly, including an `any;-;...` or `any;+;...`
+scheme when that is what Messages stores; never rewrite it to `iMessage`.
+The GUID is identity, not service authentication. New-event polling requires
+both the chat's `service_name` and the message's `service` to be iMessage.
+Outbound target validation requires the exact configured GUID/numeric chat
+mapping and actual iMessage chat service; SMS, RCS, and missing/unknown service
+metadata fail closed. Existing DM/group style and group-roster checks still
+apply, and native text/receipt lookups retain the exact GUID binding.
 
 Example structure only; all identities and absolute placeholders below are
 synthetic and must be replaced locally:

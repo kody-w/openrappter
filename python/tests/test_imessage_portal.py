@@ -1226,12 +1226,17 @@ def test_native_text_rpc_matches_only_the_authorized_message_and_disables_attach
 
 
 @pytest.mark.parametrize("encoding", ["utf16", "typedstream"])
-def test_installed_native_decoder_reads_only_the_synthetic_attributed_body(env, encoding):
+@pytest.mark.parametrize("scheme", ["iMessage", "any"])
+def test_installed_native_decoder_reads_only_the_synthetic_attributed_body(env, encoding, scheme):
     native_path = os.environ.get("PORTAL_NATIVE_READER")
     if not native_path:
         pytest.skip("Set PORTAL_NATIVE_READER for read-only native decoding of fixture SQLite.")
     env.raw["imsg_path"] = native_path
     db = make_database(env)
+    canonical = CHAT.replace("iMessage;", scheme + ";", 1)
+    actor = {**ACTOR, "chat": canonical}
+    env.raw["authorized"][0]["chat"] = canonical
+    db.execute("UPDATE chat SET guid=? WHERE ROWID=1", (canonical,))
     text = "RAPP native decoded fixture " + "long text " * 30
     encoded = text.encode("utf-8")
     body = (
@@ -1245,7 +1250,8 @@ def test_installed_native_decoder_reads_only_the_synthetic_attributed_body(env, 
     event = source.poll(0, 0)[0]
     assert event["needs_native_text"] is True and event["text"] == ""
     native = NativeClient(env.config())
-    assert native.decode_text(event, ACTOR) == text
+    assert native.decode_text(event, actor) == text
+    assert event["chat_guid"] == canonical
     source.close()
     db.close()
 
@@ -1605,6 +1611,114 @@ def test_repeated_poll_error_cannot_starve_later_jobs(env):
         env.portal().tick()
     seen = {request["job_id"] for request in env.runtime.calls if request["op"] == "status"}
     assert seen == {synthetic_job(index) for index in range(1, 10)}
+
+
+@pytest.mark.parametrize("scheme", ["iMessage", "any"])
+@pytest.mark.parametrize(("chat_service", "message_service", "admitted"), [
+    ("iMessage", "iMessage", True),
+    ("SMS", "SMS", False),
+    ("RCS", "RCS", False),
+    ("iMessage", "SMS", False),
+    ("iMessage", "RCS", False),
+    ("SMS", "iMessage", False),
+    ("RCS", "iMessage", False),
+    ("", "iMessage", False),
+    (None, "iMessage", False),
+])
+def test_chat_scheme_is_not_service_authorization(env, scheme, chat_service, message_service, admitted):
+    canonical = CHAT.replace("iMessage;", scheme + ";", 1)
+    env.raw["authorized"][0]["chat"] = canonical
+    db = make_database(env)
+    db.execute("UPDATE chat SET guid=?,service_name=? WHERE ROWID=1", (canonical, chat_service))
+    insert_message(db, 1, "RAPP inspect the synthetic route")
+    db.execute("UPDATE message SET service=? WHERE ROWID=1", (message_service,))
+    db.commit()
+    source = SQLiteSource(env.config())
+    events = source.poll(0, 0)
+    assert bool(events) is admitted
+    target = {"chat_id": 1, "chat_guid": canonical, "is_group": False}
+    assert source.target_matches(target) is (chat_service == "iMessage")
+    if admitted:
+        assert events[0]["chat_guid"] == canonical
+        assert env.portal().authorize(events[0]) == {"sender": SENDER, "chat": canonical}
+    source.close()
+    db.close()
+
+
+def test_any_scheme_imessage_keeps_the_exact_guid_through_submission_and_media_receipts(env):
+    canonical = "any;-;synthetic-owner"
+    env.raw["authorized"][0]["chat"] = canonical
+    env.source.targets[1] = canonical
+    db = make_database(env)
+    db.execute("UPDATE chat SET guid=? WHERE ROWID=1", (canonical,))
+    db.commit()
+    with Store(env.config().state_dir) as store:
+        store.data["cursor"] = store.data["floor"] = 0
+        store.save()
+    insert_message(db, 1, "RAPP file result.txt | create synthetic route output")
+
+    def tick():
+        return Portal(env.config(), runtime=env.runtime, native=env.native, clock=env.clock).tick()
+
+    tick()
+    assert submitted(env)[0]["actor"] == {"sender": SENDER, "chat": canonical}
+    add_output(env, JOB1, ".txt")
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    for _ in range(3):
+        env.clock.advance(10)
+        tick()
+    file_part = next(part for part in state(env)["outbox"] if "file" in part)
+    assert file_part["actor"]["chat"] == file_part["target"]["chat_guid"] == canonical
+    assert file_part["state"] == "delivered"
+    assert len([call for call in env.native.calls if call["file"]]) == 1
+    db.close()
+
+
+def test_any_scheme_does_not_relax_exact_sender_chat_or_style_matching(env):
+    canonical = "any;-;synthetic-owner"
+    env.raw["authorized"][0]["chat"] = canonical
+    db = make_database(env)
+    db.execute("UPDATE chat SET guid=? WHERE ROWID=1", (canonical,))
+    insert_message(db, 1)
+    source = SQLiteSource(env.config())
+    assert not source.target_matches({"chat_id": 1, "chat_guid": CHAT, "is_group": False})
+    assert not source.target_matches({"chat_id": 1, "chat_guid": canonical, "is_group": True})
+    db.execute("UPDATE handle SET id='other@example.invalid' WHERE ROWID=1")
+    db.commit()
+    assert source.poll(0, 0) == []
+    source.close()
+    db.close()
+
+
+def test_native_history_binding_does_not_rewrite_any_scheme_to_imessage(env):
+    canonical = "any;-;synthetic-owner"
+    client = NativeClient(env.config())
+    event = message(chat_guid=canonical, created_at="2026-01-01T00:00:00+00:00")
+    client.request = lambda *_: {"messages": [{**event, "chat_guid": CHAT, "text": "RAPP wrong rewritten route"}]}
+    with pytest.raises(PortalError, match="not ready"):
+        client.decode_text(event, {"sender": SENDER, "chat": canonical})
+
+
+def test_any_scheme_group_retains_explicit_group_authorization_and_roster_checks(env):
+    canonical = "any;+;synthetic-group"
+    env.raw["authorized"] = [{"sender": SENDER, "chat": canonical, "allow_group": True}]
+    db = make_database(env)
+    db.execute("UPDATE chat SET guid=?,style=43 WHERE ROWID=1", (canonical,))
+    insert_message(db, 1)
+    source = SQLiteSource(env.config())
+    event = source.poll(0, 0)[0]
+    assert event["chat_guid"] == canonical and event["is_group"] is True
+    assert env.portal().authorize(event) == {"sender": SENDER, "chat": canonical}
+    target = {"chat_id": 1, "chat_guid": canonical, "is_group": True, "roster_hash": roster_digest([SENDER])}
+    assert source.target_matches(target)
+    db.execute("INSERT INTO handle VALUES(2,'new-member@example.invalid')")
+    db.execute("INSERT INTO chat_handle_join VALUES(1,2)")
+    db.commit()
+    assert not source.target_matches(target)
+    env.raw["authorized"][0]["allow_group"] = False
+    assert env.portal().authorize(event) is None
+    source.close()
+    db.close()
 
 
 def test_an_intervening_ai_message_invalidates_bare_number_selection(env):

@@ -237,6 +237,11 @@ progress messages. `result.result` is `null` until terminal and then contains
 contains `{id,path,name,size_bytes,sha256}` and optional descriptive `mime`.
 No `relative_path` or workspace field is required from the runtime.
 The hook derives and validates the approved job export root locally.
+Job IDs must match `[0-9]{8}-[0-9]{6}-[0-9a-f]{32}`. An artifact ID must be
+`<job_id>:artifact:<index>` for an approved declaration index, its `name`
+must match that declaration's basename, and its path must equal
+`artifact_root/<job_id>/artifacts/<job_id>-<index:02d>-<name>`.
+An arbitrary filename that merely shares the job prefix is not sufficient.
 
 An outer `ok:true` only means the query succeeded. A failed/interrupted task
 still displays its error and actual/unknown worker exit code. Unconfirmed

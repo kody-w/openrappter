@@ -21,6 +21,7 @@ from .state import Store
 
 
 ADDRESS = re.compile(r"^\s*rapp(?:\s*:\s*|\s+|$)", re.IGNORECASE)
+JOB_ID = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{32}")
 TERMINAL = {"succeeded", "completed", "failed", "cancelled", "canceled", "interrupted", "expired"}
 OUTPUT_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".heif", ".tif", ".tiff", ".bmp",
@@ -72,7 +73,7 @@ def response_job(response: dict) -> tuple[str, str, dict]:
         raise PortalError("runtime_protocol", "The local job adapter omitted its job envelope.")
     identity = job.get("job_id")
     state = job.get("status")
-    if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", identity):
+    if not isinstance(identity, str) or not JOB_ID.fullmatch(identity):
         raise PortalError("runtime_protocol", "The local job adapter returned an invalid job id.")
     if not isinstance(state, str) or not state:
         raise PortalError("runtime_protocol", "The local job adapter omitted the worker state.")
@@ -816,29 +817,37 @@ class Portal:
         export_root = self.config.artifact_root / job_id / "artifacts"
         granted = []
         used_ids = set()
-        remaining_names = [Path(path).name for path in job["declared"]]
+        remaining_indices = set(range(len(job["declared"])))
         for artifact in artifacts:
             if not isinstance(artifact, dict):
                 raise PortalError("artifact_manifest", "The runtime returned an invalid artifact record.")
             artifact_id = artifact.get("id")
             name = artifact.get("name")
             path_value = artifact.get("path")
+            identity_match = (
+                re.fullmatch(re.escape(job_id) + r":artifact:(0|[1-9][0-9]*)", artifact_id)
+                if isinstance(artifact_id, str) else None
+            )
             if (
-                not isinstance(artifact_id, str) or not artifact_id or len(artifact_id) > 512
-                or artifact_id in used_ids or not isinstance(name, str)
-                or name not in remaining_names or not isinstance(path_value, str)
+                identity_match is None or len(artifact_id) > 128 or artifact_id in used_ids
+                or not isinstance(name, str) or len(name) > 180 or Path(name).name != name
+                or not isinstance(path_value, str)
             ):
                 raise PortalError("artifact_undeclared", "An emitted artifact does not match a declared output.")
+            index = int(identity_match[1])
+            if index not in remaining_indices or name != Path(job["declared"][index]).name:
+                raise PortalError("artifact_undeclared", "Artifact index/name does not match its approved declaration.")
             path = Path(path_value)
-            if path.parent != export_root or not path.name.startswith(job_id) or ".." in path.parts:
+            expected = export_root / f"{job_id}-{index:02d}-{name}"
+            if path != expected or ".." in path.parts:
                 raise PortalError("artifact_unconfined", "Artifact is not an intentional snapshot in this job's export directory.")
             used_ids.add(artifact_id)
-            remaining_names.remove(name)
+            remaining_indices.remove(index)
             granted.append({
                 **artifact, "relative_path": path.name,
                 "mime": artifact.get("mime") or mimetypes.guess_type(name)[0] or "application/octet-stream",
             })
-        if (artifacts or state == "succeeded") and remaining_names:
+        if (artifacts or state == "succeeded") and remaining_indices:
             raise PortalError("artifact_missing", "The runtime did not publish the complete declared artifact batch.")
         self.outbox.enqueue(
             group, job["actor"], job["target"], text, artifacts=granted,

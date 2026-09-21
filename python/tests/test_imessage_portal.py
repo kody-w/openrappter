@@ -32,6 +32,13 @@ ACTOR = {"sender": SENDER, "chat": CHAT}
 TARGET = {"chat_id": 1, "chat_guid": CHAT}
 
 
+def synthetic_job(index):
+    return f"20260101-000000-{index:032x}"
+
+
+JOB1 = synthetic_job(1)
+
+
 class Clock:
     def __init__(self):
         self.now = 1900000000.0
@@ -152,7 +159,7 @@ class Runtime:
                 raise error
         operation = request["op"]
         if operation == "submit":
-            job_id = self.requests.setdefault(request["request_id"], f"job-{len(self.requests)+1}")
+            job_id = self.requests.setdefault(request["request_id"], synthetic_job(len(self.requests) + 1))
             job = self.jobs.setdefault(job_id, {
                 "job_id": job_id, "status": "pending_approval",
                 "request_id": request["request_id"], "profile": request["profile"],
@@ -240,11 +247,12 @@ def submitted(env):
 
 
 def add_output(env, job_id, suffix=".png"):
-    path = env.jobs / job_id / "artifacts" / (job_id + "-export-result" + suffix)
+    index = len(env.runtime.outputs.get(job_id, []))
+    path = env.jobs / job_id / "artifacts" / f"{job_id}-{index:02d}-result{suffix}"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"deliberately emitted synthetic output")
     item = {
-        "id": job_id + "-artifact-" + suffix[1:], "path": str(path),
+        "id": f"{job_id}:artifact:{index}", "path": str(path),
         "name": "result" + suffix, "mime": {".png": "image/png", ".mp4": "video/mp4", ".m4a": "audio/mp4", ".txt": "text/plain"}[suffix],
         "size_bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
     }
@@ -459,8 +467,8 @@ def test_output_manifest_delivers_actual_four_files_and_correlates_transcoded_im
     env.source.events.append(message())
     env.portal().tick()
     for suffix in (".png", ".mp4", ".m4a", ".txt"):
-        add_output(env, "job-1", suffix)
-    env.runtime.jobs["job-1"]["status"] = "succeeded"
+        add_output(env, JOB1, suffix)
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
     for _ in range(6):
         env.clock.advance(10)
         env.portal().tick()
@@ -478,13 +486,13 @@ def test_intentionally_declared_artifacts_only(env):
     env.raw["artifact_paths"] = ["artifacts/result.png"]
     env.source.events.append(message())
     env.portal().tick()
-    artifact = add_output(env, "job-1")
+    artifact = add_output(env, JOB1)
     artifact["name"] = "secret.txt"
-    env.runtime.jobs["job-1"]["status"] = "succeeded"
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
     env.clock.advance(10)
     env.portal().tick()
     assert not [call for call in env.native.calls if call["file"]]
-    assert state(env)["jobs"]["job-1"]["error"] == "artifact_undeclared"
+    assert state(env)["jobs"][JOB1]["error"] == "artifact_undeclared"
 
 
 def test_outbox_partial_retry_never_duplicates_successful_parts(env):
@@ -728,8 +736,8 @@ def test_file_echo_and_caption_echo_are_suppressed_but_remote_repeat_is_not(env)
     env.raw["artifact_paths"] = ["artifacts/result.png"]
     env.source.events.append(message())
     env.portal().tick()
-    add_output(env, "job-1")
-    env.runtime.jobs["job-1"]["status"] = "succeeded"
+    add_output(env, JOB1)
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
     env.clock.advance(10)
     env.portal().tick()
     with Store(env.config().state_dir) as store:
@@ -760,15 +768,15 @@ def test_ambiguous_approval_is_reconciled_without_resubmission(env):
     env.clock.advance(10)
     env.portal().tick()
     assert len([call for call in env.runtime.calls if call["op"] == "approve"]) == 1
-    assert state(env)["jobs"]["job-1"]["state"] == "running"
+    assert state(env)["jobs"][JOB1]["state"] == "running"
 
 
 def test_repeated_result_does_not_duplicate_delivered_files(env):
     env.raw["artifact_paths"] = ["artifacts/result.png"]
     env.source.events.append(message())
     env.portal().tick()
-    add_output(env, "job-1")
-    env.runtime.jobs["job-1"]["status"] = "succeeded"
+    add_output(env, JOB1)
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
     env.clock.advance(10)
     env.portal().tick()
     env.clock.advance(10)
@@ -781,13 +789,13 @@ def test_artifact_manifest_cannot_cross_job_workspace(env):
     env.raw["artifact_paths"] = ["artifacts/result.png"]
     env.source.events.append(message())
     env.portal().tick()
-    item = add_output(env, "job-1")
+    item = add_output(env, JOB1)
     other = env.jobs / "some-other-job" / "artifacts"
     item["path"] = str(other / Path(item["path"]).name)
-    env.runtime.jobs["job-1"]["status"] = "succeeded"
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
     env.clock.advance(10)
     env.portal().tick()
-    assert state(env)["jobs"]["job-1"]["error"] == "artifact_unconfined"
+    assert state(env)["jobs"][JOB1]["error"] == "artifact_unconfined"
     assert not [call for call in env.native.calls if call["file"]]
 
 
@@ -801,13 +809,13 @@ def test_transport_lock_prevents_two_ticks(env):
 def test_progress_notifications_are_bounded_without_fabricated_completion(env):
     env.source.events.append(message())
     env.portal().tick()
-    env.runtime.jobs["job-1"]["status"] = "running"
+    env.runtime.jobs[JOB1]["status"] = "running"
     for _ in range(10):
         env.clock.advance(60)
         env.portal().tick()
     assert len(env.native.calls) <= 2
-    assert state(env)["jobs"]["job-1"]["state"] == "running"
-    assert not state(env)["jobs"]["job-1"]["final_queued"]
+    assert state(env)["jobs"][JOB1]["state"] == "running"
+    assert not state(env)["jobs"][JOB1]["final_queued"]
 
 
 def test_object_replacement_body_is_file_only_not_silently_ignored(env):
@@ -911,9 +919,9 @@ def test_caption_submission_does_not_unlock_the_next_file(env):
     env.raw["artifact_paths"] = ["artifacts/result.m4a", "artifacts/result.mp4"]
     env.source.events.append(message())
     env.portal().tick()
-    add_output(env, "job-1", ".m4a")
-    add_output(env, "job-1", ".mp4")
-    env.runtime.jobs["job-1"]["status"] = "succeeded"
+    add_output(env, JOB1, ".m4a")
+    add_output(env, JOB1, ".mp4")
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
     env.clock.advance(10)
     env.portal().tick()
     media = [call for call in env.native.calls if call["file"]]
@@ -929,9 +937,9 @@ def test_native_exception_then_late_attachment_delivery_resolves_without_resend(
     env.raw["artifact_paths"] = ["artifacts/result.m4a", "artifacts/result.mp4"]
     env.source.events.append(message())
     env.portal().tick()
-    add_output(env, "job-1", ".m4a")
-    add_output(env, "job-1", ".mp4")
-    env.runtime.jobs["job-1"]["status"] = "succeeded"
+    add_output(env, JOB1, ".m4a")
+    add_output(env, JOB1, ".mp4")
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
     original = env.native.send
     delayed = []
 
@@ -1094,7 +1102,7 @@ def test_an_intervening_ai_message_invalidates_bare_number_selection(env):
     env.portal().tick()
     assert not [call for call in env.runtime.calls if call["op"] == "approve"]
     assert any("approval_context_changed" in call["text"] for call in env.native.calls)
-    env.source.events.append(message(3, "RAPP approve job-1"))
+    env.source.events.append(message(3, f"RAPP approve {JOB1}"))
     env.portal().tick()
     assert len([call for call in env.runtime.calls if call["op"] == "approve"]) == 1
 
@@ -1110,7 +1118,7 @@ def test_watcher_restart_reconciles_owned_jobs_without_reapproving(env, monkeypa
     env.portal().tick()
     recovery = [call for call in env.runtime.calls if call["op"] == "recover"]
     assert len(recovery) == before + 1
-    assert recovery[-1]["actor"] == ACTOR and recovery[-1]["job_id"] == "job-1"
+    assert recovery[-1]["actor"] == ACTOR and recovery[-1]["job_id"] == JOB1
     assert not [call for call in env.runtime.calls if call["op"] == "approve"]
 
 
@@ -1131,7 +1139,7 @@ def test_staging_does_not_launder_runtime_forbidden_file_properties(env, kind):
 def test_successful_result_operation_does_not_claim_failed_task_succeeded(env):
     env.source.events.append(message())
     env.portal().tick()
-    env.runtime.jobs["job-1"]["status"] = "failed"
+    env.runtime.jobs[JOB1]["status"] = "failed"
     env.clock.advance(10)
     env.portal().tick()
     assert any("worker exit 1" in call["text"] and "synthetic_failure" in call["text"] for call in env.native.calls)
@@ -1141,7 +1149,7 @@ def test_successful_result_operation_does_not_claim_failed_task_succeeded(env):
 def test_status_persists_runtime_byte_and_event_cursors(env):
     env.source.events.append(message())
     env.portal().tick()
-    saved = state(env)["jobs"]["job-1"]
+    saved = state(env)["jobs"][JOB1]
     assert saved["stdout_offset"] == 24 and saved["event_offset"] == 1
     env.clock.advance(10)
     env.portal().tick()
@@ -1206,3 +1214,47 @@ def test_real_runtime_fake_worker_roundtrip_through_portal_and_mocked_native_del
     assert len([call for call in env.native.calls if call["file"]]) == 1
     finished = client.request({"op": "status", "actor": ACTOR, "job_id": job_id})
     assert finished["worker_active"] is False
+
+
+@pytest.mark.parametrize("mutation", [
+    "other-job-id", "out-of-range-index", "padded-id-index", "wrong-filename-index", "wrong-filename-name",
+])
+def test_manifest_requires_exact_frozen_identity_and_snapshot_filename(env, mutation):
+    env.raw["artifact_paths"] = ["artifacts/result.png"]
+    env.source.events.append(message())
+    env.portal().tick()
+    artifact = add_output(env, JOB1)
+    if mutation == "other-job-id":
+        artifact["id"] = synthetic_job(2) + ":artifact:0"
+    elif mutation == "out-of-range-index":
+        artifact["id"] = JOB1 + ":artifact:9"
+    elif mutation == "padded-id-index":
+        artifact["id"] = JOB1 + ":artifact:00"
+    else:
+        original = Path(artifact["path"])
+        new_name = JOB1 + ("-01-result.png" if mutation == "wrong-filename-index" else "-00-other.png")
+        renamed = original.with_name(new_name)
+        original.rename(renamed)
+        artifact["path"] = str(renamed)
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    env.clock.advance(10)
+    env.portal().tick()
+    assert not [call for call in env.native.calls if call["file"]]
+    assert state(env)["jobs"][JOB1]["error"] in ("artifact_undeclared", "artifact_unconfined")
+
+
+@pytest.mark.parametrize("job_id", ["job-1", "../outside", "20260101-000000-abc"])
+def test_noncanonical_runtime_job_id_is_rejected(env, job_id):
+    original = env.runtime.request
+
+    def response(request):
+        value = original(request)
+        if request["op"] == "submit":
+            value["job"]["job_id"] = job_id
+        return value
+
+    env.runtime.request = response
+    env.source.events.append(message())
+    env.portal().tick()
+    assert not state(env)["jobs"]
+    assert any("runtime_protocol" in call["text"] for call in env.native.calls)

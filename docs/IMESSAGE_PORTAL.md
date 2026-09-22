@@ -259,18 +259,57 @@ and task request-id deduplication; portal replies have non-command `[RAPP …]`
 prefixes. This protects **this portal** against repeated intake; it does not
 control a different responder's execution.
 
-### Future Claude/plugin overlap boundary
+### Supported exclusive-inbox cutover and rollback
 
-The hook's guard reserves RAPP messages and reply envelopes from the existing
-watcher's lifecycle branches. It does not modify, disable, or filter a cached
-Claude MCP iMessage plugin, and it cannot prevent another program from acting
-on the same text. An idle plugin is not evidence of global exclusivity.
-Before enabling another reader or a Claude channel on this thread, the operator
-must enforce deterministic route exclusion in that channel/dispatcher, or
-leave that channel disabled for the RAPP route. A natural-language instruction
-to “ignore RAPP” is not an enforcement boundary. The parent/reviewer must check
-that future-wake integration; this source-only handoff does not claim it has
-been deployed or proved globally exclusive.
+The lifecycle guard and portal GUID ledger do not control another reader.
+Use supported plugin controls and existing reader configuration, not a vendor
+cache patch, plugin fork, guessed channel hook, or natural-language request to
+ignore RAPP. `dmPolicy:"disabled"` alone is insufficient because self-chat
+bypasses it. Omitting channel flags stops pushed events, but does not prevent
+history-tool reads or a startup prompt from consuming the inbox.
+
+1. Back up the native plugin setting, watcher startup configuration, and legacy
+   reader configuration/checkpoint locally with their private permissions.
+   Keep the portal inactive during the ownership transition. Identify and
+   exclude existing Claude sessions and plugin reader processes: a setting
+   change does not revoke their already-loaded code or admitted work.
+2. Disable the official plugin through
+   `claude plugin disable imessage@claude-plugins-official --scope user` and
+   verify the effective setting is false. This affects **all configured
+   inboxes of that plugin**, including groups and self-chat, not just the
+   portal owner. Its MCP tools are disabled too; the separate existing
+   sentinel/native outbound activity feed remains unaffected.
+3. Gate the local Claude wake script on a private portal-enabled marker. While
+   it exists, launch a **fresh** session, explicitly set
+   `enabledPlugins["imessage@claude-plugins-official"]` to `false` in supported
+   per-session settings, and omit channel enablement, `--continue`, `--resume`,
+   and history-catch-up prompts. A future wake must not restore the competing
+   inbox reader through resumed context or a more specific plugin setting.
+4. For an overlapping legacy reader, atomically remove only the portal owner's
+   configured raw handle variants from its allowlist, preserving every other
+   entry and setting. The resulting allowlist must remain **nonempty**: an
+   empty legacy list is a wildcard. Stop that reader through its existing
+   controls, observe that it has stopped rather than trusting stale health,
+   and establish a fresh current-MAX message fence in its existing checkpoint.
+   Then restore its prior start/auto-start behavior for the remaining actors,
+   with the portal owner still excluded. This preserves their authorization;
+   the fence skips old reader backlog, not old job records. Neither stopping
+   the poller nor advancing the fence proves admitted jobs or replies drained.
+   Account for that in-flight work separately before activating the new route.
+5. Activate only the existing watcher's portal hook after the exclusions and
+   cutover checks. No Grail edit, core-process restart, new bot, or network
+   service is required. Background native delivery and actual phone ingress
+   are separate acceptance checks, not consequences of a plugin setting.
+
+For rollback, first stop portal intake and exclude its active dispatch before
+restoring any competing reader. Preserve the transport journal and unresolved
+send records; do not reset them or blindly resend. Restore the backed-up
+native startup/reader configuration and private permissions under the same
+single-owner cutover discipline, then remove the marker/session override.
+If the plugin was previously enabled, restore it through
+`claude plugin enable imessage@claude-plugins-official --scope user` and verify
+the effective setting. Do not bypass the marker or enable both inbox owners
+at once. Native outbound feed configuration remains independent throughout.
 
 ## Frozen local runtime envelope
 

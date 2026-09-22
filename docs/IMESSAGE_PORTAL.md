@@ -59,6 +59,14 @@ resolve in source-message row order and attachment ordinal order. A task
 following a still-downloading selected upload waits; it does not silently run
 without that input or absorb a later upload that downloads faster. Later
 unconsumed uploads remain available for the next requested task.
+For a file-only event awaiting native text decoding, its authorized intake
+eligibility and conversation generation are committed on the **source event**
+before decoding starts. Another ordinary task closing the intake window
+cannot revoke that already-admitted upload. Explicit `RAPP clear files` or
+`RAPP attach` advances the generation and invalidates the old pending intake;
+rearming cannot retroactively admit earlier out-of-window files. An older
+pending record without durable admission evidence fails explicitly and asks
+for rearm/resend instead of guessing permission.
 
 Capture completion and its acknowledgement enter the same atomic transport
 journal commit. Stable source GUIDs and attachment ordinals prevent a crash

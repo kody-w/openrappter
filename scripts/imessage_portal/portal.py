@@ -140,8 +140,9 @@ class Portal:
         key = token(actor["sender"] + "\0" + actor["chat"] + "\0" + target.get("roster_hash", ""))
         conversation = self.store.data["conversations"].setdefault(key, {
             "actor": dict(actor), "target": dict(target), "uploads": [],
-            "capture_until": 0, "approvals": {}, "latest_job": None,
+            "capture_until": 0, "capture_generation": 0, "approvals": {}, "latest_job": None,
         })
+        conversation.setdefault("capture_generation", 0)
         if "uploads" not in conversation:
             legacy_paths = {item["path"] for item in conversation.get("files", [])}
             conversation["uploads"] = []
@@ -307,6 +308,8 @@ class Portal:
                 "observations": {}, "staged": {}, "has_files": bool(event.get("has_attachments")),
                 "input_snapshot": self._input_snapshot(conversation, event),
                 "upload_expires": self.clock() + self.config.attachment_window_seconds,
+                "capture_eligible": capture_candidate,
+                "capture_generation": conversation["capture_generation"],
             }
             if capture_candidate:
                 conversation["uploads"].append(identity)
@@ -323,7 +326,22 @@ class Portal:
         body = text[match.end():].strip() if match else ""
         has_files = event.get("has_attachments") is True or bool(event.get("attachments"))
         numeric = text.strip() in ("1", "2") and bool(conversation["approvals"])
-        capture = not text.strip() and has_files and conversation["capture_until"] >= self.clock()
+        if previous:
+            if (
+                has_files and not text.strip() and "capture_eligible" not in previous
+                and (previous.get("selected_by") or identity in conversation["uploads"])
+            ):
+                raise PortalError(
+                    "intake_context_unknown",
+                    "This older pending upload lacks durable intake authorization. Rearm and resend it.",
+                )
+            capture_eligible = (
+                previous.get("capture_eligible") is True
+                and previous.get("capture_generation") == conversation["capture_generation"]
+            )
+        else:
+            capture_eligible = has_files and conversation["capture_until"] >= self.clock()
+        capture = not text.strip() and has_files and capture_eligible
         if not match and not numeric and not capture:
             return
         if len(text) > 65536:
@@ -339,6 +357,8 @@ class Portal:
             "first_seen": self.clock(), "deadline": self.clock() + self.config.readiness_seconds,
             "observations": {}, "staged": {}, "has_files": has_files,
             "upload_expires": previous.get("upload_expires", self.clock() + self.config.attachment_window_seconds),
+            "capture_eligible": capture_eligible,
+            "capture_generation": previous.get("capture_generation", conversation["capture_generation"]),
         }
         if previous.get("selected_by"):
             record["selected_by"] = previous["selected_by"]
@@ -565,6 +585,7 @@ class Portal:
             conversation.update(
                 uploads=[],
                 capture_until=self.clock() + self.config.attachment_window_seconds,
+                capture_generation=conversation["capture_generation"] + 1,
             )
             self._notice(f"input:{identity}:attach", actor, target,
                          "RAPP file intake is armed for this sender/thread. Send files, then RAPP <task>. "
@@ -572,7 +593,9 @@ class Portal:
             return
         if body.casefold() == "clear files":
             self._clear_capture(record["actor"])
-            conversation.update(uploads=[], capture_until=0)
+            conversation.update(
+                uploads=[], capture_until=0, capture_generation=conversation["capture_generation"] + 1,
+            )
             self._notice(f"input:{identity}:cleared", actor, target, "Pending RAPP file selection cleared.")
             return
         if command in ("1", "2", "approve"):

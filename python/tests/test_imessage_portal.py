@@ -1721,6 +1721,78 @@ def test_any_scheme_group_retains_explicit_group_authorization_and_roster_checks
     db.close()
 
 
+@pytest.mark.parametrize("invalidate", [None, "RAPP clear files", "RAPP attach"])
+def test_admitted_upload_keeps_decode_eligibility_when_a_later_text_task_closes_intake(env, invalidate):
+    upload = attachment(env, "reserved-A.txt", "text/plain")
+    env.source.events.extend([
+        message(1, "RAPP attach"),
+        message(2, "", has_attachments=True, attachments=[upload], needs_native_text=True),
+        message(3, "RAPP task T uses the preceding upload"),
+        message(4, "RAPP text-only task U"),
+    ])
+    env.portal().tick()
+    assert [request["prompt"] for request in submitted(env)] == ["text-only task U"]
+    assert submitted(env)[0]["attachments"] == []
+    saved = state(env)
+    assert next(iter(saved["conversations"].values()))["capture_until"] == 0
+    source = next(record for record in saved["inbox"].values() if record["event"]["id"] == 2)
+    assert source["state"] == "decoding" and source.get("selected_by")
+    assert source["capture_eligible"] is True
+    assert source["capture_generation"] == next(iter(saved["conversations"].values()))["capture_generation"]
+    if invalidate:
+        env.source.events.append(message(5, invalidate))
+        env.portal().tick()
+    env.native.decoded["SYNTHETIC-2"] = "\ufffc"
+    env.clock.advance(5)
+    env.portal().tick()
+    env.clock.advance(2)
+    env.portal().tick()
+    inputs_for_t = [request for request in submitted(env) if request["prompt"] == "T uses the preceding upload"]
+    if invalidate:
+        assert inputs_for_t == []
+        pending = next(record for record in state(env)["inbox"].values() if record["event"]["id"] == 3)
+        assert pending["error"] == "attachment_failed"
+    else:
+        assert len(inputs_for_t) == 1
+        assert [item["name"] for item in inputs_for_t[0]["attachments"]] == ["reserved-A.txt"]
+
+
+def test_rearming_cannot_retroactively_admit_an_earlier_unaddressed_file(env):
+    env.source.events.extend([
+        message(1, "", has_attachments=True, attachments=[attachment(env)], needs_native_text=True),
+        message(2, "RAPP attach"),
+    ])
+    env.portal().tick()
+    env.native.decoded["SYNTHETIC-1"] = "\ufffc"
+    env.clock.advance(5)
+    env.portal().tick()
+    source = next(record for record in state(env)["inbox"].values() if record["event"]["id"] == 1)
+    assert source["state"] == "ignored"
+    assert env.source.attachment_reads == 0
+    assert not any("Saved 1 attachment" in call["text"] for call in env.native.calls)
+
+
+def test_older_pending_upload_without_admission_evidence_fails_explicitly(env):
+    env.source.events.extend([
+        message(1, "RAPP attach"),
+        message(2, "", has_attachments=True, attachments=[attachment(env)], needs_native_text=True),
+        message(3, "RAPP use the pending upload"),
+    ])
+    env.portal().tick()
+    with Store(env.config().state_dir) as store:
+        source = next(record for record in store.data["inbox"].values() if record["event"]["id"] == 2)
+        source.pop("capture_eligible")
+        source.pop("capture_generation")
+        store.save()
+    env.native.decoded["SYNTHETIC-2"] = "\ufffc"
+    env.clock.advance(5)
+    env.portal().tick()
+    source = next(record for record in state(env)["inbox"].values() if record["event"]["id"] == 2)
+    assert source["error"] == "intake_context_unknown"
+    assert not submitted(env)
+    assert any("intake_context_unknown" in call["text"] for call in env.native.calls)
+
+
 def test_an_intervening_ai_message_invalidates_bare_number_selection(env):
     env.source.events.append(message())
     env.portal().tick()

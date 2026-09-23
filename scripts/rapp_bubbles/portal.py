@@ -617,10 +617,11 @@ class Portal:
         delivered), and the reply typed at least RACE_SECONDS after its last bubble left the
         Mac. A sooner reply still runs when the card the owner could read by then offered the
         same thing under that number (a heartbeat or a re-offer of the same task), so fast
-        repliers are never refused forever: only when that card is confirmed on the phone and,
-        for a bare reply, nothing but our bubbles and the owner's messages to us came between the
-        two cards (another AI's question in between may be what the number answers). A row
-        without a chat.db date (read as the Apple epoch) is judged by position alone.
+        repliers are never refused forever: only when that card is confirmed on the phone and
+        nothing but our bubbles and the owner's messages to us came after it (up to the newer
+        card for a bare reply, which sits right under that; up to the reply for RAPP <n>):
+        another AI's question in between may be what the number answers. A row without a
+        chat.db date (read as the Apple epoch) is judged by position alone.
         """
         if quoted or not parts:
             return None
@@ -639,7 +640,7 @@ class Portal:
         if (
             meaning is not None and seen is not None and seen["state"] in ("sent", "delivered")
             and self._meaning(seen, n) == meaning
-            and (explicit or self._quiet_between(seen, texts[0], event))
+            and (self._uninterrupted(seen, event) if explicit else self._quiet_between(seen, texts[0], event))
         ):
             return None
         return RACE_NOTE
@@ -794,6 +795,14 @@ class Portal:
         meant for): run nothing and show what is live instead."""
         self._remember_reply(identity, event, actor, target, "closed_menu")
         self._reoffer(identity, actor, target, part, note=note)
+
+    def _shows_again(self, part: dict, target: dict) -> bool:
+        """Whether _reoffer sends this card itself again, carrying its note (a live approval, a
+        running task's card), rather than a closed or expired notice."""
+        if self._card_approval(part):
+            return part["target"].get("roster_hash") == target.get("roster_hash")
+        job = self.store.data["jobs"].get(part.get("job_id") or "")
+        return bool(job and job["state"] in ("queued", "running", "cancelling") and job.get("started_at"))
 
     def _reoffer(self, identity: str, actor: dict, target: dict, part: dict, *, note: str | None = None) -> None:
         """Show what a card's options lead to now, instead of running one."""
@@ -1018,12 +1027,12 @@ class Portal:
                     pass
                 pick = record.get("menu_pick")
                 parts = self.outbox.parts(pick["group"]) if pick else []
-                if parts and record.get("actor") and record.get("target"):
+                card = next((part for part in parts if "text" in part), parts[0]) if parts else None
+                if card and record.get("actor") and record.get("target") and self._shows_again(card, record["target"]):
                     # A number that broke before anything ran: its card comes again, so the
                     # number resent answers it.
                     try:
-                        self._reoffer(identity, record["actor"], record["target"],
-                                      next((part for part in parts if "text" in part), parts[0]),
+                        self._reoffer(identity, record["actor"], record["target"], card,
                                       note="An internal error stopped it, so nothing ran.")
                         text = None
                     except Exception:  # noqa: BLE001 - the Skipped card below still tells the owner

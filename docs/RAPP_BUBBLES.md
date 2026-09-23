@@ -515,10 +515,10 @@ next ~5m · ref 3fa9c1
     retried part forgets its earlier landing. A pick typed sooner, or before the card existed,
     still runs when the card the owner could read by then offered the same thing under
     that number (a heartbeat or a re-offer of the same task), so a fast replier is never
-    refused over and over. That needs the earlier card confirmed on the phone and, for a
-    bare reply, nothing between the two cards in chat.db but our own bubbles and the
-    owner's messages to us: another AI's question in between may be what the number
-    answers. Otherwise nothing runs and the card comes again saying `nothing ran`, so
+    refused over and over. That needs the earlier card confirmed on the phone and nothing
+    after it in chat.db but our own bubbles and the owner's messages to us (up to the newer
+    card for a bare reply; up to the reply itself for `RAPP <n>`): another AI's question in
+    between may be what the number answers. Otherwise nothing runs and the card comes again saying `nothing ran`, so
     sending the pick again answers the card that is now newest.
   - An answer to an agent's update that the guard refuses (typed as it landed, or sent
     with `RAPP <n>`/`RAPP reply` after another author's bubble) is not recorded. A number
@@ -620,8 +620,10 @@ python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json resolv
   journal, as if the owner sent it now: typed `--typed-ago` seconds earlier, and as a
   swipe-reply on the card whose ref `--reply-to` gives. The first call to the task runtime
   is recorded and stops the run; nothing is saved or sent, and the watcher is not held up.
-  It reports a `verdict` (`acts`, `answers`, `reoffers`, `fails`, `replies`, or
-  `ignored`), the runtime calls it `would` make, the posts it `answers`, why it was
+  A `RAPP retry`/`RAPP resend` is recorded the same way, before any file is copied or
+  Messages is asked for receipts. It reports a `verdict` (`acts`: it would prepare,
+  approve, cancel, or resend something; `answers`, `reoffers`, `fails`, `replies`, or
+  `ignored`), the runtime calls and resends it `would` make, the posts it `answers`, why it was
   `refused`, error codes, and the first line of each card it would send.
 
 ### Messages health gate
@@ -695,8 +697,9 @@ are always kept. `transport-status` reports `journal_bytes` and `resources`.
 One bad item can no longer stop every tick:
 - **Poison messages.** An unexpected error while handling one message sets that message
   aside: it is marked failed (`internal:<Type>`), nothing runs, the cursor moves on, and
-  the owner gets one `! Skipped` card. A number that broke this way gets its card again
-  instead (`An internal error stopped it, so nothing ran.`), so sending it again answers.
+  the owner gets one `! Skipped` card. A number on a live approval card or a running
+  task's card that broke this way gets that card again instead (`An internal error
+  stopped it, so nothing ran.`), so sending it again answers it.
   If the task runtime had already been called, something may have started or stopped, so
   the owner is never told nothing ran: the message is checked again once (`! Checking`;
   a repeated submit reuses the same prepared job) and otherwise left to `RAPP status`.

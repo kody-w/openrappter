@@ -20,30 +20,39 @@ from .portal import Portal
 from .source import SQLiteSource
 from .state import Store
 
-ACTS = ("submit", "approve", "cancel")
+ACTS = ("submit", "approve", "cancel", "retry", "resend")
 
 
 class _Stop(BaseException):
-    """The dry run reached the task runtime: recorded, and stopped there."""
+    """The dry run reached the task runtime, Messages, or a resend: recorded, and stopped there."""
 
 
 class _Runtime:
     def __init__(self):
         self.calls: list[dict] = []
 
-    def profile_policy(self, _profile):
-        # Asked only right before a task is submitted for approval.
-        self.calls.append({"op": "submit", "job_id": None})
+    def act(self, op: str, job_id: str | None = None):
+        self.calls.append({"op": op, "job_id": job_id})
         raise _Stop()
 
+    def profile_policy(self, _profile):
+        # Asked only right before a task is submitted for approval.
+        self.act("submit")
+
     def request(self, request):
-        self.calls.append({"op": request.get("op"), "job_id": request.get("job_id")})
-        raise _Stop()
+        self.act(request.get("op"), request.get("job_id"))
 
 
 class _Native:
-    def __getattr__(self, _name):
-        raise _Stop()
+    """Messages is never touched: any use is recorded and stops the dry run."""
+
+    def __init__(self, runtime: _Runtime):
+        self.runtime = runtime
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        self.runtime.act(f"native {name}")
 
 
 class _Sandbox(Store):
@@ -91,10 +100,18 @@ def _owner(config: Config):
 
 
 def _portal(config: Config, store, clock, source=None, runtime=None) -> Portal:
-    portal = Portal(config, source=source, runtime=runtime or _Runtime(), native=_Native(), clock=clock)
+    runtime = runtime or _Runtime()
+    native = _Native(runtime)
+    portal = Portal(config, source=source, runtime=runtime, native=native, clock=clock)
     portal.store = store
-    portal.outbox = Outbox(config, store, None, clock, source.target_matches if source else (lambda _t: True),
+    portal.outbox = Outbox(config, store, native, clock, source.target_matches if source else (lambda _t: True),
                            source.tail if source else None)
+
+    def retry(_actor, job_id, *, uncertain_part=None):
+        # A resend copies files and asks Messages for receipts first: record it and stop.
+        runtime.act("resend" if uncertain_part else "retry", job_id)
+
+    portal.outbox.retry = retry
     return portal
 
 

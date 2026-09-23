@@ -4271,3 +4271,115 @@ def test_no_number_acts_on_a_card_another_author_spoke_after(env):
                 ours = [row["id"] for row in prior if row["is_from_me"] and "FOREIGN" not in row["guid"]]
                 assert ours and ours[-1] > max(foreign, default=0), (seed, step, reply["text"])
     assert acts and refusals
+
+
+# Round 5 review, pass 1.
+
+
+@pytest.mark.parametrize("kind", ["approval", "post", "heartbeat"])
+def test_a_fast_rapp_n_is_judged_by_the_card_it_could_read_and_what_came_after_that(env, kind):
+    """RAPP <n> typed as a newer card lands falls back to the card the owner could read; another
+    AI's bubble after that card may be what the number answered, so nothing runs."""
+    line = timeline(env)
+    if kind == "post":
+        post_id = delivered_feed_post(env)
+    else:
+        line.say("RAPP inspect these files")
+        env.portal().tick()
+        env.clock.advance(10)
+        env.portal().tick()
+    op, reply = "cancel", "RAPP 2"
+    if kind == "heartbeat":
+        line.say("1")
+        env.portal().tick()
+        assert explicit_ops(env, "approve")
+        env.clock.advance(10)
+        env.portal().tick()
+        line.foreign()
+        for _ in range(12):  # until the 2-minute heartbeat, offering the same Stop, goes out
+            env.clock.advance(30)
+            env.portal().tick()
+            if progress_parts(env):
+                break
+        assert progress_parts(env)
+    else:
+        op, reply = ("answer", "RAPP 1") if kind == "post" else ("approve", "RAPP 1")
+        line.foreign()
+        line.say(reply)  # refused: the card (or update) comes again under the foreign bubble
+        env.portal().tick()
+        env.clock.advance(1)
+
+    def done():
+        if kind == "post":
+            return state(env)["feed"][post_id]["state"] == "answered"
+        return bool(explicit_ops(env, op))
+
+    # Typed a second before the newest card reached the phone.
+    line.say(reply, typed_ago=2 if kind != "heartbeat" else 1)
+    env.portal().tick()
+    assert not done()
+    env.clock.advance(10)
+    line.say(reply)  # under the card shown again, it runs
+    env.portal().tick()
+    assert done()
+
+
+@pytest.mark.parametrize("failed", ["text-and-image", "image-only"])
+def test_resolve_never_copies_files_or_asks_messages_for_a_retry_or_resend(env, failed):
+    from rapp_bubbles import cards
+
+    db = make_database(env)
+    config = env.config()
+    with Store(config.state_dir) as store:
+        store.data["cursor"] = store.data["floor"] = 0
+        store.save()
+    insert_message(db, 1, "RAPP prepare the synthetic task")
+    Portal(config, runtime=env.runtime, native=env.native, clock=env.clock).tick()
+    with Store(config.state_dir) as store:
+        outbox = Outbox(config, store, env.native, env.clock, env.source.target_matches)
+        enqueue_native_test_batch(env, outbox, [".png"])
+        text, image = outbox.parts("native-test-batch")
+        # Messages reported the text failed (it has a row), or it went out; the image never
+        # left the Mac, so a real retry would copy it again.
+        if failed == "image-only":
+            text.update(state="delivered", guid="DELIVERED-ROW", submitted_at=env.clock())
+        else:
+            text.update(state="failed", retryable=True, guid="FAILED-ROW", submitted_at=env.clock())
+        image.update(state="failed", retryable=True)
+        outbox.enqueue(f"job:{JOB1}:final", ACTOR, TARGET, "[RAPP 0001] ✓ Done", job_id=JOB1)
+        uncertain = outbox.parts(f"job:{JOB1}:final")[0]
+        uncertain.update(state="unknown", submitted_at=env.clock(), send_after_rowid=0)
+        store.save()
+
+    def files():
+        return sorted((str(path), path.stat().st_mtime_ns) for path in config.state_dir.rglob("*") if path.is_file())
+
+    before = files()
+    retry = cards.resolve(config, copy.deepcopy(state(env)), f"RAPP retry {JOB1}", clock=env.clock)
+    assert files() == before, "a dry-run retry copied a file"
+    assert (retry["verdict"], retry["would"]) == ("acts", [f"retry {JOB1}"])
+    resend = cards.resolve(config, copy.deepcopy(state(env)), f"RAPP resend {uncertain['id'][:6]}", clock=env.clock)
+    assert (resend["verdict"], resend["would"]) == ("acts", [f"resend {JOB1}"])
+    assert files() == before and not env.native.history_calls
+    db.close()
+
+
+def test_a_number_that_breaks_on_a_card_with_no_live_task_gets_the_skipped_card(env, monkeypatch):
+    from rapp_bubbles import portal as portal_module
+
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    owner_target(env)
+    env.source.events.append(message(1, "RAPP health"))
+    env.portal().tick()
+    assert env.native.calls[-1]["text"].startswith("[RAPP sys] · Health")
+
+    def fragile(*_args, **_kwargs):
+        raise KeyError("synthetic")
+
+    monkeypatch.setattr(portal_module.Portal, "_health_card", fragile)
+    env.clock.advance(10)
+    env.source.events.append(message(2, "1"))  # [1] Health, on a card that is still open
+    env.portal().tick()
+    heads = [call["text"].split("\n", 1)[0] for call in env.native.calls[1:]]
+    assert len(heads) == 1 and heads[0].endswith("! Skipped")
+    assert "nothing ran" in env.native.calls[-1]["text"]

@@ -1,6 +1,7 @@
 """Synthetic only: run with --noconftest and a project-local --basetemp."""
 
 import copy
+import errno
 import hashlib
 import json
 import os
@@ -68,9 +69,13 @@ class Source:
         self.attachment_reads = 0
         self.targets = {1: CHAT}
         self.prior_guids = {}
+        self.between_rows = []
 
     def latest_prior_guid(self, event):
         return self.prior_guids.get(event["chat_guid"])
+
+    def between(self, _chat_guid, _after, _before):
+        return list(self.between_rows)
 
     def tail(self):
         return 0
@@ -3320,6 +3325,8 @@ def test_a_stop_typed_as_a_same_task_card_lands_still_stops_it(env):
     assert not explicit_ops(env, "cancel")
     offer = closed_offer(env)
     env.clock.advance(10)
+    # Only the owner's own refused "2" sits between the two cards.
+    env.source.between_rows = [{"guid": "SYNTHETIC-3", "is_from_me": False}]
     # Just as fast under the re-offered card: Stop meant Stop on the card before it too.
     env.source.events.append(message(4, "2", created_at=at(offer["submitted_at"] + 1)))
     env.portal().tick()
@@ -3562,3 +3569,175 @@ def test_errors_are_kept_once_per_code_with_a_count(env):
         errors = store.data["errors"]
     assert [(item["code"], item["count"]) for item in errors] == [("b", 1), ("a", 3)]
     assert errors[-1]["first"] < errors[-1]["time"]
+
+
+def test_a_quick_digit_after_another_ais_question_does_not_stop_a_task(env):
+    approved_running_job(env)
+    running = running_part(env)
+    env.clock.advance(10)
+    env.source.events.append(message(3, "2", created_at=at(running["submitted_at"] + 1)))
+    env.portal().tick()
+    offer = closed_offer(env)
+    env.clock.advance(10)
+    # Another AI asked "1 = continue, 2 = abort" between the two cards: the number may be its.
+    env.source.between_rows = [{"guid": "OTHER-AI-QUESTION", "is_from_me": True}]
+    env.source.events.append(message(4, "2", created_at=at(offer["submitted_at"] + 1)))
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel")
+
+
+def test_reader_lists_the_rows_between_two_cards_without_tapbacks(env):
+    db = make_database(env)
+    source = SQLiteSource(env.config())
+    insert_message(db, 1, "[RAPP 0001] one", guid="CARD-1")
+    insert_message(db, 2, "Other AI: 1 = continue, 2 = abort", guid="OTHER")
+    db.execute(
+        "INSERT INTO message(ROWID,guid,text,attributedBody,date,is_from_me,service,handle_id,"
+        "cache_has_attachments,associated_message_guid,associated_message_type) "
+        "VALUES(3,'TAPBACK','Liked a message',NULL,1,0,'iMessage',1,0,'p:0/CARD-1',2001)"
+    )
+    db.execute("INSERT INTO chat_message_join VALUES(3,1)")
+    insert_message(db, 4, "[RAPP 0001] two", guid="CARD-2")
+    db.commit()
+    assert [row["guid"] for row in source.between(CHAT, "CARD-1", "CARD-2")] == ["OTHER"]
+    assert source.between(CHAT, "CARD-1", "MISSING") is None
+    source.close()
+    db.close()
+
+
+def test_a_transient_result_failure_keeps_the_declared_file(env):
+    env.source.events.append(message(text="RAPP file result.png | create synthetic media"))
+    env.portal().tick()
+    add_output(env, JOB1)
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    real = env.runtime.request
+    failures = [2]
+
+    def flaky(request):
+        if request["op"] == "result" and failures[0]:
+            failures[0] -= 1
+            raise NotSubmitted("helper_protocol_error", "Synthetic helper timeout.")
+        return real(request)
+
+    env.runtime.request = flaky
+    for _ in range(12):
+        env.clock.advance(10)
+        env.portal().tick()
+    assert [call for call in env.native.calls if call["file"]]
+    assert not any("Output files unavailable" in call["text"] for call in env.native.calls)
+
+
+def test_timeouts_and_one_not_found_do_not_make_a_job_lost(env):
+    env.source.events.append(message())
+    env.portal().tick()
+    real = env.runtime.request
+    codes = ["runtime_unavailable", "runtime_unavailable", "not_found"]
+
+    def flaky(request):
+        if request["op"] == "status" and codes:
+            return {"ok": False, "error": {"code": codes.pop(0)}}
+        return real(request)
+
+    env.runtime.request = flaky
+    for _ in range(20):
+        env.clock.advance(10)
+        env.portal().tick()
+    job = state(env)["jobs"][JOB1]
+    assert job["final_queued"] is False and "fail_counts" not in job
+
+
+def test_a_locked_chat_db_fails_the_tick_and_the_digit_still_approves_later(env, monkeypatch):
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    env.source.events.append(message())
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    locked = [True]
+    prior = env.source.latest_prior_guid
+
+    def flaky(event):
+        if locked[0]:
+            raise sqlite3.OperationalError("database is locked")
+        return prior(event)
+
+    env.source.latest_prior_guid = flaky
+    env.source.events.append(message(2, "1"))
+    with pytest.raises(sqlite3.OperationalError):
+        env.portal().tick()
+    locked[0] = False
+    env.portal().tick()
+    assert [call["job_id"] for call in env.runtime.calls if call["op"] == "approve"] == [JOB1]
+
+
+def test_a_locked_chat_db_leaves_a_queued_part_queued(env, monkeypatch):
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    matches = env.source.target_matches
+    locked = [True]
+
+    def flaky(target):
+        if locked[0]:
+            raise sqlite3.OperationalError("database is locked")
+        return matches(target)
+
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, flaky)
+        outbox.enqueue("card", ACTOR, TARGET, "[RAPP t] hello")
+        with pytest.raises(sqlite3.OperationalError):
+            outbox.pump()
+        assert outbox.parts("card")[0]["state"] == "queued"
+        locked[0] = False
+        outbox.pump()
+        assert outbox.parts("card")[0]["state"] == "submitted"
+
+
+def test_a_decoded_message_that_breaks_is_marked_failed_and_runs_only_once(env, monkeypatch):
+    from rapp_bubbles import portal as portal_module
+
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    owner_target(env)
+    command = portal_module.Portal._command
+    calls = []
+
+    def fragile(self, identity, record):
+        calls.append(identity)
+        if "poison" in record.get("body", ""):
+            raise KeyError("synthetic")
+        return command(self, identity, record)
+
+    monkeypatch.setattr(portal_module.Portal, "_command", fragile)
+    env.source.events.append(message(1, None, needs_native_text=True))
+    env.portal().tick()
+    env.native.decoded["SYNTHETIC-1"] = "RAPP poison task"
+    for _ in range(3):
+        env.clock.advance(10)
+        env.portal().tick()
+    record = next(iter(state(env)["inbox"].values()))
+    assert record["state"] == "failed" and record["error"] == "internal:KeyError"
+    assert len(calls) == 1
+
+
+def test_rapp_reply_on_a_swiped_older_update_answers_that_update(env):
+    first = delivered_feed_post(env, channel="loop")
+    older = next(part for part in state(env)["outbox"] if part["group"] == f"feed:{first}")
+    second = delivered_feed_post(env, channel="other", text="Other 01\n1. Yes\n2. No")
+    newer = next(part for part in state(env)["outbox"] if part["group"] == f"feed:{second}")
+    env.source.events.append(message(1, "RAPP reply 1", reply_to=older["guid"],
+                                     created_at=at(newer["submitted_at"] + 1)))
+    env.portal().tick()
+    posts = state(env)["feed"]
+    assert posts[first]["answer"]["number"] == 1 and posts[second]["state"] != "answered"
+
+
+def test_a_full_disk_while_staging_is_not_called_an_unsafe_file(env, monkeypatch):
+    from rapp_bubbles import files
+
+    source = env.root / "input.txt"
+    source.write_text("synthetic")
+
+    def full(_descriptor):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(files.os, "fsync", full)
+    with pytest.raises(PortalError) as caught:
+        copy_reference(source, (env.root,), env.root / "staged" / "input.txt", 1024)
+    assert caught.value.code == "disk_full"

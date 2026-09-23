@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import re
@@ -80,6 +81,8 @@ def regular_file(
     except FileNotFoundError:
         raise
     except OSError as error:
+        if error.errno in (errno.ENOSPC, errno.EDQUOT):
+            raise PortalError("disk_full", "The disk is full; free space and it will be retried.") from error
         raise PortalError("unsafe_file", "File is inaccessible or traverses an unsafe link.") from error
     finally:
         if descriptor is not None:

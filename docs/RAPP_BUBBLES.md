@@ -507,8 +507,11 @@ next ~5m · ref 3fa9c1
     send does not use up the window). A pick typed sooner, or before the card existed,
     still runs when the card the owner could read by then offered the same thing under
     that number (a heartbeat or a re-offer of the same task), so a fast replier is never
-    refused over and over. Otherwise nothing runs and the card comes again saying
-    `nothing ran`, so sending the pick again answers the card that is now newest.
+    refused over and over. That needs the earlier card confirmed on the phone and, for a
+    bare reply, nothing between the two cards in chat.db but our own bubbles and the
+    owner's messages to us: another AI's question in between may be what the number
+    answers. Otherwise nothing runs and the card comes again saying `nothing ran`, so
+    sending the pick again answers the card that is now newest.
   - An answer to an agent's update typed as it landed is not recorded; a number gets one
     `Not answered` card (swipe-reply to answer it), other text is left alone.
   - A row with no chat.db time is judged by position alone. A card from before a group's
@@ -578,7 +581,8 @@ python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json feed-s
   newer card that is still queued cannot take it) and was not typed as the post landed
   (the read guard), including a bare number while a task approval waits; lifecycle words
   (restart, wake up, shut down, …) are never captured. After an intervening
-  message, `RAPP reply <text>` answers the latest open post explicitly. The reply
+  message, `RAPP reply <text>` answers the latest open post explicitly (or, as a
+  swipe-reply on an update, that update). The reply
   window starts at delivery and lasts `--ttl` seconds. Answers are read back
   only through `feed-status`.
 
@@ -645,22 +649,25 @@ One bad item can no longer stop every tick:
 - **Poison messages.** An unexpected error while handling one message sets that message
   aside: it is marked failed (`internal:<Type>`), nothing runs, the cursor moves on, and
   the owner gets one `! Skipped` card. The rest of the tick still runs. Known failures
-  (for example, Messages unavailable) still fail the tick and are retried, so a
-  transient problem never drops a message. A journal that cannot be written (a full
-  disk) always fails the tick.
+  (for example, Messages unavailable) and chat.db errors (a locked database) still fail
+  the tick and are retried, so a transient problem never drops a message. A journal that
+  cannot be written (a full disk) always fails the tick.
 - **Poison parts and stages.** A part that breaks the send pump or its receipt check is
-  set aside like a failed send; the parts behind it still go out. Each tick stage (disk,
+  set aside (retryable with `RAPP retry` when its send was never attempted); the parts
+  behind it still go out. Each tick stage (disk,
   recovery, receipts, polls, sends, outage, attention, compaction) runs even when an
   earlier one broke; the tick result lists what was set aside under `quarantined`.
 - **Undecodable text.** chat.db text that is not valid UTF-8 is read with replacement
   characters instead of stopping the reader.
 - **Failing polls back off.** A job whose status poll fails is polled again after 10 s,
   then 20 s, 40 s, … up to 10 minutes, and normally again after one success. A job the
-  runtime no longer knows (`not_found` three times) and one that keeps failing
-  internally (three times) are no longer followed, with one card. A finished job whose
-  result cannot be rendered (for example, a declared output file was deleted) gets its
-  text result with `Output files unavailable (<code>)` after two tries, instead of being
-  retried forever.
+  runtime no longer knows (`not_found` five times, about five minutes) and one that keeps
+  failing internally (three times) are no longer followed, with one card; each kind is
+  counted on its own, so a timeout or two never makes one `not_found` fatal. A finished
+  job whose result can never render (a deleted or invalid declared output, a malformed
+  result) gets its text with `Output files unavailable (<code>)` after two tries instead
+  of being retried forever; a transient failure (a timeout, a full disk, reported as
+  `disk_full`) keeps backing off with its files intact.
 - **Errors are kept once per code**, with a count and first and last time, so one
   repeating failure cannot push every other cause out of the 100-entry ring. `RAPP
   health` shows the last error.

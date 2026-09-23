@@ -60,6 +60,33 @@ class SQLiteSource:
         target = {"chat_id": row[0], "chat_guid": chat_guid, "is_group": False}
         return target if self.target_matches(target) else None
 
+    def between(self, chat_guid: str, after: str, before: str) -> list[dict] | None:
+        """This chat's message rows strictly between two of its rows (tapbacks are not
+        messages), or None when either row is unknown."""
+        ids = {
+            row["guid"]: row["id"] for row in self.db.execute(
+                """SELECT m.guid, m.ROWID AS id FROM message m
+                   JOIN chat_message_join j ON j.message_id=m.ROWID
+                   JOIN chat c ON c.ROWID=j.chat_id
+                   WHERE c.guid=? AND m.guid IN (?, ?)""", (chat_guid, after, before),
+            )
+        }
+        if after not in ids or before not in ids:
+            return None
+        reactions = (
+            "AND (m.associated_message_type IS NULL OR m.associated_message_type<2000 "
+            "OR m.associated_message_type>3006)"
+            if "associated_message_type" in self.columns else ""
+        )
+        rows = self.db.execute(
+            f"""SELECT m.guid, m.is_from_me FROM message m
+               JOIN chat_message_join j ON j.message_id=m.ROWID
+               JOIN chat c ON c.ROWID=j.chat_id
+               WHERE c.guid=? AND m.ROWID>? AND m.ROWID<? {reactions}
+               ORDER BY m.ROWID LIMIT 50""", (chat_guid, ids[after], ids[before]),
+        )
+        return [{"guid": row["guid"], "is_from_me": bool(row["is_from_me"])} for row in rows]
+
     def latest_prior_guid(self, event: dict) -> str | None:
         # A tapback is not a message: reacting to a card must not break the reply after it.
         reactions = (

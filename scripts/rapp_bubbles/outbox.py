@@ -11,6 +11,8 @@ from typing import Callable
 from .clients import NotSubmitted, SubmissionUnknown
 from .config import Config, PortalError, normalized
 from . import itui
+import sqlite3
+
 from .state import JournalWriteError, strict
 from .files import copy_reference, filename
 from .state import Store
@@ -248,7 +250,7 @@ class Outbox:
                 receipt_budget -= 1
                 try:
                     self.reconcile(part)
-                except JournalWriteError:
+                except (JournalWriteError, sqlite3.Error):
                     raise
                 except PortalError as error:
                     part["receipt_error"] = error.code
@@ -294,8 +296,10 @@ class Outbox:
                 for p in previous
             ):
                 continue
+            # A transient chat.db error here fails the tick with the part still queued.
+            allowed = self._allowed(part)
             try:
-                if not self._allowed(part):
+                if not allowed:
                     raise NotSubmitted("route_changed", "The original authorized chat is no longer available.")
                 if "file" in part:
                     reference = part["file"]
@@ -333,7 +337,7 @@ class Outbox:
                 elif "file" in part and result.get("guid"):
                     part["caption_guid"] = str(result["guid"])
                 part["state"] = "submitted"
-            except JournalWriteError:
+            except (JournalWriteError, sqlite3.Error):
                 raise
             except NotSubmitted as error:
                 part.update(state="failed", error=error.code, retryable=True)
@@ -349,9 +353,12 @@ class Outbox:
                 # A part that breaks the pump is set aside; the parts behind it still go out.
                 if strict():
                     raise
+                attempted = part["state"] == "submitting"
+                # Only a part whose send may have happened is uncertain; one never attempted
+                # stays retryable (RAPP retry).
                 part.update(
-                    state="unknown" if part["state"] == "submitting" else "failed",
-                    error=f"internal:{type(error).__name__}", retryable=False,
+                    state="unknown" if attempted else "failed",
+                    error=f"internal:{type(error).__name__}", retryable=not attempted,
                 )
             self.store.save()
             budget -= 1

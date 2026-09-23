@@ -2390,3 +2390,120 @@ def test_reply_to_the_card_on_the_phone_is_not_stolen_by_a_newer_queued_card(env
     env.portal().tick()
     assert state(env)["feed"][first]["answer"]["number"] == 2
     assert state(env)["feed"][second]["state"] == "pending"
+
+
+def owner_target(env):
+    env.source.direct_target = lambda chat: {"chat_id": 1, "chat_guid": chat, "is_group": False}
+
+
+def test_idle_ticks_do_not_rewrite_the_journal(env):
+    env.source.events.append(message(1, "hello Claude"))
+    env.portal().tick()
+    env.portal().tick()
+    path = Path(env.raw["state_dir"]) / "transport.json"
+    before = (path.stat().st_mtime_ns, path.stat().st_ino)
+    for _ in range(5):
+        env.clock.advance(10)
+        env.portal().tick()
+    assert (path.stat().st_mtime_ns, path.stat().st_ino) == before
+
+
+def test_compaction_drops_only_old_settled_records_past_the_late_window(env):
+    env.source.events.append(message(1, "RAPP help"))
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    with Store(env.config().state_dir) as store:
+        assert store.data["outbox"][0]["state"] == "delivered"
+        uncertain = copy.deepcopy(store.data["outbox"][0])
+        uncertain.update(id="old-unknown", group="old-unknown", state="unknown", text="[RAPP old] never seen")
+        uncertain.pop("guid", None)
+        store.data["outbox"].append(uncertain)
+        store.data["cursor"] = 10_000
+        store.save()
+    env.clock.advance(15 * 86400)
+    env.portal().tick()
+    saved = state(env)
+    assert [part["id"] for part in saved["outbox"]] == ["old-unknown"]
+    assert not saved["inbox"]
+
+
+def test_disk_pressure_warns_once_per_level_and_critical_pauses_new_tasks(env, monkeypatch):
+    from rapp_bubbles import portal as portal_module
+
+    owner_target(env)
+    free = {"gib": 5}
+    monkeypatch.setattr(portal_module.shutil, "disk_usage",
+                        lambda _path: SimpleNamespace(total=100 * 2**30, used=0, free=free["gib"] * 2**30))
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    low = [call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ! Disk low")]
+    assert len(low) == 1 and "5.0 GB free" in low[0] and "[1] Health\n[2] Recent jobs" in low[0]
+    free["gib"] = 1
+    env.clock.advance(10)
+    env.portal().tick()
+    assert env.native.calls[-1]["text"].startswith("[RAPP sys] ! Disk critical")
+    env.source.events.append(message(1, "RAPP make a report"))
+    env.clock.advance(10)
+    env.portal().tick()
+    assert not submitted(env)
+    assert any("disk_low" in call["text"] for call in env.native.calls)
+
+
+def test_imessage_outage_is_reported_once_after_recovery(env):
+    from rapp_bubbles.clients import _verdict
+
+    owner_target(env)
+    connected = [False]
+    env.native.health = lambda value, now: _verdict(
+        value, now, connected[0], "connected" if connected[0] else "imessage_account_blocked")
+    feed_post(env, text="Loop 01")
+    env.portal().tick()
+    env.clock.advance(20 * 60)
+    env.portal().tick()
+    connected[0] = True
+    for _ in range(3):
+        env.clock.advance(60)
+        env.portal().tick()
+    backs = [call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ✓ iMessage back")]
+    assert len(backs) == 1 and "down 21m" in backs[0] and "imessage_account_blocked" in backs[0]
+
+
+def test_a_long_gap_between_ticks_is_reported_once(env):
+    owner_target(env)
+    env.portal().tick()
+    env.clock.advance(3 * 3600)
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    gaps = [call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ✓ Back online")]
+    assert len(gaps) == 1 and "no ticks for 3h00m" in gaps[0]
+
+
+def test_rapp_health_reports_imessage_disk_journal_and_outbox(env):
+    env.source.events.append(message(1, "RAPP health"))
+    env.portal().tick()
+    text = env.native.calls[-1]["text"]
+    assert text.startswith("[RAPP sys] · Health")
+    assert "iMessage:" in text and "Disk:" in text and "Journal:" in text and "Outbox:" in text
+    assert "[1] Health\n[2] Recent jobs" in text
+
+
+def test_day_old_sent_receipts_are_not_polled_forever(env):
+    env.source.events.append(message(1, "RAPP help"))
+    env.portal().tick()
+    guid = state(env)["outbox"][0]["guid"]
+    env.native.states[guid] = "sent"
+    checked = []
+    original = env.native.status
+    env.native.status = lambda value: checked.append(value) or original(value)
+    env.clock.advance(10)
+    env.portal().tick()
+    assert state(env)["outbox"][0]["state"] == "sent" and checked
+    before = len(checked)
+    env.clock.advance(25 * 3600)
+    for _ in range(3):
+        env.clock.advance(10)
+        env.portal().tick()
+    assert len(checked) == before

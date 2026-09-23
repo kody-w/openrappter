@@ -49,6 +49,9 @@ Only `RAPP …` / `RAPP: …` addresses this portal. Case does not matter.
 | `RAPP clear files` | Clear the pending file selection and close its intake window. |
 | A reply directly under an operator update with options | Answers that update (numbers pick its options); see the operator feed. |
 | `RAPP reply <text>` | Answer the latest open operator update even after other messages. |
+| A digit right under a card, or `RAPP <n>` | Pick that card's numbered option (an open approval card keeps 1/2). |
+| `RAPP quiet [job]` | Stop a running task's automatic ETA updates; its result still arrives. |
+| `RAPP health` | iMessage verdict, free disk, journal size, and outbox states as one card. |
 | `RAPP help` | Explain routing and these commands. |
 
 When several tasks await approval, bare numbers cannot select one. Use an exact
@@ -545,6 +548,33 @@ run at all (for example, Automation consent is missing) fails open to the
 ungated behavior. Healthy results are cached for 120 s and unhealthy ones for
 45 s; nothing is probed while the outbox is empty. `transport-status` reports the
 verdict under `imessage`.
+
+### Disk, outage, and gap cards
+
+rapp-bubbles tells the owner about its own trouble with one `[RAPP sys]` card per
+event, each ending with `[1] Health` and `[2] Recent jobs`:
+
+- **Disk pressure**: every tick checks free space on the state volume. Below 10 GB (or
+  5%) one `Disk low` card is sent; below 2 GB (or 2%) a `Disk critical` card is sent,
+  new task preparation is refused with `disk_low` (status, stop, and results keep
+  working), and automatic ETA updates pause. Each level alerts once per six hours.
+  The overnight disk-full that silently failed 343 ticks now names itself.
+- **iMessage back**: when the health gate has held sends for five minutes or more and
+  iMessage reconnects, one card reports how long it was down, the verdict, and how many
+  queued parts are now sending.
+- **Back online**: each successful tick touches a tiny `heartbeat` file; a gap of five
+  minutes or more (failed ticks, a stopped watcher, a full disk) is reported once.
+
+### Bounded journal and idle ticks
+
+Idle ticks no longer rewrite the journal: re-read late-window rows and unchanged
+recovery passes save nothing. Settled feed posts are skipped, and a part that has
+been `sent` for a day stops polling for a delivered receipt (`unknown` and `submitted`
+parts keep reconciling, so late discovery still works). Once an hour, delivered or
+permanently failed parts older than 14 days, their staged files, handled inbox records,
+and ended jobs older than 30 days are removed, but only past the reader's late window
+(cursor − 256), so deduplication can never replay a row. Uncertain and retryable parts
+are always kept. `transport-status` reports `journal_bytes` and `resources`.
 
 ### Doctor (read-only)
 

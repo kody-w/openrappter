@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import json
 import math
 import mimetypes
@@ -187,13 +188,15 @@ class Portal:
         command = words[0].casefold() if words else "help"
         if re.fullmatch(r"[1-9]", command):
             return len(words) > 1
+        if command == "health":
+            return len(words) > 1
         if command == "quiet":
             # "RAPP quiet the fans" is still a task; only "quiet" or "quiet <job ref>" is a command.
             return len(words) > 1 and not (
                 itui.HEX_REF.fullmatch(words[1].strip()) or JOB_ID.fullmatch(words[1].strip())
             )
         return body.casefold() != "clear files" and command not in {
-            "help", "?", "attach", "1", "2", "approve", "files", "list", "resume", "recover",
+            "help", "?", "attach", "1", "2", "approve", "files", "list", "resume", "recover", "health",
             "status", "result", "stop", "cancel", "retry", "resend",
         }
 
@@ -270,6 +273,134 @@ class Portal:
         self.outbox.enqueue(key, job["actor"], job["target"], text, job_id=job_id, menu=commands,
                             card="progress" if update else None)
 
+    def _owner_route(self) -> tuple[dict, dict] | None:
+        """The first authorized direct thread, for system cards nobody asked for yet."""
+        lookup = getattr(self.source, "direct_target", None)
+        for route in self.config.routes:
+            if ";+;" in route.chat or not callable(lookup):
+                continue
+            target = lookup(route.chat)
+            if target:
+                return {"sender": route.sender, "chat": route.chat}, target
+        return None
+
+    def _system_card(self, key: str, glyph: str, status: str, lines: list[str]) -> None:
+        route = self._owner_route()
+        if route is None:
+            return
+        options, commands = itui.menu("system")
+        text = itui.card(itui.header("sys", glyph, status), top=lines, options=options,
+                         footer=f"ref {token(f'{key}:0')[:6]}")
+        self.outbox.enqueue(key, *route, text, menu=commands)
+
+    def _resources(self) -> None:
+        """Free-space preflight: warn once per level, refuse new tasks when critical."""
+        usage = shutil.disk_usage(self.config.state_dir)
+        free_gib, percent = usage.free / 2**30, 100 * usage.free / max(usage.total, 1)
+        level = "critical" if free_gib < 2 or percent < 2 else "low" if free_gib < 10 or percent < 5 else "ok"
+        info = self.store.data.setdefault("resources", {})
+        now = self.clock()
+        info["free_gib"], info["free_pct"] = round(free_gib, 1), round(percent, 1)
+        if level == info.get("level", "ok") and (level == "ok" or now - info.get("alerted_at", 0) < 6 * 3600):
+            return
+        info["level"] = level
+        if level != "ok":
+            info["alerted_at"] = now
+            self._system_card(
+                f"sys:disk:{level}:{int(now)}", itui.GLYPH["attention"], f"Disk {level}",
+                [f"{free_gib:.1f} GB free ({percent:.0f}%)",
+                 "new tasks paused until space frees" if level == "critical" else "free space soon"],
+            )
+        self.store.save()
+
+    def _outage_report(self) -> None:
+        outage = self.store.data.get("imessage_health", {}).get("outage")
+        if not outage or outage.get("reported"):
+            return
+        outage["reported"] = True
+        held = sum(part["state"] == "queued" for part in self.store.data["outbox"])
+        self._system_card(
+            f"sys:outage:{int(outage['start'])}", itui.GLYPH["succeeded"], "iMessage back",
+            [f"down {itui.span(outage['end'] - outage['start'])}", str(outage.get("code") or "unknown")[:28],
+             f"{held} queued part(s) sending"],
+        )
+        self.store.save()
+
+    def _heartbeat(self) -> None:
+        """Touch a tiny file per successful tick; a long gap means ticks failed or stopped."""
+        path = self.config.state_dir / "heartbeat"
+        now = self.clock()
+        try:
+            last = path.stat().st_mtime
+        except FileNotFoundError:
+            last = None
+        if last is not None and now - last >= 300:
+            self._system_card(f"sys:gap:{int(last)}", itui.GLYPH["succeeded"], "Back online",
+                              [f"no ticks for {itui.span(now - last)}", "check RAPP health"])
+            self.store.save()
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        os.close(descriptor)
+        os.utime(path, (now, now))
+
+    def _compact(self) -> None:
+        """Hourly: drop settled records that are old and past the reader's late window."""
+        data, now = self.store.data, self.clock()
+        if now - data.get("compacted_at", 0) < 3600:
+            return
+        data["compacted_at"] = now
+        horizon = (data["cursor"] or 0) - 256
+        keep = []
+        for part in data["outbox"]:
+            settled = part["state"] in ("sent", "delivered") or (part["state"] == "failed" and not part.get("retryable"))
+            if settled and now - part.get("created_at", now) > 14 * 86400 and part.get("send_after_rowid", 0) < horizon:
+                if "file" in part:
+                    Path(part["file"]["path"]).unlink(missing_ok=True)
+                continue
+            keep.append(part)
+        data["outbox"] = keep
+        uploads = {
+            identity for conversation in data["conversations"].values() for identity in conversation.get("uploads", [])
+        }
+        for identity, record in list(data["inbox"].items()):
+            if (
+                record["state"] in ("done", "failed", "ignored", "cancelled") and identity not in uploads
+                and now - record.get("first_seen", now) > 14 * 86400 and record["event"]["id"] < horizon
+            ):
+                del data["inbox"][identity]
+        referenced = {
+            job_id for conversation in data["conversations"].values()
+            for job_id in [conversation.get("latest_job"), *conversation.get("approvals", {})]
+        } | {part.get("job_id") for part in data["outbox"]}
+        for job_id, job in list(data["jobs"].items()):
+            ended = job.get("finished_at") or job.get("last_poll", now)
+            if job["state"] in TERMINAL and job.get("final_queued") and job_id not in referenced and now - ended > 30 * 86400:
+                del data["jobs"][job_id]
+        self.store.save()
+
+    def _health_card(self, key: str, actor: dict, target: dict) -> None:
+        data = self.store.data
+        health = data.get("imessage_health", {})
+        resources = data.get("resources", {})
+        states: dict[str, int] = {}
+        for part in data["outbox"]:
+            states[part["state"]] = states.get(part["state"], 0) + 1
+        try:
+            journal = (self.config.state_dir / "transport.json").stat().st_size
+        except OSError:
+            journal = 0
+        lines = [
+            f"iMessage: {health.get('code', 'not checked')}",
+            f"Disk: {resources.get('free_gib', '?')} GB free · {resources.get('level', 'ok')}",
+            f"Journal: {journal // 1024} KB",
+            "Outbox: " + (", ".join(f"{count} {state}" for state, count in sorted(states.items())) or "empty"),
+        ]
+        if health.get("hint"):
+            lines.append(health["hint"])
+        options, commands = itui.menu("system")
+        text = itui.card(itui.header("sys", itui.GLYPH["info"], "Health"), body=lines, options=options,
+                         footer=f"ref {token(f'{key}:0')[:6]}")
+        self.outbox.enqueue(key, actor, target, text, menu=commands)
+
     def _history(self, job: dict) -> list:
         return self.store.data.get("eta_history", {}).get(job.get("profile") or self.config.profile, [])
 
@@ -303,6 +434,7 @@ class Portal:
                 if store.data["cursor"] is None:
                     store.data["cursor"] = store.data["floor"] = self.source.tail()
                     store.save()
+                self._resources()
                 self._recover_jobs()
                 self.outbox.pump(reconcile_only=True)
                 feed.refresh(store, self.clock())
@@ -314,11 +446,14 @@ class Portal:
                     self._advance(identity, record)
                 events = self.source.poll(store.data["cursor"], store.data["floor"])
                 for event in events:
+                    before = store.data["cursor"]
                     identity = self._ingest(event)
                     if identity is not None:
                         self._advance(identity, store.data["inbox"][identity])
-                    store.data["cursor"] = max(store.data["cursor"], event["id"])
-                    store.save()
+                    store.data["cursor"] = max(before, event["id"])
+                    # Re-read late-window rows that changed nothing must not rewrite the journal.
+                    if store.data["cursor"] != before or identity is not None:
+                        store.save()
                 pending = [
                     (identity, record) for identity, record in store.data["inbox"].items()
                     if record["state"] in ("decoding", "receiving", "ready", "runtime_pending")
@@ -329,7 +464,10 @@ class Portal:
                 self._poll_jobs()
                 self.outbox.pump()
                 feed.refresh(store, self.clock())
+                self._outage_report()
                 self._delivery_attention()
+                self._compact()
+                self._heartbeat()
                 failures = sum(
                     p["state"] in ("failed", "unknown") for p in store.data["outbox"]
                 )
@@ -739,6 +877,9 @@ class Portal:
         if command in ("1", "2", "approve"):
             self._approve_or_cancel(identity, record, conversation, command, argument)
             return
+        if command == "health" and not argument:
+            self._health_card(f"input:{identity}:health", actor, target)
+            return
         if command == "quiet" and (not argument or itui.HEX_REF.fullmatch(argument) or JOB_ID.fullmatch(argument)):
             job_id, job = self._job_for_actor(argument or None, actor, conversation)
             job.setdefault("stream", {"sent": 0, "last_at": 0, "quiet": False})["quiet"] = True
@@ -875,6 +1016,8 @@ class Portal:
                 "artifact_paths": record.get("requested_artifacts", []),
             }
             self.store.save()
+        if self.store.data.get("resources", {}).get("level") == "critical":
+            raise PortalError("disk_low", "Disk space is critically low; free space before new tasks. Status and stop still work.")
         policy = self.runtime.profile_policy(record["submission"]["profile"])
         if "policy_snapshot" not in record:
             record["policy_snapshot"] = policy
@@ -1003,6 +1146,7 @@ class Portal:
 
     def _recover_jobs(self) -> None:
         instance = os.environ.get("RAPP_PORTAL_WATCHER_INSTANCE", "manual")
+        changed = self.store.data.get("watcher_instance") != instance
         self.store.data["watcher_instance"] = instance
         budget = 4
         jobs = sorted(
@@ -1029,7 +1173,9 @@ class Portal:
                 )
             job["last_recovery"] = self.clock()
             job["recovery_instance"] = instance
-        self.store.save()
+            changed = True
+        if changed:
+            self.store.save()
 
     def _poll_jobs(self) -> None:
         budget = 4
@@ -1102,6 +1248,8 @@ class Portal:
         estimate = itui.estimate(now - job["started_at"], job.get("progress"), self._history(job))
         if estimate["basis"] == "history" and estimate["remaining"] is None and not stream.get("overrun"):
             stream["overrun"] = milestone = True
+        if self.store.data.get("resources", {}).get("level") == "critical":
+            return
         if itui.due(stream, now - job["started_at"], now, milestone=milestone):
             self._job_card(f"job:{job_id}:update:{stream['sent']}", job_id, job, update=True)
             stream["sent"] += 1

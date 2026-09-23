@@ -18,6 +18,9 @@ from .state import Store
 ACCEPTED = {"submitted", "sent", "delivered"}
 
 
+STALE_RECEIPT_SECONDS = 86400
+
+
 def token(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:24]
 
@@ -218,6 +221,10 @@ class Outbox:
                 self.store.save()
             if part["state"] in ("submitted", "sent", "unknown"):
                 if now - part.get("last_checked", 0) < 5 or receipt_budget == 0:
+                    continue
+                if part["state"] == "sent" and now - part.get("submitted_at", now) > STALE_RECEIPT_SECONDS:
+                    # A day-old "sent" receipt no longer changes; unknown and submitted parts keep
+                    # reconciling so late discovery still works, and RAPP resend/retry reconcile too.
                     continue
                 receipt_budget -= 1
                 try:

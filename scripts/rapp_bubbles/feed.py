@@ -95,6 +95,8 @@ def post(store, outbox: Outbox, actor: dict, target: dict, *, text: str, file: s
 def refresh(store, now: float) -> None:
     changed = False
     for item in store.data.get("feed", {}).values():
+        if item["state"] not in ("pending", "open"):
+            continue
         parts = _parts(store, item)
         if item["state"] == "pending":
             if parts and all(part["state"] in ("sent", "delivered") for part in parts):

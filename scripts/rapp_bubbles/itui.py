@@ -43,6 +43,7 @@ MENUS = {
     "final": (("Full result", "result {job}"), ("Recent jobs", "list")),
     "attention": (("Retry failed", "retry {job}"), ("Details", "status {job}")),
     "notice": (("Recent jobs", "list"), ("Help", "help")),
+    "system": (("Health", "health"), ("Recent jobs", "list")),
 }
 # Heartbeats by time since the job started, then every REPEAT seconds, up to MAX_UPDATES.
 HEARTBEATS = (120, 300, 600, 1200, 2100, 3600)

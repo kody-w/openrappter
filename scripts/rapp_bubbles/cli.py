@@ -49,7 +49,7 @@ def post_command(config, args):
         source.close()
 
 
-def status_command(store):
+def status_command(config, store):
     counts = {}
     for part in store.data["outbox"]:
         counts[part["state"]] = counts.get(part["state"], 0) + 1
@@ -57,6 +57,9 @@ def status_command(store):
         "ok": True, "initialized": store.data["cursor"] is not None,
         "jobs": len(store.data["jobs"]), "outbox": counts,
         "imessage": store.data.get("imessage_health", {}),
+        "resources": store.data.get("resources", {}),
+        "journal_bytes": (config.state_dir / "transport.json").stat().st_size
+        if (config.state_dir / "transport.json").exists() else 0,
         "feed": [item["state"] for item in feed.describe(store)],
         "recent_error_codes": [item["code"] for item in store.data["errors"][-10:]],
     }
@@ -97,7 +100,7 @@ def main(argv=None) -> int:
             result["healthy"] = result.pop("ok")
             result["ok"] = True
         else:
-            result = locked(config, status_command)
+            result = locked(config, lambda store: status_command(config, store))
         print(json.dumps(result, separators=(",", ":")))
         return 0 if result["ok"] else 1
     except PortalError as error:

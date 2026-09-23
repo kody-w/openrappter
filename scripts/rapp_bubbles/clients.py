@@ -367,6 +367,13 @@ def _restarted(state: dict, now: float, reason: str) -> None:
 
 
 def _verdict(state: dict, now: float, ok: bool, code: str, *, hint: str | None = None) -> bool:
+    if ok:
+        since = state.pop("down_since", None)
+        if since is not None and now - since >= 300:
+            # Remembered so the portal can tell the owner once that iMessage is back.
+            state["outage"] = {"start": since, "end": now, "code": state.get("code"), "reported": False}
+    else:
+        state.setdefault("down_since", now)
     state.update(ok=ok, code=code, checked_at=now)
     if hint:
         state["hint"] = hint

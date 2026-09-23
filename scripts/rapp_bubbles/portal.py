@@ -358,6 +358,10 @@ class Portal:
                 continue
             keep.append(part)
         data["outbox"] = keep
+        for conversation in data["conversations"].values():
+            approvals = conversation.get("approvals", {})
+            for job_id in [key for key, value in approvals.items() if value["expires_at"] < now - 3600]:
+                approvals.pop(job_id)
         uploads = {
             identity for conversation in data["conversations"].values() for identity in conversation.get("uploads", [])
         }
@@ -534,7 +538,9 @@ class Portal:
         match = ADDRESS.match(text)
         body = text[match.end():].strip() if match else ""
         has_files = event.get("has_attachments") is True or bool(event.get("attachments"))
-        numeric = text.strip() in ("1", "2") and bool(conversation["approvals"])
+        numeric = text.strip() in ("1", "2") and any(
+            value["expires_at"] > self.clock() for value in conversation["approvals"].values()
+        )
         if previous:
             if (
                 has_files and not text.strip() and "capture_eligible" not in previous
@@ -857,10 +863,9 @@ class Portal:
             )
             self._notice(f"input:{identity}:cleared", actor, target, "Pending RAPP file selection cleared.")
             return
-        if re.fullmatch(r"[1-9]", command) and not argument and not (
-            command in ("1", "2") and any(
-                value["expires_at"] > self.clock() for value in conversation["approvals"].values()
-            )
+        if (
+            record.get("explicit_address") and re.fullmatch(r"[1-9]", command) and not argument
+            and not (command in ("1", "2") and conversation["approvals"])
         ):
             # RAPP <n>: the latest open card's option, after other messages intervened.
             part = self.outbox.latest_menu(actor, self.clock())
@@ -922,7 +927,7 @@ class Portal:
             return
         if command in ("resume", "recover"):
             if argument:
-                self._job_for_actor(argument, actor, conversation)
+                argument, _ = self._job_for_actor(argument, actor, conversation)
             response = self._request({"op": "recover", "actor": actor, **({"job_id": argument} if argument else {})})
             self._notice(f"input:{identity}:recover", actor, target,
                          "Reconciled this thread's durable jobs. Recovery does not grant new permissions. "
@@ -962,7 +967,7 @@ class Portal:
             part = matches[0] if len({p["id"] for p in matches}) == 1 else None
             if not part or not part.get("job_id"):
                 raise PortalError("part_not_in_thread", "No uncertain result part belongs to this thread.")
-            count = self.outbox.retry(actor, part["job_id"], uncertain_part=argument)
+            count = self.outbox.retry(actor, part["job_id"], uncertain_part=part["id"])
             self._notice(f"input:{identity}:resend", actor, target,
                          f"Your explicit request queued {count} uncertain part(s). A previous attempt may still arrive.",
                          part["job_id"])
@@ -1256,6 +1261,8 @@ class Portal:
             stream["last_at"] = now
 
     def _finish_timing(self, job: dict, state: str) -> None:
+        if job.get("finished_at"):
+            return
         now = self.clock()
         started = job.get("started_at")
         job["finished_at"] = now

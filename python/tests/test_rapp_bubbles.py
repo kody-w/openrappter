@@ -2507,3 +2507,74 @@ def test_day_old_sent_receipts_are_not_polled_forever(env):
         env.clock.advance(10)
         env.portal().tick()
     assert len(checked) == before
+
+
+def test_a_stray_digit_after_an_approval_expires_never_stops_another_task(env):
+    approved_running_job(env)
+    env.clock.advance(10)
+    env.source.events.append(message(3, "RAPP another task"))
+    env.portal().tick()
+    env.clock.advance(400)
+    env.portal().tick()
+    env.source.prior_guids[CHAT] = "OTHER-AI-MESSAGE"
+    env.source.events.append(message(4, "2"))
+    env.portal().tick()
+    env.source.events.append(message(5, "RAPP 2"))
+    env.portal().tick()
+    assert not [call for call in env.runtime.calls if call["op"] == "cancel"]
+    assert state(env)["jobs"][JOB1]["state"] == "running"
+
+
+def test_repeated_long_cards_never_share_a_first_piece(env):
+    approved_running_job(env)
+    original = env.runtime.request
+
+    def long_result(request):
+        value = original(request)
+        if request["op"] == "result":
+            value["stdout"] = {**value["stdout"], "text": "y" * 5600}
+            if value.get("result"):
+                value["result"]["response"] = "x" * 5600
+        return value
+
+    env.runtime.request = long_result
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    env.clock.advance(10)
+    env.portal().tick()
+    env.source.events.extend([message(3, "RAPP result 0001"), message(4, "RAPP result 0001")])
+    env.clock.advance(10)
+    env.portal().tick()
+    firsts = [part["text"] for part in state(env)["outbox"] if part["index"] == 0 and "⋯ 1/" in part["text"]]
+    assert len(firsts) >= 3 and len(set(firsts)) == len(firsts)
+
+
+def test_resend_by_short_part_ref_requeues_that_uncertain_part(env):
+    approved_running_job(env)
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    env.clock.advance(10)
+    env.portal().tick()
+    with Store(env.config().state_dir) as store:
+        final = next(part for part in store.data["outbox"] if part["group"] == f"job:{JOB1}:final")
+        final.update(state="unknown", error="receipt_unconfirmed", text="[RAPP 0001] ✓ Done\nnever seen")
+        final.pop("guid", None)
+        store.save()
+        ref = final["id"][:6]
+    env.source.events.append(message(3, f"RAPP resend {ref}"))
+    env.clock.advance(10)
+    env.portal().tick()
+    part = next(part for part in state(env)["outbox"] if part["id"].startswith(ref))
+    assert part["attempt"] == 1 and any("[RAPP retry " in call["text"] for call in env.native.calls)
+
+
+def test_a_failing_final_result_records_the_job_duration_once(env):
+    env.source.events.append(message(1, "RAPP file result.png | create synthetic media"))
+    env.portal().tick()
+    env.clock.advance(10)
+    env.source.events.append(message(2, "1"))
+    env.portal().tick()
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    for _ in range(6):
+        env.clock.advance(10)
+        env.portal().tick()
+    assert state(env)["jobs"][JOB1]["error"] == "artifact_missing"
+    assert len(state(env)["eta_history"]["synthetic-workspace"]) == 1

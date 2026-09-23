@@ -52,6 +52,10 @@ class Outbox:
         if menu:
             # Every part of the group carries the menu, so a reply under any bubble resolves.
             extra.update(menu=list(menu), menu_until=self.clock() + itui.MENU_TTL)
+        if framed and len(pieces) > 1:
+            # Piece one needs its own unique line too: exact-text receipts must never collide.
+            head, _, rest = pieces[0].partition("\n")
+            pieces[0] = f"{head}\n⋯ 1/{len(pieces)} · ref {token(f'{group}:0')[:6]}" + (f"\n{rest}" if rest else "")
         prepared = []
         staged = []
         try:

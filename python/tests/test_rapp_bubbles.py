@@ -6115,3 +6115,77 @@ def test_a_tick_failure_record_read_again_after_a_crash_is_counted_once(env, mon
     env.clock.advance(60)
     env.portal().tick()
     assert state(env)["tick_alerts"]["transport_internal_error"]["count"] == 4
+
+
+# Round 8 review, pass 1.
+
+
+def second_task_on_timeline(env):
+    line = timeline(env)
+    line.direct_target = lambda chat: {"chat_id": 1, "chat_guid": chat, "is_group": False}
+    running_on_timeline(env, line)
+    env.clock.advance(10)
+    line.say("RAPP another task")
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    until_heartbeat(env)
+    return line
+
+
+@pytest.mark.parametrize("again", ["2", "RAPP 2"])
+def test_a_stop_sent_again_before_the_card_that_told_could_be_read_still_waits(env, again):
+    line = second_task_on_timeline(env)
+    env.clock.advance(10)
+    line.say(again)  # meant for task 2's Cancel
+    env.portal().tick()
+    assert env.native.calls[-1]["text"].startswith("[RAPP 0001] ● Not stopped\n")
+    told = next(part for part in state(env)["outbox"] if part.get("told_approvals"))
+    landed = max(told.get("submitted_at") or 0, told.get("sent_at") or 0)
+    env.clock.now = landed + 1
+    line.say(again)  # typed a second after that card left the Mac: not read yet
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel")
+    env.clock.advance(10)
+    line.say(again)  # sent again once it could have been read
+    env.portal().tick()
+    assert [call["job_id"] for call in explicit_ops(env, "cancel")] == [JOB1]
+
+
+def test_a_pick_whose_card_cannot_be_shown_again_is_still_set_aside(env, monkeypatch):
+    from rapp_bubbles import portal as portal_module
+
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    approved_running_job(env)
+
+    def broken(*_args, **_kwargs):
+        raise KeyError("synthetic card bug")
+
+    monkeypatch.setattr(portal_module.Portal, "_job_card", broken)
+    env.clock.advance(10)
+    env.source.events.append(message(3, "1"))  # Details, right under the running card
+    for _ in range(4):
+        assert env.portal().tick()["ok"]
+        env.clock.advance(10)
+    assert len([call for call in env.native.calls if "was set aside after an internal error" in call["text"]]) == 1
+
+
+def test_a_flaky_sender_is_told_while_it_can_still_send(env, monkeypatch):
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    owner_target(env)
+    env.portal().tick()
+    real, ticks = Outbox.pump, [0]
+
+    def sometimes(self, *, reconcile_only=False):
+        if not reconcile_only:
+            ticks[0] += 1
+            if ticks[0] in (1, 31, 61):
+                raise RuntimeError("synthetic")
+        return real(self, reconcile_only=reconcile_only)
+
+    monkeypatch.setattr(Outbox, "pump", sometimes)
+    for _ in range(70):
+        env.clock.advance(10)
+        env.portal().tick()
+    assert [call["text"].split("\n", 1)[0] for call in env.native.calls
+            if call["text"].startswith("[RAPP sys]")] == ["[RAPP sys] ! Sending flaky"]

@@ -1007,14 +1007,23 @@ class Portal:
                        if value["expires_at"] > now - LAPSE_SHADOW),
                       key=lambda key: conversation["approvals"][key]["expires_at"])
 
-    def _stop_shadowed(self, command: str, card: dict, quoted) -> list[str]:
+    def _stop_shadowed(self, command: str, card: dict, quoted, event: dict) -> list[str]:
         """The approvals that shadow this pick, or [] when it may be read as a Stop. A swipe-reply
         names its card, so it is not ambiguous; nor is a number sent again under a card that
-        was shown again saying those approvals were waiting."""
+        was shown again saying those approvals were waiting, once it could have been read: a
+        reply typed within RACE_SECONDS of that card landing was typed before it was (a row
+        without a chat.db time is judged by position alone)."""
         if not command.startswith("stop ") or quoted:
             return []
         waiting = self._shadowing(self._part_conversation(card))
-        return waiting if set(waiting) - set(card.get("told_approvals", ())) else []
+        told = set(card.get("told_approvals", ()))
+        if told:
+            typed = timestamp(event.get("created_at"))
+            parts = self.outbox.parts(card["group"])
+            texts = [part for part in parts if "text" in part] or parts
+            if typed > APPLE_EPOCH + 86400 and typed - max(map(self._landed, texts)) < RACE_SECONDS:
+                told = set()
+        return waiting if set(waiting) - told else []
 
     def _shadow_note(self, waiting: list[str], card: dict, n: int) -> str:
         approvals = (self._part_conversation(card) or {}).get("approvals", {})
@@ -1041,7 +1050,7 @@ class Portal:
         if bubble is not None and self._off_options(bubble, quoted):
             return {"reason": "piece", "note": PIECE_NOTE}
         card = next((item for item in parts if "text" in item), parts[0])
-        waiting = self._stop_shadowed(command, card, quoted) if command else []
+        waiting = self._stop_shadowed(command, card, quoted, event) if command else []
         if waiting:
             return {"reason": "approval", "note": self._shadow_note(waiting, card, n), "waiting": waiting}
         note = self._unread(parts, event, n, quoted=quoted, delivery=delivery, explicit=explicit)
@@ -1260,8 +1269,9 @@ class Portal:
                 stage.update(told=True, mark=now, kind="stuck" if stuck else "flaky")
                 changed = True
                 label, effect = STAGES.get(name, (name.capitalize(), "part of each tick is failing"))
-                if name != "send":
+                if name != "send" or not stuck:
                     # A stuck sender cannot send its own card; its back card says how long instead.
+                    # A flaky one sends between its failures, so it can.
                     stage["card"] = f"sys:stuck:{name}:{int(stage['since'])}"
                     kind = code.rsplit(":", 1)[-1]
                     if stuck:
@@ -1379,11 +1389,11 @@ class Portal:
                 if card and record.get("actor") and record.get("target") and self._shows_again(card, record["target"]):
                     # A number that broke before anything ran: its card comes again, so the
                     # number resent answers it.
-                    menu = card.get("menu") or []
+                    commands = card.get("menu") or []
                     try:
                         self._reoffer(identity, record["actor"], record["target"], card,
                                       note="An internal error stopped it, so nothing ran.",
-                                      refused=menu[pick["n"] - 1] if 0 < pick["n"] <= len(menu) else None)
+                                      refused=commands[pick["n"] - 1] if 0 < pick["n"] <= len(commands) else None)
                         text = None
                     except Exception:  # noqa: BLE001 - the Skipped card below still tells the owner
                         pass

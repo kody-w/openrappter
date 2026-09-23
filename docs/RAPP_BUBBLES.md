@@ -530,10 +530,10 @@ next ~5m · ref 3fa9c1
     that approval's Cancel. The running card comes again with `Not stopped` on its lock-screen
     line and the waiting task named (`Task 0002's approval is waiting, so nothing stopped.
     Send 2 again to stop 0001; to cancel 0002, swipe-reply 2 on its card.`). The same
-    number sent again under that card (or `RAPP 2` while it is the newest) stops the task,
-    since it was read with that news; so do a swipe-reply on a running card and
-    `RAPP stop 0001`. An approval that lapsed longer ago holds nothing, even while the
-    runtime has not yet reported it expired.
+    number sent again under that card (or `RAPP 2` while it is the newest), typed at least
+    3 seconds after it left the Mac, stops the task, since it was read with that news; so do
+    a swipe-reply on a running card and `RAPP stop 0001`. An approval that lapsed longer ago
+    holds nothing, even while the runtime has not yet reported it expired.
   - These reasons are checked in one order for a bare digit, `RAPP <n>`, and `cards`
     alike: first the lasting ones (the bubble does not show the options; another task's
     approval), then the passing ones (not confirmed yet, another author after the card, a
@@ -662,9 +662,9 @@ python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json resolv
   option with its label and the `RAPP …` text that does the same from anywhere (an agent
   post takes its numbers only as a reply on it). `rapp_n` is the card `RAPP <n>` answers
   right now, whether it is open, and `blocked`: whether the tick's read rule would refuse
-  `RAPP <n>` sent now, and why (`unconfirmed`, `closed`, `piece`, `foreign`, `approval`, or
-  `race` with `ready_in` seconds; null when it would be answered), by the tick's own rule in
-  its own order. `options` gives the same for
+  `RAPP <n>` sent now, and why (`unconfirmed`, `closed`, `foreign`, `approval`, or `race`
+  with `ready_in` seconds; null when it would be answered), by the tick's own rule in its
+  own order. `options` gives the same for
   each number: the tick guards Approve, Cancel, Stop, and answers to an agent's post, so
   Details or Quiet on a card runs even when its Stop would be refused. A Stop held for
   another task's approval names it (`"waiting": ["0002"]`), and only a race alone carries
@@ -751,7 +751,8 @@ event, each ending with `[1] Health` and `[2] Recent jobs`:
   range (`it failed for 5m–10m`), since the time of its latest failure is saved at most
   every five minutes; for the same reason the hold counts twenty minutes from the latest
   saved failure. A stuck sender cannot send its own card, so it gets one `✓ Sending back ·
-  it failed for 1m–6m` card instead, and a stuck card that never left the Mac is dropped when
+  it failed for 1m–6m` card instead (a flaky one sends between its failures, so it gets its
+  `! Sending flaky` card), and a stuck card that never left the Mac is dropped when
   its stage is back. A card that fails to build never fails the tick. `RAPP health` lists
   stuck and flaky stages, and stages that failed lately without a card. While this tick's
   disk check fails, new tasks are refused with `disk_unknown`: a disk that cannot be

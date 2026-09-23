@@ -6263,3 +6263,31 @@ def test_an_agent_post_numbering_with_an_ordinal_numero_interrupts_rapp_n(env, t
     line.say("RAPP 2")
     env.portal().tick()
     assert not explicit_ops(env, "cancel")
+
+
+# Round 8 review, pass 5.
+
+
+@pytest.mark.parametrize("text", ["\u9078\u629e\u80a2\u306f1\u304b2\u3067\u3059", "\u7b2c1\u6848\u304b\u7b2c2\u6848",
+                                  "\u9009\u98791\u6216\u9009\u98792", "\uc81c1\uc548 \ub610\ub294 \uc81c2\uc548",
+                                  "\u0e02\u0e49\u0e2d1\u0e2b\u0e23\u0e37\u0e2d\u0e02\u0e49\u0e2d2"])
+def test_an_agent_post_offering_numbers_in_a_script_without_spaces_interrupts_rapp_n(env, text):
+    from rapp_bubbles import itui
+
+    assert itui.names_numbers(text)
+    line = timeline(env)
+    running_on_timeline(env, line)
+    env.clock.advance(10)
+    feed_post(env, text=text, options=0)
+    env.portal().tick()
+    env.clock.advance(10)
+    line.say("RAPP 2")
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel")
+
+
+def test_only_a_latin_letter_or_digit_glues_a_number_into_a_word():
+    from rapp_bubbles import itui
+
+    for text in ("R8 ships", "v10 out", "Build 42", "ref 64707a", "\uff32\uff18 ships"):  # fullwidth R8 is R8
+        assert not itui.names_numbers(text), text

@@ -144,7 +144,10 @@ def names_numbers(text: str) -> bool:
             run = [unicodedata.digit(ch) for ch in line[index:end]]
             while len(run) > 1 and run[0] == 0:
                 run.pop(0)  # zero-padded: "02" shows a 2
-            if not line[index - 1:index].isalnum() and len(run) == 1 and run[0] in range(1, 10):
+            # Only a Latin letter or digit glues a number into a word ("R8", "v10"): scripts
+            # written without spaces (Japanese, Chinese, Thai) put a number right after a letter.
+            before = line[index - 1:index]
+            if not (before.isalnum() and before.isascii()) and len(run) == 1 and run[0] in range(1, 10):
                 return True
             index = end
     return False

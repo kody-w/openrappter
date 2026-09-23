@@ -2178,3 +2178,13 @@ def test_cli_post_targets_only_the_authorized_direct_thread_and_reports_status(e
     assert json.loads(capsys.readouterr().out)["error"]["code"] == "feed_target"
     assert cli.main(["--config", str(path), "transport-status"]) == 0
     assert json.loads(capsys.readouterr().out)["feed"] == ["pending"]
+
+
+@pytest.mark.parametrize("reply", ["²", "①", "٣", "9" * 5000, "0", "10"])
+def test_non_ascii_or_oversized_digit_replies_never_wedge_ticks(env, reply):
+    post_id = delivered_feed_post(env, options=3)
+    env.source.events.append(message(1, reply))
+    env.portal().tick()
+    env.portal().tick()
+    answer = state(env)["feed"][post_id]["answer"]
+    assert answer is not None and answer["number"] is None

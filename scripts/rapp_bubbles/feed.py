@@ -143,7 +143,8 @@ def capture(store, event: dict, actor: dict, text: str, now: float, *,
         # Nothing has reached the phone yet, so there is nothing to answer.
         return None
     stripped = text.strip()
-    number = int(stripped) if stripped.isdigit() and 1 <= int(stripped) <= item["options"] else None
+    # ASCII only: "²" or "①" pass str.isdigit() but crash int() and would wedge every tick.
+    number = int(stripped) if re.fullmatch(r"[1-9]", stripped) and int(stripped) <= item["options"] else None
     item.update(state="answered", answer={
         "text": stripped[:2000], "number": number, "guid": event.get("guid"),
         "rowid": event.get("id"), "at": now, "explicit": explicit, "has_attachments": has_files,

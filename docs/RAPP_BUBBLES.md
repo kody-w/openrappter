@@ -668,6 +668,9 @@ One bad item can no longer stop every tick:
   result) gets its text with `Output files unavailable (<code>)` after two tries instead
   of being retried forever; a transient failure (a timeout, a full disk, reported as
   `disk_full`) keeps backing off with its files intact.
+- **A full disk never loses a file.** A result file waits, still queued, until there is
+  room to verify and send it, then goes out by itself; an incoming upload waits for space
+  until its deadline, and only then fails with `disk_full`.
 - **Errors are kept once per code**, with a count and first and last time, so one
   repeating failure cannot push every other cause out of the 100-entry ring. `RAPP
   health` shows the last error.

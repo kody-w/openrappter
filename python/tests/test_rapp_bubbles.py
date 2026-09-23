@@ -3741,3 +3741,75 @@ def test_a_full_disk_while_staging_is_not_called_an_unsafe_file(env, monkeypatch
     with pytest.raises(PortalError) as caught:
         copy_reference(source, (env.root,), env.root / "staged" / "input.txt", 1024)
     assert caught.value.code == "disk_full"
+
+
+def test_a_file_part_waits_while_the_disk_is_full_and_goes_out_after(env, monkeypatch):
+    from rapp_bubbles import outbox as outbox_module
+
+    free = {"bytes": 0}
+    monkeypatch.setattr(shutil, "disk_usage",
+                        lambda _path: SimpleNamespace(total=100 * 2**30, used=0, free=free["bytes"]))
+    real = outbox_module.copy_reference
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        enqueue_native_test_batch(env, outbox, [".png"])
+        for _ in range(3):
+            outbox.pump()
+            env.clock.advance(10)
+        file_part = next(part for part in store.data["outbox"] if "file" in part)
+        assert file_part["state"] == "queued" and not [call for call in env.native.calls if call["file"]]
+        # Room reported, but the disk fills during the verifying copy: still queued, not lost.
+        free["bytes"] = 50 * 2**30
+
+        def full(*_args, **_kwargs):
+            raise PortalError("disk_full", "Synthetic full disk.")
+
+        monkeypatch.setattr(outbox_module, "copy_reference", full)
+        outbox.pump()
+        assert file_part["state"] == "queued"
+        monkeypatch.setattr(outbox_module, "copy_reference", real)
+        for _ in range(2):
+            env.clock.advance(10)
+            outbox.pump()
+    assert [call for call in env.native.calls if call["file"]]
+
+
+def test_an_upload_on_a_full_disk_waits_for_space_instead_of_failing(env, monkeypatch):
+    from rapp_bubbles import portal as portal_module
+
+    real = portal_module.copy_reference
+    full = [True]
+
+    def copy(*args, **kwargs):
+        if full[0]:
+            raise PortalError("disk_full", "Synthetic full disk.")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(portal_module, "copy_reference", copy)
+    env.source.events.extend([
+        message(1, "RAPP attach"), message(2, "", has_attachments=True, attachments=[attachment(env)]),
+    ])
+    for _ in range(3):
+        env.portal().tick()
+        env.clock.advance()
+    record = next(item for item in state(env)["inbox"].values() if item["event"]["id"] == 2)
+    assert record["state"] == "receiving"
+    full[0] = False
+    for _ in range(3):
+        env.portal().tick()
+        env.clock.advance()
+    assert any("Saved 1 attachment" in call["text"] for call in env.native.calls)
+
+
+def test_reader_does_not_vouch_for_a_long_or_inverted_gap(env):
+    db = make_database(env)
+    source = SQLiteSource(env.config())
+    insert_message(db, 1, "[RAPP 0001] one", guid="CARD-1")
+    for index in range(2, 54):
+        insert_message(db, index, f"row {index}", guid=f"ROW-{index}")
+    insert_message(db, 54, "[RAPP 0001] two", guid="CARD-2")
+    assert source.between(CHAT, "CARD-1", "CARD-2") is None
+    assert source.between(CHAT, "CARD-2", "CARD-1") is None
+    assert source.between(CHAT, "ROW-2", "ROW-4") == [{"guid": "ROW-3", "is_from_me": False}]
+    source.close()
+    db.close()

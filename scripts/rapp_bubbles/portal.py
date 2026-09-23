@@ -1163,6 +1163,8 @@ class Portal:
 
     def _receive(self, identity: str, record: dict) -> bool:
         if self.clock() > record["deadline"]:
+            if record.get("staging_error") == "disk_full":
+                raise PortalError("disk_full", "The disk stayed full, so the attachment was not saved; free space and send it again.")
             raise PortalError("attachment_timeout", "An attachment did not finish downloading; send it again after download.")
         attachments = self.source.attachments(record["event"])
         if not isinstance(attachments, list) or len(attachments) > self.config.max_files:
@@ -1236,6 +1238,10 @@ class Portal:
             except PortalError as error:
                 if error.code == "file_changed":
                     record["observations"].pop(key, None)
+                    waiting = True
+                elif error.code == "disk_full":
+                    # Wait for space until the upload's deadline rather than failing at once.
+                    record["staging_error"] = "disk_full"
                     waiting = True
                 else:
                     raise

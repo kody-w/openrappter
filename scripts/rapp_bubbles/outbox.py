@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -11,11 +13,8 @@ from typing import Callable
 from .clients import NotSubmitted, SubmissionUnknown
 from .config import Config, PortalError, normalized
 from . import itui
-import sqlite3
-
-from .state import JournalWriteError, strict
 from .files import copy_reference, filename
-from .state import Store
+from .state import JournalWriteError, Store, strict
 
 
 ACCEPTED = {"submitted", "sent", "delivered"}
@@ -296,6 +295,10 @@ class Outbox:
                 for p in previous
             ):
                 continue
+            if "file" in part and not self._room_for(part["file"].get("size_bytes") or 0):
+                # Verifying a file copies it once more; on a full disk it waits, still queued
+                # and unwritten, and goes out by itself once space is freed.
+                continue
             # A transient chat.db error here fails the tick with the part still queued.
             allowed = self._allowed(part)
             try:
@@ -344,6 +347,8 @@ class Outbox:
             except SubmissionUnknown as error:
                 part.update(state="unknown", error=error.code, retryable=False)
             except (PortalError, OSError) as error:
+                if getattr(error, "code", None) == "disk_full" and part["state"] == "queued":
+                    continue  # the disk filled between the check and the copy: wait, queued
                 part.update(
                     state="unknown" if part["state"] == "submitting" else "failed",
                     error=getattr(error, "code", "outbox_file_missing"),
@@ -362,6 +367,9 @@ class Outbox:
                 )
             self.store.save()
             budget -= 1
+
+    def _room_for(self, size: int) -> bool:
+        return shutil.disk_usage(self.config.state_dir).free >= size + 16 * 2**20
 
     def retry(self, actor: dict, job_id: str, *, uncertain_part: str | None = None) -> int:
         changed = 0

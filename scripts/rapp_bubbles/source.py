@@ -71,7 +71,7 @@ class SQLiteSource:
                    WHERE c.guid=? AND m.guid IN (?, ?)""", (chat_guid, after, before),
             )
         }
-        if after not in ids or before not in ids:
+        if after not in ids or before not in ids or ids[after] >= ids[before]:
             return None
         reactions = (
             "AND (m.associated_message_type IS NULL OR m.associated_message_type<2000 "
@@ -83,9 +83,10 @@ class SQLiteSource:
                JOIN chat_message_join j ON j.message_id=m.ROWID
                JOIN chat c ON c.ROWID=j.chat_id
                WHERE c.guid=? AND m.ROWID>? AND m.ROWID<? {reactions}
-               ORDER BY m.ROWID LIMIT 50""", (chat_guid, ids[after], ids[before]),
-        )
-        return [{"guid": row["guid"], "is_from_me": bool(row["is_from_me"])} for row in rows]
+               ORDER BY m.ROWID LIMIT 51""", (chat_guid, ids[after], ids[before]),
+        ).fetchall()
+        # More than 50 rows is too much to vouch for: report it as unknown.
+        return None if len(rows) > 50 else [{"guid": row["guid"], "is_from_me": bool(row["is_from_me"])} for row in rows]
 
     def latest_prior_guid(self, event: dict) -> str | None:
         # A tapback is not a message: reacting to a card must not break the reply after it.

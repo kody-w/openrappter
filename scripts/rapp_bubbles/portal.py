@@ -1120,8 +1120,8 @@ class Portal:
             label, _ = STAGES.get(name, (name.capitalize(), ""))
             # For the same reason, how long it failed is known to within STAGE_LAST_EVERY.
             low = stage.get("last", stage["since"]) - stage["since"]
-            spell = (f"under {itui.span(STAGE_LAST_EVERY)}" if low < 60
-                     else f"{itui.span(low)}–{itui.span(low + STAGE_LAST_EVERY)}")
+            high = itui.span(low + STAGE_LAST_EVERY)
+            spell = f"under {high}" if low < 60 else f"{itui.span(low, floor=True)}–{high}"
             self._stage_card(f"sys:back:{name}:{int(stage['since'])}", itui.GLYPH["succeeded"], f"{label} back",
                              [f"it failed for {spell}"])
         self.store.save()

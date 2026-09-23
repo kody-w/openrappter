@@ -87,11 +87,12 @@ def label(prompt: str) -> str:
     return clip(prompt, 24)
 
 
-def span(seconds: float) -> str:
+def span(seconds: float, *, floor: bool = False) -> str:
+    """A short duration, rounded up to the minute (down with ``floor``, for a lower bound)."""
     seconds = max(0.0, float(seconds))
     if seconds < 60:
         return "<1m"
-    minutes = math.ceil(seconds / 60)
+    minutes = math.floor(seconds / 60) if floor else math.ceil(seconds / 60)
     if minutes < 60:
         return f"{minutes}m"
     hours, rest = divmod(minutes, 60)

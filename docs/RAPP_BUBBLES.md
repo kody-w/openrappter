@@ -725,7 +725,7 @@ event, each ending with `[1] Health` and `[2] Recent jobs`:
   (`it failed for 5m–10m`), since the time of its latest failure is saved at most every
   five minutes; for the same reason the hold counts twenty minutes from the latest saved
   failure. A stuck sender cannot send its own card, so it gets one `✓ Sending back · it
-  failed for under 5m` card instead, and a stuck card that never left the Mac is dropped when its
+  failed for 1m–6m` card instead, and a stuck card that never left the Mac is dropped when its
   stage is back. A card that fails to build never fails the tick. `RAPP health` lists
   stuck stages. While this tick's disk check fails, new tasks are refused with
   `disk_unknown`: a disk that cannot be checked is not assumed to have room.

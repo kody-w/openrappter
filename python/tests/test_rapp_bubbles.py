@@ -5647,3 +5647,31 @@ def test_a_back_card_waits_the_whole_hold_and_bounds_how_long_the_stage_failed(e
     assert back["created_at"] - last_failure >= 900
     low, high = map(int, re.search(r"it failed for (\d+)m–(\d+)m", back["text"]).groups())
     assert low * 60 <= last_failure - started <= high * 60
+
+
+# Round 7 review, pass 3.
+
+
+def test_a_back_card_range_holds_a_stage_that_failed_twice_minutes_apart(env, monkeypatch):
+    import re
+    from rapp_bubbles import portal as portal_module
+
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    owner_target(env)
+    env.portal().tick()
+    real, ticks, fails = portal_module.Portal._outage_report, [0], []
+
+    def twice(self):
+        ticks[0] += 1
+        if ticks[0] in (1, 33):  # two failures, 320 s apart
+            fails.append(self.clock())
+            raise RuntimeError("synthetic")
+        return real(self)
+
+    monkeypatch.setattr(portal_module.Portal, "_outage_report", twice)
+    for _ in range(200):
+        env.clock.advance(10)
+        env.portal().tick()
+    back = next(part["text"] for part in state(env)["outbox"] if part["group"].startswith("sys:back:outage"))
+    low, high = map(int, re.search(r"it failed for (\d+)m–(\d+)m", back).groups())
+    assert low * 60 <= fails[-1] - fails[0] <= high * 60, back

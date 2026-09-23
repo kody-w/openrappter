@@ -66,11 +66,20 @@ FILLERS = frozenset("\u115f\u1160\u3164\uffa0")
 BIDI = frozenset("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
 
 
+def _numeral(ch: str) -> str:
+    """A character read for the number it shows: a numeral sign stays a sign ("№2" is "#2",
+    not the word "No2" NFKC makes of it), and a number drawn as letters (Roman Ⅱ) is its digit."""
+    if ch == "\u2116":
+        return "#"
+    value = unicodedata.numeric(ch, 0) if unicodedata.category(ch) == "Nl" else 0
+    return str(int(value)) if value in range(1, 10) else ch
+
+
 def _shown(line: str) -> tuple[str, bool]:
     """A line as the phone draws its characters (NFKC, without format characters or fillers),
     and whether it may be drawn in another order than stored (a bidi control or a
     right-to-left letter on it)."""
-    line = unicodedata.normalize("NFKC", line)
+    line = unicodedata.normalize("NFKC", "".join(map(_numeral, line)))
     clean = "".join(ch for ch in line if unicodedata.category(ch) != "Cf" and ch not in FILLERS)
     return clean, any(ch in BIDI for ch in line) or any(unicodedata.bidirectional(ch) in ("R", "AL") for ch in clean)
 
@@ -79,10 +88,20 @@ def _digit(ch: str) -> bool:
     return unicodedata.digit(ch, 0) in range(1, 10)
 
 
+def _leads(word: str) -> bool:
+    """Whether a word shows a number 1-9 first, zero-padded or not ("2", "02", "10", "1st")."""
+    for ch in word:
+        value = unicodedata.digit(ch, None)
+        if value != 0:
+            return value in range(1, 10)
+    return False
+
+
 def draws_numbers(text: str) -> bool:
     """Whether text draws numbered choices in any form a phone shows as one: a line whose
-    first letter or digit, after any marks (brackets, bullets, markdown), is a digit 1-9.
-    Fullwidth, keycap, circled, and other-script digits count (NFKC, then the digit value);
+    first word, after any marks (brackets, bullets, markdown), starts with a digit 1-9 (after
+    any leading zeros: "01."). Fullwidth, keycap, circled, Roman, and other-script digits
+    count (NFKC, then the digit value);
     format characters and invisible fillers are skipped, and a line that may be drawn in
     another order (bidi controls, right-to-left text) counts when any digit 1-9 is on it.
     Deny by default: a line that merely starts with a count counts too."""
@@ -92,27 +111,36 @@ def draws_numbers(text: str) -> bool:
             if any(_digit(ch) for ch in line):
                 return True
             continue
-        found = re.match(r"[\W_]*(\w)", line.strip())
-        if found and _digit(found.group(1)):
+        found = re.match(r"[\W_]*(\w+)", line.strip())
+        if found and _leads(found.group(1)):
             return True
     return False
 
 
 def names_numbers(text: str) -> bool:
     """Whether text shows a number 1-9 that starts a word of its own anywhere ("Reply 1 or
-    2", "2️⃣", "5/8", "1st", "_2_"), not only at the start of a line: how another author's
-    words are read, deny by default, since any of them may be what the owner's number
-    answers. A digit inside a word or a longer number ("R8", "42", "v10") does not count."""
+    2", "2️⃣", "5/8", "1st", "_2_", "02", "№2", "Ⅱ"), not only at the start of a line: how
+    another author's words are read, deny by default, since any of them may be what the
+    owner's number answers. A digit inside a word or a longer number ("R8", "42", "v10")
+    does not count."""
     for raw in text.splitlines():
         line, reordered = _shown(raw)
         if reordered and any(_digit(ch) for ch in line):
             return True
-        for index, ch in enumerate(line):
-            if not _digit(ch):
+        index = 0
+        while index < len(line):
+            if unicodedata.digit(line[index], None) is None:
+                index += 1
                 continue
-            before, after = line[index - 1:index], line[index + 1:index + 2]
-            if not before.isalnum() and not (after and unicodedata.digit(after, None) is not None):
+            end = index
+            while end < len(line) and unicodedata.digit(line[end], None) is not None:
+                end += 1
+            run = [unicodedata.digit(ch) for ch in line[index:end]]
+            while len(run) > 1 and run[0] == 0:
+                run.pop(0)  # zero-padded: "02" shows a 2
+            if not line[index - 1:index].isalnum() and len(run) == 1 and run[0] in range(1, 10):
                 return True
+            index = end
     return False
 
 

@@ -6017,8 +6017,9 @@ def test_numbers_are_read_the_way_a_phone_draws_them():
         assert itui.draws_numbers(text), text
     for text in ("Reply 1 to ship or 2 to hold", "Pick 2", "5/8 agents in", "v1.2 is out", "2\ufe0f\u20e3"):
         assert itui.names_numbers(text), text
-    for text in ("Build 42 passed.", "R8 ships 40676fe", "No numbers here", "Loop 01"):
+    for text in ("Build 42 passed.", "R8 ships 40676fe", "No numbers here"):
         assert not itui.names_numbers(text) and not itui.draws_numbers(text), text
+    assert itui.names_numbers("Loop 01") and not itui.draws_numbers("Loop 01")  # a zero-padded 1 is a 1
 
 
 def test_an_update_without_options_never_lapses(env):
@@ -6213,5 +6214,33 @@ def test_a_number_that_starts_a_word_is_named_and_one_inside_a_word_is_not():
 
     for text in ("1st: ship", "Pick 2nd", "_2_ Hold", "\u33e1 Hold", "2FA on", "x (3)", "\u00b2 more"):
         assert itui.names_numbers(text), text
-    for text in ("R8 ships", "Build 42", "v10 out", "Loop 01", "No numbers", "ref 64707a"):
+    for text in ("R8 ships", "Build 42", "v10 out", "No numbers", "ref 64707a", "0 left"):
         assert not itui.names_numbers(text), text
+
+
+# Round 8 review, pass 3.
+
+
+@pytest.mark.parametrize("text", ["Pick one:\n01. Ship it\n02. Hold", "Pick \u21161 or \u21162", "Pick 01 or 02",
+                                  "Option \u2160 or \u2161"])
+def test_an_agent_post_numbering_its_choices_another_way_interrupts_rapp_n(env, text):
+    line = timeline(env)
+    running_on_timeline(env, line)
+    env.clock.advance(10)
+    feed_post(env, text=text, options=0)
+    env.portal().tick()
+    env.clock.advance(10)
+    line.say("RAPP 2")  # meant for the agent's second choice
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel")
+
+
+def test_zero_padded_and_roman_numbers_are_read_as_numbers():
+    from rapp_bubbles import itui
+
+    for text in ("01. Ship", "Pick one:\n02. Hold", "\u2161 Hold"):
+        assert itui.draws_numbers(text), text
+    for text in ("0. Cancel", "0x1F", "Loop 01"):
+        assert not itui.draws_numbers(text), text
+    for text in ("Pick \u21162", "Pick 02", "Option \u2161"):
+        assert itui.names_numbers(text), text

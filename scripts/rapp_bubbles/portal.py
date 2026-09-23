@@ -38,11 +38,22 @@ INTERNAL_ATTEMPTS = 3  # internal errors before a job is no longer followed
 # Known failures keep their handling and transient ones (a locked chat.db) fail the tick to be
 # retried; only unexpected errors are ever set aside.
 UNCONTAINED = (JournalWriteError, PortalError, sqlite3.Error)
+DEGRADED_AFTER = 60  # a stage failing this long, tick after tick, gets one card
+STAGES = {  # stage: (lock-screen label, what the owner loses while it fails)
+    "disk": ("Disk", "disk checks fail, so new tasks are refused"),
+    "recover": ("Recovery", "restart recovery is paused"),
+    "receipts": ("Receipts", "delivery checks are paused"),
+    "feed": ("Feed", "agent updates may not open"),
+    "poll": ("Updates", "task updates and results are paused"),
+    "send": ("Sending", "cards may not go out"),
+    "outage": ("Outage", "outage reports are paused"),
+    "attention": ("Alerts", "delivery alerts are paused"),
+    "compact": ("Cleanup", "journal cleanup is paused"),
+}
 APPLE_EPOCH = 978307200
 RACE_NOTE = "Your reply landed as this card arrived, so nothing ran."
 UNCONFIRMED_NOTE = "Not confirmed on your phone, so nothing ran."
-POST_RACE = ("Your reply landed as an update arrived, so nothing was answered.\n"
-             "Swipe-reply on the update to answer it.")
+FOREIGN_NOTE = "Another message came after this card, so nothing ran."
 JOB_ID = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{32}")
 TERMINAL = {"succeeded", "completed", "failed", "cancelled", "canceled", "interrupted", "expired"}
 OUTPUT_EXTENSIONS = {
@@ -65,9 +76,10 @@ HELP = (
     "RAPP resend <part-id> — deliberately resend one uncertain part after checking your phone.\n"
     "RAPP clear files — discard the pending input selection.\n"
     "Loop updates: a bare reply right after an update answers it (numbers pick its options). "
-    "RAPP reply <text> answers the latest open update even after other messages.\n"
+    "RAPP reply <text> answers the latest open update even after your other messages.\n"
     "Cards end with [n] options: reply the digit right under a card (or swipe-reply to it), "
-    "or RAPP <n> for the newest card after other messages. On a live approval card, 1 approves "
+    "or RAPP <n> for the newest card after your other messages (after another AI's message, "
+    "the card comes again: send the number under it). On a live approval card, 1 approves "
     "and 2 cancels that task only; RAPP approve <job-id> always works. "
     "Running tasks keep sending ETA updates.\n"
     "RAPP quiet [job] stops a task's automatic updates; its result still comes.\n"
@@ -130,6 +142,7 @@ class Portal:
         self.store: Store
         self.outbox: Outbox
         self._quarantined: list[dict] = []
+        self._runtime_called = False
 
     def authorize(self, event: dict) -> dict | None:
         if (
@@ -422,6 +435,27 @@ class Portal:
         )
         self.store.save()
 
+    @staticmethod
+    def _failure_cause(failure: dict) -> str:
+        return "disk full" if failure.get("errno") == 28 else str(failure.get("code") or "unknown")
+
+    def _take_tick_failure(self) -> dict | None:
+        """The cause the CLI recorded for ticks that failed as a whole (they save nothing)."""
+        path = self.config.state_dir / "tick-failure.json"
+        try:
+            modified = path.stat().st_mtime
+        except FileNotFoundError:
+            return None
+        try:
+            failure = json.loads(path.read_text(encoding="utf-8"))
+            failure = failure if isinstance(failure, dict) else {}
+        except (OSError, ValueError):
+            failure = {}
+        failure["last"] = max(float(failure.get("last") or 0), modified)
+        self.store.data["last_tick_failure"] = failure
+        path.unlink(missing_ok=True)
+        return failure
+
     def _heartbeat(self) -> None:
         """Touch a tiny file per successful tick; a long gap means ticks failed or stopped."""
         path = self.config.state_dir / "heartbeat"
@@ -430,9 +464,14 @@ class Portal:
             last = path.stat().st_mtime
         except FileNotFoundError:
             last = None
+        failure = self._take_tick_failure()
         if last is not None and now - last >= 300:
+            cause = (f"{failure.get('count', 1)} ticks failed · {self._failure_cause(failure)}"
+                     if failure else "check RAPP health")
             self._system_card(f"sys:gap:{int(last)}", itui.GLYPH["succeeded"], "Back online",
-                              [f"no ticks for {itui.span(now - last)}", "check RAPP health"])
+                              [f"no ticks for {itui.span(now - last)}", cause])
+            self.store.save()
+        elif failure:
             self.store.save()
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         os.close(descriptor)
@@ -496,6 +535,10 @@ class Portal:
             f"Journal: {journal // 1024} KB",
             *([f"Last error: {data['errors'][-1]['code']} ×{data['errors'][-1].get('count', 1)}"]
               if data.get("errors") else []),
+            *(f"Stuck: {STAGES.get(name, (name,))[0].lower()} for {itui.span(self.clock() - stage['since'])}"
+              for name, stage in data.get("stages", {}).items()),
+            *([f"Last failed ticks: {data['last_tick_failure'].get('count', 1)} · "
+               f"{self._failure_cause(data['last_tick_failure'])}"] if data.get("last_tick_failure") else []),
             "Outbox: " + (", ".join(f"{count} {state}" for state, count in sorted(states.items())) or "empty"),
         ]
         if health.get("hint"):
@@ -526,10 +569,14 @@ class Portal:
         """Approve, Cancel and Stop act on a task; the other options only show things."""
         return part.get("menu_kind") == "approval" or command.startswith("stop ")
 
-    @staticmethod
-    def _landed(part: dict) -> float:
-        """When a bubble left the Mac: after its send returned, not when the send began."""
-        return max(part.get("submitted_at") or 0, part.get("sent_at") or 0)
+    def _landed(self, part: dict) -> float:
+        """When a bubble left the Mac: when its send returned, or the chat.db row it was later
+        found in. A send that never returned may have taken its whole timeout."""
+        submitted = part.get("submitted_at") or 0
+        sent = part.get("sent_at")
+        if sent is None and submitted:
+            sent = submitted + self.config.native_timeout
+        return max(submitted, sent or 0)
 
     def _meaning(self, part: dict, n: int | None):
         """What number n picks on a card; the same meaning on two cards is the same choice."""
@@ -580,6 +627,10 @@ class Portal:
         texts = [part for part in parts if "text" in part] or parts
         if delivery and any(part["state"] not in ("sent", "delivered") for part in texts):
             return UNCONFIRMED_NOTE
+        if explicit and not self._uninterrupted(texts[-1], event):
+            # RAPP <n> finds our newest card, but another author's bubble after it (an AI's
+            # look-alike card, a group member) may be what the owner was answering.
+            return FOREIGN_NOTE
         typed = timestamp(event.get("created_at"))
         if typed <= APPLE_EPOCH + 86400 or typed - max(map(self._landed, texts)) >= RACE_SECONDS:
             return None
@@ -611,6 +662,26 @@ class Portal:
             for row in rows
         )
 
+    def _ours_or_owner(self, row: dict, event: dict) -> bool:
+        """A row that leaves the owner's view on our card: our own bubble, or his own message
+        (any inbound row in a one-to-one chat; in a group, one from his handle)."""
+        if self.outbox.part_for_guid(row["guid"]) is not None:
+            return True
+        if row["is_from_me"]:
+            return False
+        return not event.get("is_group") or normalized(str(row.get("sender") or "")) == normalized(
+            str(event.get("sender") or ""))
+
+    def _uninterrupted(self, card: dict, event: dict) -> bool:
+        """Nothing from another author sits between a card and an explicit reply to it."""
+        between = getattr(self.source, "between", None)
+        guids = [part.get("guid") or part.get("caption_guid") for part in self.outbox.parts(card["group"])]
+        guids = [guid for guid in guids if guid]
+        if not callable(between) or not guids or not isinstance(event.get("guid"), str):
+            return False
+        rows = between(event["chat_guid"], guids[-1], event["guid"])
+        return rows is not None and all(self._ours_or_owner(row, event) for row in rows)
+
     def _readable(self, identity: str, record: dict, card: dict, n: int, quoted) -> bool:
         """False, after re-offering the card as the newest one, when RAPP <n> cannot have been
         meant for it."""
@@ -622,21 +693,49 @@ class Portal:
         self._reoffer(identity, record["actor"], record["target"], part, note=note)
         return False
 
-    def _post_guard(self, event: dict, text: str, refused: list):
-        """A feed.capture guard: an answer typed as its post landed is not recorded."""
+    def _post_guard(self, event: dict, text: str, refused: list, *, explicit: bool):
+        """A feed.capture guard: an answer typed as its post landed, or (for RAPP <n> and RAPP
+        reply) after another author's bubble, is not recorded."""
         digit = re.fullmatch(r"[1-9]", text.strip())
 
         def guard(item: dict) -> bool:
-            parts = self.outbox.parts(item["group"])
+            bubbles = feed._bubbles(self.store, item)
             quoted = bool(event.get("reply_to")) and event["reply_to"] in {
-                value for part in parts for value in (part.get("guid"), part.get("caption_guid")) if value
+                value for part in bubbles for value in (part.get("guid"), part.get("caption_guid")) if value
             }
+            # The newest showing of the post that left the Mac (its copy after a refusal, once
+            # sent) is the one being answered.
+            groups = list(dict.fromkeys(part["group"] for part in bubbles))
+            shown = [group for group in groups if any(
+                part.get("guid") or part.get("caption_guid") for part in self.outbox.parts(group))]
+            parts = self.outbox.parts((shown or groups or [item["group"]])[-1])
             note = self._unread(parts, event, int(digit.group()) if digit else None,
-                                quoted=quoted, delivery=False, explicit=True)
+                                quoted=quoted, delivery=False, explicit=explicit)
             if note:
-                refused.append(item["id"])
+                refused.append((item["id"], note))
             return note is None
         return guard
+
+    def _post_refusal(self, identity: str, actor: dict, target: dict, refusal: tuple) -> None:
+        """An answer an update could not take: the update comes again as the newest bubble,
+        with its own options, so the number sent again answers it."""
+        post_id, note = refusal
+        item = self.store.data.get("feed", {}).get(post_id)
+        if not item or not feed.is_open(item, actor, self.clock()):
+            self._notice(f"input:{identity}:post-closed", actor, target, "That update is no longer open.",
+                         title="Not answered")
+            return
+        envelope = f"[RAPP {item['channel']}] "
+        original = next((part.get("text") or part.get("caption") or "" for part in self.outbox.parts(item["group"])), "")
+        body = original[len(envelope):] if original.startswith(envelope) else original
+        why = "Another message came after it" if note == FOREIGN_NOTE else "Your reply landed as it arrived"
+        group = f"feed:{post_id}:again:{identity[:8]}"
+        item.setdefault("aliases", []).append(group)
+        if item["state"] == "open":
+            # The copy is answerable for as long as the post was when it first arrived.
+            item["open_until"] = max(item.get("open_until", 0), self.clock() + item["ttl"])
+        self.outbox.enqueue(group, actor, target,
+                            f"{envelope}{body}\n{itui.RULE}\n{why}, so nothing was answered. Send the number again.")
 
     def _menu_open(self, part: dict, now: float) -> bool:
         """A task's live menu stays open while it runs, an approval card while its approval is
@@ -748,6 +847,9 @@ class Portal:
         self.store.save()
 
     def _request(self, request: dict) -> dict:
+        if request.get("op") in ("submit", "approve", "cancel"):
+            # From here the runtime may act: an interruption is reconciled, never "nothing ran".
+            self._runtime_called = True
         response = self.runtime.request(request)
         if not isinstance(response, dict) or response.get("ok") is not True:
             error = response.get("error") if isinstance(response, dict) else None
@@ -844,13 +946,44 @@ class Portal:
                 raise
             code = f"internal:{name}:{type(error).__name__}"
             self._quarantined.append({"kind": "stage", "ref": name, "code": code})
-            self.store.error(code, self.clock())
+            self._stage_failed(name, code)
+            return
+        self._stage_ok(name)
+
+    def _stage_failed(self, name: str, code: str) -> None:
+        """A stage failing tick after tick is recorded once and told once, after DEGRADED_AFTER;
+        the ticks in between write nothing (and still touch the heartbeat, so this card, not the
+        gap card, is what says so)."""
+        stages = self.store.data.setdefault("stages", {})
+        now, stage = self.clock(), stages.get(name)
+        if stage is None or stage["code"] != code:
+            stages[name] = {"code": code, "since": stage["since"] if stage else now,
+                            "told": bool(stage and stage.get("told"))}
+            self.store.error(code, now)
+        elif not stage["told"] and now - stage["since"] >= DEGRADED_AFTER:
+            stage["told"] = True
+            label, effect = STAGES.get(name, (name.capitalize(), "part of each tick is failing"))
+            self._system_card(f"sys:stuck:{name}:{int(stage['since'])}", itui.GLYPH["attention"], f"{label} stuck",
+                              [effect, f"failing {itui.span(now - stage['since'])} · {code.rsplit(':', 1)[-1]}"])
+            self.store.save()
+
+    def _stage_ok(self, name: str) -> None:
+        stages = self.store.data.get("stages")
+        stage = stages.pop(name, None) if stages else None
+        if stage is None:
+            return
+        if stage.get("told"):
+            label, _ = STAGES.get(name, (name.capitalize(), ""))
+            self._system_card(f"sys:back:{name}:{int(stage['since'])}", itui.GLYPH["succeeded"], f"{label} back",
+                              [f"it failed for {itui.span(self.clock() - stage['since'])}"])
+        self.store.save()
 
     def _contain(self, ref: str, action, *, event: dict | None = None, record: dict | None = None) -> bool:
         """Run one message's step. An unexpected error sets that message aside only: it is
         marked failed (nothing runs), the tick goes on, and the owner hears about it once.
         Known failures (PortalError) keep their existing handling; journal failures are never
         contained."""
+        self._runtime_called = False
         try:
             action()
             return True
@@ -866,23 +999,43 @@ class Portal:
             elif record is not None:
                 # Handling may have replaced the record (a decoded message is routed afresh).
                 record = self.store.data["inbox"].get(identity, record)
-            if record is not None:
+            key, title = f"sys:skipped:{token(ref)[:12]}", "Skipped"
+            text = [f"One message was set aside after an internal error ({type(error).__name__}),",
+                    "so nothing ran. Send it again if it mattered."]
+            if record is not None and self._runtime_called:
+                # The task runtime was already called, so something may have started or stopped:
+                # look again (once) instead of claiming nothing ran.
+                attempts = record["internal_attempts"] = record.get("internal_attempts", 0) + 1
+                record.update(state="runtime_pending" if attempts < 2 else "failed", error=code)
+                key, title = f"{key}:{attempts}", "Checking"
+                text = ["Interrupted after the task runtime was called, so it may have started.",
+                        "Checking again; RAPP status shows it." if attempts < 2 else "Check it with RAPP status."]
+            elif record is not None:
                 record.update(state="failed", error=code)
                 try:
                     self._release_inputs(identity, record)
                 except Exception:  # noqa: BLE001 - releasing is best effort for a broken record
                     pass
+                pick = record.get("menu_pick")
+                parts = self.outbox.parts(pick["group"]) if pick else []
+                if parts and record.get("actor") and record.get("target"):
+                    # A number that broke before anything ran: its card comes again, so the
+                    # number resent answers it.
+                    try:
+                        self._reoffer(identity, record["actor"], record["target"],
+                                      next((part for part in parts if "text" in part), parts[0]),
+                                      note="An internal error stopped it, so nothing ran.")
+                        text = None
+                    except Exception:  # noqa: BLE001 - the Skipped card below still tells the owner
+                        pass
             self._quarantined.append({"kind": "message", "ref": ref[:16], "code": code})
-            text = [f"One message was set aside after an internal error ({type(error).__name__}),",
-                    "so nothing ran. Send it again if it mattered."]
-            key = f"sys:skipped:{token(ref)[:12]}"
             # The card is queued (saving the tombstone with it) before anything else: if queueing
             # fails, nothing was saved and the message is handled afresh next tick.
-            if record is not None and record.get("actor") and record.get("target"):
+            if text and record is not None and record.get("actor") and record.get("target"):
                 self._notice(key, record["actor"], record["target"], "\n".join(text),
-                             title="Skipped", glyph=itui.GLYPH["error"])
-            else:
-                self._system_card(key, itui.GLYPH["error"], "Skipped", text)
+                             title=title, glyph=itui.GLYPH["error"])
+            elif text:
+                self._system_card(key, itui.GLYPH["error"], title, text)
             self.store.error(code, self.clock())
             return False
 
@@ -980,13 +1133,13 @@ class Portal:
             ) else None
             answered = feed.capture(self.store, event, actor, answer, self.clock(), explicit=True,
                                     post_id=post["id"] if post else None,
-                                    guard=self._post_guard(event, answer, refused))
+                                    guard=self._post_guard(event, answer, refused, explicit=True))
             self._remember_reply(identity, event, actor, target, "feed_reply")
-            self._notice(
-                f"feed-reply:{identity}", actor, target,
-                POST_RACE if refused else "Got it." if answered else "There is no open update to answer right now.",
-                title="Not answered" if refused else None,
-            )
+            if refused:
+                self._post_refusal(identity, actor, target, refused[0])
+            else:
+                self._notice(f"feed-reply:{identity}", actor, target,
+                             "Got it." if answered else "There is no open update to answer right now.")
             return
         menu_pick = None
         if not match and not capture:
@@ -1003,16 +1156,16 @@ class Portal:
 
             refused = []
             if feed.capture(self.store, event, actor, text, self.clock(), prior=before,
-                            guard=self._post_guard(event, text, refused)):
+                            guard=self._post_guard(event, text, refused, explicit=False)):
                 self._remember_reply(identity, event, actor, target, "feed_reply")
                 return
             digit = re.fullmatch(r"[1-9]", text.strip())
             if refused:
-                # Typed as the update landed, so meant for something else: a number gets one
-                # card; other text is left to the rest of the conversation.
+                # Typed as the update landed, so meant for something else: a number gets the
+                # update again (so resending it answers); other text is left to the conversation.
                 if digit:
                     self._remember_reply(identity, event, actor, target, "feed_race")
-                    self._notice(f"input:{identity}:feed-race", actor, target, POST_RACE, title="Not answered")
+                    self._post_refusal(identity, actor, target, refused[0])
                 return
             if not digit:
                 return
@@ -1344,10 +1497,12 @@ class Portal:
                 refused = []
                 answered = feed.capture(self.store, record["event"], actor, command, self.clock(),
                                         explicit=True, post_id=card["post"],
-                                        guard=self._post_guard(record["event"], command, refused))
-                self._notice(f"input:{identity}:reply", actor, target,
-                             POST_RACE if refused else "Got it." if answered else "That update is no longer open.",
-                             title="Not answered" if refused else None)
+                                        guard=self._post_guard(record["event"], command, refused, explicit=True))
+                if refused:
+                    self._post_refusal(identity, actor, target, refused[0])
+                else:
+                    self._notice(f"input:{identity}:reply", actor, target,
+                                 "Got it." if answered else "That update is no longer open.")
                 return
             chosen = card["menu"][int(command) - 1]
             if chosen in ("1", "2"):
@@ -1522,6 +1677,9 @@ class Portal:
         # Refusal follows the disk right now: freeing space works at once, without the hold.
         if self._disk_now() == "critical":
             raise PortalError("disk_low", "Disk space is critically low; free space before new tasks. Status and stop still work.")
+        if "disk" in self.store.data.get("stages", {}):
+            # Fail closed: a disk that cannot be checked is not assumed to have room.
+            raise PortalError("disk_unknown", "The disk check is failing, so new tasks wait until it works again.")
         policy = self.runtime.profile_policy(record["submission"]["profile"])
         if "policy_snapshot" not in record:
             record["policy_snapshot"] = policy

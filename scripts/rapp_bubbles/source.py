@@ -60,33 +60,39 @@ class SQLiteSource:
         target = {"chat_id": row[0], "chat_guid": chat_guid, "is_group": False}
         return target if self.target_matches(target) else None
 
-    def between(self, chat_guid: str, after: str, before: str) -> list[dict] | None:
-        """This chat's message rows strictly between two of its rows (tapbacks are not
-        messages), or None when either row is unknown."""
+    def between(self, chat_guid: str, after: str, before: str | None) -> list[dict] | None:
+        """This chat's message rows strictly between two of its rows, or after one to the end
+        when ``before`` is None (tapbacks are not messages). None when a row is unknown, the
+        range is inverted, or there are more than 50 rows to vouch for."""
+        wanted = (after,) if before is None else (after, before)
         ids = {
             row["guid"]: row["id"] for row in self.db.execute(
-                """SELECT m.guid, m.ROWID AS id FROM message m
+                f"""SELECT m.guid, m.ROWID AS id FROM message m
                    JOIN chat_message_join j ON j.message_id=m.ROWID
                    JOIN chat c ON c.ROWID=j.chat_id
-                   WHERE c.guid=? AND m.guid IN (?, ?)""", (chat_guid, after, before),
+                   WHERE c.guid=? AND m.guid IN ({",".join("?" * len(wanted))})""", (chat_guid, *wanted),
             )
         }
-        if after not in ids or before not in ids or ids[after] >= ids[before]:
+        if after not in ids or before is not None and (before not in ids or ids[after] >= ids[before]):
             return None
+        upper = ids[before] if before is not None else 2**62
         reactions = (
             "AND (m.associated_message_type IS NULL OR m.associated_message_type<2000 "
             "OR m.associated_message_type>3006)"
             if "associated_message_type" in self.columns else ""
         )
         rows = self.db.execute(
-            f"""SELECT m.guid, m.is_from_me FROM message m
+            f"""SELECT m.guid, m.is_from_me, h.id AS sender FROM message m
                JOIN chat_message_join j ON j.message_id=m.ROWID
                JOIN chat c ON c.ROWID=j.chat_id
+               LEFT JOIN handle h ON h.ROWID=m.handle_id
                WHERE c.guid=? AND m.ROWID>? AND m.ROWID<? {reactions}
-               ORDER BY m.ROWID LIMIT 51""", (chat_guid, ids[after], ids[before]),
+               ORDER BY m.ROWID LIMIT 51""", (chat_guid, ids[after], upper),
         ).fetchall()
         # More than 50 rows is too much to vouch for: report it as unknown.
-        return None if len(rows) > 50 else [{"guid": row["guid"], "is_from_me": bool(row["is_from_me"])} for row in rows]
+        return None if len(rows) > 50 else [
+            {"guid": row["guid"], "is_from_me": bool(row["is_from_me"]), "sender": row["sender"]} for row in rows
+        ]
 
     def latest_prior_guid(self, event: dict) -> str | None:
         # A tapback is not a message: reacting to a card must not break the reply after it.

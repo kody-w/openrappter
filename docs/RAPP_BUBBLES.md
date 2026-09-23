@@ -37,7 +37,7 @@ Only `RAPP …` / `RAPP: …` addresses this portal. Case does not matter.
 | A photo/video/audio/file after `RAPP attach` | Stage it and acknowledge a useful next step; never execute file contents. |
 | `RAPP <task>` with files attached | Wait for all observed files, then prepare the task with their references. |
 | `1` / `2` | Approve / cancel exactly the task of the confirmed, still-live approval card the number sits right under (or swipe-replies to). |
-| `RAPP 1` / `RAPP 2` | Approve / cancel only when the card answered (the one a swipe-reply quotes, else the newest card sent before you typed) is that task's live approval card; otherwise they pick that card's options. |
+| `RAPP 1` / `RAPP 2` | Approve / cancel only when the card answered (the one a swipe-reply quotes, else the newest card sent before you typed, with nothing from another author after it) is that task's live approval card; otherwise they pick that card's options. |
 | `RAPP approve <job-id>` | Approve that exact locally pending job using its stored, finite token. |
 | `RAPP status [job-id]` | Worker state and honest native output states. |
 | `RAPP list` | Bounded list of jobs scoped by the local adapter to this actor. |
@@ -48,7 +48,7 @@ Only `RAPP …` / `RAPP: …` addresses this portal. Case does not matter.
 | `RAPP resend <part-id>` | Explicitly redeliver one uncertain part **after checking the phone**; the old attempt may still arrive. |
 | `RAPP clear files` | Clear the pending file selection and close its intake window. |
 | A reply directly under an operator update with options | Answers that update (numbers pick its options); see the operator feed. |
-| `RAPP reply <text>` | Answer the latest open operator update even after other messages. |
+| `RAPP reply <text>` | Answer the latest open operator update, even after your own other messages (after another author's bubble, the update comes again to be answered). |
 | A digit right under (or swiped onto) a card, or `RAPP <n>` for the newest card | Pick that card's numbered option; on a live approval card, 1/2 approve/cancel that task. |
 | `RAPP quiet [job]` | Stop a running task's automatic ETA updates; its result still arrives. |
 | `RAPP health` | iMessage verdict, free disk, journal size, and outbox states as one card. |
@@ -502,9 +502,17 @@ next ~5m · ref 3fa9c1
   - A swipe-reply names a bubble the owner has seen, so it always counts.
   - Otherwise the card must be confirmed on the phone (sent or delivered). If it is not,
     nothing runs and the card comes again saying `Not confirmed on your phone`.
+  - `RAPP <n>` and `RAPP reply` name no bubble, so nothing from another author may sit
+    after the card: only our own bubbles and the owner's messages to us (in a group, only
+    from his handle). Another AI's look-alike card or a group member's message in between
+    may be what the number answers, so nothing runs and the card comes again saying
+    `Another message came after this card`; the number sent again right under it runs.
+    Named commands (`RAPP approve 0001`) are not affected.
   - The reply must be typed at least 3 seconds after the card's last bubble left the
     Mac (by the message's chat.db time; measured from when the send returned, so a slow
-    send does not use up the window). A pick typed sooner, or before the card existed,
+    send does not use up the window). A send that never returned is timed from the
+    chat.db row it was later found in, or else from the end of its whole timeout, and a
+    retried part forgets its earlier landing. A pick typed sooner, or before the card existed,
     still runs when the card the owner could read by then offered the same thing under
     that number (a heartbeat or a re-offer of the same task), so a fast replier is never
     refused over and over. That needs the earlier card confirmed on the phone and, for a
@@ -512,13 +520,18 @@ next ~5m · ref 3fa9c1
     owner's messages to us: another AI's question in between may be what the number
     answers. Otherwise nothing runs and the card comes again saying `nothing ran`, so
     sending the pick again answers the card that is now newest.
-  - An answer to an agent's update typed as it landed is not recorded; a number gets one
-    `Not answered` card (swipe-reply to answer it), other text is left alone.
+  - An answer to an agent's update that the guard refuses (typed as it landed, or sent
+    with `RAPP <n>`/`RAPP reply` after another author's bubble) is not recorded. A number
+    gets the update again as the newest bubble: its own text and options, saying why
+    nothing was answered, so the number sent again (bare right under it, or `RAPP <n>`)
+    answers it. The copy keeps the update open for another full reply window. Other text
+    is left alone.
   - A row with no chat.db time is judged by position alone. A card from before a group's
     members changed is never re-sent to the changed group.
 - **`RAPP <n>`** answers the card a swipe-reply quotes (nothing runs if the quoted
   message is not one of our cards), else the newest card sent before you typed,
-  operator posts included, and never falls back to an older card. A newest card whose delivery is
+  operator posts included, and never falls back to an older card; the read guard above
+  then checks that nothing from another author came after it. A newest card whose delivery is
   unknown counts as closed ("check your phone"). `RAPP 1`/`RAPP 2` approve or cancel
   only when that newest card is the task's live approval card (`approval_expired`
   after it lapses), and `RAPP <n>` never picks Stop while an approval is waiting or
@@ -583,8 +596,33 @@ python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json feed-s
   (restart, wake up, shut down, …) are never captured. After an intervening
   message, `RAPP reply <text>` answers the latest open post explicitly (or, as a
   swipe-reply on an update, that update). The reply
-  window starts at delivery and lasts `--ttl` seconds. Answers are read back
-  only through `feed-status`.
+  window starts at delivery and lasts `--ttl` seconds. A refused answer brings the
+  update back with its options (see the read guard), and that copy is answerable for
+  another `--ttl` seconds. Answers are read back only through `feed-status`.
+
+### What a card offers and what a reply would do (`cards`, `resolve`)
+
+An agent operating the thread (or the owner at a shell) can see what the cards offer and
+what a reply would do before sending it. Nothing is sent or run:
+
+```bash
+python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json cards
+python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json resolve \
+  --text "RAPP 1" [--reply-to <ref>] [--typed-ago 2]
+```
+
+- `cards` lists the ten newest cards with options, newest first: `ref` (the ref in the
+  card's footer), kind, job, delivery state, when it landed, whether it is open, and each
+  option with its label and the `RAPP …` text that does the same from anywhere (an agent
+  post takes its numbers only as a reply on it). `rapp_n` is the card `RAPP <n>` answers
+  right now, and whether it is open.
+- `resolve` sends the reply through the real routing code on a private copy of the
+  journal, as if the owner sent it now: typed `--typed-ago` seconds earlier, and as a
+  swipe-reply on the card whose ref `--reply-to` gives. The first call to the task runtime
+  is recorded and stops the run; nothing is saved or sent, and the watcher is not held up.
+  It reports a `verdict` (`acts`, `answers`, `reoffers`, `fails`, `replies`, or
+  `ignored`), the runtime calls it `would` make, the posts it `answers`, why it was
+  `refused`, error codes, and the first line of each card it would send.
 
 ### Messages health gate
 
@@ -624,7 +662,16 @@ event, each ending with `[1] Health` and `[2] Recent jobs`:
   queued parts are now sending. It goes out first: sending waits one tick for it, and
   system cards always lead the queue.
 - **Back online**: each successful tick touches a tiny `heartbeat` file; a gap of five
-  minutes or more (failed ticks, a stopped watcher, a full disk) is reported once.
+  minutes or more (failed ticks, a stopped watcher, a full disk) is reported once. A tick
+  that fails as a whole saves nothing itself, so the CLI keeps a tiny cause record
+  (`tick-failure.json`, or at least its time on a full disk) and the card names it:
+  `3 ticks failed · disk full`. `RAPP health` keeps showing it (`Last failed ticks: …`).
+- **Stuck stages**: a tick stage that fails tick after tick for a minute gets one card
+  saying what the owner loses while it fails (`! Sending stuck` · `cards may not go out`)
+  and one `✓ Sending back` card when it works again. The failure is recorded once, and
+  the ticks in between write nothing. `RAPP health` lists stuck stages. While the disk
+  check itself fails, new tasks are refused with `disk_unknown`: a disk that cannot be
+  checked is not assumed to have room.
 
 ### Bounded journal and idle ticks
 
@@ -648,7 +695,12 @@ are always kept. `transport-status` reports `journal_bytes` and `resources`.
 One bad item can no longer stop every tick:
 - **Poison messages.** An unexpected error while handling one message sets that message
   aside: it is marked failed (`internal:<Type>`), nothing runs, the cursor moves on, and
-  the owner gets one `! Skipped` card. The rest of the tick still runs. Known failures
+  the owner gets one `! Skipped` card. A number that broke this way gets its card again
+  instead (`An internal error stopped it, so nothing ran.`), so sending it again answers.
+  If the task runtime had already been called, something may have started or stopped, so
+  the owner is never told nothing ran: the message is checked again once (`! Checking`;
+  a repeated submit reuses the same prepared job) and otherwise left to `RAPP status`.
+  The rest of the tick still runs. Known failures
   (for example, Messages unavailable) and chat.db errors (a locked database) still fail
   the tick and are retried, so a transient problem never drops a message. A journal that
   cannot be written (a full disk) always fails the tick.
@@ -742,7 +794,10 @@ installed native UTF-16/typedstream decoder against synthetic fixture SQLite.
 Those tests invoke only native version/read operations, with no message send
 and no private chat database. The ordinary suite also covers a foreign AI's
 intervening outbound SQL row, fresh-tail initialization, and durable pending
-downloads from regular single-link mode-0644 media files.
+downloads from regular single-link mode-0644 media files. A `Timeline` fake keeps one
+chat in real row order (the owner's messages, our bubbles as they are sent, another
+AI's rows), and a seeded test checks across interleavings that no Approve, Cancel, or
+Stop ever runs for a number with another author's bubble after its card.
 
 Tests use synthetic identities, fixture SQLite, project-local HOME/state,
 harmless files, fake native RPC, and a fake job adapter. They do not send,

@@ -190,6 +190,13 @@ class Outbox:
                 part.update(state="unknown", error="ambiguous_receipt")
             elif len(guids) == 1:
                 part["guid"] = guids.pop()
+                if part.get("sent_at") is None:
+                    # A send that never returned: its chat.db row says when it really left.
+                    try:
+                        part["sent_at"] = datetime.fromisoformat(
+                            str(matches[0]["created_at"]).replace("Z", "+00:00")).timestamp()
+                    except (KeyError, TypeError, ValueError):
+                        pass
         if part.get("guid"):
             result = self.native.status(part["guid"])
             fields = result.get("status_fields") or {}
@@ -408,7 +415,7 @@ class Outbox:
                 part["text"] = f"[RAPP retry {attempt_token}]\n{part['text']}"
             for field in (
                 "guid", "caption_guid", "error", "last_checked", "receipt", "submitted_at", "send_after_rowid",
-                "receipt_created_after", "receipt_created_before",
+                "receipt_created_after", "receipt_created_before", "sent_at",
             ):
                 part.pop(field, None)
             part["state"] = "queued"

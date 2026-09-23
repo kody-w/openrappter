@@ -114,7 +114,14 @@ def refresh(store, now: float) -> None:
 
 
 def post_for_group(store, group: str) -> dict | None:
-    return next((item for item in store.data.get("feed", {}).values() if item["group"] == group), None)
+    """The post a bubble belongs to: its own bubble, or a copy shown again after a refusal."""
+    return next((item for item in store.data.get("feed", {}).values()
+                 if item["group"] == group or group in item.get("aliases", ())), None)
+
+
+def _bubbles(store, post):
+    groups = {post["group"], *post.get("aliases", ())}
+    return [part for part in store.data["outbox"] if part["group"] in groups]
 
 
 def is_open(item: dict, actor: dict, now: float) -> bool:
@@ -147,7 +154,7 @@ def capture(store, event: dict, actor: dict, text: str, now: float, *,
         before = prior() if callable(prior) else prior
         adjacent = [
             item for item in candidates if before and before in {
-                value for part in _parts(store, item)
+                value for part in _bubbles(store, item)
                 for value in (part.get("guid"), part.get("caption_guid")) if value
             }
         ]

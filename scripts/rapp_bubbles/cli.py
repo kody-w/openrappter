@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
+import os
 import time
 
-from . import doctor, feed
+from . import cards, doctor, feed
 from .config import Config, PortalError
 from .outbox import Outbox
 from .portal import HELP, Portal
@@ -25,6 +27,32 @@ def locked(config, action, wait=30.0):
             if error.code != "tick_busy" or time.monotonic() > deadline:
                 raise
             time.sleep(0.4)
+
+
+def record_tick_failure(config, error) -> None:
+    """A tiny cause record for a tick that failed as a whole, which saves nothing itself; the
+    next good tick names it. On a full disk, at least its time is kept (the file's mtime)."""
+    path = config.state_dir / "tick-failure.json"
+    now = time.time()
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+        previous = previous if isinstance(previous, dict) else {}
+    except (OSError, ValueError):
+        previous = {}
+    record = {
+        "code": getattr(error, "code", None) or "transport_internal_error", "kind": type(error).__name__,
+        "errno": error.errno if isinstance(error, OSError) else None,
+        "first": previous.get("first", now), "last": now, "count": int(previous.get("count") or 0) + 1,
+    }
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(record, stream)
+    except OSError:
+        try:
+            os.utime(path)
+        except OSError:
+            pass
 
 
 def post_command(config, args):
@@ -70,8 +98,10 @@ def main(argv=None) -> int:
     parser.add_argument("--config", required=True, help="Owner-only private portal JSON configuration")
     parser.add_argument("command", choices=(
         "tick", "check-config", "transport-status", "help-route", "post", "feed-status", "doctor",
+        "cards", "resolve",
     ))
-    parser.add_argument("--text", default="", help="post: message text, or the file's caption")
+    parser.add_argument("--text", default="",
+                        help="post: message text, or the file's caption; resolve: the reply to try")
     parser.add_argument("--file", help="post: one image or file to attach")
     parser.add_argument("--options", type=int, default=0,
                         help="post: numbered choices offered; posts with choices collect the reply")
@@ -79,11 +109,19 @@ def main(argv=None) -> int:
     parser.add_argument("--channel", default="loop", help="post: a newer post replaces undelivered ones here")
     parser.add_argument("--route", type=int, default=0, help="post: index of the authorized route")
     parser.add_argument("--id", help="feed-status: one post id")
+    parser.add_argument("--reply-to", help="resolve: the ref of the card the reply is a swipe-reply on")
+    parser.add_argument("--typed-ago", type=float, default=0.0,
+                        help="resolve: seconds before now the reply was typed")
     args = parser.parse_args(argv)
     try:
         config = Config.load(args.config)
         if args.command == "tick":
-            result = Portal(config).tick()
+            try:
+                result = Portal(config).tick()
+            except Exception as error:
+                if getattr(error, "code", None) != "tick_busy":
+                    record_tick_failure(config, error)
+                raise
         elif args.command == "check-config":
             result = {"ok": True, "authorized_routes": len(config.routes)}
         elif args.command == "help-route":
@@ -95,6 +133,12 @@ def main(argv=None) -> int:
                 "ok": True, "posts": feed.describe(store, args.id),
                 "imessage": store.data.get("imessage_health", {}),
             })
+        elif args.command == "cards":
+            result = locked(config, lambda store: cards.describe(config, store))
+        elif args.command == "resolve":
+            # A private copy of the journal: the dry run holds no lock and saves nothing.
+            data = locked(config, lambda store: copy.deepcopy(store.data))
+            result = cards.resolve(config, data, args.text, reply_to=args.reply_to, typed_ago=args.typed_ago)
         elif args.command == "doctor":
             result = doctor.run()
             result["healthy"] = result.pop("ok")

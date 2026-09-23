@@ -124,7 +124,7 @@ def is_open(item: dict, actor: dict, now: float) -> bool:
 
 
 def capture(store, event: dict, actor: dict, text: str, now: float, *,
-            prior=None, explicit: bool = False, post_id: str | None = None) -> dict | None:
+            prior=None, explicit: bool = False, post_id: str | None = None, guard=None) -> dict | None:
     """Record the owner's answer to the latest open post.
 
     ``prior`` is a callable returning the GUID of the message just before this one; it is
@@ -167,6 +167,9 @@ def capture(store, event: dict, actor: dict, text: str, now: float, *,
         ):
             # Nothing has reached the phone yet, so there is nothing to answer.
             return None
+    if guard is not None and not guard(item):
+        # The caller judged that this answer cannot have been meant for this post.
+        return None
     stripped = text.strip()
     # ASCII only: "²" or "①" pass str.isdigit() but crash int() and would wedge every tick.
     number = int(stripped) if re.fullmatch(r"[1-9]", stripped) and int(stripped) <= item["options"] else None

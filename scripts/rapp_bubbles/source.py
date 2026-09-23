@@ -14,6 +14,8 @@ class SQLiteSource:
         try:
             self.db = sqlite3.connect(config.messages_db.as_uri() + "?mode=ro", uri=True, timeout=1)
             self.db.row_factory = sqlite3.Row
+            # One row with undecodable text must not stop the reader for every later row.
+            self.db.text_factory = lambda value: value.decode("utf-8", "replace")
             self.db.execute("PRAGMA query_only=ON")
             self.db.execute("PRAGMA temp_store=MEMORY")
             self.columns = {row[1] for row in self.db.execute("PRAGMA table_info(message)")}

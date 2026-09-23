@@ -11,6 +11,7 @@ from typing import Callable
 from .clients import NotSubmitted, SubmissionUnknown
 from .config import Config, PortalError, normalized
 from . import itui
+from .state import JournalWriteError, strict
 from .files import copy_reference, filename
 from .state import Store
 
@@ -105,10 +106,13 @@ class Outbox:
                     self.config.state_dir / "outbox" / identity
                     / f"rapp-{identity}-{display_name}"
                 )
-                reference = copy_reference(
-                    source, (workspace,), destination, self.config.max_file_bytes,
-                    expected_sha256=checksum, expected_size=size,
-                )
+                try:
+                    reference = copy_reference(
+                        source, (workspace,), destination, self.config.max_file_bytes,
+                        expected_sha256=checksum, expected_size=size,
+                    )
+                except FileNotFoundError as error:
+                    raise PortalError("artifact_missing", "A declared output file is gone from the job's export.") from error
                 staged.append(destination)
                 prepared.append(self._part(
                     group, index, identity, actor, target, job_id,
@@ -244,6 +248,8 @@ class Outbox:
                 receipt_budget -= 1
                 try:
                     self.reconcile(part)
+                except JournalWriteError:
+                    raise
                 except PortalError as error:
                     part["receipt_error"] = error.code
                     part["last_checked"] = now
@@ -252,6 +258,12 @@ class Outbox:
                         and now - part["submitted_at"] >= self.config.receipt_seconds
                     ):
                         part.update(state="unknown", error="receipt_unavailable")
+                    self.store.save()
+                except Exception as error:
+                    # One part that breaks its receipt check keeps backing off like any other.
+                    if strict():
+                        raise
+                    part.update(receipt_error=f"internal:{type(error).__name__}", last_checked=now)
                     self.store.save()
         if reconcile_only:
             return
@@ -312,6 +324,8 @@ class Outbox:
                 )
                 if result.get("ok") is not True:
                     raise SubmissionUnknown("native_send_unknown", "Native send did not acknowledge submission.")
+                # When the bubble really left the Mac: a slow send must not use up the read guard.
+                part["sent_at"] = self.clock()
                 # File GUIDs must be found by exact attachment correlation; a text
                 # caption's GUID is not an attachment receipt.
                 if "file" not in part and result.get("guid"):
@@ -319,6 +333,8 @@ class Outbox:
                 elif "file" in part and result.get("guid"):
                     part["caption_guid"] = str(result["guid"])
                 part["state"] = "submitted"
+            except JournalWriteError:
+                raise
             except NotSubmitted as error:
                 part.update(state="failed", error=error.code, retryable=True)
             except SubmissionUnknown as error:
@@ -328,6 +344,14 @@ class Outbox:
                     state="unknown" if part["state"] == "submitting" else "failed",
                     error=getattr(error, "code", "outbox_file_missing"),
                     retryable=False,
+                )
+            except Exception as error:
+                # A part that breaks the pump is set aside; the parts behind it still go out.
+                if strict():
+                    raise
+                part.update(
+                    state="unknown" if part["state"] == "submitting" else "failed",
+                    error=f"internal:{type(error).__name__}", retryable=False,
                 )
             self.store.save()
             budget -= 1

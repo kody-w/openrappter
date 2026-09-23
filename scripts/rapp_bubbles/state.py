@@ -13,6 +13,16 @@ from .config import PortalError
 from .files import private_directory
 
 
+class JournalWriteError(OSError):
+    """The journal could not be written (for example, a full disk). Never quarantined: the
+    tick must fail loudly rather than carry on without durable state."""
+
+
+def strict() -> bool:
+    """Re-raise unexpected errors instead of quarantining them (the test suite, debugging)."""
+    return os.environ.get("RAPP_BUBBLES_STRICT") == "1"
+
+
 class Store:
     def __init__(self, root: Path):
         self.root = root
@@ -66,24 +76,34 @@ class Store:
             raise RuntimeError("transport state must be locked")
         pending = self.root / f".transport.{uuid.uuid4().hex}.pending"
         try:
-            descriptor = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                json.dump(self.data, stream, ensure_ascii=False, separators=(",", ":"))
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(pending, self.root / "transport.json")
-            directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+            self._write(pending)
+        except OSError as error:
+            raise JournalWriteError(error.errno, error.strerror or str(error)) from error
         finally:
             pending.unlink(missing_ok=True)
 
+    def _write(self, pending: Path) -> None:
+        descriptor = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(self.data, stream, ensure_ascii=False, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(pending, self.root / "transport.json")
+        directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+
     def error(self, code: str, now: float) -> None:
-        self.data["errors"].append({"code": code, "time": now})
-        self.data["errors"] = self.data["errors"][-100:]
+        # One entry per code (first and last time, count), so a failure that repeats cannot
+        # push every other cause out of the ring.
+        previous = next((item for item in self.data["errors"] if item.get("code") == code), None)
+        entry = {"code": code, "time": now, "first": now, "count": 1}
+        if previous:
+            entry.update(first=previous.get("first", previous.get("time", now)), count=previous.get("count", 1) + 1)
+        self.data["errors"] = [item for item in self.data["errors"] if item is not previous][-99:] + [entry]
         self.save()
 
     def __exit__(self, *_args) -> None:

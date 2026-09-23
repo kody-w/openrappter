@@ -496,13 +496,23 @@ next ~5m · ref 3fa9c1
   after they were sent. A digit under one of our cards that no longer offers it gets
   one live card (`Expired` for an approval that lapsed, else "Card closed") and never
   runs a stale option.
-- **Race guard.** Approve, Cancel, or Stop typed before the card it answers was sent,
-  or within 3 seconds after (by the message's chat.db time), was meant for something
-  else, so nothing runs. Instead that card comes again as a fresh bubble saying
-  `nothing ran` (the same approval, or the live task card), for a bare digit and for
-  `RAPP <n>` alike, so sending the pick again answers the card that is now newest. A
-  row with no chat.db time is judged by position alone. A card from before a group's
-  members changed is never re-sent to the changed group.
+- **Read guard.** One rule decides whether Approve, Cancel, Stop, or an answer to an
+  agent's update could have been meant for the card it lands under, for a bare digit and
+  for `RAPP <n>` alike:
+  - A swipe-reply names a bubble the owner has seen, so it always counts.
+  - Otherwise the card must be confirmed on the phone (sent or delivered). If it is not,
+    nothing runs and the card comes again saying `Not confirmed on your phone`.
+  - The reply must be typed at least 3 seconds after the card's last bubble left the
+    Mac (by the message's chat.db time; measured from when the send returned, so a slow
+    send does not use up the window). A pick typed sooner, or before the card existed,
+    still runs when the card the owner could read by then offered the same thing under
+    that number (a heartbeat or a re-offer of the same task), so a fast replier is never
+    refused over and over. Otherwise nothing runs and the card comes again saying
+    `nothing ran`, so sending the pick again answers the card that is now newest.
+  - An answer to an agent's update typed as it landed is not recorded; a number gets one
+    `Not answered` card (swipe-reply to answer it), other text is left alone.
+  - A row with no chat.db time is judged by position alone. A card from before a group's
+    members changed is never re-sent to the changed group.
 - **`RAPP <n>`** answers the card a swipe-reply quotes (nothing runs if the quoted
   message is not one of our cards), else the newest card sent before you typed,
   operator posts included, and never falls back to an older card. A newest card whose delivery is
@@ -565,8 +575,8 @@ python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json feed-s
   Mac, so an outage never releases a burst of stale cards.
 - Posts with `--options N` (1–9) collect one answer. The owner's next message is
   captured only when it directly follows that post in the chat (GUID adjacency, so a
-  newer card that is still queued cannot take it),
-  including a bare number while a task approval waits; lifecycle words
+  newer card that is still queued cannot take it) and was not typed as the post landed
+  (the read guard), including a bare number while a task approval waits; lifecycle words
   (restart, wake up, shut down, …) are never captured. After an intervening
   message, `RAPP reply <text>` answers the latest open post explicitly. The reply
   window starts at delivery and lasts `--ttl` seconds. Answers are read back
@@ -614,8 +624,10 @@ event, each ending with `[1] Health` and `[2] Recent jobs`:
 
 ### Bounded journal and idle ticks
 
-Idle ticks no longer rewrite the journal: re-read late-window rows, unchanged recovery
-passes, and job polls that learned nothing save nothing. Settled feed posts are skipped.
+Idle ticks no longer rewrite the journal: re-read late-window rows and job polls that
+learned nothing save nothing. Recovery runs once per watcher instance (after a restart);
+every status poll already reconciles its job runtime-side, so it no longer runs on a
+timer. Settled feed posts are skipped.
 Receipts back off with age: fresh parts are checked every 5 seconds, then every tenth of
 their age, at most hourly. A part more than a day old that was already checked after
 its receipt window stops auto-polling (a part never checked, because the bridge was
@@ -626,6 +638,32 @@ permanently failed parts older than 14 days, their staged files, handled inbox r
 and ended jobs older than 30 days are removed, but only past the reader's late window
 (cursor − 256), so deduplication can never replay a row. Uncertain and retryable parts
 are always kept. `transport-status` reports `journal_bytes` and `resources`.
+
+### Poison records and failing polls
+
+One bad item can no longer stop every tick:
+- **Poison messages.** An unexpected error while handling one message sets that message
+  aside: it is marked failed (`internal:<Type>`), nothing runs, the cursor moves on, and
+  the owner gets one `! Skipped` card. The rest of the tick still runs. Known failures
+  (for example, Messages unavailable) still fail the tick and are retried, so a
+  transient problem never drops a message. A journal that cannot be written (a full
+  disk) always fails the tick.
+- **Poison parts and stages.** A part that breaks the send pump or its receipt check is
+  set aside like a failed send; the parts behind it still go out. Each tick stage (disk,
+  recovery, receipts, polls, sends, outage, attention, compaction) runs even when an
+  earlier one broke; the tick result lists what was set aside under `quarantined`.
+- **Undecodable text.** chat.db text that is not valid UTF-8 is read with replacement
+  characters instead of stopping the reader.
+- **Failing polls back off.** A job whose status poll fails is polled again after 10 s,
+  then 20 s, 40 s, … up to 10 minutes, and normally again after one success. A job the
+  runtime no longer knows (`not_found` three times) and one that keeps failing
+  internally (three times) are no longer followed, with one card. A finished job whose
+  result cannot be rendered (for example, a declared output file was deleted) gets its
+  text result with `Output files unavailable (<code>)` after two tries, instead of being
+  retried forever.
+- **Errors are kept once per code**, with a count and first and last time, so one
+  repeating failure cannot push every other cause out of the 100-entry ring. `RAPP
+  health` shows the last error.
 
 ### Doctor (read-only)
 

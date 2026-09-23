@@ -545,30 +545,36 @@ class Portal:
         that is still open would run an option the owner never looked at (such as Stop).
         """
         now, best = self.clock(), None
+        # Attachment bubbles carry their card's menu for bare replies, but a card with text is
+        # judged by its text; an image post is a single attachment bubble and is its own card.
+        texted = {part["group"] for part in self.store.data["outbox"] if "text" in part}
         for part in self.store.data["outbox"]:
             # An attempted card whose receipt is unknown may be on the phone, so it still counts
             # as the newest card (a closed one) and blocks any fallback.
-            # Attachment bubbles carry their card's menu for bare replies, but the card is its text.
             if (
                 part["actor"] != actor or part["state"] not in ("submitted", "sent", "delivered", "unknown")
-                or part.get("send_after_rowid", -1) >= before_rowid or "file" in part
+                or part.get("send_after_rowid", -1) >= before_rowid
+                or ("file" in part and part["group"] in texted)
             ):
                 continue
-            post = feed.post_for_group(self.store, part["group"]) if part["group"].startswith("feed:") else None
-            confirmed = part["state"] != "unknown"
-            if part.get("menu"):
-                card = {"group": part["group"], "menu": part["menu"], "options": len(part["menu"]),
-                        "post": None, "open": confirmed and self._menu_open(part, now), "confirmed": confirmed,
-                        "approval": part.get("menu_kind") == "approval", "submitted_at": part.get("submitted_at")}
-            elif post and post["options"] and post["actor"] == actor:
-                card = {"group": part["group"], "menu": None, "options": post["options"], "approval": False,
-                        "post": post["id"], "open": confirmed and feed.is_open(post, actor, now),
-                        "confirmed": confirmed, "submitted_at": part.get("submitted_at")}
-            else:
-                continue
-            if best is None or part.get("submitted_at", 0) >= best[0]:
+            card = self._card(part, actor, now)
+            if card and (best is None or part.get("submitted_at", 0) >= best[0]):
                 best = (part.get("submitted_at", 0), card)
         return best[1] if best else None
+
+    def _card(self, part: dict, actor: dict, now: float) -> dict | None:
+        """A sent part as a card RAPP <n> can answer, or None when it offers no options."""
+        post = feed.post_for_group(self.store, part["group"]) if part["group"].startswith("feed:") else None
+        confirmed = part["state"] != "unknown"
+        if part.get("menu"):
+            return {"group": part["group"], "menu": part["menu"], "options": len(part["menu"]),
+                    "post": None, "open": confirmed and self._menu_open(part, now), "confirmed": confirmed,
+                    "approval": part.get("menu_kind") == "approval", "submitted_at": part.get("submitted_at")}
+        if post and post["options"] and post["actor"] == actor:
+            return {"group": part["group"], "menu": None, "options": post["options"], "approval": False,
+                    "post": post["id"], "open": confirmed and feed.is_open(post, actor, now),
+                    "confirmed": confirmed, "submitted_at": part.get("submitted_at")}
+        return None
 
     def _closed_card(self, identity: str, event: dict, actor: dict, target: dict, part: dict,
                      *, racing: bool = False) -> None:
@@ -1082,10 +1088,18 @@ class Portal:
             self._notice(f"input:{identity}:cleared", actor, target, "Pending RAPP file selection cleared.")
             return
         if record.get("explicit_address") and re.fullmatch(r"[1-9]", command) and not argument:
-            # RAPP <n>: the newest card the owner could have seen before typing, agent posts
-            # included; never an older card. 1/2 approve or cancel only when that newest card
-            # is a live approval card, and then only that card's job.
-            card = self._latest_card(actor, record["event"]["id"])
+            # RAPP <n>: the card a swipe-reply quotes, else the newest card the owner could have
+            # seen before typing, agent posts included; never an older card. 1/2 approve or
+            # cancel only when that card is a live approval card, and then only its job.
+            quoted = record["event"].get("reply_to")
+            if quoted:
+                part = self.outbox.part_for_guid(quoted)
+                card = self._card(part, actor, self.clock()) if part and part["actor"] == actor else None
+                if card is None:
+                    raise PortalError("no_open_menu", "That swipe-reply is not on one of our cards with "
+                                      "options, so nothing ran. Swipe-reply on the card you mean.")
+            else:
+                card = self._latest_card(actor, record["event"]["id"])
             if card and card["approval"] and command in ("1", "2"):
                 if self._settled(identity, record, card, command):
                     self._approve_or_cancel(identity, record, conversation, command, "", card=card["group"])
@@ -1105,8 +1119,9 @@ class Portal:
             chosen = card["menu"][int(command) - 1]
             if chosen in ("1", "2"):
                 raise PortalError("no_open_menu", "No open card offers that number. Use RAPP status or RAPP list.")
-            if chosen.startswith("stop ") and conversation["approvals"]:
-                # An approval is waiting (or just lapsed): RAPP 2 may have meant its Cancel.
+            if chosen.startswith("stop ") and conversation["approvals"] and not quoted:
+                # An approval is waiting (or just lapsed): RAPP 2 may have meant its Cancel. A
+                # swipe-reply names its card, so it is not ambiguous.
                 raise PortalError("approval_pending", "A task approval is waiting or just expired, so RAPP "
                                   f"{command} stops nothing. Use RAPP stop {itui.short(chosen.split()[-1])} "
                                   "to stop that task.")

@@ -3254,3 +3254,51 @@ def test_a_swipe_reply_to_any_bubble_of_a_long_approval_card_approves_it(env):
     env.source.events.append(message(2, "1", reply_to=pieces[0]["guid"]))
     env.portal().tick()
     assert [call["job_id"] for call in env.runtime.calls if call["op"] == "approve"] == [JOB1]
+
+
+def test_rapp_n_answers_an_image_post_not_an_older_cards_stop(env):
+    approved_running_job(env)
+    image = env.root / "chart.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+    post_id = feed_post(env, text="Loop 02\n1. Ship it\n2. Hold", file=str(image))
+    for _ in range(2):
+        env.clock.advance(10)
+        env.portal().tick()
+    env.source.events.append(message(3, "RAPP 2"))
+    env.portal().tick()
+    assert not [call for call in env.runtime.calls if call["op"] == "cancel"]
+    assert state(env)["feed"][post_id]["state"] == "answered"
+
+
+def test_a_swiped_rapp_1_approves_the_quoted_approval_card_not_the_newest(env):
+    env.source.events.extend([message(), message(2, "RAPP another task")])
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    env.source.events.append(message(3, "RAPP 1", reply_to=approval_part(env)["guid"]))
+    env.portal().tick()
+    assert [call["job_id"] for call in env.runtime.calls if call["op"] == "approve"] == [JOB1]
+
+
+def test_a_swiped_rapp_2_stops_the_quoted_task_not_the_newest_approval(env):
+    approved_running_job(env)
+    running = running_part(env)
+    env.clock.advance(10)
+    env.source.events.append(message(3, "RAPP another task"))
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    env.source.events.append(message(4, "RAPP 2", reply_to=running["guid"]))
+    env.portal().tick()
+    assert [call["job_id"] for call in explicit_ops(env, "cancel")] == [JOB1]
+
+
+def test_a_swiped_rapp_n_on_a_message_that_is_not_our_card_runs_nothing(env):
+    env.source.events.append(message())
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    env.source.events.append(message(2, "RAPP 1", reply_to="OTHER-AI-MESSAGE"))
+    env.portal().tick()
+    assert not [call for call in env.runtime.calls if call["op"] == "approve"]
+    assert any("not on one of our cards" in call["text"] for call in env.native.calls)

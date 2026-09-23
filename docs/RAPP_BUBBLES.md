@@ -37,7 +37,7 @@ Only `RAPP …` / `RAPP: …` addresses this portal. Case does not matter.
 | A photo/video/audio/file after `RAPP attach` | Stage it and acknowledge a useful next step; never execute file contents. |
 | `RAPP <task>` with files attached | Wait for all observed files, then prepare the task with their references. |
 | `1` / `2` | Approve / cancel exactly the task of the confirmed, still-live approval card the number sits right under (or swipe-replies to). |
-| `RAPP 1` / `RAPP 2` | Approve / cancel only when the newest card sent before you typed is that task's live approval card; otherwise they pick the newest card's options. |
+| `RAPP 1` / `RAPP 2` | Approve / cancel only when the card answered (the one a swipe-reply quotes, else the newest card sent before you typed) is that task's live approval card; otherwise they pick that card's options. |
 | `RAPP approve <job-id>` | Approve that exact locally pending job using its stored, finite token. |
 | `RAPP status [job-id]` | Worker state and honest native output states. |
 | `RAPP list` | Bounded list of jobs scoped by the local adapter to this actor. |
@@ -503,8 +503,9 @@ next ~5m · ref 3fa9c1
   `RAPP <n>` alike, so sending the pick again answers the card that is now newest. A
   row with no chat.db time is judged by position alone. A card from before a group's
   members changed is never re-sent to the changed group.
-- **`RAPP <n>`** answers the newest card sent before you typed, operator posts
-  included, and never falls back to an older card. A newest card whose delivery is
+- **`RAPP <n>`** answers the card a swipe-reply quotes (nothing runs if the quoted
+  message is not one of our cards), else the newest card sent before you typed,
+  operator posts included, and never falls back to an older card. A newest card whose delivery is
   unknown counts as closed ("check your phone"). `RAPP 1`/`RAPP 2` approve or cancel
   only when that newest card is the task's live approval card (`approval_expired`
   after it lapses), and `RAPP <n>` never picks Stop while an approval is waiting or
@@ -512,7 +513,8 @@ next ~5m · ref 3fa9c1
   nothing. An error card is itself the newest card, so refusals name a command that
   still works (`RAPP approve 0001`, a swipe-reply on the card) rather than `RAPP 1`.
   Attachment bubbles belong to their card: an unconfirmed attachment does not close a
-  delivered card's options.
+  delivered card's options, while an image post (a single attachment bubble) is its own
+  card.
   Options only map to existing commands (`status`, `stop`, `result`, `list`, `help`,
   `retry`) plus `RAPP quiet [job]`, so a number can never grant anything new. A handled
   reply is recorded before dispatch, so the reader's late-row window never repeats it.

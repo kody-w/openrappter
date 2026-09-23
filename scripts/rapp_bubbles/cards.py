@@ -231,8 +231,10 @@ def resolve(config: Config, data: dict, text: str, *, reply_to: str | None = Non
             return reoffer(identity, actor, target, part, note=note)
 
         def _post_refusal(identity, actor, target, refusal):
-            refused.append(refusal[1])
-            return post_refusal(identity, actor, target, refusal)
+            shown = post_refusal(identity, actor, target, refusal)
+            # A copy is shown again only while the update can still take an answer.
+            refused.append(refusal[1] if shown else "That update is no longer open.")
+            return shown
 
         portal._reoffer, portal._post_refusal = _reoffer, _post_refusal
         try:

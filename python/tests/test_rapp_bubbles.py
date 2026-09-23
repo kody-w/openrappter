@@ -5122,3 +5122,53 @@ def test_a_failure_that_only_moved_the_records_time_is_still_counted(env, monkey
     env.portal().tick()
     back = [call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ✓ Back online")]
     assert len(back) == 1 and "2+ ticks failed" in back[0]
+
+
+# Round 6 review, pass 3.
+
+
+def near_cap(env, line):
+    """A delivered update whose second refusal lands 2 s before the 2x cap."""
+    post_id = delivered_feed_post(env)
+    opened = state(env)["feed"][post_id]["delivered_at"]
+    env.clock.now = opened + 299
+    line.foreign()
+    line.say("RAPP 1")
+    env.portal().tick()
+    env.clock.now = opened + 598
+    return post_id
+
+
+def test_a_withheld_refusal_handled_again_after_a_crash_is_told_once(env, monkeypatch):
+    from rapp_bubbles import portal as portal_module
+    from rapp_bubbles.state import JournalWriteError
+
+    line = timeline(env)
+    near_cap(env, line)
+    copy_part = next(part for part in reversed(state(env)["outbox"]) if ":again:" in part["group"])
+    real, failed = portal_module.Portal._remember_reply, []
+
+    def crash(self, identity, event, actor, target, kind):
+        if kind == "feed_race" and not failed:
+            failed.append(kind)
+            raise JournalWriteError(errno.ENOSPC, "synthetic full disk")
+        return real(self, identity, event, actor, target, kind)
+
+    monkeypatch.setattr(portal_module.Portal, "_remember_reply", crash)
+    line.say("1", typed_ago=env.clock() - copy_part["sent_at"] - 1)  # typed as the copy landed
+    sent = len(env.native.calls)
+    with pytest.raises(JournalWriteError):
+        env.portal().tick()
+    env.clock.advance(1)
+    env.portal().tick()
+    assert [call["text"].split("\n", 1)[0].rsplit("· ", 1)[-1] for call in env.native.calls[sent:]] == ["Not answered"]
+
+
+def test_resolve_reports_a_withheld_copy_as_the_update_closing(env, monkeypatch):
+    line = timeline(env)
+    cards = dry_run_on(line, monkeypatch)
+    near_cap(env, line)
+    line.foreign()
+    dry = cards.resolve(env.config(), copy.deepcopy(state(env)), "RAPP 1", clock=env.clock)
+    assert dry["refused"] == ["That update is no longer open."]
+    assert [head.rsplit("· ", 1)[-1] for head in dry["cards"]] == ["Not answered"]

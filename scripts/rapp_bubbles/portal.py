@@ -749,17 +749,18 @@ class Portal:
             return note is None
         return guard
 
-    def _post_refusal(self, identity: str, actor: dict, target: dict, refusal: tuple) -> None:
+    def _post_refusal(self, identity: str, actor: dict, target: dict, refusal: tuple) -> bool:
         """An answer an update could not take: the update comes again as the newest bubble,
         with its own options last and why nothing was answered right under its first line, so
-        the number sent again (or swiped on it) answers it. One copy waits to go at a time."""
+        the number sent again (or swiped on it) answers it. One copy waits to go at a time.
+        False when the update is closed (or closes now) instead, and the owner is told so."""
         post_id, note = refusal
         item = self.store.data.get("feed", {}).get(post_id)
         now = self.clock()
         if not item or not feed.is_open(item, actor, now):
             self._notice(f"input:{identity}:post-closed", actor, target, "That update is no longer open.",
                          title="Not answered")
-            return
+            return False
         envelope = f"[RAPP {item['channel']}] "
         original = next((part.get("text") or part.get("caption") or "" for part in self.outbox.parts(item["group"])), "")
         body = original[len(envelope):] if original.startswith(envelope) else original
@@ -784,13 +785,14 @@ class Portal:
                 item["refusals"] = [*item.get("refusals", []), {"at": now, "why": why, "copy": None}][-3:]
                 self._notice(f"input:{identity}:post-closed", actor, target, "That update is no longer open.",
                              title="Not answered")
-                return
+                return False
             item["open_until"] = until
         if group not in aliases:
             aliases.append(group)
         item["refusals"] = [*item.get("refusals", []), {"at": now, "why": why, "copy": token(f"{group}:0")[:6]}][-3:]
         self.outbox.enqueue(group, actor, target, "\n".join(
             [f"{envelope}Not answered · {head}", f"{advice}, so nothing was answered. {tail}", *([rest] if rest else [])]))
+        return True
 
     def _menu_open(self, part: dict, now: float) -> bool:
         """A task's live menu stays open while it runs, an approval card while its approval is
@@ -1214,6 +1216,10 @@ class Portal:
         return self._route_event(identity, event, actor, target)
 
     def _route_event(self, identity: str, event: dict, actor: dict, target: dict) -> str | None:
+        if self.outbox.parts(f"input:{identity}:post-closed"):
+            # Already told its update is closed; a crash came before the reply was recorded.
+            self._remember_reply(identity, event, actor, target, "feed_race")
+            return None
         # Messages may represent an attachment-only body with U+FFFC.
         text = str(event.get("text") or "").replace("\ufffc", "")
         conversation = self._conversation(actor, target)
@@ -1558,6 +1564,8 @@ class Portal:
         return matches[0] if matches else value
 
     def _command(self, identity: str, record: dict) -> None:
+        if self.outbox.parts(f"input:{identity}:post-closed"):
+            return  # already told its update is closed, before a crash kept it from being done
         actor, target, body = record["actor"], record["target"], record["body"]
         conversation = self._conversation(actor, target)
         words = body.split(maxsplit=1)

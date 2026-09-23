@@ -60,6 +60,7 @@ class Outbox:
         artifacts: list[dict] | None = None, workspace: Path | None = None,
         declared: tuple[str, ...] = (), job_id: str | None = None,
         menu: list[str] | None = None, card: str | None = None, menu_kind: str | None = None,
+        marks: dict | None = None,
     ) -> None:
         if self.parts(group):
             return
@@ -79,6 +80,8 @@ class Outbox:
         if menu:
             # Every part of the group carries the menu, so a reply under any bubble resolves.
             extra.update(menu=list(menu), menu_kind=menu_kind or "notice")
+        # Facts about the card as a whole, carried by each of its bubbles like the menu.
+        extra.update(marks or {})
         if framed and len(pieces) > 1:
             # Piece one needs its own unique line too: exact-text receipts must never collide.
             head, _, rest = pieces[0].partition("\n")

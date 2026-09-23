@@ -60,17 +60,58 @@ HISTORY = 20
 HEX_REF = re.compile(r"#?([0-9a-f]{4,32})", re.IGNORECASE)
 
 
+# Letters that show as nothing: a line's scan skips them like format characters.
+FILLERS = frozenset("\u115f\u1160\u3164\uffa0")
+# Controls that reorder a line as shown, so its first character stored need not be the first seen.
+BIDI = frozenset("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
+
+
+def _shown(line: str) -> tuple[str, bool]:
+    """A line as the phone draws its characters (NFKC, without format characters or fillers),
+    and whether it may be drawn in another order than stored (a bidi control or a
+    right-to-left letter on it)."""
+    line = unicodedata.normalize("NFKC", line)
+    clean = "".join(ch for ch in line if unicodedata.category(ch) != "Cf" and ch not in FILLERS)
+    return clean, any(ch in BIDI for ch in line) or any(unicodedata.bidirectional(ch) in ("R", "AL") for ch in clean)
+
+
+def _digit(ch: str) -> bool:
+    return unicodedata.digit(ch, 0) in range(1, 10)
+
+
 def draws_numbers(text: str) -> bool:
     """Whether text draws numbered choices in any form a phone shows as one: a line whose
     first letter or digit, after any marks (brackets, bullets, markdown), is a digit 1-9.
-    Fullwidth, keycap, circled, and other-script digits count (NFKC, then the digit value),
-    and format characters (zero-width spaces, bidi marks) are removed first. Deny by
-    default: a line that merely starts with a count counts too."""
-    clean = "".join(ch for ch in unicodedata.normalize("NFKC", text) if unicodedata.category(ch) != "Cf")
-    for line in clean.splitlines():
+    Fullwidth, keycap, circled, and other-script digits count (NFKC, then the digit value);
+    format characters and invisible fillers are skipped, and a line that may be drawn in
+    another order (bidi controls, right-to-left text) counts when any digit 1-9 is on it.
+    Deny by default: a line that merely starts with a count counts too."""
+    for raw in text.splitlines():
+        line, reordered = _shown(raw)
+        if reordered:
+            if any(_digit(ch) for ch in line):
+                return True
+            continue
         found = re.match(r"[\W_]*(\w)", line.strip())
-        if found and unicodedata.digit(found.group(1), 0) in range(1, 10):
+        if found and _digit(found.group(1)):
             return True
+    return False
+
+
+def names_numbers(text: str) -> bool:
+    """Whether text shows a number 1-9 standing on its own anywhere ("Reply 1 or 2", "2️⃣",
+    "5/8"), not only at the start of a line: how another author's words are read, deny by
+    default, since any of them may be what the owner's number answers."""
+    for raw in text.splitlines():
+        line, reordered = _shown(raw)
+        if reordered and any(_digit(ch) for ch in line):
+            return True
+        for index, ch in enumerate(line):
+            if not _digit(ch):
+                continue
+            before, after = line[index - 1:index], line[index + 1:index + 2]
+            if not (before.isalnum() or before == "_") and not (after.isalnum() or after == "_"):
+                return True
     return False
 
 

@@ -508,11 +508,13 @@ next ~5m · ref 3fa9c1
     nothing runs and the card comes again saying `Not confirmed on your phone`.
   - `RAPP <n>` and `RAPP reply` name no bubble, so nothing from another author may sit
     after the card: only the owner's own messages (any in a one-to-one chat; in a group,
-    his handle's) and our own bubbles, except an agent's post of another update that draws
-    numbered lines of its own, which may be what the number answers. Numbers count in any
-    form a phone shows them (`[1] Yes`, `(2)`, `2️⃣`, `❷`, fullwidth or other-script digits,
-    markdown bullets, zero-width or bidi marks in front), and any line whose first letter or
-    digit is a digit counts: deny by default. Another
+    his handle's) and our own bubbles, except an agent's post of another update, which is
+    read deny by default: its own words (without the `[RAPP <channel>]` envelope we put on
+    it) count when a number 1-9 stands alone anywhere in them (`[2] Hold`, `Reply 1 or 2`,
+    `2️⃣`, `❷`, fullwidth or other-script digits, `5/8`), and a post with a picture always
+    counts, since the picture may show numbers. Format characters and invisible fillers
+    (Hangul fillers, zero-width marks) are skipped, and a line that bidi controls or
+    right-to-left text may draw in another order counts when any digit is on it. Another
     AI's look-alike card or a group member's message in between counts too. Then nothing
     runs and the card comes again saying `Another message came after the card` and to
     swipe-reply the number on it: in a thread where another AI answers every message, a
@@ -523,10 +525,19 @@ next ~5m · ref 3fa9c1
     text may draw `[2]` lines of its own), or a swipe-reply on an attachment, runs nothing
     and the card comes again. An approval card
     is ours and the owner's prompt, so a swipe-reply on any of its bubbles counts.
-  - A Stop picked without a swipe-reply while a task approval is waiting (or just lapsed)
-    runs nothing, bare or `RAPP 2` alike: the 2 may have meant that approval's Cancel. The
-    running card comes again saying so; a swipe-reply on it, or `RAPP stop 0001`, stops
-    the task.
+  - A Stop picked without a swipe-reply while another task's approval is live (or lapsed
+    within the last two minutes) runs nothing, bare or `RAPP 2` alike: the 2 may have meant
+    that approval's Cancel. The running card comes again with `Not stopped` on its lock-screen
+    line and the waiting task named (`Task 0002's approval is waiting, so nothing stopped.
+    Send 2 again to stop 0001; to cancel 0002, swipe-reply 2 on its card.`). The same
+    number sent again under that card (or `RAPP 2` while it is the newest) stops the task,
+    since it was read with that news; so do a swipe-reply on a running card and
+    `RAPP stop 0001`. An approval that lapsed longer ago holds nothing, even while the
+    runtime has not yet reported it expired.
+  - These reasons are checked in one order for a bare digit, `RAPP <n>`, and `cards`
+    alike: first the lasting ones (the bubble does not show the options; another task's
+    approval), then the passing ones (not confirmed yet, another author after the card, a
+    race), so waiting out a race never promises a pick a lasting reason refuses.
   - The reply must be typed at least 3 seconds after the card's last bubble left the
     Mac (by the message's chat.db time; measured from when the send returned, so a slow
     send does not use up the window). A send that never returned is timed from the
@@ -559,8 +570,9 @@ next ~5m · ref 3fa9c1
   then checks that nothing from another author came after it. A newest card whose delivery is
   unknown counts as closed ("check your phone"). `RAPP 1`/`RAPP 2` approve or cancel
   only when that newest card is the task's live approval card (`approval_expired`
-  after it lapses), and `RAPP <n>` never picks Stop while an approval is waiting or
-  just expired, since `RAPP 2` may have meant Cancel (see the read guard). `RAPP 1 …` with extra words runs
+  after it lapses), and `RAPP <n>` never picks Stop while another task's approval is live or
+  lapsed within two minutes, since `RAPP 2` may have meant Cancel, unless that newest card is
+  the one that came again saying so (see the read guard). `RAPP 1 …` with extra words runs
   nothing. An error card is itself the newest card, so refusals name a command that
   still works (`RAPP approve 0001`, a swipe-reply on the card) rather than `RAPP 1`.
   Attachment bubbles belong to their card: an unconfirmed attachment does not close a
@@ -650,10 +662,13 @@ python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json resolv
   option with its label and the `RAPP …` text that does the same from anywhere (an agent
   post takes its numbers only as a reply on it). `rapp_n` is the card `RAPP <n>` answers
   right now, whether it is open, and `blocked`: whether the tick's read rule would refuse
-  `RAPP <n>` sent now, and why (`unconfirmed`, `closed`, `foreign`, `approval`, or `race`
-  with `ready_in` seconds; null when it would be answered). `options` gives the same for
+  `RAPP <n>` sent now, and why (`unconfirmed`, `closed`, `piece`, `foreign`, `approval`, or
+  `race` with `ready_in` seconds; null when it would be answered), by the tick's own rule in
+  its own order. `options` gives the same for
   each number: the tick guards Approve, Cancel, Stop, and answers to an agent's post, so
-  Details or Quiet on a card runs even when its Stop would be refused.
+  Details or Quiet on a card runs even when its Stop would be refused. A Stop held for
+  another task's approval names it (`"waiting": ["0002"]`), and only a race alone carries
+  `ready_in`.
 - `resolve` sends the reply through the real routing code on a private copy of the
   journal, as if the owner sent it now: typed `--typed-ago` seconds earlier, and as a
   swipe-reply on the card whose ref `--reply-to` gives. The first call to the task runtime
@@ -708,27 +723,41 @@ event, each ending with `[1] Health` and `[2] Recent jobs`:
   `chat.db busy` for a locked database (named from the SQLite error behind the reader's
   `messages_unavailable`). The record is written whole or not at all: on a
   full disk the last one stays and only its time moves (`3+ ticks failed`), so the count
-  is never erased. Ticks that fail now and then gather in it; a good tick saves them at
-  most every 10 minutes (not once per failure) and removes the record only after that
-  save succeeded; when three or more gathered, one `! Ticks failing` card says how many
-  and why, at most once an hour per cause. `RAPP health` shows the latest: `Last failed:
-  3 ticks failed · disk full · 2h ago`. On a disk that is still critical the gap card is
-  `! Back, disk full`, saying new tasks wait, not an all-clear.
-- **Stuck stages**: a tick stage that fails tick after tick for a minute gets one card
-  saying what the owner loses while it fails (`! Receipts stuck` · `delivery checks are
-  paused`), and counts as back only after at least fifteen minutes without failing, then one
-  `✓ Receipts back` card. An incident belongs to the stage, whatever its error: a stage
-  whose error keeps changing, or that fails every few minutes, is still one incident and
-  is told once, and each kind of error is recorded once. While it fails, the journal is
-  written at most every five minutes. The hourly cleanup, which works only once an hour,
-  is told on its second failed run. A back card gives how long the stage failed as a range
-  (`it failed for 5m–10m`), since the time of its latest failure is saved at most every
-  five minutes; for the same reason the hold counts twenty minutes from the latest saved
-  failure. A stuck sender cannot send its own card, so it gets one `✓ Sending back · it
-  failed for 1m–6m` card instead, and a stuck card that never left the Mac is dropped when its
-  stage is back. A card that fails to build never fails the tick. `RAPP health` lists
-  stuck stages. While this tick's disk check fails, new tasks are refused with
-  `disk_unknown`: a disk that cannot be checked is not assumed to have room.
+  is never erased. A damaged record (a field that is not a number) is read as a count and
+  times it could be, never as a reason to fail every tick, and the record is flushed to
+  disk before it replaces the last one. Ticks that fail now and then gather in it; a good
+  tick saves them at most every 10 minutes (not once per failure) and removes the record
+  only after that save succeeded. Each save adds them to one incident per cause: once
+  three or more have failed, one `! Ticks failing` card says how many and why; it is told
+  again only after six hours, then once a day, each time with every failure since it
+  began; and once none has failed for fifteen minutes, one `✓ Ticks back` card says how
+  many failed over how long. `RAPP health` shows the latest (`Last failed: 3 ticks failed ·
+  disk full · 2h ago`) and each open incident. On a disk that is still critical the gap
+  card is `! Back, disk full`, saying how much space is free and that new tasks wait, not
+  an all-clear; a disk check that finds the disk critical after such a gap holds its own
+  alert, so that news comes once.
+- **Stuck and flaky stages**: a tick stage that fails tick after tick for a minute gets one
+  card saying what the owner loses while it fails (`! Receipts stuck` · `delivery checks are
+  paused`); one that fails now and then, three separate times each within fifteen minutes
+  of the last, gets one `! Receipts flaky` card (`failed 3 times in 10m`). A failure or two
+  on their own tell nothing, and end quietly after fifteen minutes. A told stage counts as
+  back only after at least fifteen minutes without failing, then one `✓ Receipts back`
+  card. An incident belongs to the stage, whatever its error: a stage whose error keeps
+  changing is still one incident and is told once, and each kind of error is recorded once.
+  The journal is written when something new is known (a first good run after failures,
+  another run of them, a new kind of error, the card), and once told at most every five
+  minutes while it keeps failing. The hourly cleanup, which works only once an hour, is
+  told on its second failed run in a row. A back card gives how long the stage failed as a
+  range (`it failed for 5m–10m`), since the time of its latest failure is saved at most
+  every five minutes; for the same reason the hold counts twenty minutes from the latest
+  saved failure. A stuck sender cannot send its own card, so it gets one `✓ Sending back ·
+  it failed for 1m–6m` card instead, and a stuck card that never left the Mac is dropped when
+  its stage is back. A card that fails to build never fails the tick. `RAPP health` lists
+  stuck and flaky stages, and stages that failed lately without a card. While this tick's
+  disk check fails, new tasks are refused with `disk_unknown`: a disk that cannot be
+  checked is not assumed to have room. `transport-status` reports `stages` (each with
+  `told`, `kind`, its error `codes`, and `back_after`), `tick_failure` (the record pending
+  now, and the last one saved), `tick_incidents`, and `heartbeat_age_s`.
 
 ### Bounded journal and idle ticks
 

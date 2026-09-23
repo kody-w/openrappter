@@ -39,9 +39,12 @@ INTERNAL_ATTEMPTS = 3  # internal errors before a job is no longer followed
 # retried; only unexpected errors are ever set aside.
 UNCONTAINED = (JournalWriteError, PortalError, sqlite3.Error)
 DEGRADED_AFTER = 60  # a stage failing this long, tick after tick, gets one card
+FLAKY_RUNS = 3  # so do this many separate runs of failures, each within STAGE_HOLD of the last
 STAGE_HOLD = 900  # and counts as back only after this long without failing, so failing now and then is one incident
 STAGE_LAST_EVERY = 300  # while it fails, the time of its latest failure is saved at most this often
 FAILURE_MERGE = 600  # failed-tick records gather this long before a good tick saves them
+TICKS_RETOLD = (6 * 3600, 24 * 3600)  # a ticks-failing incident is told again after these waits
+LAPSE_SHADOW = 120  # an approval that lapsed this recently may still be what an unswiped Stop meant
 COPY_WINDOW = 30  # an update closing sooner than this is not shown again to be answered
 STAGES = {  # stage: (lock-screen label, what the owner loses while it fails)
     "disk": ("Disk", "disk checks fail, so new tasks are refused"),
@@ -59,8 +62,10 @@ RACE_NOTE = "Your reply landed as this card arrived, so nothing ran."
 UNCONFIRMED_NOTE = "Not confirmed on your phone, so nothing ran."
 FOREIGN_NOTE = "Another message came after the card, so nothing ran. Swipe-reply your number on this one."
 THREAD_NOTE = "Someone else replied under the card, so nothing ran. Swipe-reply your number on this one."
-APPROVAL_NOTE = "A task approval is waiting, so nothing stopped. Swipe-reply your number on the card you mean."
 PIECE_NOTE = "That bubble is not the one with the options, so nothing ran. Swipe-reply your number on this one."
+# Why a pick was refused, by the read rule's note: one name each for cards and the tick alike.
+READ_REASONS = {UNCONFIRMED_NOTE: "unconfirmed", FOREIGN_NOTE: "foreign", THREAD_NOTE: "foreign",
+                RACE_NOTE: "race"}
 JOB_ID = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{32}")
 TERMINAL = {"succeeded", "completed", "failed", "cancelled", "canceled", "interrupted", "expired"}
 OUTPUT_EXTENSIONS = {
@@ -137,6 +142,42 @@ def output_text(response: dict, key: str) -> str:
     if isinstance(value, dict):
         value = value.get("text", "")
     return value if isinstance(value, str) else ""
+
+
+def recorded_number(value, fallback: float) -> float:
+    """A time or count from a record another process wrote: a finite number, else the fallback."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return number if math.isfinite(number) else fallback
+
+
+def read_tick_failure(state_dir: Path) -> dict | None:
+    """The cause the CLI recorded for ticks that failed as a whole (they save nothing), with
+    every field made safe to use: a damaged record must never be what stops each tick."""
+    path = state_dir / "tick-failure.json"
+    try:
+        modified = path.stat().st_mtime
+    except FileNotFoundError:
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    raw = raw if isinstance(raw, dict) else {}
+    recorded = recorded_number(raw.get("last"), 0)
+    last = max(recorded, modified)
+    errno = raw.get("errno")
+    return {
+        "code": raw["code"] if isinstance(raw.get("code"), str) and raw["code"] else "unknown",
+        "kind": raw["kind"] if isinstance(raw.get("kind"), str) else None,
+        "errno": errno if type(errno) is int else None,
+        "first": min(recorded_number(raw.get("first"), last), last), "last": last,
+        "count": max(1, int(recorded_number(raw.get("count"), 1))),
+        # A later failure that could not be written (a full disk) only moved the file's time.
+        "more": raw.get("more") is True or modified > recorded + 1,
+    }
 
 
 class Portal:
@@ -294,14 +335,17 @@ class Portal:
         self.outbox.enqueue(key, actor, target, text, job_id=job_id, menu=commands, menu_kind=menu)
 
     def _job_card(self, key: str, job_id: str, job: dict, *, update: bool = False, advance: bool = False,
-                  note: str | None = None) -> None:
-        """A running task's live card: status and ETA on line one, then its options."""
+                  note: str | None = None, status: str | None = None, told_approvals: tuple = ()) -> None:
+        """A running task's live card: status and ETA on line one (or ``status``, for a card
+        shown again for a pick that did not run), then its options. ``told_approvals`` names the
+        approvals its note told of, so the same number sent again under it is read with them in
+        mind."""
         now = self.clock()
         stream = job.setdefault("stream", {"sent": 0, "last_at": 0, "quiet": False})
         started = job.setdefault("started_at", now)
         estimate = self._estimate(job, now)
         state = job["state"]
-        status = {"queued": "Queued", "cancelling": "Stopping"}.get(state, estimate["status"])
+        status = status or {"queued": "Queued", "cancelling": "Stopping"}.get(state, estimate["status"])
         top = []
         if estimate["fraction"] is not None:
             top.append(itui.bar(estimate["fraction"]) + (" est" if estimate["basis"] == "history" else ""))
@@ -337,7 +381,8 @@ class Portal:
         if update:
             self.outbox.supersede(job_id)
         self.outbox.enqueue(key, job["actor"], job["target"], text, job_id=job_id, menu=commands,
-                            card="progress" if update else None, menu_kind=kind)
+                            card="progress" if update else None, menu_kind=kind,
+                            marks={"told_approvals": list(told_approvals)} if told_approvals else None)
 
     def _owner_route(self) -> tuple[dict, dict] | None:
         """The first authorized direct thread, for system cards nobody asked for yet."""
@@ -420,6 +465,10 @@ class Portal:
                 itui.GLYPH["succeeded"] if level == "ok" else itui.GLYPH["attention"], f"Disk {level}",
                 [space, resumed + ("; free space soon" if level == "low" else "")],
             )
+        elif level == "critical" and (self._last_heartbeat() or now) <= now - 300:
+            # Ticks stopped for a while (a full disk stops them): this tick's gap card says the
+            # disk is full and new tasks wait, so the owner gets that news once.
+            return
         else:
             self._system_card(
                 f"sys:disk:{level}:{int(now)}", itui.GLYPH["attention"], f"Disk {level}",
@@ -453,71 +502,109 @@ class Portal:
 
     @staticmethod
     def _failed_ticks(failure: dict) -> str:
-        count = int(failure.get("count") or 1)
+        count = max(1, int(recorded_number(failure.get("count"), 1)))
         # A later failure that could not be written (a full disk) only moved the file's time.
         return f"{count}{'+' if failure.get('more') else ''} tick{'' if count == 1 and not failure.get('more') else 's'} failed"
 
     def _read_tick_failure(self) -> dict | None:
-        """The cause the CLI recorded for ticks that failed as a whole (they save nothing)."""
-        path = self.config.state_dir / "tick-failure.json"
+        return read_tick_failure(self.config.state_dir)
+
+    def _last_heartbeat(self) -> float | None:
         try:
-            modified = path.stat().st_mtime
+            return (self.config.state_dir / "heartbeat").stat().st_mtime
         except FileNotFoundError:
             return None
-        try:
-            failure = json.loads(path.read_text(encoding="utf-8"))
-            failure = failure if isinstance(failure, dict) else {}
-        except (OSError, ValueError):
-            failure = {}
-        recorded = float(failure.get("last") or 0)
-        failure["more"] = bool(failure.get("more")) or modified > recorded + 1
-        failure["last"] = max(recorded, modified)
-        failure.setdefault("first", failure["last"])
-        return failure
 
     def _heartbeat(self) -> None:
         """Touch a tiny file per successful tick; a long gap means ticks failed or stopped.
         Ticks that fail now and then gather in the CLI's record, which a good tick saves at most
-        every FAILURE_MERGE (or with the gap card), removing it only once that save succeeded."""
+        every FAILURE_MERGE (or with the gap card), removing it only once that save succeeded;
+        each save adds them to that cause's incident, which ends once none has failed for
+        STAGE_HOLD."""
         path = self.config.state_dir / "heartbeat"
         now = self.clock()
-        try:
-            last = path.stat().st_mtime
-        except FileNotFoundError:
-            last = None
+        last = self._last_heartbeat()
         gap = last is not None and now - last >= 300
-        failure = self._read_tick_failure()
-        if failure and not gap and now - float(failure["first"]) < FAILURE_MERGE:
-            failure = None
+        pending = self._read_tick_failure()
+        failure = pending if pending and (gap or now - pending["first"] >= FAILURE_MERGE) else None
+        changed = False
         if failure:
             self.store.data["last_tick_failure"] = failure
+            changed = True
         if gap:
             cause = (f"{self._failed_ticks(failure)} · {self._failure_cause(failure)}"
                      if failure else "check RAPP health")
-            # Back, but not all clear while the disk still blocks new tasks.
+            # Back, but not all clear while the disk still blocks new tasks (and this card says
+            # so for the disk check, which held its own alert for it this tick).
             critical = self._disk_now() == "critical"
+            free = self.store.data.get("resources", {}).get("free_gib")
             self._system_card(f"sys:gap:{int(last)}", itui.GLYPH["attention" if critical else "succeeded"],
                               "Back, disk full" if critical else "Back online",
                               [f"no ticks for {itui.span(now - last)}", cause,
-                               *(["new tasks paused until space frees"] if critical else [])])
-        elif failure and int(failure.get("count") or 1) >= 3:
-            # Whole ticks failing between good ones leave no gap to report: say so, at most
-            # once an hour per cause.
-            alerts = self.store.data.setdefault("tick_alerts", {})
-            cause = self._failure_cause(failure)
-            if now - alerts.get(cause, 0) >= 3600:
-                alerts[cause] = now
-                self._system_card(f"sys:ticks:{int(float(failure['first']))}", itui.GLYPH["attention"],
-                                  "Ticks failing", [f"{self._failed_ticks(failure)} in "
-                                                    f"{itui.span(float(failure['last']) - float(failure['first']))}",
-                                                    cause])
-        if gap or failure:
+                               *([(f"{free} GB free · " if free is not None else "")
+                                  + "new tasks paused until space frees"] if critical else [])])
+            if failure:
+                # Told by this card, but an incident of the same cause goes on through the gap.
+                self._ticks_failing(failure, now, tell=False)
+            changed = True
+        elif failure:
+            self._ticks_failing(failure, now)
+        if pending is None:
+            # No tick has failed since the last save: an incident quiet for long enough ends.
+            changed = self._ticks_quiet(now) or changed
+        if changed:
             self.store.save()
         if failure:
             (self.config.state_dir / "tick-failure.json").unlink(missing_ok=True)
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         os.close(descriptor)
         os.utime(path, (now, now))
+
+    def _ticks_failing(self, failure: dict, now: float, *, tell: bool = True) -> None:
+        """Whole ticks failing between good ones leave no gap to report. They are one incident
+        per cause: told once three or more have failed, then again only after TICKS_RETOLD
+        waits, with every failure since it began counted once (a record read again, because
+        the save before could not remove it, adds only what is new in it). Without ``tell``
+        (a gap card told of them) only an incident already open is extended."""
+        alerts = self.store.data.get("tick_alerts") or {}
+        cause = self._failure_cause(failure)
+        incident = alerts.get(cause)
+        if not isinstance(incident, dict):
+            if not tell:
+                return
+            # A journal from before incidents kept only the time of the last card.
+            told = recorded_number(incident, 0) if incident is not None else 0
+            incident = {"since": failure["first"], "last": failure["last"], "count": 0, "more": False,
+                        "told_at": told, "every": 3600 if told else 0}
+        merged = incident.get("merged") or {}
+        fresh = failure["count"] - merged["count"] if merged.get("first") == failure["first"] else failure["count"]
+        incident["merged"] = {"first": failure["first"], "count": failure["count"]}
+        if fresh > 0:
+            incident.update(count=int(incident["count"]) + fresh, last=max(incident["last"], failure["last"]),
+                            more=bool(incident["more"] or failure["more"]))
+        self.store.data["tick_alerts"] = {**alerts, cause: incident}
+        if not tell or incident["count"] < 3 or (incident["told_at"] and now - incident["told_at"] < incident["every"]):
+            return
+        retold = [wait for wait in TICKS_RETOLD if wait > incident["every"]]
+        incident.update(told_at=now, every=retold[0] if retold else TICKS_RETOLD[-1])
+        self._system_card(f"sys:ticks:{int(incident['since'])}:{int(now)}", itui.GLYPH["attention"], "Ticks failing",
+                          [f"{self._failed_ticks(incident)} in {itui.span(incident['last'] - incident['since'])}", cause])
+
+    def _ticks_quiet(self, now: float) -> bool:
+        """End each ticks-failing incident that has had no failure for STAGE_HOLD; one the owner
+        was told of gets one back card."""
+        alerts = self.store.data.get("tick_alerts")
+        changed = False
+        for cause, incident in list((alerts or {}).items()):
+            if isinstance(incident, dict) and now - incident["last"] < STAGE_HOLD:
+                continue
+            alerts.pop(cause)
+            changed = True
+            if isinstance(incident, dict) and incident["told_at"]:
+                self._system_card(f"sys:ticks-back:{int(incident['since'])}", itui.GLYPH["succeeded"], "Ticks back",
+                                  [f"{self._failed_ticks(incident)} over "
+                                   f"{itui.span(incident['last'] - incident['since'])}", cause])
+        return changed
 
     def _compact(self) -> bool | None:
         """Hourly: drop settled records that are old and past the reader's late window. False
@@ -578,10 +665,14 @@ class Portal:
             f"Journal: {journal // 1024} KB",
             *([f"Last error: {data['errors'][-1]['code']} ×{data['errors'][-1].get('count', 1)}"]
               if data.get("errors") else []),
-            *(f"Stuck: {STAGES.get(name, (name,))[0].lower()} for {itui.span(self.clock() - stage['since'])}"
+            *(f"{'Flaky' if stage.get('kind') == 'flaky' else 'Stuck'}: {STAGES.get(name, (name,))[0].lower()} "
+              f"for {itui.span(self.clock() - stage['since'])}" if stage.get("told")
+              else f"Failed lately: {STAGES.get(name, (name,))[0].lower()} ×{stage.get('runs', 1)}"
               for name, stage in data.get("stages", {}).items()),
+            *(f"Ticks failing: {self._failed_ticks(incident)} in {itui.span(incident['last'] - incident['since'])} · {cause}"
+              for cause, incident in data.get("tick_alerts", {}).items() if isinstance(incident, dict)),
             *(f"Last failed: {self._failed_ticks(failure)} · {self._failure_cause(failure)} · "
-              f"{itui.span(self.clock() - float(failure['last']))} ago"
+              f"{itui.span(self.clock() - recorded_number(failure.get('last'), self.clock()))} ago"
               for failure in [self._read_tick_failure() or data.get("last_tick_failure")] if failure),
             "Outbox: " + (", ".join(f"{count} {state}" for state, count in sorted(states.items())) or "empty"),
         ]
@@ -695,20 +786,37 @@ class Portal:
     def _harmless(self, row: dict, event: dict, card: dict) -> bool:
         """A row after a card that leaves the owner's view on it: his own message (any inbound
         row in a one-to-one chat; in a group, one from his handle), or one of our bubbles. An
-        agent's post of another update is ours but written by an agent, so one that draws
-        numbered lines of its own may be what a number answers."""
+        agent's post of another update is ours but written by an agent, and is read deny by
+        default: a number anywhere in its words, or a picture, may be what a number answers."""
         part = self.outbox.part_for_guid(row["guid"])
         if part is not None:
             post = feed.post_for_group(self.store, part["group"]) if part["group"].startswith("feed:") else None
             if post is None:
                 return True
             mine = feed.post_for_group(self.store, card["group"]) if card["group"].startswith("feed:") else None
-            return (mine is not None and mine["id"] == post["id"]) or not itui.draws_numbers(
-                part.get("text") or part.get("caption") or "")
+            if mine is not None and mine["id"] == post["id"]:
+                return True
+            if any("file" in item for item in feed._bubbles(self.store, post)):
+                return False
+            return not itui.names_numbers(self._authored(post, part.get("text") or part.get("caption") or ""))
         if row["is_from_me"]:
             return False
         return not event.get("is_group") or normalized(str(row.get("sender") or "")) == normalized(
             str(event.get("sender") or ""))
+
+    @staticmethod
+    def _authored(post: dict, text: str) -> str:
+        """An agent post's own words in one of its bubbles, without the framing we put on it:
+        the [RAPP <channel>] envelope, and a long copy's piece lines."""
+        lines = text.split("\n")
+        envelope = f"[RAPP {post['channel']}] "
+        if lines and re.fullmatch(r"\[RAPP [0-9a-f]{6}\] ⋯ \d+/\d+", lines[0]):
+            lines = lines[1:]
+        elif lines and lines[0].startswith(envelope):
+            lines[0] = lines[0][len(envelope):]
+            if lines[0] == "Not answered" or lines[0].startswith("Not answered · "):
+                lines[0] = lines[0][len("Not answered · "):]
+        return "\n".join(line for line in lines if not re.fullmatch(r"⋯ \d+/\d+ · ref [0-9a-f]{6}", line))
 
     def _uninterrupted(self, card: dict, event: dict) -> bool:
         """Nothing but the owner's messages and our own bubbles sits after a card, up to the
@@ -731,17 +839,18 @@ class Portal:
         rows = rows_in(event["chat_guid"], event["reply_to"], event)
         return rows is None or not all(self._harmless(row, event, card) for row in rows)
 
-    def _readable(self, identity: str, record: dict, card: dict, n: int, quoted) -> bool:
+    def _readable(self, identity: str, record: dict, card: dict, n: int, quoted, command: str | None = None) -> bool:
         """False, after re-offering the card as the newest one, when RAPP <n> cannot have been
         meant for it."""
         parts = self.outbox.parts(card["group"])
         swiped = self.outbox.part_for_guid(quoted) if quoted else None
-        note = PIECE_NOTE if swiped is not None and self._off_options(swiped, True) else self._unread(
-            parts, record["event"], n, quoted=bool(quoted), explicit=True)
-        if note is None:
+        pick = self._pick_note(card["group"], n, command, record["event"], bubble=swiped, quoted=bool(quoted),
+                               explicit=True)
+        if pick is None:
             return True
         part = next((item for item in parts if "text" in item), parts[0])
-        self._reoffer(identity, record["actor"], record["target"], part, note=note)
+        self._reoffer(identity, record["actor"], record["target"], part, note=pick["note"],
+                      told=pick.get("waiting", ()), refused=command)
         return False
 
     def _post_guard(self, event: dict, text: str, refused: list, *, explicit: bool):
@@ -828,7 +937,7 @@ class Portal:
         job = self.store.data["jobs"].get(part.get("job_id") or "")
         if part.get("menu_kind") in ("running", "quiet", "cancelling") and job is not None:
             # A task no longer followed (lost, or its result could not be shown) is closed too.
-            return job["state"] not in TERMINAL and not job.get("final_queued")
+            return self._following(job)
         sent = part.get("submitted_at") or part.get("created_at") or now
         return now <= sent + itui.MENU_TTL
 
@@ -871,11 +980,11 @@ class Portal:
         return None
 
     def _closed_card(self, identity: str, event: dict, actor: dict, target: dict, part: dict,
-                     *, note: str | None = None) -> None:
+                     *, note: str | None = None, told: tuple = (), refused: str | None = None) -> None:
         """A digit under one of our cards that no longer offers it (or that it may not have been
         meant for): run nothing and show what is live instead."""
         self._remember_reply(identity, event, actor, target, "closed_menu")
-        self._reoffer(identity, actor, target, part, note=note)
+        self._reoffer(identity, actor, target, part, note=note, told=told, refused=refused)
 
     @staticmethod
     def _following(job: dict | None) -> bool:
@@ -890,11 +999,53 @@ class Portal:
             return part["target"].get("roster_hash") == target.get("roster_hash")
         return self._following(self.store.data["jobs"].get(part.get("job_id") or ""))
 
-    @staticmethod
-    def _stop_shadowed(command: str, conversation: dict, quoted) -> bool:
-        """An unswiped Stop while a task approval waits (or just lapsed): its 2 may have meant
-        that card's Cancel. A swipe-reply names its card, so it is not ambiguous."""
-        return command.startswith("stop ") and not quoted and bool(conversation.get("approvals"))
+    def _shadowing(self, conversation: dict | None) -> list[str]:
+        """The approvals an unswiped Stop may have meant as that card's Cancel: live ones, and
+        any that lapsed within LAPSE_SHADOW (the owner may have typed before it did)."""
+        now = self.clock()
+        return sorted((key for key, value in (conversation or {}).get("approvals", {}).items()
+                       if value["expires_at"] > now - LAPSE_SHADOW),
+                      key=lambda key: conversation["approvals"][key]["expires_at"])
+
+    def _stop_shadowed(self, command: str, card: dict, quoted) -> list[str]:
+        """The approvals that shadow this pick, or [] when it may be read as a Stop. A swipe-reply
+        names its card, so it is not ambiguous; nor is a number sent again under a card that
+        was shown again saying those approvals were waiting."""
+        if not command.startswith("stop ") or quoted:
+            return []
+        waiting = self._shadowing(self._part_conversation(card))
+        return waiting if set(waiting) - set(card.get("told_approvals", ())) else []
+
+    def _shadow_note(self, waiting: list[str], card: dict, n: int) -> str:
+        approvals = (self._part_conversation(card) or {}).get("approvals", {})
+        refs = " and ".join(itui.short(key) for key in waiting)
+        lapsed = all(approvals.get(key, {}).get("expires_at", 0) <= self.clock() for key in waiting)
+        if len(waiting) == 1:
+            what = f"Task {refs}'s approval {'just lapsed' if lapsed else 'is waiting'}"
+        else:
+            what = f"Approvals for {refs} {'just lapsed' if lapsed else 'are waiting'}"
+        cancel = "" if lapsed else f"; to cancel {refs}, swipe-reply 2 on {'its card' if len(waiting) == 1 else 'their cards'}"
+        return f"{what}, so nothing stopped. Send {n} again to stop {itui.short(card.get('job_id'))}{cancel}."
+
+    def _pick_note(self, group: str, n: int, command: str | None, event: dict, *, bubble: dict | None = None,
+                   quoted: bool = False, explicit: bool = False, delivery: bool = True) -> dict | None:
+        """Why a number cannot be read as this pick of this card ({reason, note}), or None when
+        it may run. One rule, in one order, for bare digits, RAPP <n>, and cards: lasting
+        reasons first (the bubble it sits under does not show the options; another task's
+        approval may be what it meant), then passing ones (not confirmed on the phone yet,
+        another author after the card, a race), so a wait is never promised where a lasting
+        reason refuses anyway."""
+        parts = self.outbox.parts(group)
+        if not parts:
+            return None
+        if bubble is not None and self._off_options(bubble, quoted):
+            return {"reason": "piece", "note": PIECE_NOTE}
+        card = next((item for item in parts if "text" in item), parts[0])
+        waiting = self._stop_shadowed(command, card, quoted) if command else []
+        if waiting:
+            return {"reason": "approval", "note": self._shadow_note(waiting, card, n), "waiting": waiting}
+        note = self._unread(parts, event, n, quoted=quoted, delivery=delivery, explicit=explicit)
+        return {"reason": READ_REASONS.get(note, "race"), "note": note} if note else None
 
     def _off_options(self, part: dict, quoted: bool) -> bool:
         """Whether a number on this bubble cannot be read as an answer to its card's options.
@@ -907,8 +1058,10 @@ class Portal:
             return False
         return bool(quoted) or "text" in part
 
-    def _reoffer(self, identity: str, actor: dict, target: dict, part: dict, *, note: str | None = None) -> None:
-        """Show what a card's options lead to now, instead of running one."""
+    def _reoffer(self, identity: str, actor: dict, target: dict, part: dict, *, note: str | None = None,
+                 told: tuple = (), refused: str | None = None) -> None:
+        """Show what a card's options lead to now, instead of running one (``refused``: the
+        command it did not run, which a running card's lock-screen line names when it is Stop)."""
         job = self.store.data["jobs"].get(part.get("job_id") or "")
         approval = self._card_approval(part)
         if approval and part["target"].get("roster_hash") != target.get("roster_hash"):
@@ -934,7 +1087,8 @@ class Portal:
             self.outbox.enqueue(group, actor, target, text, job_id=part["job_id"], menu=commands,
                                 menu_kind="approval")
         elif self._following(job):
-            self._job_card(f"input:{identity}:closed", part["job_id"], job, note=note)
+            self._job_card(f"input:{identity}:closed", part["job_id"], job, note=note, told_approvals=tuple(told),
+                           status="Not stopped" if (refused or "").startswith("stop ") else None)
         elif part.get("menu_kind") == "approval" and part.get("job_id") in (
             self._part_conversation(part) or {}
         ).get("approvals", {}):
@@ -1069,14 +1223,23 @@ class Portal:
             self._stage_ok(name)
 
     def _stage_failed(self, name: str, code: str) -> None:
-        """A stage failing tick after tick is recorded once and told once, after DEGRADED_AFTER.
-        While it keeps failing the journal is written at most once a minute (to keep the time of
-        the latest failure, which decides when it is back), and the heartbeat is still touched,
-        so this card, not the gap card, is what says so."""
+        """A stage's failures are one incident until it has held for STAGE_HOLD, and it is told
+        once: after failing tick after tick for DEGRADED_AFTER (stuck), or on its FLAKY_RUNS-th
+        separate run of failures (flaky). A failure or two on their own tell nothing. The
+        journal is written only when something new is known (another run, a new kind of error,
+        the card), and once told at most every STAGE_LAST_EVERY (to keep the time of the latest
+        failure, which decides when it is back); the heartbeat is still touched, so this card,
+        not the gap card, is what says so."""
         stages = self.store.data.setdefault("stages", {})
         now, stage = self.clock(), stages.get(name)
+        if (
+            stage is not None and not stage["told"] and stage.get("broken")
+            and now - stage.get("last", stage["since"]) >= STAGE_HOLD
+        ):
+            stage = None  # it worked, then held (with no tick to end it): this is a new incident
         if stage is None:
-            stages[name] = {"code": code, "codes": [code], "since": now, "told": False, "last": now}
+            stages[name] = {"code": code, "codes": [code], "since": now, "told": False, "last": now,
+                            "runs": 1, "run_since": now}
             self.store.error(code, now)
             return
         # One incident per stage, whatever the error: a new kind is recorded once, and the latest
@@ -1086,31 +1249,57 @@ class Portal:
         if code not in codes:
             stage["codes"] = [*codes, code][-5:]
             self.store.error(code, now)
-        # The latest failure rides along with any save; one is forced at most every few minutes.
         stage["last"] = now
-        changed = now - stage.get("mark", stage["since"]) >= STAGE_LAST_EVERY
-        if changed:
-            stage["mark"] = now
-        if not stage["told"] and now - stage["since"] >= DEGRADED_AFTER:
-            stage["told"], changed = True, True
-            label, effect = STAGES.get(name, (name.capitalize(), "part of each tick is failing"))
-            if name != "send":
-                # A stuck sender cannot send its own card; its back card says how long instead.
-                stage["card"] = f"sys:stuck:{name}:{int(stage['since'])}"
-                self._stage_card(stage["card"], itui.GLYPH["attention"], f"{label} stuck",
-                                 [effect, f"failing {itui.span(now - stage['since'])} · {code.rsplit(':', 1)[-1]}"])
+        changed = False
+        if not stage["told"]:
+            if stage.pop("broken", False):
+                # It worked in between: this failure starts another run of them.
+                stage["runs"], stage["run_since"], changed = stage.get("runs", 1) + 1, now, True
+            stuck = now - stage.get("run_since", stage["since"]) >= DEGRADED_AFTER
+            if stuck or stage.get("runs", 1) >= FLAKY_RUNS:
+                stage.update(told=True, mark=now, kind="stuck" if stuck else "flaky")
+                changed = True
+                label, effect = STAGES.get(name, (name.capitalize(), "part of each tick is failing"))
+                if name != "send":
+                    # A stuck sender cannot send its own card; its back card says how long instead.
+                    stage["card"] = f"sys:stuck:{name}:{int(stage['since'])}"
+                    kind = code.rsplit(":", 1)[-1]
+                    if stuck:
+                        self._stage_card(stage["card"], itui.GLYPH["attention"], f"{label} stuck", [
+                            effect, f"failing {itui.span(now - stage.get('run_since', stage['since']))} · {kind}"])
+                    else:
+                        self._stage_card(stage["card"], itui.GLYPH["attention"], f"{label} flaky", [
+                            f"now and then, {effect}",
+                            f"failed {stage['runs']} times in {itui.span(now - stage['since'])} · {kind}"])
+        elif now - stage.get("mark", stage["since"]) >= STAGE_LAST_EVERY:
+            # The latest failure rides along with any save; one is forced at most every few minutes.
+            stage["mark"], changed = now, True
         if changed:
             self.store.save()
 
     def _stage_ok(self, name: str) -> None:
         """A stage is back once it has not failed for STAGE_HOLD, so a flapping stage stays one
-        incident. A stuck card that never left the Mac (the stuck stage was sending) is dropped
-        instead of arriving together with its back card."""
+        incident. One nobody was told of ends quietly then; until then its first good run is
+        written down, so a failure after it counts as another run. A stuck card that never left
+        the Mac (the stuck stage was sending) is dropped instead of arriving together with its
+        back card."""
         stages = self.store.data.get("stages")
         stage = stages.get(name) if stages else None
+        if stage is None:
+            return
+        quiet = self.clock() - stage.get("last", stage["since"])
+        if not stage["told"]:
+            if quiet >= STAGE_HOLD:
+                stages.pop(name)
+            elif stage.get("broken"):
+                return
+            else:
+                stage["broken"] = True
+            self.store.save()
+            return
         # The saved time of the latest failure may be up to STAGE_LAST_EVERY behind the real one
         # (each tick is a new process), so the hold counts from the latest it could have been.
-        if stage is None or self.clock() - stage.get("last", stage["since"]) < STAGE_HOLD + STAGE_LAST_EVERY:
+        if quiet < STAGE_HOLD + STAGE_LAST_EVERY:
             return
         stages.pop(name)
         unsent = [part for part in self.outbox.parts(stage.get("card") or "") if part["state"] == "queued"]
@@ -1190,9 +1379,11 @@ class Portal:
                 if card and record.get("actor") and record.get("target") and self._shows_again(card, record["target"]):
                     # A number that broke before anything ran: its card comes again, so the
                     # number resent answers it.
+                    menu = card.get("menu") or []
                     try:
                         self._reoffer(identity, record["actor"], record["target"], card,
-                                      note="An internal error stopped it, so nothing ran.")
+                                      note="An internal error stopped it, so nothing ran.",
+                                      refused=menu[pick["n"] - 1] if 0 < pick["n"] <= len(menu) else None)
                         text = None
                     except Exception:  # noqa: BLE001 - the Skipped card below still tells the owner
                         pass
@@ -1355,14 +1546,11 @@ class Portal:
             n = int(digit.group())
             if self._menu_open(part, self.clock()) and n <= len(part["menu"]):
                 command, quoted = part["menu"][n - 1], bool(event.get("reply_to"))
-                note = None
-                if self._consequential(part, command):
-                    note = (PIECE_NOTE if self._off_options(part, quoted) else self._unread(
-                        self.outbox.parts(part["group"]), event, n, quoted=quoted))
-                    if note is None and self._stop_shadowed(command, conversation, quoted):
-                        note = APPROVAL_NOTE
-                if note:
-                    self._closed_card(identity, event, actor, target, part, note=note)
+                pick = self._pick_note(part["group"], n, command, event, bubble=part,
+                                       quoted=quoted) if self._consequential(part, command) else None
+                if pick:
+                    self._closed_card(identity, event, actor, target, part, note=pick["note"],
+                                      told=tuple(pick.get("waiting", ())), refused=command)
                     return
                 menu_pick = {"group": part["group"], "n": n}
             else:
@@ -1692,14 +1880,7 @@ class Portal:
                                  "Got it." if answered else "That update is no longer open.")
                 return
             chosen = card["menu"][int(command) - 1]
-            if chosen in ("1", "2"):
-                raise PortalError("no_open_menu", "No open card offers that number. Use RAPP status or RAPP list.")
-            if self._stop_shadowed(chosen, conversation, quoted):
-                parts = self.outbox.parts(card["group"])
-                self._reoffer(identity, actor, target, next((item for item in parts if "text" in item), parts[0]),
-                              note=APPROVAL_NOTE)
-                return
-            if chosen.startswith("stop ") and not self._readable(identity, record, card, int(command), quoted):
+            if chosen.startswith("stop ") and not self._readable(identity, record, card, int(command), quoted, chosen):
                 return
             record["body"] = chosen
             self._command(identity, record)
@@ -1790,7 +1971,7 @@ class Portal:
                 job["state"] = state
                 if operation == "cancel":
                     conversation["approvals"].pop(job_id, None)
-                if state in ("queued", "running", "cancelling") and job.get("started_at") and not job.get("final_queued"):
+                if self._following(job):
                     self._job_card(f"input:{identity}:{operation}", job_id, job)
                 else:
                     self._notice(f"input:{identity}:{operation}", actor, target,

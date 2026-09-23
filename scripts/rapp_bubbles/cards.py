@@ -16,8 +16,7 @@ from datetime import datetime, timezone
 from . import feed, itui
 from .config import Config, PortalError
 from .outbox import Outbox, token
-from .portal import (APPROVAL_NOTE, FOREIGN_NOTE, PIECE_NOTE, RACE_SECONDS, THREAD_NOTE,
-                     UNCONFIRMED_NOTE, Portal)
+from .portal import RACE_SECONDS, Portal
 from .source import SQLiteSource
 from .state import Store
 
@@ -147,14 +146,11 @@ def _event(config: Config, source, route, now: float) -> dict | None:
     }
 
 
-REASONS = {UNCONFIRMED_NOTE: "unconfirmed", FOREIGN_NOTE: "foreign", THREAD_NOTE: "foreign",
-           APPROVAL_NOTE: "approval", PIECE_NOTE: "piece"}
-
-
 def _blocked(portal: Portal, newest: dict, event: dict | None, now: float) -> dict:
     """Whether `RAPP <n>` sent now would be refused, and why, for each number the card offers:
     the tick guards Approve, Cancel, Stop, and answers to an agent's post, and lets the rest
-    run. `blocked` is the first refusal among them (a race clears in `ready_in` seconds)."""
+    run. `blocked` is the first refusal among them, by the tick's own pick rule (a race alone
+    clears in `ready_in` seconds; a Stop another task's approval shadows names it in `waiting`)."""
     if not newest["confirmed"]:
         return {"blocked": "unconfirmed", "options": []}
     if not newest["open"]:
@@ -164,19 +160,18 @@ def _blocked(portal: Portal, newest: dict, event: dict | None, now: float) -> di
     parts = portal.outbox.parts(newest["group"])
     part = next((item for item in parts if "text" in item), parts[0])
     texts = [item for item in parts if "text" in item] or parts
-    conversation = portal._part_conversation(part) or {}
     options = []
     for n in range(1, newest["options"] + 1):
         command = newest["menu"][n - 1] if newest["menu"] else None
         guarded = bool(newest["post"]) or portal._consequential(part, command)
-        note = portal._unread(parts, event, n, quoted=False, delivery=not newest["post"],
-                              explicit=True) if guarded else None
-        if note is None and command and portal._stop_shadowed(command, conversation, None):
-            note = APPROVAL_NOTE
-        option = {"n": n, "blocked": REASONS.get(note, "race") if note else None}
+        pick = portal._pick_note(newest["group"], n, command, event, explicit=True,
+                                 delivery=not newest["post"]) if guarded else None
+        option = {"n": n, "blocked": pick["reason"] if pick else None}
         if option["blocked"] == "race":
             landed = max(portal._landed(item) for item in texts)
             option["ready_in"] = max(0.0, round(RACE_SECONDS - (now - landed), 1))
+        if pick and pick.get("waiting"):
+            option["waiting"] = [itui.short(job_id) for job_id in pick["waiting"]]
         options.append(option)
     first = next((option for option in options if option["blocked"]), None)
     return {"blocked": first["blocked"] if first else None, "options": options,
@@ -244,9 +239,9 @@ def resolve(config: Config, data: dict, text: str, *, reply_to: str | None = Non
         refused = []
         reoffer, post_refusal = portal._reoffer, portal._post_refusal
 
-        def _reoffer(identity, actor, target, part, *, note=None):
+        def _reoffer(identity, actor, target, part, *, note=None, **rest):
             refused.append(note or "That card's options have closed.")
-            return reoffer(identity, actor, target, part, note=note)
+            return reoffer(identity, actor, target, part, note=note, **rest)
 
         def _post_refusal(identity, actor, target, refusal):
             shown = post_refusal(identity, actor, target, refusal)

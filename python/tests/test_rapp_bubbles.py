@@ -4713,8 +4713,8 @@ def test_a_flapping_stage_is_one_incident_written_about_once_a_minute(env, monke
         env.portal().tick()
         wrote, mark = journal_writes(journal, mark)
         writes += wrote
-    stuck = [call for call in env.native.calls if call["text"].startswith("[RAPP sys] ! Outage stuck")]
-    assert len(stuck) == 1 and writes <= 15
+    flaky = [call for call in env.native.calls if call["text"].startswith("[RAPP sys] ! Outage flaky")]
+    assert len(flaky) == 1 and writes <= 15
 
 
 def test_an_hourly_stage_that_fails_each_run_is_told_on_its_second_run(env, monkeypatch):
@@ -5197,7 +5197,7 @@ def test_a_bare_stop_under_a_heartbeat_waits_while_another_tasks_approval_does(e
     env.source.events.append(message(10, "2"))  # meant for task 2's Cancel, landed under the heartbeat
     env.portal().tick()
     assert not explicit_ops(env, "cancel")
-    assert "A task approval is waiting, so nothing stopped." in env.native.calls[-1]["text"]
+    assert "Task 0002's approval is waiting, so nothing stopped." in env.native.calls[-1]["text"]
     env.clock.advance(10)
     env.source.events.append(message(11, "2", reply_to=heartbeat["guid"]))  # a swipe-reply names its card
     env.portal().tick()
@@ -5211,7 +5211,7 @@ def test_rapp_2_while_an_approval_waits_shows_the_running_card_again_not_an_erro
     env.portal().tick()
     shown = env.native.calls[-1]["text"]
     assert not explicit_ops(env, "cancel")
-    assert shown.startswith("[RAPP 0001] ● ") and "A task approval is waiting, so nothing stopped." in shown
+    assert shown.startswith("[RAPP 0001] ● Not stopped\n") and "Task 0002's approval is waiting" in shown
     env.clock.advance(10)
     env.source.events.append(message(11, "RAPP stop 0001"))
     env.portal().tick()
@@ -5358,8 +5358,8 @@ def test_a_stage_failing_every_few_minutes_is_one_incident_told_once(env, monkey
     for _ in range(60):
         env.clock.advance(10)
         env.portal().tick()
-    stuck = [call for call in env.native.calls if call["text"].startswith("[RAPP sys] ! Outage stuck")]
-    assert len(stuck) == 1
+    flaky = [call for call in env.native.calls if call["text"].startswith("[RAPP sys] ! Outage flaky")]
+    assert len(flaky) == 1
 
 
 def test_ticks_failing_between_good_ones_are_told_at_most_once_an_hour(env, monkeypatch):
@@ -5663,7 +5663,7 @@ def test_a_back_card_range_holds_a_stage_that_failed_twice_minutes_apart(env, mo
 
     def twice(self):
         ticks[0] += 1
-        if ticks[0] in (1, 33):  # two failures, 320 s apart
+        if ticks[0] in (1, 17, 33):  # three separate failures, 320 s from first to last
             fails.append(self.clock())
             raise RuntimeError("synthetic")
         return real(self)
@@ -5675,3 +5675,443 @@ def test_a_back_card_range_holds_a_stage_that_failed_twice_minutes_apart(env, mo
     back = next(part["text"] for part in state(env)["outbox"] if part["group"].startswith("sys:back:outage"))
     low, high = map(int, re.search(r"it failed for (\d+)m–(\d+)m", back).groups())
     assert low * 60 <= fails[-1] - fails[0] <= high * 60, back
+
+
+# Round 8: a Stop the owner resends is his; one pick rule for every path; failure cards that
+# tell a real streak (or a flaky stage) once and say when it ends; agent posts read deny by default.
+
+
+def waiting_approval(env):
+    return next(value for conversation in state(env)["conversations"].values()
+                for value in conversation["approvals"].values())
+
+
+def run_until(env, moment, step=30):
+    while env.clock.now + step < moment:
+        env.clock.advance(step)
+        env.portal().tick()
+    env.clock.now = moment
+    env.portal().tick()
+
+
+@pytest.mark.parametrize("again", ["2", "RAPP 2"])
+def test_a_stop_sent_again_under_the_card_that_told_of_the_approval_stops(env, again):
+    second_task_waiting(env)
+    env.clock.advance(10)
+    env.source.events.append(message(10, again))
+    env.portal().tick()
+    shown = env.native.calls[-1]["text"]
+    assert not explicit_ops(env, "cancel")
+    assert shown.startswith("[RAPP 0001] ● Not stopped\n")
+    assert "Send 2 again to stop 0001; to cancel 0002, swipe-reply 2 on its card." in shown
+    env.clock.advance(10)
+    env.source.events.append(message(11, again))  # right under that card, having read it
+    env.portal().tick()
+    assert [call["job_id"] for call in explicit_ops(env, "cancel")] == [JOB1]
+
+
+@pytest.mark.parametrize("stop", ["2", "RAPP 2"])
+def test_an_approval_that_lapsed_a_while_ago_no_longer_holds_a_stop(env, stop):
+    from rapp_bubbles.portal import LAPSE_SHADOW
+
+    second_task_waiting(env)
+    # The runtime never reported it expired, so it is still on record (until the hourly cleanup).
+    run_until(env, waiting_approval(env)["expires_at"] + LAPSE_SHADOW + 5)
+    env.source.events.append(message(20, stop))
+    env.portal().tick()
+    assert [call["job_id"] for call in explicit_ops(env, "cancel")] == [JOB1]
+
+
+def test_a_stop_just_after_an_approval_lapsed_says_so_and_runs_when_sent_again(env):
+    second_task_waiting(env)
+    run_until(env, waiting_approval(env)["expires_at"] + 30)
+    env.source.events.append(message(20, "RAPP 2"))
+    env.portal().tick()
+    shown = env.native.calls[-1]["text"]
+    assert not explicit_ops(env, "cancel")
+    assert "Task 0002's approval just lapsed, so nothing stopped. Send 2 again to stop 0001." in shown
+    env.clock.advance(10)
+    env.source.events.append(message(21, "RAPP 2"))
+    env.portal().tick()
+    assert [call["job_id"] for call in explicit_ops(env, "cancel")] == [JOB1]
+
+
+def test_cards_names_the_approval_not_a_race_for_a_stop_both_would_hold(env):
+    from rapp_bubbles import cards
+
+    line = timeline(env)
+    line.direct_target = lambda chat: {"chat_id": 1, "chat_guid": chat, "is_group": False}
+    running_on_timeline(env, line)
+    env.clock.advance(10)
+    line.say("RAPP another task")
+    env.portal().tick()
+    until_heartbeat(env)  # task 1's heartbeat has just landed: a race, and task 2's approval waits
+    config = env.config()
+    with Store(config.state_dir) as store:
+        rapp_n = cards.describe(config, store, clock=env.clock, source=line)["rapp_n"]
+    assert rapp_n["options"][1] == {"n": 2, "blocked": "approval", "waiting": ["0002"]}
+    assert rapp_n["blocked"] == "approval" and "ready_in" not in rapp_n
+    line.say("RAPP 2")
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel") and "Task 0002's approval is waiting" in env.native.calls[-1]["text"]
+
+
+def test_following_is_the_one_rule_for_a_task_cards_live_menu(env):
+    assert Portal._following({"state": "queued", "started_at": 1})
+    assert Portal._following({"state": "cancelling", "started_at": 1})
+    assert not Portal._following({"state": "running"})  # never shown as started
+    assert not Portal._following({"state": "pending_approval", "started_at": 1})
+    assert not Portal._following({"state": "running", "started_at": 1, "final_queued": True})
+    approved_running_job(env)
+    env.runtime.jobs[JOB1]["status"] = "paused"  # not ended, but not a state the card follows
+    with Store(env.config().state_dir) as store:
+        store.data["jobs"][JOB1]["state"] = "paused"
+        store.save()
+    env.clock.advance(10)
+    env.source.events.append(message(3, "2"))  # under its running card
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel")
+    assert "next ~" not in env.native.calls[-1]["text"]
+
+
+def outage_failing_at(monkeypatch, failing):
+    from rapp_bubbles import portal as portal_module
+
+    real, ticks = portal_module.Portal._outage_report, [0]
+
+    def sometimes(self):
+        ticks[0] += 1
+        if failing(ticks[0]):
+            raise RuntimeError("synthetic")
+        return real(self)
+
+    monkeypatch.setattr(portal_module.Portal, "_outage_report", sometimes)
+
+
+def test_two_failures_on_their_own_tell_nothing(env, monkeypatch):
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    owner_target(env)
+    env.portal().tick()
+    outage_failing_at(monkeypatch, lambda tick: tick in (1, 62))  # 610 s apart, working in between
+    for _ in range(200):
+        env.clock.advance(10)
+        env.portal().tick()
+    assert not [call for call in env.native.calls if call["text"].startswith("[RAPP sys]")]
+    assert not state(env).get("stages")
+    assert [item["code"] for item in state(env)["errors"]] == ["internal:outage:RuntimeError"]
+
+
+def test_a_stage_failing_now_and_then_is_told_as_flaky_and_how_often(env, monkeypatch):
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    owner_target(env)
+    env.portal().tick()
+    outage_failing_at(monkeypatch, lambda tick: tick in (1, 31, 61))  # three runs, 300 s apart
+    for _ in range(62):
+        env.clock.advance(10)
+        env.portal().tick()
+    flaky = [call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ! Outage flaky")]
+    assert len(flaky) == 1
+    assert "now and then, outage reports are paused" in flaky[0] and "failed 3 times in 10m" in flaky[0]
+
+
+def test_a_damaged_tick_failure_record_never_stops_the_ticks(env, monkeypatch):
+    from rapp_bubbles import cli
+
+    owner_target(env)
+    env.portal().tick()
+    config = env.config()
+    record = config.state_dir / "tick-failure.json"
+    record.write_text(json.dumps({"first": "soon", "last": "later", "count": "many", "code": 7}))
+    monkeypatch.setattr(cli.time, "time", env.clock)
+    cli.record_tick_failure(config, OSError(errno.EIO, "synthetic"))  # a failure on top of it
+    written = json.loads(record.read_text())
+    assert written["count"] == 2 and isinstance(written["first"], float)
+    record.write_text(json.dumps({"first": None, "last": "nan", "count": [], "code": ""}))
+    for _ in range(3):
+        env.clock.advance(400)
+        assert env.portal().tick()["ok"]
+    assert not record.exists()
+
+
+def test_ticks_failing_now_and_then_are_one_incident_that_backs_off_and_ends(env, monkeypatch):
+    import re
+    from rapp_bubbles import cli
+
+    owner_target(env)
+    env.portal().tick()
+    config = env.config()
+    monkeypatch.setattr(cli.time, "time", env.clock)
+    for n in range(8 * 60):  # eight hours, a tick a minute; one in five fails, healing on the next
+        env.clock.advance(60)
+        if n % 5 == 0:
+            cli.record_tick_failure(config, OSError(errno.EIO, "synthetic"))
+            continue
+        env.portal().tick()
+    failing = [call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ! Ticks failing")]
+    assert len(failing) == 2  # told once, then again only after six hours, with the total so far
+    assert int(re.search(r"(\d+) ticks failed", failing[1]).group(1)) > 60
+    for _ in range(20):
+        env.clock.advance(60)
+        env.portal().tick()
+    back = [call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ✓ Ticks back")]
+    assert len(back) == 1 and "96 ticks failed over 7h" in back[0]
+    assert not state(env).get("tick_alerts")
+
+
+def test_ticks_failing_counts_every_failure_toward_its_card(env, monkeypatch):
+    from rapp_bubbles import cli
+
+    owner_target(env)
+    env.portal().tick()
+    config = env.config()
+    monkeypatch.setattr(cli.time, "time", env.clock)
+
+    def fail_then_merge(failures):
+        for _ in range(failures):
+            env.clock.advance(20)
+            cli.record_tick_failure(config, OSError(errno.EIO, "synthetic"))
+        for _ in range(11):  # good ticks a minute apart, until one saves the record
+            env.clock.advance(60)
+            env.portal().tick()
+        assert not (config.state_dir / "tick-failure.json").exists()
+        return [call for call in env.native.calls if call["text"].startswith("[RAPP sys] ! Ticks failing")]
+
+    assert not fail_then_merge(2)  # two failed ticks are not an incident to tell yet
+    told = fail_then_merge(1)  # a third, in a later record, is
+    assert len(told) == 1 and "3 ticks failed" in told[0]["text"]
+
+
+def test_a_gap_on_a_critical_disk_is_one_card(env, monkeypatch):
+    owner_target(env)
+    free = {"bytes": 50 * 2**30}
+    full_disk(monkeypatch, free)
+    env.portal().tick()
+    free["bytes"] = 1 * 2**30  # the disk filled while ticks stopped
+    env.clock.advance(900)
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    lines = [call["text"].split("\n", 1)[0] for call in env.native.calls if call["text"].startswith("[RAPP sys]")]
+    assert lines == ["[RAPP sys] ! Back, disk full"]
+    back = next(call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ! Back"))
+    assert "1.0 GB free · new tasks paused until space frees" in back
+    assert state(env)["resources"]["level"] == "critical"
+
+
+def test_transport_status_shows_stages_tick_failures_and_the_heartbeat(env, monkeypatch):
+    from rapp_bubbles import cli
+
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    owner_target(env)
+    env.portal().tick()
+    outage_failing_at(monkeypatch, lambda tick: tick == 1)
+    env.clock.advance(10)
+    env.portal().tick()
+    config = env.config()
+    monkeypatch.setattr(cli.time, "time", env.clock)
+    cli.record_tick_failure(config, OSError(errno.ENOSPC, "No space left on device"))
+    with Store(config.state_dir) as store:
+        status = cli.status_command(config, store)
+    stage = status["stages"]["outage"]
+    assert stage["told"] is False and stage["kind"] is None and stage["back_after"] == stage["last"] + 900
+    assert status["tick_failure"]["pending"]["count"] == 1 and status["tick_failure"]["pending"]["errno"] == errno.ENOSPC
+    assert isinstance(status["heartbeat_age_s"], float) and status["tick_incidents"] == {}
+
+
+def test_a_told_stage_writes_the_journal_at_most_every_five_minutes(env, monkeypatch):
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    owner_target(env)
+    env.portal().tick()
+    outage_failing_at(monkeypatch, lambda tick: True)
+    for _ in range(8):
+        env.clock.advance(10)
+        env.portal().tick()
+    assert state(env)["stages"]["outage"]["told"]
+    for _ in range(6):  # let the stuck card go out and its receipt settle
+        env.clock.advance(10)
+        env.portal().tick()
+    journal = Path(env.raw["state_dir"]) / "transport.json"
+    writes, mark = 0, (journal.stat().st_ino, journal.stat().st_mtime_ns)
+    for _ in range(30):  # five more minutes of the same failure
+        env.clock.advance(10)
+        env.portal().tick()
+        wrote, mark = journal_writes(journal, mark)
+        writes += wrote
+    assert writes <= 2
+
+
+def test_failure_code_names_a_sqlite_error_raised_while_handling_another(tmp_path):
+    from rapp_bubbles import cli
+
+    path = tmp_path / "locked.db"
+    holder = sqlite3.connect(path, timeout=0)
+    holder.execute("CREATE TABLE t(x)")
+    holder.commit()
+    holder.execute("BEGIN EXCLUSIVE")
+    other = sqlite3.connect(path, timeout=0)
+    try:
+        try:
+            other.execute("SELECT * FROM t").fetchall()
+        except sqlite3.Error:
+            raise PortalError("messages_unavailable", "Messages history is unavailable.")  # no "from"
+    except PortalError as error:
+        caught = error
+    finally:
+        other.close()
+        holder.rollback()
+        holder.close()
+    assert caught.__cause__ is None and cli.failure_code(caught) == "sqlite_busy"
+
+
+@pytest.mark.parametrize("drawn", ["[2] Hold", "1) Ship 2) Hold", "2\ufe0f\u20e3 Hold", "\u3164\u3164[2] Hold",
+                                   "\uffa02. Hold", "Reply 1 to ship or 2 to hold", "\u202edloH .2"])
+def test_an_agent_post_whose_first_line_draws_numbers_interrupts_rapp_n(env, drawn):
+    line = timeline(env)
+    running_on_timeline(env, line)
+    env.clock.advance(10)
+    feed_post(env, text=drawn, options=0)
+    env.portal().tick()
+    env.clock.advance(10)
+    line.say("RAPP 2")
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel")
+    assert FOREIGN_LINE in env.native.calls[-1]["text"]
+
+
+def test_an_agent_post_with_a_picture_interrupts_rapp_n(env):
+    line = timeline(env)
+    running_on_timeline(env, line)
+    picture = env.root / "board.png"
+    picture.write_bytes(b"synthetic picture of a numbered board")
+    env.clock.advance(10)
+    post_id = feed_post(env, text="Board", file=str(picture), options=0)
+    env.portal().tick()
+    with Store(env.config().state_dir) as store:
+        # Its receipt found the picture's own row, as chat.db's attachment match does.
+        part = next(item for item in store.data["outbox"] if item["group"] == f"feed:{post_id}")
+        part["guid"] = part["caption_guid"].replace("CAPTION-", "OUTGOING-")
+        store.save()
+    env.clock.advance(10)
+    line.say("RAPP 2")
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel")
+
+
+def test_an_agent_post_without_numbers_leaves_rapp_n_on_our_card(env):
+    line = timeline(env)
+    running_on_timeline(env, line)
+    env.clock.advance(10)
+    feed_post(env, text="Build 42 passed on R8 (40676fe).", options=0, channel="ci-2")
+    env.portal().tick()
+    env.clock.advance(10)
+    line.say("RAPP 2")
+    env.portal().tick()
+    assert [call["job_id"] for call in explicit_ops(env, "cancel")] == [JOB1]
+
+
+def test_numbers_are_read_the_way_a_phone_draws_them():
+    from rapp_bubbles import itui
+
+    for text in ("\u3164[2] Hold", "\uffa02. Hold", "\u202edloH .2", "\u2067\u05d0 2\u2069", "\u33e0 Hold",
+                 "_1_ Hold"):
+        assert itui.draws_numbers(text), text
+    for text in ("Reply 1 to ship or 2 to hold", "Pick 2", "5/8 agents in", "v1.2 is out", "2\ufe0f\u20e3"):
+        assert itui.names_numbers(text), text
+    for text in ("Build 42 passed.", "R8 ships 40676fe", "No numbers here", "Loop 01"):
+        assert not itui.names_numbers(text) and not itui.draws_numbers(text), text
+
+
+def test_an_update_without_options_never_lapses(env):
+    timeline(env)
+    post_id = feed_post(env, text="Status only", options=0, ttl=60)
+    env.portal().tick()
+    part = next(item for item in state(env)["outbox"] if item["group"] == f"feed:{post_id}")
+    env.native.states[part["guid"]] = "pending"  # its receipt never confirms
+    for _ in range(40):
+        env.clock.advance(30)
+        env.portal().tick()
+    item = state(env)["feed"][post_id]
+    assert item["state"] == "pending" and not item.get("lapsed")
+
+
+def test_an_update_lapses_the_grace_and_its_window_after_its_first_send(env):
+    from rapp_bubbles.feed import PENDING_GRACE
+
+    timeline(env)
+    post_id = feed_post(env, ttl=60)
+    env.portal().tick()
+    part = next(item for item in state(env)["outbox"] if item["group"] == f"feed:{post_id}")
+    env.native.states[part["guid"]] = "pending"
+    sent = part["submitted_at"]
+    run_until(env, sent + PENDING_GRACE + 60 - 1)
+    assert state(env)["feed"][post_id]["state"] == "pending"
+    run_until(env, sent + PENDING_GRACE + 60 + 1, step=1)
+    item = state(env)["feed"][post_id]
+    assert item["state"] == "expired" and item["lapsed"] and item["sent_at"] == sent
+
+
+def test_a_lapsed_updates_unsent_bubble_never_goes_out(env):
+    from rapp_bubbles.feed import PENDING_GRACE
+
+    timeline(env)
+    post_id = feed_post(env, ttl=60)
+    env.portal().tick()
+    part = next(item for item in state(env)["outbox"] if item["group"] == f"feed:{post_id}")
+    env.native.states[part["guid"]] = "pending"
+    run_until(env, part["submitted_at"] + PENDING_GRACE + 60 - 5)
+    with Store(env.config().state_dir) as store:
+        mine = next(item for item in store.data["outbox"] if item["group"] == f"feed:{post_id}")
+        mine["state"] = "queued"  # waiting to be sent again
+        store.save()
+    sends = len(env.native.calls)
+    env.clock.advance(10)
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["state"] == "expired"
+    assert not [item for item in state(env)["outbox"] if item["group"] == f"feed:{post_id}"]
+    assert len(env.native.calls) == sends
+
+
+@pytest.mark.parametrize(("pick", "stop"), [("1", False), ("2", True)])
+def test_a_running_cards_pick_that_broke_names_a_stop_only_when_it_was_one(env, monkeypatch, pick, stop):
+    from rapp_bubbles import portal as portal_module
+
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    approved_running_job(env)
+
+    def fragile(*_args, **_kwargs):
+        raise KeyError("synthetic")
+
+    monkeypatch.setattr(portal_module.Portal, "_job_for_actor", fragile)
+    env.clock.advance(10)
+    env.source.events.append(message(3, pick))
+    env.portal().tick()
+    shown = env.native.calls[-1]["text"]
+    assert "An internal error stopped it, so nothing ran." in shown
+    assert shown.startswith("[RAPP 0001] ● Not stopped\n") == stop
+
+
+def test_a_tick_failure_record_read_again_after_a_crash_is_counted_once(env, monkeypatch):
+    from rapp_bubbles import cli
+
+    owner_target(env)
+    env.portal().tick()
+    config = env.config()
+    monkeypatch.setattr(cli.time, "time", env.clock)
+    record = config.state_dir / "tick-failure.json"
+    for _ in range(3):
+        env.clock.advance(20)
+        cli.record_tick_failure(config, OSError(errno.EIO, "synthetic"))
+    kept = record.read_text()
+    env.clock.advance(600)
+    env.portal().tick()
+    assert not record.exists()
+    record.write_text(kept)  # as if that tick died after its save, before removing the record
+    env.clock.advance(60)
+    env.portal().tick()
+    assert state(env)["tick_alerts"]["transport_internal_error"]["count"] == 3
+    record.write_text(kept)
+    env.clock.advance(20)
+    cli.record_tick_failure(config, OSError(errno.EIO, "synthetic"))  # one more, on that same record
+    env.clock.advance(60)
+    env.portal().tick()
+    assert state(env)["tick_alerts"]["transport_internal_error"]["count"] == 4

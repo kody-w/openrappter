@@ -12,7 +12,7 @@ import time
 from . import cards, doctor, feed
 from .config import Config, PortalError
 from .outbox import Outbox
-from .portal import HELP, Portal
+from .portal import HELP, STAGE_HOLD, STAGE_LAST_EVERY, Portal, read_tick_failure, recorded_number
 from .source import SQLiteSource
 from .state import Store
 
@@ -51,26 +51,25 @@ def record_tick_failure(config, error) -> None:
     path = config.state_dir / "tick-failure.json"
     now = time.time()
     try:
-        previous = json.loads(path.read_text(encoding="utf-8"))
-        previous = previous if isinstance(previous, dict) else {}
-    except (OSError, ValueError):
-        previous = {}
-    try:
-        # A failure that could only move the record's time is counted as more, for good.
-        moved = path.stat().st_mtime > float(previous.get("last") or 0) + 1
+        # The record as a good tick reads it: a damaged one counts from here, never raises.
+        previous = read_tick_failure(config.state_dir)
     except OSError:
-        moved = False
+        previous = None
     record = {
         "code": failure_code(error), "kind": type(error).__name__,
         "errno": error.errno if isinstance(error, OSError) else None,
-        "first": previous.get("first", now), "last": now, "count": int(previous.get("count") or 0) + 1,
-        "more": bool(previous.get("more")) or moved,
+        "first": previous["first"] if previous else now, "last": now,
+        "count": (previous["count"] if previous else 0) + 1,
+        # A failure that could only move the record's time is counted as more, for good.
+        "more": bool(previous and previous["more"]),
     }
     pending = config.state_dir / f".tick-failure.{os.getpid()}.pending"
     try:
         descriptor = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             json.dump(record, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(pending, path)
     except OSError:
         try:
@@ -116,6 +115,19 @@ def status_command(config, store):
         if (config.state_dir / "transport.json").exists() else 0,
         "feed": [item["state"] for item in feed.describe(store)],
         "recent_error_codes": [item["code"] for item in store.data["errors"][-10:]],
+        # What the owner's system cards are about: stages failing (and when each counts as back),
+        # ticks failing as a whole, and how long ago a tick last completed.
+        "stages": {name: {
+            "since": stage.get("since"), "last": stage.get("last"), "told": bool(stage.get("told")),
+            "kind": stage.get("kind", "stuck") if stage.get("told") else None, "codes": stage.get("codes", []),
+            "back_after": recorded_number(stage.get("last", stage.get("since")), 0)
+            + (STAGE_HOLD + STAGE_LAST_EVERY if stage.get("told") else STAGE_HOLD),
+        } for name, stage in store.data.get("stages", {}).items()},
+        "tick_failure": {"pending": read_tick_failure(config.state_dir), "last": store.data.get("last_tick_failure")},
+        "tick_incidents": {cause: incident for cause, incident in store.data.get("tick_alerts", {}).items()
+                           if isinstance(incident, dict)},
+        "heartbeat_age_s": round(time.time() - heartbeat.stat().st_mtime, 1)
+        if (heartbeat := config.state_dir / "heartbeat").exists() else None,
     }
 
 

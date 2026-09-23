@@ -235,7 +235,13 @@ def resolve(config: Config, data: dict, text: str, *, reply_to: str | None = Non
             return post_refusal(identity, actor, target, refusal)
 
         portal._reoffer, portal._post_refusal = _reoffer, _post_refusal
-        before = len(data["outbox"])
+        try:
+            # The tick checks the disk first, and refuses new tasks while that check fails.
+            portal._resources()
+        except Exception:  # noqa: BLE001 - a failing disk check is what is being mirrored
+            portal._failing.add("disk")
+        # Parts, not positions: the run may drop a copy that was still waiting.
+        before = {part["id"] for part in data["outbox"]}
         answered = {key for key, item in data.get("feed", {}).items() if item["state"] == "answered"}
         try:
             identity = portal._ingest(event)
@@ -243,7 +249,7 @@ def resolve(config: Config, data: dict, text: str, *, reply_to: str | None = Non
                 portal._advance(identity, data["inbox"][identity])
         except _Stop:
             pass
-        groups = list(dict.fromkeys(part["group"] for part in data["outbox"][before:]))
+        groups = list(dict.fromkeys(part["group"] for part in data["outbox"] if part["id"] not in before))
         cards = [(portal.outbox.parts(group)[0].get("text") or "").split("\n", 1)[0] for group in groups]
         answers = sorted(key for key, item in data.get("feed", {}).items()
                          if item["state"] == "answered" and key not in answered)

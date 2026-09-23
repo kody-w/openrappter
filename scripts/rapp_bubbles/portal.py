@@ -41,6 +41,7 @@ UNCONTAINED = (JournalWriteError, PortalError, sqlite3.Error)
 DEGRADED_AFTER = 60  # a stage failing this long, tick after tick, gets one card
 STAGE_HOLD = 2 * DEGRADED_AFTER  # and counts as back only after this long without failing
 FAILURE_MERGE = 600  # failed-tick records gather this long before a good tick saves them
+COPY_WINDOW = 30  # an update closing sooner than this is not shown again to be answered
 STAGES = {  # stage: (lock-screen label, what the owner loses while it fails)
     "disk": ("Disk", "disk checks fail, so new tasks are refused"),
     "recover": ("Recovery", "restart recovery is paused"),
@@ -646,10 +647,10 @@ class Portal:
         bubble left the Mac. A sooner reply still runs when the card the owner could read by then offered the
         same thing under that number (a heartbeat or a re-offer of the same task), so fast
         repliers are never refused forever: only when that card is confirmed on the phone and
-        nothing but our bubbles and the owner's messages to us came after it (up to the newer
-        card for a bare reply, which sits right under that; up to the reply for RAPP <n>):
-        another AI's question in between may be what the number answers. A row without a
-        chat.db date (read as the Apple epoch) is judged by position alone.
+        nothing but our bubbles and the owner's messages came after it, up to the reply (a
+        newer card goes out a bubble at a time, so another AI's question may land among its
+        bubbles and be what the number answers). A row without a chat.db date (read as the
+        Apple epoch) is judged by position alone.
         """
         if not parts:
             return None
@@ -670,7 +671,7 @@ class Portal:
         if (
             meaning is not None and seen is not None and seen["state"] in ("sent", "delivered")
             and self._meaning(seen, n) == meaning
-            and self._uninterrupted(seen, event, until=None if explicit else texts[0])
+            and self._uninterrupted(seen, event)
         ):
             return None
         return RACE_NOTE
@@ -693,13 +694,13 @@ class Portal:
         return not event.get("is_group") or normalized(str(row.get("sender") or "")) == normalized(
             str(event.get("sender") or ""))
 
-    def _uninterrupted(self, card: dict, event: dict, until: dict | None = None) -> bool:
-        """Nothing but the owner's messages and our own bubbles sits after a card, up to a newer
-        card (``until``, from its first bubble) or else up to the reply."""
+    def _uninterrupted(self, card: dict, event: dict) -> bool:
+        """Nothing but the owner's messages and our own bubbles sits after a card, up to the
+        reply."""
         between = getattr(self.source, "between", None)
         guids = [part.get("guid") or part.get("caption_guid") for part in self.outbox.parts(card["group"])]
         guids = [guid for guid in guids if guid]
-        end = (until.get("guid") or until.get("caption_guid")) if until is not None else event.get("guid")
+        end = event.get("guid")
         if not callable(between) or not guids or not isinstance(end, str) or not end:
             return False
         rows = between(event["chat_guid"], guids[-1], end)
@@ -772,13 +773,19 @@ class Portal:
         aliases = item.setdefault("aliases", [])
         # An older copy that has not left the Mac is replaced, never queued behind this one.
         feed.drop_queued_copies(self.store, item)
-        if group not in aliases:
-            aliases.append(group)
-        item["refusals"] = [*item.get("refusals", []), {"at": now, "why": why, "copy": token(f"{group}:0")[:6]}][-3:]
         if item["state"] == "open":
             # The copy is answerable for a reply window of its own, up to twice the first.
             opened = item.get("delivered_at") or item.get("created_at") or now
             item["open_until"] = max(item.get("open_until", 0), min(now + item["ttl"], opened + 2 * item["ttl"]))
+            if item["open_until"] - now < COPY_WINDOW:
+                # Too little time is left to answer a copy: say so instead of inviting it.
+                item["refusals"] = [*item.get("refusals", []), {"at": now, "why": why, "copy": None}][-3:]
+                self._notice(f"input:{identity}:post-closed", actor, target, "That update is no longer open.",
+                             title="Not answered")
+                return
+        if group not in aliases:
+            aliases.append(group)
+        item["refusals"] = [*item.get("refusals", []), {"at": now, "why": why, "copy": token(f"{group}:0")[:6]}][-3:]
         self.outbox.enqueue(group, actor, target, "\n".join(
             [f"{envelope}Not answered · {head}", f"{advice}, so nothing was answered. {tail}", *([rest] if rest else [])]))
 

@@ -49,11 +49,16 @@ def record_tick_failure(config, error) -> None:
         previous = previous if isinstance(previous, dict) else {}
     except (OSError, ValueError):
         previous = {}
+    try:
+        # A failure that could only move the record's time is counted as more, for good.
+        moved = path.stat().st_mtime > float(previous.get("last") or 0) + 1
+    except OSError:
+        moved = False
     record = {
         "code": failure_code(error), "kind": type(error).__name__,
         "errno": error.errno if isinstance(error, OSError) else None,
         "first": previous.get("first", now), "last": now, "count": int(previous.get("count") or 0) + 1,
-        "more": bool(previous.get("more")),
+        "more": bool(previous.get("more")) or moved,
     }
     pending = config.state_dir / f".tick-failure.{os.getpid()}.pending"
     try:

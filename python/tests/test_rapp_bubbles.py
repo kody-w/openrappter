@@ -4952,3 +4952,154 @@ def test_cards_says_when_rapp_n_would_be_refused_and_why(env):
     assert rapp_n()["blocked"] is None
     line.foreign()
     assert rapp_n()["blocked"] == "foreign"
+
+
+# Round 6 review, pass 1.
+
+
+def test_a_fast_stop_under_a_long_card_with_another_ais_bubble_inside_it_stops_nothing(env):
+    line = timeline(env)
+    running_on_timeline(env, line)
+    original = env.runtime.request
+
+    def long_result(request):
+        value = original(request)
+        if request["op"] == "result":
+            value["stdout"] = {**value["stdout"], "text": "\n".join(f"row {n:03d} " + "y" * 60 for n in range(90))}
+        return value
+
+    env.runtime.request = long_result
+    real = env.native.send
+
+    def interleaving(chat_id, *, text="", file=""):
+        result = real(chat_id, text=text, file=file)
+        if "⋯ 1/" in text:
+            line.foreign()  # another AI's bubble lands while our card is still going out
+        return result
+
+    env.native.send = interleaving
+    env.clock.advance(10)
+    line.say("RAPP result 0001")  # a 3-bubble "output so far" card, ending [2] Stop
+    env.portal().tick()
+    assert any("FOREIGN" in row["guid"] for row in line.rows)
+    env.clock.advance(1)
+    line.say("2")  # right under its last bubble, a second after it landed
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel")
+
+
+def test_a_fast_answer_under_a_copy_with_another_ais_bubble_inside_it_is_not_recorded(env):
+    line = timeline(env)
+    filler = "\n".join(f"Step {n:02d}: " + "detail " * 7 for n in range(1, 41))
+    post_id = feed_post(env, text=f"Loop 01\n{filler}\n1. Ship it\n2. Hold")
+    env.portal().tick()
+    real = env.native.send
+
+    def interleaving(chat_id, *, text="", file=""):
+        result = real(chat_id, text=text, file=file)
+        if text.startswith("[RAPP loop] Not answered") and "⋯ 1/2" in text:
+            line.foreign()  # another AI's bubble lands between the copy's two bubbles
+        return result
+
+    env.native.send = interleaving
+    env.clock.advance(10)
+    line.say("1", typed_ago=9)  # typed a second after the post landed: refused, shown again
+    env.portal().tick()
+    assert any("FOREIGN" in row["guid"] for row in line.rows)
+    env.clock.advance(1)
+    line.say("1")  # right under the copy's last bubble, a second after it landed
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["state"] != "answered"
+
+
+def test_a_copy_is_not_sent_when_the_update_has_no_reply_window_left(env):
+    line = timeline(env)
+    post_id = delivered_feed_post(env)
+    opened = state(env)["feed"][post_id]["delivered_at"]
+    env.clock.now = opened + 299  # first refusal: the window grows to opened + 599
+    line.foreign()
+    line.say("RAPP 1")
+    env.portal().tick()
+    env.clock.now = opened + 598  # second refusal: capped at opened + 600, two seconds left
+    line.foreign()
+    line.say("RAPP 1")
+    sent = len(env.native.calls)
+    env.portal().tick()
+    texts = [call["text"] for call in env.native.calls[sent:]]
+    assert not [text for text in texts if "Not answered ·" in text.split("\n", 1)[0]]
+    assert any("That update is no longer open." in text for text in texts)
+    assert state(env)["feed"][post_id]["refusals"][-1]["copy"] is None
+
+
+def dry_run_on(line, monkeypatch):
+    from rapp_bubbles import cards
+
+    line.direct_target = lambda chat: {"chat_id": 1, "chat_guid": chat, "is_group": False}
+    line.close = lambda: None
+    monkeypatch.setattr(cards, "SQLiteSource", lambda _config: line)
+    return cards
+
+
+def test_resolve_lists_the_cards_it_would_send_even_when_a_waiting_copy_is_dropped(env, monkeypatch):
+    line = timeline(env)
+    cards = dry_run_on(line, monkeypatch)
+    post_id = delivered_feed_post(env)
+    original = next(part for part in state(env)["outbox"] if part["group"] == f"feed:{post_id}")
+    env.native.health = lambda _value, _now: False  # Messages is down: the copy waits
+    env.clock.advance(10)
+    line.foreign()
+    line.say("RAPP 1")
+    env.portal().tick()
+    again = cards.resolve(env.config(), copy.deepcopy(state(env)), "RAPP 1", clock=env.clock)
+    assert (again["verdict"], again["cards"]) == ("reoffers", ["[RAPP loop] Not answered · Loop 01"])
+    answered = cards.resolve(env.config(), copy.deepcopy(state(env)), "RAPP reply 1",
+                             reply_to=cards.ref(original["group"]), clock=env.clock)
+    assert answered["answers"] == [post_id] and answered["cards"]
+
+
+def test_resolve_says_new_tasks_wait_while_the_disk_check_fails(env, monkeypatch):
+    from rapp_bubbles import portal as portal_module
+
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    line = timeline(env)
+    cards = dry_run_on(line, monkeypatch)
+
+    def usage(_path):
+        raise RuntimeError("synthetic disk check failure")
+
+    monkeypatch.setattr(portal_module.shutil, "disk_usage", usage)
+    env.clock.advance(10)
+    env.portal().tick()
+    dry = cards.resolve(env.config(), copy.deepcopy(state(env)), "RAPP inspect more", clock=env.clock)
+    assert dry["verdict"] == "fails" and "disk_unknown" in dry["errors"]
+
+
+def test_a_failure_that_only_moved_the_records_time_is_still_counted(env, monkeypatch):
+    from rapp_bubbles import cli
+
+    owner_target(env)
+    env.portal().tick()
+    config = env.config()
+    now = {"t": env.clock()}
+    monkeypatch.setattr(cli.time, "time", lambda: now["t"])
+    real_utime = os.utime
+    monkeypatch.setattr(cli.os, "utime", lambda path, times=None, **kwargs: real_utime(
+        path, times if times is not None else (now["t"], now["t"]), **kwargs))
+    cli.record_tick_failure(config, OSError(errno.EIO, "synthetic"))  # written
+    now["t"] += 10
+    real_dump = cli.json.dump
+
+    def full(*_args, **_kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(cli.json, "dump", full)
+    cli.record_tick_failure(config, OSError(errno.ENOSPC, "No space left on device"))  # only its time moves
+    monkeypatch.setattr(cli.json, "dump", real_dump)
+    now["t"] += 10
+    cli.record_tick_failure(config, OSError(errno.EIO, "synthetic"))  # written again
+    env.clock.now = now["t"] + 600
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    back = [call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ✓ Back online")]
+    assert len(back) == 1 and "2+ ticks failed" in back[0]

@@ -25,6 +25,7 @@ from __future__ import annotations
 import math
 import re
 import statistics
+import unicodedata
 
 WIDTH = 28
 RULE = "─" * 14
@@ -57,6 +58,19 @@ STALL_SECONDS = 600
 MENU_TTL = 3600
 HISTORY = 20
 HEX_REF = re.compile(r"#?([0-9a-f]{4,32})", re.IGNORECASE)
+
+
+def draws_numbers(text: str) -> bool:
+    """Whether text draws numbered choices in any form a phone shows as one: a line that
+    starts, after at most three other marks, with a digit 1-9. Fullwidth and keycap digits
+    count (NFKC), and format characters (zero-width spaces, bidi marks) are removed first.
+    Deny by default: a line that merely starts with a count counts too."""
+    clean = "".join(ch for ch in unicodedata.normalize("NFKC", text) if unicodedata.category(ch) != "Cf")
+    for line in clean.splitlines():
+        found = re.match(r"\W{0,3}(\d)", line.strip())
+        if found and unicodedata.digit(found.group(1), 0) in range(1, 10):
+            return True
+    return False
 
 
 def short(job_id: str | None) -> str:

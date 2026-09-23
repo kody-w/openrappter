@@ -31,11 +31,17 @@ def locked(config, action, wait=30.0):
 
 
 def failure_code(error) -> str:
+    """The most specific cause: a SQLite error's own name (the reader wraps it as
+    messages_unavailable), else the error's code."""
+    current, seen = error, set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        name = getattr(current, "sqlite_errorname", None) if isinstance(current, sqlite3.Error) else None
+        if isinstance(name, str) and name:
+            return name.lower()
+        current = current.__cause__ or current.__context__
     code = getattr(error, "code", None)
-    if isinstance(code, str) and code:
-        return code
-    name = getattr(error, "sqlite_errorname", None) if isinstance(error, sqlite3.Error) else None
-    return name.lower() if isinstance(name, str) and name else "transport_internal_error"
+    return code if isinstance(code, str) and code else "transport_internal_error"
 
 
 def record_tick_failure(config, error) -> None:

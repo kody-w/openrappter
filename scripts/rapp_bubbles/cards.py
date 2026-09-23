@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 from . import feed, itui
 from .config import Config, PortalError
 from .outbox import Outbox, token
-from .portal import FOREIGN_NOTE, RACE_SECONDS, THREAD_NOTE, UNCONFIRMED_NOTE, Portal
+from .portal import (APPROVAL_NOTE, FOREIGN_NOTE, PIECE_NOTE, RACE_SECONDS, THREAD_NOTE,
+                     UNCONFIRMED_NOTE, Portal)
 from .source import SQLiteSource
 from .state import Store
 
@@ -146,23 +147,40 @@ def _event(config: Config, source, route, now: float) -> dict | None:
     }
 
 
+REASONS = {UNCONFIRMED_NOTE: "unconfirmed", FOREIGN_NOTE: "foreign", THREAD_NOTE: "foreign",
+           APPROVAL_NOTE: "approval", PIECE_NOTE: "piece"}
+
+
 def _blocked(portal: Portal, newest: dict, event: dict | None, now: float) -> dict:
-    """Whether `RAPP <n>` sent now would be refused, why, and when a race clears."""
+    """Whether `RAPP <n>` sent now would be refused, and why, for each number the card offers:
+    the tick guards Approve, Cancel, Stop, and answers to an agent's post, and lets the rest
+    run. `blocked` is the first refusal among them (a race clears in `ready_in` seconds)."""
     if not newest["confirmed"]:
-        return {"blocked": "unconfirmed"}
+        return {"blocked": "unconfirmed", "options": []}
     if not newest["open"]:
-        return {"blocked": "closed"}
+        return {"blocked": "closed", "options": []}
     if event is None:
-        return {"blocked": None}
+        return {"blocked": None, "options": []}
     parts = portal.outbox.parts(newest["group"])
-    note = portal._unread(parts, event, None, quoted=False, delivery=not newest["post"], explicit=True)
-    if note is None:
-        return {"blocked": None}
-    reason = {UNCONFIRMED_NOTE: "unconfirmed", FOREIGN_NOTE: "foreign", THREAD_NOTE: "foreign"}.get(note, "race")
-    if reason != "race":
-        return {"blocked": reason}
-    landed = max(portal._landed(part) for part in ([part for part in parts if "text" in part] or parts))
-    return {"blocked": reason, "ready_in": max(0.0, round(RACE_SECONDS - (now - landed), 1))}
+    part = next((item for item in parts if "text" in item), parts[0])
+    texts = [item for item in parts if "text" in item] or parts
+    conversation = portal._part_conversation(part) or {}
+    options = []
+    for n in range(1, newest["options"] + 1):
+        command = newest["menu"][n - 1] if newest["menu"] else None
+        guarded = bool(newest["post"]) or portal._consequential(part, command)
+        note = portal._unread(parts, event, n, quoted=False, delivery=not newest["post"],
+                              explicit=True) if guarded else None
+        if note is None and command and portal._stop_shadowed(command, conversation, None):
+            note = APPROVAL_NOTE
+        option = {"n": n, "blocked": REASONS.get(note, "race") if note else None}
+        if option["blocked"] == "race":
+            landed = max(portal._landed(item) for item in texts)
+            option["ready_in"] = max(0.0, round(RACE_SECONDS - (now - landed), 1))
+        options.append(option)
+    first = next((option for option in options if option["blocked"]), None)
+    return {"blocked": first["blocked"] if first else None, "options": options,
+            **({"ready_in": first["ready_in"]} if first and "ready_in" in first else {})}
 
 
 def describe(config: Config, store, *, limit: int = 10, clock=time.time, source=None) -> dict:

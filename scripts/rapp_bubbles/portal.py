@@ -39,7 +39,8 @@ INTERNAL_ATTEMPTS = 3  # internal errors before a job is no longer followed
 # retried; only unexpected errors are ever set aside.
 UNCONTAINED = (JournalWriteError, PortalError, sqlite3.Error)
 DEGRADED_AFTER = 60  # a stage failing this long, tick after tick, gets one card
-STAGE_HOLD = 2 * DEGRADED_AFTER  # and counts as back only after this long without failing
+STAGE_HOLD = 900  # and counts as back only after this long without failing, so failing now and then is one incident
+STAGE_LAST_EVERY = 300  # while it fails, the time of its latest failure is saved at most this often
 FAILURE_MERGE = 600  # failed-tick records gather this long before a good tick saves them
 COPY_WINDOW = 30  # an update closing sooner than this is not shown again to be answered
 STAGES = {  # stage: (lock-screen label, what the owner loses while it fails)
@@ -58,8 +59,8 @@ RACE_NOTE = "Your reply landed as this card arrived, so nothing ran."
 UNCONFIRMED_NOTE = "Not confirmed on your phone, so nothing ran."
 FOREIGN_NOTE = "Another message came after the card, so nothing ran. Swipe-reply your number on this one."
 THREAD_NOTE = "Someone else replied under the card, so nothing ran. Swipe-reply your number on this one."
-# A line an agent's post draws like one of our options ("[1] Yes", "2. Hold", "3) Later").
-OPTION_LINE = re.compile(r"^\s*\[?[1-9][\].)]\s+\S", re.MULTILINE)
+APPROVAL_NOTE = "A task approval is waiting, so nothing stopped. Swipe-reply your number on the card you mean."
+PIECE_NOTE = "That bubble is not the one with the options, so nothing ran. Swipe-reply your number on this one."
 JOB_ID = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{32}")
 TERMINAL = {"succeeded", "completed", "failed", "cancelled", "canceled", "interrupted", "expired"}
 OUTPUT_EXTENSIONS = {
@@ -448,7 +449,7 @@ class Portal:
         code = str(failure.get("code") or "unknown")
         if failure.get("errno") == 28:
             return "disk full"
-        return "chat.db busy" if code in ("sqlite_busy", "sqlite_locked") else code
+        return "chat.db busy" if code.startswith(("sqlite_busy", "sqlite_locked")) else code
 
     @staticmethod
     def _failed_ticks(failure: dict) -> str:
@@ -493,8 +494,23 @@ class Portal:
         if gap:
             cause = (f"{self._failed_ticks(failure)} · {self._failure_cause(failure)}"
                      if failure else "check RAPP health")
-            self._system_card(f"sys:gap:{int(last)}", itui.GLYPH["succeeded"], "Back online",
-                              [f"no ticks for {itui.span(now - last)}", cause])
+            # Back, but not all clear while the disk still blocks new tasks.
+            critical = self._disk_now() == "critical"
+            self._system_card(f"sys:gap:{int(last)}", itui.GLYPH["attention" if critical else "succeeded"],
+                              "Back, disk full" if critical else "Back online",
+                              [f"no ticks for {itui.span(now - last)}", cause,
+                               *(["new tasks paused until space frees"] if critical else [])])
+        elif failure and int(failure.get("count") or 1) >= 3:
+            # Whole ticks failing between good ones leave no gap to report: say so, at most
+            # once an hour per cause.
+            alerts = self.store.data.setdefault("tick_alerts", {})
+            cause = self._failure_cause(failure)
+            if now - alerts.get(cause, 0) >= 3600:
+                alerts[cause] = now
+                self._system_card(f"sys:ticks:{int(float(failure['first']))}", itui.GLYPH["attention"],
+                                  "Ticks failing", [f"{self._failed_ticks(failure)} in "
+                                                    f"{itui.span(float(failure['last']) - float(failure['first']))}",
+                                                    cause])
         if gap or failure:
             self.store.save()
         if failure:
@@ -687,7 +703,7 @@ class Portal:
             if post is None:
                 return True
             mine = feed.post_for_group(self.store, card["group"]) if card["group"].startswith("feed:") else None
-            return (mine is not None and mine["id"] == post["id"]) or not OPTION_LINE.search(
+            return (mine is not None and mine["id"] == post["id"]) or not itui.draws_numbers(
                 part.get("text") or part.get("caption") or "")
         if row["is_from_me"]:
             return False
@@ -719,7 +735,9 @@ class Portal:
         """False, after re-offering the card as the newest one, when RAPP <n> cannot have been
         meant for it."""
         parts = self.outbox.parts(card["group"])
-        note = self._unread(parts, record["event"], n, quoted=bool(quoted), explicit=True)
+        swiped = self.outbox.part_for_guid(quoted) if quoted else None
+        note = PIECE_NOTE if swiped is not None and self._off_options(swiped, True) else self._unread(
+            parts, record["event"], n, quoted=bool(quoted), explicit=True)
         if note is None:
             return True
         part = next((item for item in parts if "text" in item), parts[0])
@@ -745,7 +763,7 @@ class Portal:
             note = self._unread(parts, event, int(digit.group()) if digit else None,
                                 quoted=quoted, delivery=False, explicit=explicit)
             if note:
-                refused.append((item["id"], note))
+                refused.append((item["id"], note, bool(digit)))
             return note is None
         return guard
 
@@ -754,7 +772,8 @@ class Portal:
         with its own options last and why nothing was answered right under its first line, so
         the number sent again (or swiped on it) answers it. One copy waits to go at a time.
         False when the update is closed (or closes now) instead, and the owner is told so."""
-        post_id, note = refusal
+        post_id, note, *kind = refusal
+        number = kind[0] if kind else True
         item = self.store.data.get("feed", {}).get(post_id)
         now = self.clock()
         if not item or not feed.is_open(item, actor, now):
@@ -765,11 +784,15 @@ class Portal:
         original = next((part.get("text") or part.get("caption") or "" for part in self.outbox.parts(item["group"])), "")
         body = original[len(envelope):] if original.startswith(envelope) else original
         head, _, rest = body.partition("\n")
+        if itui.draws_numbers(head):
+            # The post starts with an option: line one keeps to the channel, the menu stays whole.
+            head, rest = "", body
         why, advice = {
             FOREIGN_NOTE: ("foreign", "Another message came after it"),
             THREAD_NOTE: ("thread", "Someone else replied under it"),
         }.get(note, ("race", "Your reply landed as it arrived"))
-        tail = "Send the number again." if why == "race" else "Swipe-reply your number on this one."
+        what = "number" if number else "answer"
+        tail = f"Send the {what} again." if why == "race" else f"Swipe-reply your {what} on this one."
         group = f"feed:{post_id}:again:{identity[:8]}"
         aliases = item.setdefault("aliases", [])
         # An older copy that has not left the Mac is replaced, never queued behind this one.
@@ -791,7 +814,8 @@ class Portal:
             aliases.append(group)
         item["refusals"] = [*item.get("refusals", []), {"at": now, "why": why, "copy": token(f"{group}:0")[:6]}][-3:]
         self.outbox.enqueue(group, actor, target, "\n".join(
-            [f"{envelope}Not answered · {head}", f"{advice}, so nothing was answered. {tail}", *([rest] if rest else [])]))
+            [f"{envelope}Not answered" + (f" · {head}" if head else ""), f"{advice}, so nothing was answered. {tail}",
+             *([rest] if rest else [])]))
         return True
 
     def _menu_open(self, part: dict, now: float) -> bool:
@@ -803,7 +827,8 @@ class Portal:
             return self._card_approval(part) is not None
         job = self.store.data["jobs"].get(part.get("job_id") or "")
         if part.get("menu_kind") in ("running", "quiet", "cancelling") and job is not None:
-            return job["state"] not in TERMINAL
+            # A task no longer followed (lost, or its result could not be shown) is closed too.
+            return job["state"] not in TERMINAL and not job.get("final_queued")
         sent = part.get("submitted_at") or part.get("created_at") or now
         return now <= sent + itui.MENU_TTL
 
@@ -852,13 +877,35 @@ class Portal:
         self._remember_reply(identity, event, actor, target, "closed_menu")
         self._reoffer(identity, actor, target, part, note=note)
 
+    @staticmethod
+    def _following(job: dict | None) -> bool:
+        """A task whose live card we keep: started, not ended, and not given up on."""
+        return bool(job and job["state"] in ("queued", "running", "cancelling") and job.get("started_at")
+                    and not job.get("final_queued"))
+
     def _shows_again(self, part: dict, target: dict) -> bool:
         """Whether _reoffer sends this card itself again, carrying its note (a live approval, a
         running task's card), rather than a closed or expired notice."""
         if self._card_approval(part):
             return part["target"].get("roster_hash") == target.get("roster_hash")
-        job = self.store.data["jobs"].get(part.get("job_id") or "")
-        return bool(job and job["state"] in ("queued", "running", "cancelling") and job.get("started_at"))
+        return self._following(self.store.data["jobs"].get(part.get("job_id") or ""))
+
+    @staticmethod
+    def _stop_shadowed(command: str, conversation: dict, quoted) -> bool:
+        """An unswiped Stop while a task approval waits (or just lapsed): its 2 may have meant
+        that card's Cancel. A swipe-reply names its card, so it is not ambiguous."""
+        return command.startswith("stop ") and not quoted and bool(conversation.get("approvals"))
+
+    def _off_options(self, part: dict, quoted: bool) -> bool:
+        """Whether a number on this bubble cannot be read as an answer to its card's options.
+        They are shown on the card's last text bubble: an earlier piece of a card that carries
+        worker output (which may draw options of its own) is not it, and neither is an
+        attachment a swipe-reply names. An approval card is ours and the owner's prompt, so
+        any of its bubbles answers it."""
+        texts = [item for item in self.outbox.parts(part["group"]) if "text" in item]
+        if part.get("menu_kind") == "approval" or not texts or part.get("id") == texts[-1].get("id"):
+            return False
+        return bool(quoted) or "text" in part
 
     def _reoffer(self, identity: str, actor: dict, target: dict, part: dict, *, note: str | None = None) -> None:
         """Show what a card's options lead to now, instead of running one."""
@@ -886,7 +933,7 @@ class Portal:
             )
             self.outbox.enqueue(group, actor, target, text, job_id=part["job_id"], menu=commands,
                                 menu_kind="approval")
-        elif job and job["state"] in ("queued", "running", "cancelling") and job.get("started_at"):
+        elif self._following(job):
             self._job_card(f"input:{identity}:closed", part["job_id"], job, note=note)
         elif part.get("menu_kind") == "approval" and part.get("job_id") in (
             self._part_conversation(part) or {}
@@ -1028,13 +1075,18 @@ class Portal:
         so this card, not the gap card, is what says so."""
         stages = self.store.data.setdefault("stages", {})
         now, stage = self.clock(), stages.get(name)
-        if stage is None or stage["code"] != code:
-            stages[name] = {"code": code, "since": stage["since"] if stage else now,
-                            "told": bool(stage and stage.get("told")), "last": now,
-                            **({"card": stage["card"]} if stage and stage.get("card") else {})}
+        if stage is None:
+            stages[name] = {"code": code, "codes": [code], "since": now, "told": False, "last": now}
             self.store.error(code, now)
             return
-        changed = now - stage.get("last", stage["since"]) >= DEGRADED_AFTER
+        # One incident per stage, whatever the error: a new kind is recorded once, and the latest
+        # kind rides along with the next write.
+        codes = stage.setdefault("codes", [stage["code"]])
+        stage["code"] = code
+        if code not in codes:
+            stage["codes"] = [*codes, code][-5:]
+            self.store.error(code, now)
+        changed = now - stage.get("last", stage["since"]) >= STAGE_LAST_EVERY
         if changed:
             stage["last"] = now
         if not stage["told"] and now - stage["since"] >= DEGRADED_AFTER:
@@ -1294,8 +1346,13 @@ class Portal:
                 return
             n = int(digit.group())
             if self._menu_open(part, self.clock()) and n <= len(part["menu"]):
-                note = self._consequential(part, part["menu"][n - 1]) and self._unread(
-                    self.outbox.parts(part["group"]), event, n, quoted=bool(event.get("reply_to")))
+                command, quoted = part["menu"][n - 1], bool(event.get("reply_to"))
+                note = None
+                if self._consequential(part, command):
+                    note = (PIECE_NOTE if self._off_options(part, quoted) else self._unread(
+                        self.outbox.parts(part["group"]), event, n, quoted=quoted))
+                    if note is None and self._stop_shadowed(command, conversation, quoted):
+                        note = APPROVAL_NOTE
                 if note:
                     self._closed_card(identity, event, actor, target, part, note=note)
                     return
@@ -1629,12 +1686,11 @@ class Portal:
             chosen = card["menu"][int(command) - 1]
             if chosen in ("1", "2"):
                 raise PortalError("no_open_menu", "No open card offers that number. Use RAPP status or RAPP list.")
-            if chosen.startswith("stop ") and conversation["approvals"] and not quoted:
-                # An approval is waiting (or just lapsed): RAPP 2 may have meant its Cancel. A
-                # swipe-reply names its card, so it is not ambiguous.
-                raise PortalError("approval_pending", "A task approval is waiting or just expired, so RAPP "
-                                  f"{command} stops nothing. Use RAPP stop {itui.short(chosen.split()[-1])} "
-                                  "to stop that task.")
+            if self._stop_shadowed(chosen, conversation, quoted):
+                parts = self.outbox.parts(card["group"])
+                self._reoffer(identity, actor, target, next((item for item in parts if "text" in item), parts[0]),
+                              note=APPROVAL_NOTE)
+                return
             if chosen.startswith("stop ") and not self._readable(identity, record, card, int(command), quoted):
                 return
             record["body"] = chosen
@@ -1726,7 +1782,7 @@ class Portal:
                 job["state"] = state
                 if operation == "cancel":
                     conversation["approvals"].pop(job_id, None)
-                if state in ("queued", "running", "cancelling") and job.get("started_at"):
+                if state in ("queued", "running", "cancelling") and job.get("started_at") and not job.get("final_queued"):
                     self._job_card(f"input:{identity}:{operation}", job_id, job)
                 else:
                     self._notice(f"input:{identity}:{operation}", actor, target,

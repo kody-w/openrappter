@@ -27,16 +27,20 @@ LIFECYCLE = re.compile(
 MAX_TEXT = 2400
 MAX_OPTIONS = 9
 KEEP_POSTS = 200
+# A post whose delivery is never confirmed lapses after its reply window plus the receipt window,
+# instead of taking answers (days later) for ever.
+PENDING_GRACE = 180
 
 
 def _parts(store, post):
     return [part for part in store.data["outbox"] if part["group"] == post["group"]]
 
 
-def drop_queued_copies(store, post) -> bool:
+def drop_queued_copies(store, post, *, original: bool = False) -> bool:
     """Drop the copies of a post (shown again after a refused answer) that have not left the
-    Mac yet: a closed or replaced post must not come back, and only the newest copy waits."""
-    copies = set(post.get("aliases", ()))
+    Mac yet: a closed or replaced post must not come back, and only the newest copy waits.
+    With ``original``, the post's own unsent bubbles go too (it lapsed before it was sent)."""
+    copies = set(post.get("aliases", ())) | ({post["group"]} if original else set())
     stale = [part for part in store.data["outbox"] if part["group"] in copies and part["state"] == "queued"]
     for part in stale:
         if "file" in part:
@@ -53,8 +57,13 @@ def post(store, outbox: Outbox, actor: dict, target: dict, *, text: str, file: s
         raise PortalError("feed_too_long", f"Feed text is limited to {MAX_TEXT} characters.")
     if not 0 <= options <= MAX_OPTIONS or not 0 < ttl <= 86400:
         raise PortalError("feed_invalid", "Options must be 0-9 and the reply window 1s-24h.")
-    if not re.fullmatch(r"[a-z0-9-]{1,32}", channel):
-        raise PortalError("feed_invalid", "Channel names are 1-32 lowercase letters, digits, or hyphens.")
+    if (
+        not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", channel) or channel in ("sys", "artifact")
+        or re.fullmatch(r"[0-9a-f]{4,6}", channel)
+    ):
+        # Line one starts [RAPP <channel>]; a channel must never look like a task's or a system card's.
+        raise PortalError("feed_invalid", "Channel names are 1-32 lowercase letters, digits, or hyphens, "
+                          "starting with a letter, and never sys, artifact, or a short hex ref.")
     feed = store.data.setdefault("feed", {})
     post_id = "post-" + uuid.uuid4().hex[:12]
     for other in feed.values():
@@ -119,6 +128,11 @@ def refresh(store, now: float) -> None:
                 item.update(state="failed")
                 drop_queued_copies(store, item)
                 changed = True
+            elif not _live(item, now):
+                # Never confirmed on the phone in time: it lapses, and what has not gone yet stays.
+                item.update(state="expired", lapsed=True)
+                drop_queued_copies(store, item, original=True)
+                changed = True
         elif item["state"] == "open" and now > item["open_until"]:
             item["state"] = "expired"
             drop_queued_copies(store, item)
@@ -138,10 +152,15 @@ def _bubbles(store, post):
     return [part for part in store.data["outbox"] if part["group"] in groups]
 
 
+def _live(item: dict, now: float) -> bool:
+    if item["state"] == "pending":
+        return now <= item["created_at"] + item["ttl"] + PENDING_GRACE
+    return item["state"] == "open" and item.get("open_until", 0) >= now
+
+
 def is_open(item: dict, actor: dict, now: float) -> bool:
     """Whether a post still takes an answer from this actor."""
-    live = item["state"] == "pending" or item["state"] == "open" and item.get("open_until", 0) >= now
-    return bool(live and item["options"] and item["actor"] == actor)
+    return bool(_live(item, now) and item["options"] and item["actor"] == actor)
 
 
 def capture(store, event: dict, actor: dict, text: str, now: float, *,
@@ -152,13 +171,7 @@ def capture(store, event: dict, actor: dict, text: str, now: float, *,
     only called when a post is waiting. A post whose receipt bookkeeping has not caught up
     yet (still pending) can already be answered, because adjacency is proven by GUID.
     """
-    candidates = [
-        item for item in store.data.get("feed", {}).values()
-        if item["actor"] == actor and item["options"] and (
-            item["state"] == "pending"
-            or item["state"] == "open" and item.get("open_until", 0) >= now
-        )
-    ]
+    candidates = [item for item in store.data.get("feed", {}).values() if is_open(item, actor, now)]
     if not candidates:
         return None
     has_files = event.get("has_attachments") is True or bool(event.get("attachments"))
@@ -180,14 +193,13 @@ def capture(store, event: dict, actor: dict, text: str, now: float, *,
     else:
         if post_id is not None:
             candidates = [item for item in candidates if item["id"] == post_id]
-            if not candidates:
-                return None
-        item = max(candidates, key=lambda value: value["created_at"])
-        if item["state"] == "pending" and not any(
-            part.get("guid") or part.get("caption_guid") for part in _parts(store, item)
-        ):
-            # Nothing has reached the phone yet, so there is nothing to answer.
+        # Only a post that reached the phone can be answered: a newer one still waiting to be
+        # sent must not take the answer to the one the owner is looking at.
+        shown = [item for item in candidates if any(
+            part.get("guid") or part.get("caption_guid") for part in _bubbles(store, item))]
+        if not shown:
             return None
+        item = max(shown, key=lambda value: value["created_at"])
     if guard is not None and not guard(item):
         # The caller judged that this answer cannot have been meant for this post.
         return None
@@ -209,7 +221,7 @@ def describe(store, post_id: str | None = None) -> list[dict]:
         items.values(), key=lambda value: value["created_at"])[-10:]
     return [{
         "id": item["id"], "channel": item["channel"], "state": item["state"], "options": item["options"],
-        "open_until": item.get("open_until"), "answer": item["answer"],
+        "open_until": item.get("open_until"), "answer": item["answer"], "lapsed": bool(item.get("lapsed")),
         "parts": [part["state"] for part in _parts(store, item)],
         # Every time the post was shown (again after a refused answer), and why answers were refused.
         "showings": [{"ref": token(f"{group}:0")[:6], "parts": [part["state"] for part in store.data["outbox"]

@@ -27,8 +27,9 @@ LIFECYCLE = re.compile(
 MAX_TEXT = 2400
 MAX_OPTIONS = 9
 KEEP_POSTS = 200
-# A post whose delivery is never confirmed lapses after its reply window plus the receipt window,
-# instead of taking answers (days later) for ever.
+# A post with options that went out but whose delivery is never confirmed lapses its reply
+# window plus the receipt window after it was sent, instead of taking answers (days later)
+# for ever. One still waiting to be sent does not lapse: it opens when it is delivered.
 PENDING_GRACE = 180
 
 
@@ -120,6 +121,10 @@ def refresh(store, now: float) -> None:
             continue
         parts = _parts(store, item)
         if item["state"] == "pending":
+            sent = [part["submitted_at"] for part in parts if part.get("submitted_at")]
+            if sent and "sent_at" not in item:
+                item["sent_at"] = min(sent)
+                changed = True
             if parts and all(part["state"] in ("sent", "delivered") for part in parts):
                 item.update(state="open" if item["options"] else "delivered", delivered_at=now,
                             open_until=now + item["ttl"])
@@ -128,8 +133,9 @@ def refresh(store, now: float) -> None:
                 item.update(state="failed")
                 drop_queued_copies(store, item)
                 changed = True
-            elif not _live(item, now):
-                # Never confirmed on the phone in time: it lapses, and what has not gone yet stays.
+            elif item["options"] and not _live(item, now):
+                # Sent, but never confirmed on the phone in time: it lapses, and what of it has
+                # not gone yet stays.
                 item.update(state="expired", lapsed=True)
                 drop_queued_copies(store, item, original=True)
                 changed = True
@@ -154,7 +160,7 @@ def _bubbles(store, post):
 
 def _live(item: dict, now: float) -> bool:
     if item["state"] == "pending":
-        return now <= item["created_at"] + item["ttl"] + PENDING_GRACE
+        return "sent_at" not in item or now <= item["sent_at"] + PENDING_GRACE + item["ttl"]
     return item["state"] == "open" and item.get("open_until", 0) >= now
 
 

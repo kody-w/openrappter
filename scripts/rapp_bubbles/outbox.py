@@ -64,6 +64,15 @@ class Outbox:
         if self.parts(group):
             return
         pieces = pieces_of(text)
+        cut = text.rfind(f"\n{itui.RULE}\n")
+        if menu and len(pieces) > 1 and cut > 0 and len(text) - cut <= 1200:
+            # A card's options (from its last rule on) go out whole, in its last bubble: that is
+            # the bubble a number is read from.
+            pieces, tail = pieces_of(text[:cut]), text[cut + 1:]
+            if len(pieces[-1]) + 1 + len(tail) <= 2400:
+                pieces[-1] = f"{pieces[-1]}\n{tail}"
+            else:
+                pieces.append(tail)
         # iTUI cards arrive already framed with their "[RAPP …] status" first line.
         framed = text.startswith("[RAPP ")
         extra = {"card": card} if card else {}

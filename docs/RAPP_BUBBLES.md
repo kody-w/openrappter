@@ -510,16 +510,18 @@ next ~5m · ref 3fa9c1
     after the card: only the owner's own messages (any in a one-to-one chat; in a group,
     his handle's) and our own bubbles, except an agent's post of another update that draws
     numbered lines of its own, which may be what the number answers. Numbers count in any
-    form a phone shows them (`[1] Yes`, `(2)`, `2️⃣`, fullwidth digits, zero-width or bidi
-    marks in front), and any line starting with a digit counts: deny by default. Another
+    form a phone shows them (`[1] Yes`, `(2)`, `2️⃣`, `❷`, fullwidth or other-script digits,
+    markdown bullets, zero-width or bidi marks in front), and any line whose first letter or
+    digit is a digit counts: deny by default. Another
     AI's look-alike card or a group member's message in between counts too. Then nothing
     runs and the card comes again saying `Another message came after the card` and to
     swipe-reply the number on it: in a thread where another AI answers every message, a
     number sent again may never sit right under a card, but a swipe-reply names it.
     Named commands (`RAPP approve 0001`) are not affected.
-  - Only the bubble that shows a card's options answers its Stop: a number on an earlier
-    piece of a long card (whose worker text may draw `[2]` lines of its own), or a
-    swipe-reply on an attachment, runs nothing and the card comes again. An approval card
+  - Only the bubble that shows a card's options answers its Stop: a long card always sends
+    its options whole, in its last bubble, and a number on an earlier piece (whose worker
+    text may draw `[2]` lines of its own), or a swipe-reply on an attachment, runs nothing
+    and the card comes again. An approval card
     is ours and the owner's prompt, so a swipe-reply on any of its bubbles counts.
   - A Stop picked without a swipe-reply while a task approval is waiting (or just lapsed)
     runs nothing, bare or `RAPP 2` alike: the 2 may have meant that approval's Cancel. The
@@ -621,10 +623,11 @@ python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json feed-s
   (restart, wake up, shut down, …) are never captured. After an intervening
   message, `RAPP reply <text>` answers the latest open post that reached the phone (a
   newer one still waiting to be sent never takes it), or, as a swipe-reply on an update,
-  that update. The reply window starts at delivery and lasts `--ttl` seconds; a post
-  whose delivery is never confirmed lapses `--ttl` plus the 180 s receipt window after it
-  was made, and what of it has not been sent is dropped (`feed-status` shows
-  `lapsed`). A refused answer brings the
+  that update. The reply window starts at delivery and lasts `--ttl` seconds; a post with
+  options that went out but whose delivery is never confirmed lapses `--ttl` plus the
+  180 s receipt window after it was sent (`feed-status` shows `lapsed`), instead of taking
+  answers days later. A post still waiting to be sent (an outage, a full disk) does not
+  lapse: it opens when it is delivered. A refused answer brings the
   update back with its options (see the read guard), and that copy is answerable for
   another `--ttl` seconds, up to twice the first window. Answers are read back only
   through `feed-status`, which also lists each post's `refusals` (the last three: when,

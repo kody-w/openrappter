@@ -1086,9 +1086,11 @@ class Portal:
         if code not in codes:
             stage["codes"] = [*codes, code][-5:]
             self.store.error(code, now)
-        changed = now - stage.get("last", stage["since"]) >= STAGE_LAST_EVERY
+        # The latest failure rides along with any save; one is forced at most every few minutes.
+        stage["last"] = now
+        changed = now - stage.get("mark", stage["since"]) >= STAGE_LAST_EVERY
         if changed:
-            stage["last"] = now
+            stage["mark"] = now
         if not stage["told"] and now - stage["since"] >= DEGRADED_AFTER:
             stage["told"], changed = True, True
             label, effect = STAGES.get(name, (name.capitalize(), "part of each tick is failing"))
@@ -1115,7 +1117,7 @@ class Portal:
         elif stage.get("told"):
             label, _ = STAGES.get(name, (name.capitalize(), ""))
             self._stage_card(f"sys:back:{name}:{int(stage['since'])}", itui.GLYPH["succeeded"], f"{label} back",
-                             [f"it failed for {itui.span(self.clock() - stage['since'])}"])
+                             [f"it failed for {itui.span(stage.get('last', stage['since']) - stage['since'])}"])
         self.store.save()
 
     def _stage_card(self, key: str, glyph: str, status: str, lines: list[str]) -> None:

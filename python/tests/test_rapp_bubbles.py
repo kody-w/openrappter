@@ -5505,3 +5505,111 @@ def test_may_have_run_names_the_picked_job_and_offers_its_details(env, monkeypat
     env.portal().tick()
     final = next(part for part in state(env)["outbox"] if part["text"].startswith("[RAPP 0001] ! May have run"))
     assert final["menu_kind"] == "check" and final["menu"][0] == f"status {JOB1}"
+
+
+# Round 7 review, pass 1.
+
+
+@pytest.mark.parametrize("drawn", ["\u2777 Hold", "\u278b Hold", "\u24f6 Hold", "- **2.** Hold", ">>> 2. Hold"])
+def test_circled_digits_and_markdown_bullets_in_a_post_interrupt_rapp_n(env, drawn):
+    line = timeline(env)
+    running_on_timeline(env, line)
+    env.clock.advance(10)
+    feed_post(env, text=f"Deploy?\n{drawn}", options=0)
+    env.portal().tick()
+    env.clock.advance(10)
+    line.say("RAPP 2")
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel")
+
+
+def test_a_status_post_waiting_out_an_outage_is_still_sent(env):
+    healthy = [False]
+    env.native.health = lambda _value, _now: healthy[0]
+    feed_post(env, text="Build finished", options=0)
+    for _ in range(54):
+        env.clock.advance(10)
+        env.portal().tick()
+    healthy[0] = True
+    for _ in range(3):
+        env.clock.advance(10)
+        env.portal().tick()
+    assert [call["text"] for call in env.native.calls] == ["[RAPP loop] Build finished"]
+
+
+def test_a_post_sent_late_still_takes_its_answer_once_delivered(env):
+    line = timeline(env)
+    healthy = [False]
+    env.native.health = lambda _value, _now: healthy[0]
+    post_id = feed_post(env, ttl=300)
+    created = env.clock.now
+    while env.clock.now < created + 470:
+        env.clock.advance(10)
+        env.portal().tick()
+    healthy[0] = True
+    env.clock.advance(5)
+    env.portal().tick()  # sent at last
+    part = next(item for item in state(env)["outbox"] if item["group"] == f"feed:{post_id}")
+    env.native.states[part["guid"]] = "pending"
+    env.clock.advance(10)
+    env.portal().tick()
+    env.native.states[part["guid"]] = "delivered"
+    env.clock.advance(10)
+    env.portal().tick()
+    env.clock.advance(20)
+    line.say("1")
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["state"] == "answered"
+
+
+def test_a_long_cards_options_go_out_whole_in_its_last_bubble(env):
+    line = timeline(env)
+    running_on_timeline(env, line)
+    original = env.runtime.request
+
+    def result(request):
+        value = original(request)
+        if request["op"] == "result":
+            rows = [f"row {n:03d} " + "y" * 60 for n in range(32)] + ["p" * 37]
+            value["stdout"] = {**value["stdout"], "text": "\n".join(rows)}
+        return value
+
+    env.runtime.request = result
+    env.clock.advance(10)
+    line.say("RAPP result 0001")
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    pieces = sorted((part for part in state(env)["outbox"] if part["group"].startswith(f"job:{JOB1}:requested:")),
+                    key=lambda part: part["index"])
+    assert len(pieces) == 2 and "[1] Details\n[2] Stop\n[3] Quiet" in pieces[-1]["text"]
+    assert "[2] Stop" not in pieces[0]["text"]
+    env.clock.advance(10)
+    line.say("2", reply_to=pieces[-1]["guid"])
+    env.portal().tick()
+    assert [call["job_id"] for call in explicit_ops(env, "cancel")] == [JOB1]
+
+
+def test_a_back_card_says_how_long_the_stage_failed_not_its_hold(env, monkeypatch):
+    import re
+
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    owner_target(env)
+    env.portal().tick()
+    real = Outbox.pump
+
+    def broken(self, *, reconcile_only=False):
+        if not reconcile_only:
+            raise RuntimeError("synthetic")
+        return real(self, reconcile_only=True)
+
+    monkeypatch.setattr(Outbox, "pump", broken)
+    for _ in range(12):  # two minutes
+        env.clock.advance(10)
+        env.portal().tick()
+    monkeypatch.setattr(Outbox, "pump", real)
+    for _ in range(12):
+        env.clock.advance(100)
+        env.portal().tick()
+    back = next(call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ✓ Sending back"))
+    assert int(re.search(r"it failed for (\d+)m", back).group(1)) <= 5, back

@@ -716,13 +716,16 @@ event, each ending with `[1] Health` and `[2] Recent jobs`:
   `! Back, disk full`, saying new tasks wait, not an all-clear.
 - **Stuck stages**: a tick stage that fails tick after tick for a minute gets one card
   saying what the owner loses while it fails (`! Receipts stuck` · `delivery checks are
-  paused`), and counts as back only after fifteen minutes without failing, then one
+  paused`), and counts as back only after at least fifteen minutes without failing, then one
   `✓ Receipts back` card. An incident belongs to the stage, whatever its error: a stage
   whose error keeps changing, or that fails every few minutes, is still one incident and
   is told once, and each kind of error is recorded once. While it fails, the journal is
   written at most every five minutes. The hourly cleanup, which works only once an hour,
-  is told on its second failed run. A stuck sender cannot send its own card, so it gets one `✓ Sending back · it failed
-  for 3m` card instead, and a stuck card that never left the Mac is dropped when its
+  is told on its second failed run. A back card gives how long the stage failed as a range
+  (`it failed for 5m–10m`), since the time of its latest failure is saved at most every
+  five minutes; for the same reason the hold counts twenty minutes from the latest saved
+  failure. A stuck sender cannot send its own card, so it gets one `✓ Sending back · it
+  failed for under 5m` card instead, and a stuck card that never left the Mac is dropped when its
   stage is back. A card that fails to build never fails the tick. `RAPP health` lists
   stuck stages. While this tick's disk check fails, new tasks are refused with
   `disk_unknown`: a disk that cannot be checked is not assumed to have room.

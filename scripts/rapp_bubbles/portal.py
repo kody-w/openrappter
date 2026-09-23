@@ -1108,7 +1108,9 @@ class Portal:
         instead of arriving together with its back card."""
         stages = self.store.data.get("stages")
         stage = stages.get(name) if stages else None
-        if stage is None or self.clock() - stage.get("last", stage["since"]) < STAGE_HOLD:
+        # The saved time of the latest failure may be up to STAGE_LAST_EVERY behind the real one
+        # (each tick is a new process), so the hold counts from the latest it could have been.
+        if stage is None or self.clock() - stage.get("last", stage["since"]) < STAGE_HOLD + STAGE_LAST_EVERY:
             return
         stages.pop(name)
         unsent = [part for part in self.outbox.parts(stage.get("card") or "") if part["state"] == "queued"]
@@ -1116,8 +1118,12 @@ class Portal:
             self.store.data["outbox"] = [part for part in self.store.data["outbox"] if part not in unsent]
         elif stage.get("told"):
             label, _ = STAGES.get(name, (name.capitalize(), ""))
+            # For the same reason, how long it failed is known to within STAGE_LAST_EVERY.
+            low = stage.get("last", stage["since"]) - stage["since"]
+            spell = (f"under {itui.span(STAGE_LAST_EVERY)}" if low < 60
+                     else f"{itui.span(low)}–{itui.span(low + STAGE_LAST_EVERY)}")
             self._stage_card(f"sys:back:{name}:{int(stage['since'])}", itui.GLYPH["succeeded"], f"{label} back",
-                             [f"it failed for {itui.span(stage.get('last', stage['since']) - stage['since'])}"])
+                             [f"it failed for {spell}"])
         self.store.save()
 
     def _stage_card(self, key: str, glyph: str, status: str, lines: list[str]) -> None:

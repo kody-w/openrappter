@@ -4147,9 +4147,9 @@ def test_a_stage_failing_tick_after_tick_is_told_once_after_a_minute_then_back(e
     for _ in range(3):
         env.clock.advance(10)
         env.portal().tick()
-    # Working again, but not back until it has held for fifteen minutes.
+    # Working again, but not back until it has held for fifteen minutes (twenty from the saved failure).
     assert not [call for call in env.native.calls if "Outage back" in call["text"]] and state(env)["stages"]
-    for _ in range(10):
+    for _ in range(15):
         env.clock.advance(100)
         env.portal().tick()
     back = [call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ✓ Outage back")]
@@ -4754,7 +4754,7 @@ def test_a_stuck_sender_sends_one_back_card_and_no_stuck_card(env, monkeypatch):
         env.clock.advance(10)
         env.portal().tick()
     monkeypatch.setattr(Outbox, "pump", real)
-    for _ in range(12):
+    for _ in range(15):
         env.clock.advance(100)
         env.portal().tick()
     heads = [call["text"].split("\n", 1)[0] for call in env.native.calls]
@@ -5604,12 +5604,46 @@ def test_a_back_card_says_how_long_the_stage_failed_not_its_hold(env, monkeypatc
         return real(self, reconcile_only=True)
 
     monkeypatch.setattr(Outbox, "pump", broken)
+    started = env.clock.now + 10
     for _ in range(12):  # two minutes
         env.clock.advance(10)
         env.portal().tick()
+    failed_for = env.clock.now - started
     monkeypatch.setattr(Outbox, "pump", real)
-    for _ in range(12):
+    for _ in range(15):
         env.clock.advance(100)
         env.portal().tick()
     back = next(call["text"] for call in env.native.calls if call["text"].startswith("[RAPP sys] ✓ Sending back"))
-    assert int(re.search(r"it failed for (\d+)m", back).group(1)) <= 5, back
+    spell = re.search(r"it failed for (?:under (\d+)m|(\d+)m–(\d+)m)", back)
+    low, high = (0, int(spell.group(1))) if spell.group(1) else (int(spell.group(2)), int(spell.group(3)))
+    # A range that holds the real two minutes, not the fifteen-minute hold on top.
+    assert low * 60 <= failed_for <= high * 60 and high <= 7, back
+
+
+def test_a_back_card_waits_the_whole_hold_and_bounds_how_long_the_stage_failed(env, monkeypatch):
+    import re
+    from rapp_bubbles import portal as portal_module
+
+    monkeypatch.delenv("RAPP_BUBBLES_STRICT")
+    owner_target(env)
+    env.portal().tick()
+    real, failing = portal_module.Portal._outage_report, [True]
+
+    def flaky(self):
+        if failing[0]:
+            raise RuntimeError("synthetic")
+        return real(self)
+
+    monkeypatch.setattr(portal_module.Portal, "_outage_report", flaky)
+    started = env.clock.now + 10
+    for _ in range(54):  # about nine minutes, failing every tick of an otherwise idle Mac
+        env.clock.advance(10)
+        env.portal().tick()
+    last_failure, failing[0] = env.clock.now, False
+    for _ in range(150):
+        env.clock.advance(10)
+        env.portal().tick()
+    back = next(part for part in state(env)["outbox"] if part["group"].startswith("sys:back:outage"))
+    assert back["created_at"] - last_failure >= 900
+    low, high = map(int, re.search(r"it failed for (\d+)m–(\d+)m", back["text"]).groups())
+    assert low * 60 <= last_failure - started <= high * 60

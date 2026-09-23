@@ -6,6 +6,7 @@ import argparse
 import copy
 import json
 import os
+import sqlite3
 import time
 
 from . import cards, doctor, feed
@@ -29,9 +30,18 @@ def locked(config, action, wait=30.0):
             time.sleep(0.4)
 
 
+def failure_code(error) -> str:
+    code = getattr(error, "code", None)
+    if isinstance(code, str) and code:
+        return code
+    name = getattr(error, "sqlite_errorname", None) if isinstance(error, sqlite3.Error) else None
+    return name.lower() if isinstance(name, str) and name else "transport_internal_error"
+
+
 def record_tick_failure(config, error) -> None:
-    """A tiny cause record for a tick that failed as a whole, which saves nothing itself; the
-    next good tick names it. On a full disk, at least its time is kept (the file's mtime)."""
+    """A tiny cause record for a tick that failed as a whole, which saves nothing itself; a
+    later good tick names it. Written whole or not at all: on a full disk the last record stays
+    and only its time moves, so the count is never lost."""
     path = config.state_dir / "tick-failure.json"
     now = time.time()
     try:
@@ -40,16 +50,21 @@ def record_tick_failure(config, error) -> None:
     except (OSError, ValueError):
         previous = {}
     record = {
-        "code": getattr(error, "code", None) or "transport_internal_error", "kind": type(error).__name__,
+        "code": failure_code(error), "kind": type(error).__name__,
         "errno": error.errno if isinstance(error, OSError) else None,
         "first": previous.get("first", now), "last": now, "count": int(previous.get("count") or 0) + 1,
+        "more": bool(previous.get("more")),
     }
+    pending = config.state_dir / f".tick-failure.{os.getpid()}.pending"
     try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        descriptor = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             json.dump(record, stream)
+        os.replace(pending, path)
     except OSError:
         try:
+            pending.unlink(missing_ok=True)
+            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600))
             os.utime(path)
         except OSError:
             pass
@@ -134,7 +149,11 @@ def main(argv=None) -> int:
                 "imessage": store.data.get("imessage_health", {}),
             })
         elif args.command == "cards":
-            result = locked(config, lambda store: cards.describe(config, store))
+            source = SQLiteSource(config)
+            try:
+                result = locked(config, lambda store: cards.describe(config, store, source=source))
+            finally:
+                source.close()
         elif args.command == "resolve":
             # A private copy of the journal: the dry run holds no lock and saves nothing.
             data = locked(config, lambda store: copy.deepcopy(store.data))
@@ -153,7 +172,7 @@ def main(argv=None) -> int:
     except Exception as error:
         # Name the failure class (for example errno 28, disk full) without echoing private
         # paths or message content.
-        failure = {"code": "transport_internal_error", "kind": type(error).__name__}
+        failure = {"code": failure_code(error), "kind": type(error).__name__}
         if isinstance(error, OSError) and error.errno:
             failure["errno"] = error.errno
         print(json.dumps({"ok": False, "error": failure}))

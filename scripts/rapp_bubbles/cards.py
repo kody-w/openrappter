@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from . import feed, itui
 from .config import Config, PortalError
 from .outbox import Outbox, token
-from .portal import Portal
+from .portal import FOREIGN_NOTE, RACE_SECONDS, THREAD_NOTE, UNCONFIRMED_NOTE, Portal
 from .source import SQLiteSource
 from .state import Store
 
@@ -133,11 +133,46 @@ def _options(store, part: dict) -> list[dict]:
     return [{"n": n, "label": labels.get(str(n), ""), "command": None} for n in range(1, post["options"] + 1)]
 
 
-def describe(config: Config, store, *, limit: int = 10, clock=time.time) -> dict:
+def _event(config: Config, source, route, now: float) -> dict | None:
+    """The owner's message as if he sent it now, for the read rule to judge."""
+    target = source.direct_target(route.chat)
+    if target is None:
+        return None
+    return {
+        "id": source.tail() + 1, "guid": f"DRYRUN-{uuid.uuid4().hex}", "text": "", "sender": route.sender,
+        "chat_id": target["chat_id"], "chat_guid": route.chat, "service": "iMessage",
+        "is_group": False, "is_from_me": False, "chat_style": 45, "participants": [route.sender],
+        "has_attachments": False, "created_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+    }
+
+
+def _blocked(portal: Portal, newest: dict, event: dict | None, now: float) -> dict:
+    """Whether `RAPP <n>` sent now would be refused, why, and when a race clears."""
+    if not newest["confirmed"]:
+        return {"blocked": "unconfirmed"}
+    if not newest["open"]:
+        return {"blocked": "closed"}
+    if event is None:
+        return {"blocked": None}
+    parts = portal.outbox.parts(newest["group"])
+    note = portal._unread(parts, event, None, quoted=False, delivery=not newest["post"], explicit=True)
+    if note is None:
+        return {"blocked": None}
+    reason = {UNCONFIRMED_NOTE: "unconfirmed", FOREIGN_NOTE: "foreign", THREAD_NOTE: "foreign"}.get(note, "race")
+    if reason != "race":
+        return {"blocked": reason}
+    landed = max(portal._landed(part) for part in ([part for part in parts if "text" in part] or parts))
+    return {"blocked": reason, "ready_in": max(0.0, round(RACE_SECONDS - (now - landed), 1))}
+
+
+def describe(config: Config, store, *, limit: int = 10, clock=time.time, source=None) -> dict:
     """The owner's recent cards with options, newest first: kind, delivery, whether open, and
-    each option; plus the card `RAPP <n>` answers now."""
-    _, actor = _owner(config)
-    portal, now = _portal(config, store, clock), clock()
+    each option; plus the card `RAPP <n>` answers now, and (with a chat.db reader) whether the
+    read rule would refuse it right now and why."""
+    route, actor = _owner(config)
+    now = clock()
+    event = _event(config, source, route, now) if source is not None else None
+    portal = _portal(config, store, clock, _Source(source, event["guid"]) if event else None)
     texted = {part["group"] for part in store.data["outbox"] if "text" in part}
     rows, seen = [], set()
     for part in sorted(store.data["outbox"], key=portal._landed, reverse=True):
@@ -160,8 +195,9 @@ def describe(config: Config, store, *, limit: int = 10, clock=time.time) -> dict
         if len(rows) >= limit:
             break
     newest = portal._latest_card(actor, 2**62)
-    return {"ok": True, "cards": rows,
-            "rapp_n": {"ref": ref(newest["group"]), "open": newest["open"]} if newest else None}
+    return {"ok": True, "cards": rows, "rapp_n": {
+        "ref": ref(newest["group"]), "open": newest["open"], **_blocked(portal, newest, event, now),
+    } if newest else None}
 
 
 def resolve(config: Config, data: dict, text: str, *, reply_to: str | None = None,
@@ -175,14 +211,9 @@ def resolve(config: Config, data: dict, text: str, *, reply_to: str | None = Non
         target = source.direct_target(route.chat)
         if target is None:
             raise PortalError("feed_target", "The authorized iMessage thread is unavailable.")
-        now, guid = clock(), f"DRYRUN-{uuid.uuid4().hex}"
-        event = {
-            "id": source.tail() + 1, "guid": guid, "text": text, "sender": route.sender,
-            "chat_id": target["chat_id"], "chat_guid": route.chat, "service": "iMessage",
-            "is_group": False, "is_from_me": False, "chat_style": 45, "participants": [route.sender],
-            "has_attachments": False,
-            "created_at": datetime.fromtimestamp(now - max(0.0, typed_ago), timezone.utc).isoformat(),
-        }
+        now = clock()
+        event = {**_event(config, source, route, now - max(0.0, typed_ago)), "text": text}
+        guid = event["guid"]
         if reply_to:
             group = next((part["group"] for part in data["outbox"] if ref(part["group"]) == reply_to), None)
             bubbles = [value for part in data["outbox"] if part["group"] == group

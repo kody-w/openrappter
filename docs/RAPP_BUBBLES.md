@@ -499,14 +499,20 @@ next ~5m · ref 3fa9c1
 - **Read guard.** One rule decides whether Approve, Cancel, Stop, or an answer to an
   agent's update could have been meant for the card it lands under, for a bare digit and
   for `RAPP <n>` alike:
-  - A swipe-reply names a bubble the owner has seen, so it always counts.
+  - A swipe-reply names a card the owner has seen, so it counts, unless someone else
+    replied in that card's thread: iOS records the thread's root, not the bubble that
+    was swiped, so the owner may have answered that reply. Then nothing runs and the
+    card comes again saying `Someone else replied under the card`.
   - Otherwise the card must be confirmed on the phone (sent or delivered). If it is not,
     nothing runs and the card comes again saying `Not confirmed on your phone`.
   - `RAPP <n>` and `RAPP reply` name no bubble, so nothing from another author may sit
-    after the card: only our own bubbles and the owner's messages to us (in a group, only
-    from his handle). Another AI's look-alike card or a group member's message in between
-    may be what the number answers, so nothing runs and the card comes again saying
-    `Another message came after this card`; the number sent again right under it runs.
+    after the card: only the owner's own messages (any in a one-to-one chat; in a group,
+    his handle's) and our own bubbles, except an agent's post of another update that draws
+    numbered lines of its own (`[1] Yes`), which may be what the number answers. Another
+    AI's look-alike card or a group member's message in between counts too. Then nothing
+    runs and the card comes again saying `Another message came after the card` and to
+    swipe-reply the number on it: in a thread where another AI answers every message, a
+    number sent again may never sit right under a card, but a swipe-reply names it.
     Named commands (`RAPP approve 0001`) are not affected.
   - The reply must be typed at least 3 seconds after the card's last bubble left the
     Mac (by the message's chat.db time; measured from when the send returned, so a slow
@@ -516,16 +522,20 @@ next ~5m · ref 3fa9c1
     still runs when the card the owner could read by then offered the same thing under
     that number (a heartbeat or a re-offer of the same task), so a fast replier is never
     refused over and over. That needs the earlier card confirmed on the phone and nothing
-    after it in chat.db but our own bubbles and the owner's messages to us (up to the newer
-    card for a bare reply; up to the reply itself for `RAPP <n>`): another AI's question in
-    between may be what the number answers. Otherwise nothing runs and the card comes again saying `nothing ran`, so
+    after it in chat.db from another author, by the same rule (up to the newer card for a
+    bare reply; up to the reply itself for `RAPP <n>`): another AI's question in between
+    may be what the number answers, while the owner's own note to another AI is not. Otherwise nothing runs and the card comes again saying `nothing ran`, so
     sending the pick again answers the card that is now newest.
   - An answer to an agent's update that the guard refuses (typed as it landed, or sent
     with `RAPP <n>`/`RAPP reply` after another author's bubble) is not recorded. A number
-    gets the update again as the newest bubble: its own text and options, saying why
-    nothing was answered, so the number sent again (bare right under it, or `RAPP <n>`)
-    answers it. The copy keeps the update open for another full reply window. Other text
-    is left alone.
+    gets the update again as the newest bubble: `Not answered · <its first line>` on the
+    lock screen, why nothing was answered right under that, and its own options last (a
+    long update is split between lines, never inside one). The number sent again, or
+    swiped on the copy, answers it. Only the newest copy waits to go out, and a copy still
+    waiting is dropped when the update is answered, expires, or is replaced by a newer
+    one. Each refusal keeps the update open for another reply window, up to twice the
+    first. The refusal is saved before the reply is recorded as handled, so a crash in
+    between never loses it. Other text is left alone.
   - A row with no chat.db time is judged by position alone. A card from before a group's
     members changed is never re-sent to the changed group.
 - **`RAPP <n>`** answers the card a swipe-reply quotes (nothing runs if the quoted
@@ -598,7 +608,10 @@ python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json feed-s
   swipe-reply on an update, that update). The reply
   window starts at delivery and lasts `--ttl` seconds. A refused answer brings the
   update back with its options (see the read guard), and that copy is answerable for
-  another `--ttl` seconds. Answers are read back only through `feed-status`.
+  another `--ttl` seconds, up to twice the first window. Answers are read back only
+  through `feed-status`, which also lists each post's `refusals` (the last three: when,
+  why — `race`, `foreign`, or `thread` — and the copy's ref) and every `showing` (the
+  post and each copy, with its bubbles' delivery states).
 
 ### What a card offers and what a reply would do (`cards`, `resolve`)
 
@@ -615,7 +628,9 @@ python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json resolv
   card's footer), kind, job, delivery state, when it landed, whether it is open, and each
   option with its label and the `RAPP …` text that does the same from anywhere (an agent
   post takes its numbers only as a reply on it). `rapp_n` is the card `RAPP <n>` answers
-  right now, and whether it is open.
+  right now, whether it is open, and `blocked`: whether the tick's read rule would refuse
+  `RAPP <n>` sent now, and why (`unconfirmed`, `closed`, `foreign`, or `race` with
+  `ready_in` seconds; null when it would be answered).
 - `resolve` sends the reply through the real routing code on a private copy of the
   journal, as if the owner sent it now: typed `--typed-ago` seconds earlier, and as a
   swipe-reply on the card whose ref `--reply-to` gives. The first call to the task runtime
@@ -666,14 +681,24 @@ event, each ending with `[1] Health` and `[2] Recent jobs`:
 - **Back online**: each successful tick touches a tiny `heartbeat` file; a gap of five
   minutes or more (failed ticks, a stopped watcher, a full disk) is reported once. A tick
   that fails as a whole saves nothing itself, so the CLI keeps a tiny cause record
-  (`tick-failure.json`, or at least its time on a full disk) and the card names it:
-  `3 ticks failed · disk full`. `RAPP health` keeps showing it (`Last failed ticks: …`).
+  (`tick-failure.json`), and the card names it: `3 ticks failed · disk full`, or
+  `chat.db busy` for a locked database. The record is written whole or not at all: on a
+  full disk the last one stays and only its time moves (`3+ ticks failed`), so the count
+  is never erased. Ticks that fail now and then gather in it; a good tick saves them at
+  most every 10 minutes (not once per failure) and removes the record only after that
+  save succeeded. `RAPP health` shows the latest: `Last failed: 3 ticks failed · disk
+  full · 2h ago`.
 - **Stuck stages**: a tick stage that fails tick after tick for a minute gets one card
-  saying what the owner loses while it fails (`! Sending stuck` · `cards may not go out`)
-  and one `✓ Sending back` card when it works again. The failure is recorded once, and
-  the ticks in between write nothing. `RAPP health` lists stuck stages. While the disk
-  check itself fails, new tasks are refused with `disk_unknown`: a disk that cannot be
-  checked is not assumed to have room.
+  saying what the owner loses while it fails (`! Receipts stuck` · `delivery checks are
+  paused`), and counts as back only after two minutes without failing, then one
+  `✓ Receipts back` card. So a stage that fails every other tick is one incident, not a
+  card and a journal write per flap: while it fails, the journal is written about once a
+  minute. The hourly cleanup, which works only once an hour, is told on its second failed
+  run. A stuck sender cannot send its own card, so it gets one `✓ Sending back · it failed
+  for 3m` card instead, and a stuck card that never left the Mac is dropped when its
+  stage is back. A card that fails to build never fails the tick. `RAPP health` lists
+  stuck stages. While this tick's disk check fails, new tasks are refused with
+  `disk_unknown`: a disk that cannot be checked is not assumed to have room.
 
 ### Bounded journal and idle ticks
 
@@ -701,8 +726,11 @@ One bad item can no longer stop every tick:
   task's card that broke this way gets that card again instead (`An internal error
   stopped it, so nothing ran.`), so sending it again answers it.
   If the task runtime had already been called, something may have started or stopped, so
-  the owner is never told nothing ran: the message is checked again once (`! Checking`;
-  a repeated submit reuses the same prepared job) and otherwise left to `RAPP status`.
+  the owner is never told nothing ran: the message is checked again on the next tick
+  (`! Checking`; a repeated submit reuses the same prepared job), and if that breaks too,
+  one `! May have run` card names the task, with `[1] Details`. A message already past
+  the runtime (an interrupted approve being reconciled, a re-check) counts as called, so
+  its re-check breaking never says nothing ran.
   The rest of the tick still runs. Known failures
   (for example, Messages unavailable) and chat.db errors (a locked database) still fail
   the tick and are retried, so a transient problem never drops a message. A journal that
@@ -799,8 +827,10 @@ and no private chat database. The ordinary suite also covers a foreign AI's
 intervening outbound SQL row, fresh-tail initialization, and durable pending
 downloads from regular single-link mode-0644 media files. A `Timeline` fake keeps one
 chat in real row order (the owner's messages, our bubbles as they are sent, another
-AI's rows), and a seeded test checks across interleavings that no Approve, Cancel, or
-Stop ever runs for a number with another author's bubble after its card.
+AI's rows, and swipe-reply threads), and a seeded test checks across interleavings that
+no Approve, Cancel, or Stop ever runs for a number with another author's bubble after
+its card. Guard tests pin the fail-closed cases (a gap the reader cannot vouch for, a
+card with no known bubble, a send timed from the end of its timeout).
 
 Tests use synthetic identities, fixture SQLite, project-local HOME/state,
 harmless files, fake native RPC, and a fake job adapter. They do not send,

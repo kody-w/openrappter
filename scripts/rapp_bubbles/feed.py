@@ -33,6 +33,18 @@ def _parts(store, post):
     return [part for part in store.data["outbox"] if part["group"] == post["group"]]
 
 
+def drop_queued_copies(store, post) -> bool:
+    """Drop the copies of a post (shown again after a refused answer) that have not left the
+    Mac yet: a closed or replaced post must not come back, and only the newest copy waits."""
+    copies = set(post.get("aliases", ()))
+    stale = [part for part in store.data["outbox"] if part["group"] in copies and part["state"] == "queued"]
+    for part in stale:
+        if "file" in part:
+            Path(part["file"]["path"]).unlink(missing_ok=True)
+    store.data["outbox"] = [part for part in store.data["outbox"] if part not in stale]
+    return bool(stale)
+
+
 def post(store, outbox: Outbox, actor: dict, target: dict, *, text: str, file: str | None = None,
          options: int = 0, ttl: float = 300, channel: str = "loop", now: float) -> dict:
     if not text.strip() and not file:
@@ -51,7 +63,7 @@ def post(store, outbox: Outbox, actor: dict, target: dict, *, text: str, file: s
         # A newer update replaces any older card that has not left this Mac yet, so an
         # iMessage outage never releases a burst of stale cards when it recovers. A card
         # already on the phone stays answerable; adjacency decides which one a reply meant.
-        stale = [part for part in _parts(store, other) if part["state"] == "queued"]
+        stale = [part for part in _bubbles(store, other) if part["state"] == "queued"]
         for part in stale:
             if "file" in part:
                 Path(part["file"]["path"]).unlink(missing_ok=True)
@@ -105,9 +117,11 @@ def refresh(store, now: float) -> None:
                 changed = True
             elif any(part["state"] == "failed" for part in parts):
                 item.update(state="failed")
+                drop_queued_copies(store, item)
                 changed = True
         elif item["state"] == "open" and now > item["open_until"]:
             item["state"] = "expired"
+            drop_queued_copies(store, item)
             changed = True
     if changed:
         store.save()
@@ -184,6 +198,7 @@ def capture(store, event: dict, actor: dict, text: str, now: float, *,
         "text": stripped[:2000], "number": number, "guid": event.get("guid"),
         "rowid": event.get("id"), "at": now, "explicit": explicit, "has_attachments": has_files,
     })
+    drop_queued_copies(store, item)
     store.save()
     return item
 
@@ -196,4 +211,9 @@ def describe(store, post_id: str | None = None) -> list[dict]:
         "id": item["id"], "channel": item["channel"], "state": item["state"], "options": item["options"],
         "open_until": item.get("open_until"), "answer": item["answer"],
         "parts": [part["state"] for part in _parts(store, item)],
+        # Every time the post was shown (again after a refused answer), and why answers were refused.
+        "showings": [{"ref": token(f"{group}:0")[:6], "parts": [part["state"] for part in store.data["outbox"]
+                                                               if part["group"] == group]}
+                     for group in [item["group"], *item.get("aliases", ())]],
+        "refusals": list(item.get("refusals", ())),
     } for item in selected]

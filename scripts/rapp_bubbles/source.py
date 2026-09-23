@@ -94,6 +94,30 @@ class SQLiteSource:
             {"guid": row["guid"], "is_from_me": bool(row["is_from_me"]), "sender": row["sender"]} for row in rows
         ]
 
+    def thread_rows(self, chat_guid: str, root: str, event: dict) -> list[dict] | None:
+        """This chat's replies in the thread rooted at ``root`` from before ``event``. iOS keeps
+        the thread's root in thread_originator_guid, not the bubble that was swiped, so these
+        are the bubbles a swipe-reply naming ``root`` may really have answered. None when there
+        are more than 50 to vouch for."""
+        if "thread_originator_guid" not in self.columns:
+            return []
+        reactions = (
+            "AND (m.associated_message_type IS NULL OR m.associated_message_type<2000 "
+            "OR m.associated_message_type>3006)"
+            if "associated_message_type" in self.columns else ""
+        )
+        rows = self.db.execute(
+            f"""SELECT m.guid, m.is_from_me, h.id AS sender FROM message m
+               JOIN chat_message_join j ON j.message_id=m.ROWID
+               JOIN chat c ON c.ROWID=j.chat_id
+               LEFT JOIN handle h ON h.ROWID=m.handle_id
+               WHERE c.guid=? AND m.thread_originator_guid=? AND m.ROWID<? AND m.guid!=? {reactions}
+               ORDER BY m.ROWID LIMIT 51""", (chat_guid, root, event["id"], event["guid"]),
+        ).fetchall()
+        return None if len(rows) > 50 else [
+            {"guid": row["guid"], "is_from_me": bool(row["is_from_me"]), "sender": row["sender"]} for row in rows
+        ]
+
     def latest_prior_guid(self, event: dict) -> str | None:
         # A tapback is not a message: reacting to a card must not break the reply after it.
         reactions = (

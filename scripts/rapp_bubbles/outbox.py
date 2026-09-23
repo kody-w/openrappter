@@ -26,6 +26,23 @@ def token(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:24]
 
 
+def pieces_of(text: str, size: int = 2400) -> list[str]:
+    """Bubble-sized pieces, cut at a line break when there is one in the second half of the
+    piece, so no line (an option, a table row) is split across two bubbles."""
+    pieces = []
+    while len(text) > size:
+        cut = text.rfind("\n", size // 2, size)
+        if cut == -1:
+            pieces.append(text[:size])
+            text = text[size:]
+        else:
+            # The break itself is dropped; a bubble never ends in blank lines.
+            pieces.append(text[:cut].rstrip("\n") or text[:cut])
+            text = text[cut + 1:]
+    # A file-only group has no text bubble at all.
+    return [*pieces, text] if text else pieces
+
+
 class Outbox:
     def __init__(
         self, config: Config, store: Store, native, clock: Callable[[], float],
@@ -46,7 +63,7 @@ class Outbox:
     ) -> None:
         if self.parts(group):
             return
-        pieces = [text[i:i + 2400] for i in range(0, len(text), 2400)]
+        pieces = pieces_of(text)
         # iTUI cards arrive already framed with their "[RAPP …] status" first line.
         framed = text.startswith("[RAPP ")
         extra = {"card": card} if card else {}

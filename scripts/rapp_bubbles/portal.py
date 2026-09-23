@@ -39,6 +39,8 @@ INTERNAL_ATTEMPTS = 3  # internal errors before a job is no longer followed
 # retried; only unexpected errors are ever set aside.
 UNCONTAINED = (JournalWriteError, PortalError, sqlite3.Error)
 DEGRADED_AFTER = 60  # a stage failing this long, tick after tick, gets one card
+STAGE_HOLD = 2 * DEGRADED_AFTER  # and counts as back only after this long without failing
+FAILURE_MERGE = 600  # failed-tick records gather this long before a good tick saves them
 STAGES = {  # stage: (lock-screen label, what the owner loses while it fails)
     "disk": ("Disk", "disk checks fail, so new tasks are refused"),
     "recover": ("Recovery", "restart recovery is paused"),
@@ -53,7 +55,10 @@ STAGES = {  # stage: (lock-screen label, what the owner loses while it fails)
 APPLE_EPOCH = 978307200
 RACE_NOTE = "Your reply landed as this card arrived, so nothing ran."
 UNCONFIRMED_NOTE = "Not confirmed on your phone, so nothing ran."
-FOREIGN_NOTE = "Another message came after this card, so nothing ran."
+FOREIGN_NOTE = "Another message came after the card, so nothing ran. Swipe-reply your number on this one."
+THREAD_NOTE = "Someone else replied under the card, so nothing ran. Swipe-reply your number on this one."
+# A line an agent's post draws like one of our options ("[1] Yes", "2. Hold", "3) Later").
+OPTION_LINE = re.compile(r"^\s*\[?[1-9][\].)]\s+\S", re.MULTILINE)
 JOB_ID = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{32}")
 TERMINAL = {"succeeded", "completed", "failed", "cancelled", "canceled", "interrupted", "expired"}
 OUTPUT_EXTENSIONS = {
@@ -79,7 +84,7 @@ HELP = (
     "RAPP reply <text> answers the latest open update even after your other messages.\n"
     "Cards end with [n] options: reply the digit right under a card (or swipe-reply to it), "
     "or RAPP <n> for the newest card after your other messages (after another AI's message, "
-    "the card comes again: send the number under it). On a live approval card, 1 approves "
+    "the card comes again: swipe-reply your number on it). On a live approval card, 1 approves "
     "and 2 cancels that task only; RAPP approve <job-id> always works. "
     "Running tasks keep sending ETA updates.\n"
     "RAPP quiet [job] stops a task's automatic updates; its result still comes.\n"
@@ -142,6 +147,8 @@ class Portal:
         self.store: Store
         self.outbox: Outbox
         self._quarantined: list[dict] = []
+        self._set_aside: set[str] = set()
+        self._failing: set[str] = set()
         self._runtime_called = False
 
     def authorize(self, event: dict) -> dict | None:
@@ -437,9 +444,18 @@ class Portal:
 
     @staticmethod
     def _failure_cause(failure: dict) -> str:
-        return "disk full" if failure.get("errno") == 28 else str(failure.get("code") or "unknown")
+        code = str(failure.get("code") or "unknown")
+        if failure.get("errno") == 28:
+            return "disk full"
+        return "chat.db busy" if code in ("sqlite_busy", "sqlite_locked") else code
 
-    def _take_tick_failure(self) -> dict | None:
+    @staticmethod
+    def _failed_ticks(failure: dict) -> str:
+        count = int(failure.get("count") or 1)
+        # A later failure that could not be written (a full disk) only moved the file's time.
+        return f"{count}{'+' if failure.get('more') else ''} tick{'' if count == 1 and not failure.get('more') else 's'} failed"
+
+    def _read_tick_failure(self) -> dict | None:
         """The cause the CLI recorded for ticks that failed as a whole (they save nothing)."""
         path = self.config.state_dir / "tick-failure.json"
         try:
@@ -451,37 +467,47 @@ class Portal:
             failure = failure if isinstance(failure, dict) else {}
         except (OSError, ValueError):
             failure = {}
-        failure["last"] = max(float(failure.get("last") or 0), modified)
-        self.store.data["last_tick_failure"] = failure
-        path.unlink(missing_ok=True)
+        recorded = float(failure.get("last") or 0)
+        failure["more"] = bool(failure.get("more")) or modified > recorded + 1
+        failure["last"] = max(recorded, modified)
+        failure.setdefault("first", failure["last"])
         return failure
 
     def _heartbeat(self) -> None:
-        """Touch a tiny file per successful tick; a long gap means ticks failed or stopped."""
+        """Touch a tiny file per successful tick; a long gap means ticks failed or stopped.
+        Ticks that fail now and then gather in the CLI's record, which a good tick saves at most
+        every FAILURE_MERGE (or with the gap card), removing it only once that save succeeded."""
         path = self.config.state_dir / "heartbeat"
         now = self.clock()
         try:
             last = path.stat().st_mtime
         except FileNotFoundError:
             last = None
-        failure = self._take_tick_failure()
-        if last is not None and now - last >= 300:
-            cause = (f"{failure.get('count', 1)} ticks failed · {self._failure_cause(failure)}"
+        gap = last is not None and now - last >= 300
+        failure = self._read_tick_failure()
+        if failure and not gap and now - float(failure["first"]) < FAILURE_MERGE:
+            failure = None
+        if failure:
+            self.store.data["last_tick_failure"] = failure
+        if gap:
+            cause = (f"{self._failed_ticks(failure)} · {self._failure_cause(failure)}"
                      if failure else "check RAPP health")
             self._system_card(f"sys:gap:{int(last)}", itui.GLYPH["succeeded"], "Back online",
                               [f"no ticks for {itui.span(now - last)}", cause])
+        if gap or failure:
             self.store.save()
-        elif failure:
-            self.store.save()
+        if failure:
+            (self.config.state_dir / "tick-failure.json").unlink(missing_ok=True)
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         os.close(descriptor)
         os.utime(path, (now, now))
 
-    def _compact(self) -> None:
-        """Hourly: drop settled records that are old and past the reader's late window."""
+    def _compact(self) -> bool | None:
+        """Hourly: drop settled records that are old and past the reader's late window. False
+        when it is not due (it did nothing, so it proves nothing about the stage)."""
         data, now = self.store.data, self.clock()
         if now - data.get("compacted_at", 0) < 3600:
-            return
+            return False
         data["compacted_at"] = now
         horizon = (data["cursor"] or 0) - 256
         keep = []
@@ -537,8 +563,9 @@ class Portal:
               if data.get("errors") else []),
             *(f"Stuck: {STAGES.get(name, (name,))[0].lower()} for {itui.span(self.clock() - stage['since'])}"
               for name, stage in data.get("stages", {}).items()),
-            *([f"Last failed ticks: {data['last_tick_failure'].get('count', 1)} · "
-               f"{self._failure_cause(data['last_tick_failure'])}"] if data.get("last_tick_failure") else []),
+            *(f"Last failed: {self._failed_ticks(failure)} · {self._failure_cause(failure)} · "
+              f"{itui.span(self.clock() - float(failure['last']))} ago"
+              for failure in [self._read_tick_failure() or data.get("last_tick_failure")] if failure),
             "Outbox: " + (", ".join(f"{count} {state}" for state, count in sorted(states.items())) or "empty"),
         ]
         if health.get("hint"):
@@ -613,9 +640,10 @@ class Portal:
         """Why the owner cannot have meant this pick for this card, or None when it may run.
 
         The one rule for Approve, Cancel, Stop, and answers to agent posts. A swipe-reply names
-        a bubble the owner has seen. Otherwise the card must be confirmed on the phone (sent or
-        delivered), and the reply typed at least RACE_SECONDS after its last bubble left the
-        Mac. A sooner reply still runs when the card the owner could read by then offered the
+        a card the owner has seen, unless another author replied in that card's thread (iOS
+        names the thread, not the bubble swiped). Otherwise the card must be confirmed on the
+        phone (sent or delivered), and the reply typed at least RACE_SECONDS after its last
+        bubble left the Mac. A sooner reply still runs when the card the owner could read by then offered the
         same thing under that number (a heartbeat or a re-offer of the same task), so fast
         repliers are never refused forever: only when that card is confirmed on the phone and
         nothing but our bubbles and the owner's messages to us came after it (up to the newer
@@ -623,8 +651,10 @@ class Portal:
         another AI's question in between may be what the number answers. A row without a
         chat.db date (read as the Apple epoch) is judged by position alone.
         """
-        if quoted or not parts:
+        if not parts:
             return None
+        if quoted:
+            return THREAD_NOTE if self._thread_interrupted(parts[0], event) else None
         texts = [part for part in parts if "text" in part] or parts
         if delivery and any(part["state"] not in ("sent", "delivered") for part in texts):
             return UNCONFIRMED_NOTE
@@ -640,48 +670,49 @@ class Portal:
         if (
             meaning is not None and seen is not None and seen["state"] in ("sent", "delivered")
             and self._meaning(seen, n) == meaning
-            and (self._uninterrupted(seen, event) if explicit else self._quiet_between(seen, texts[0], event))
+            and self._uninterrupted(seen, event, until=None if explicit else texts[0])
         ):
             return None
         return RACE_NOTE
 
-    def _quiet_between(self, seen: dict, card: dict, event: dict) -> bool:
-        """Whether only our own bubbles and the owner's messages to us sit between two cards,
-        so the owner's view did not change from one to the other."""
-        between = getattr(self.source, "between", None)
-        earlier = [part.get("guid") or part.get("caption_guid") for part in self.outbox.parts(seen["group"])]
-        earlier = [guid for guid in earlier if guid]
-        if not callable(between) or not earlier or not card.get("guid"):
-            return False
-        rows = between(event["chat_guid"], earlier[-1], card["guid"])
-        if rows is None:
-            return False
-        inbox = self.store.data["inbox"]
-        return all(
-            self.outbox.part_for_guid(row["guid"]) is not None
-            or (not row["is_from_me"] and hashlib.sha256(str(row["guid"]).encode()).hexdigest() in inbox)
-            for row in rows
-        )
-
-    def _ours_or_owner(self, row: dict, event: dict) -> bool:
-        """A row that leaves the owner's view on our card: our own bubble, or his own message
-        (any inbound row in a one-to-one chat; in a group, one from his handle)."""
-        if self.outbox.part_for_guid(row["guid"]) is not None:
-            return True
+    def _harmless(self, row: dict, event: dict, card: dict) -> bool:
+        """A row after a card that leaves the owner's view on it: his own message (any inbound
+        row in a one-to-one chat; in a group, one from his handle), or one of our bubbles. An
+        agent's post of another update is ours but written by an agent, so one that draws
+        numbered lines of its own may be what a number answers."""
+        part = self.outbox.part_for_guid(row["guid"])
+        if part is not None:
+            post = feed.post_for_group(self.store, part["group"]) if part["group"].startswith("feed:") else None
+            if post is None:
+                return True
+            mine = feed.post_for_group(self.store, card["group"]) if card["group"].startswith("feed:") else None
+            return (mine is not None and mine["id"] == post["id"]) or not OPTION_LINE.search(
+                part.get("text") or part.get("caption") or "")
         if row["is_from_me"]:
             return False
         return not event.get("is_group") or normalized(str(row.get("sender") or "")) == normalized(
             str(event.get("sender") or ""))
 
-    def _uninterrupted(self, card: dict, event: dict) -> bool:
-        """Nothing from another author sits between a card and an explicit reply to it."""
+    def _uninterrupted(self, card: dict, event: dict, until: dict | None = None) -> bool:
+        """Nothing but the owner's messages and our own bubbles sits after a card, up to a newer
+        card (``until``, from its first bubble) or else up to the reply."""
         between = getattr(self.source, "between", None)
         guids = [part.get("guid") or part.get("caption_guid") for part in self.outbox.parts(card["group"])]
         guids = [guid for guid in guids if guid]
-        if not callable(between) or not guids or not isinstance(event.get("guid"), str):
+        end = (until.get("guid") or until.get("caption_guid")) if until is not None else event.get("guid")
+        if not callable(between) or not guids or not isinstance(end, str) or not end:
             return False
-        rows = between(event["chat_guid"], guids[-1], event["guid"])
-        return rows is not None and all(self._ours_or_owner(row, event) for row in rows)
+        rows = between(event["chat_guid"], guids[-1], end)
+        return rows is not None and all(self._harmless(row, event, card) for row in rows)
+
+    def _thread_interrupted(self, card: dict, event: dict) -> bool:
+        """Whether another author replied in the thread a swipe-reply names, so the owner may
+        have swiped on that reply rather than on our card."""
+        rows_in = getattr(self.source, "thread_rows", None)
+        if not callable(rows_in) or not isinstance(event.get("reply_to"), str):
+            return False
+        rows = rows_in(event["chat_guid"], event["reply_to"], event)
+        return rows is None or not all(self._harmless(row, event, card) for row in rows)
 
     def _readable(self, identity: str, record: dict, card: dict, n: int, quoted) -> bool:
         """False, after re-offering the card as the newest one, when RAPP <n> cannot have been
@@ -719,24 +750,37 @@ class Portal:
 
     def _post_refusal(self, identity: str, actor: dict, target: dict, refusal: tuple) -> None:
         """An answer an update could not take: the update comes again as the newest bubble,
-        with its own options, so the number sent again answers it."""
+        with its own options last and why nothing was answered right under its first line, so
+        the number sent again (or swiped on it) answers it. One copy waits to go at a time."""
         post_id, note = refusal
         item = self.store.data.get("feed", {}).get(post_id)
-        if not item or not feed.is_open(item, actor, self.clock()):
+        now = self.clock()
+        if not item or not feed.is_open(item, actor, now):
             self._notice(f"input:{identity}:post-closed", actor, target, "That update is no longer open.",
                          title="Not answered")
             return
         envelope = f"[RAPP {item['channel']}] "
         original = next((part.get("text") or part.get("caption") or "" for part in self.outbox.parts(item["group"])), "")
         body = original[len(envelope):] if original.startswith(envelope) else original
-        why = "Another message came after it" if note == FOREIGN_NOTE else "Your reply landed as it arrived"
+        head, _, rest = body.partition("\n")
+        why, advice = {
+            FOREIGN_NOTE: ("foreign", "Another message came after it"),
+            THREAD_NOTE: ("thread", "Someone else replied under it"),
+        }.get(note, ("race", "Your reply landed as it arrived"))
+        tail = "Send the number again." if why == "race" else "Swipe-reply your number on this one."
         group = f"feed:{post_id}:again:{identity[:8]}"
-        item.setdefault("aliases", []).append(group)
+        aliases = item.setdefault("aliases", [])
+        # An older copy that has not left the Mac is replaced, never queued behind this one.
+        feed.drop_queued_copies(self.store, item)
+        if group not in aliases:
+            aliases.append(group)
+        item["refusals"] = [*item.get("refusals", []), {"at": now, "why": why, "copy": token(f"{group}:0")[:6]}][-3:]
         if item["state"] == "open":
-            # The copy is answerable for as long as the post was when it first arrived.
-            item["open_until"] = max(item.get("open_until", 0), self.clock() + item["ttl"])
-        self.outbox.enqueue(group, actor, target,
-                            f"{envelope}{body}\n{itui.RULE}\n{why}, so nothing was answered. Send the number again.")
+            # The copy is answerable for a reply window of its own, up to twice the first.
+            opened = item.get("delivered_at") or item.get("created_at") or now
+            item["open_until"] = max(item.get("open_until", 0), min(now + item["ttl"], opened + 2 * item["ttl"]))
+        self.outbox.enqueue(group, actor, target, "\n".join(
+            [f"{envelope}Not answered · {head}", f"{advice}, so nothing was answered. {tail}", *([rest] if rest else [])]))
 
     def _menu_open(self, part: dict, now: float) -> bool:
         """A task's live menu stays open while it runs, an approval card while its approval is
@@ -880,7 +924,7 @@ class Portal:
                 if store.data["cursor"] is None:
                     store.data["cursor"] = store.data["floor"] = self.source.tail()
                     store.save()
-                self._quarantined = []
+                self._quarantined, self._set_aside, self._failing = [], set(), set()
                 self._step("disk", self._resources)
                 self._step("recover", self._recover_jobs)
                 self._step("receipts", lambda: self.outbox.pump(reconcile_only=True))
@@ -913,6 +957,9 @@ class Portal:
                     if record["state"] in ("decoding", "receiving", "ready", "runtime_pending")
                 ]
                 for identity, record in pending[:self.config.events_per_tick]:
+                    # One set aside this tick is looked at again next tick, not straight away.
+                    if identity in self._set_aside:
+                        continue
                     if record["state"] in ("decoding", "receiving", "ready", "runtime_pending"):
                         self._contain(identity, lambda: self._advance(identity, record), record=record)
                 # Each stage runs even when an earlier one broke: a poison job or record never
@@ -945,54 +992,87 @@ class Portal:
 
     def _step(self, name: str, action) -> None:
         """One tick stage. An unexpected error there is recorded and the tick goes on; known
-        failures (PortalError) still fail the tick as before, and so does the journal."""
+        failures (PortalError) still fail the tick as before, and so does the journal. A stage
+        that returns False did no work this tick, which says nothing about whether it works."""
         try:
-            action()
+            ran = action()
         except UNCONTAINED:
             raise
         except Exception as error:
             if strict():
                 raise
             code = f"internal:{name}:{type(error).__name__}"
+            self._failing.add(name)
             self._quarantined.append({"kind": "stage", "ref": name, "code": code})
             self._stage_failed(name, code)
             return
-        self._stage_ok(name)
+        if ran is not False:
+            self._stage_ok(name)
 
     def _stage_failed(self, name: str, code: str) -> None:
-        """A stage failing tick after tick is recorded once and told once, after DEGRADED_AFTER;
-        the ticks in between write nothing (and still touch the heartbeat, so this card, not the
-        gap card, is what says so)."""
+        """A stage failing tick after tick is recorded once and told once, after DEGRADED_AFTER.
+        While it keeps failing the journal is written at most once a minute (to keep the time of
+        the latest failure, which decides when it is back), and the heartbeat is still touched,
+        so this card, not the gap card, is what says so."""
         stages = self.store.data.setdefault("stages", {})
         now, stage = self.clock(), stages.get(name)
         if stage is None or stage["code"] != code:
             stages[name] = {"code": code, "since": stage["since"] if stage else now,
-                            "told": bool(stage and stage.get("told"))}
+                            "told": bool(stage and stage.get("told")), "last": now,
+                            **({"card": stage["card"]} if stage and stage.get("card") else {})}
             self.store.error(code, now)
-        elif not stage["told"] and now - stage["since"] >= DEGRADED_AFTER:
-            stage["told"] = True
+            return
+        changed = now - stage.get("last", stage["since"]) >= DEGRADED_AFTER
+        if changed:
+            stage["last"] = now
+        if not stage["told"] and now - stage["since"] >= DEGRADED_AFTER:
+            stage["told"], changed = True, True
             label, effect = STAGES.get(name, (name.capitalize(), "part of each tick is failing"))
-            self._system_card(f"sys:stuck:{name}:{int(stage['since'])}", itui.GLYPH["attention"], f"{label} stuck",
-                              [effect, f"failing {itui.span(now - stage['since'])} · {code.rsplit(':', 1)[-1]}"])
+            if name != "send":
+                # A stuck sender cannot send its own card; its back card says how long instead.
+                stage["card"] = f"sys:stuck:{name}:{int(stage['since'])}"
+                self._stage_card(stage["card"], itui.GLYPH["attention"], f"{label} stuck",
+                                 [effect, f"failing {itui.span(now - stage['since'])} · {code.rsplit(':', 1)[-1]}"])
+        if changed:
             self.store.save()
 
     def _stage_ok(self, name: str) -> None:
+        """A stage is back once it has not failed for STAGE_HOLD, so a flapping stage stays one
+        incident. A stuck card that never left the Mac (the stuck stage was sending) is dropped
+        instead of arriving together with its back card."""
         stages = self.store.data.get("stages")
-        stage = stages.pop(name, None) if stages else None
-        if stage is None:
+        stage = stages.get(name) if stages else None
+        if stage is None or self.clock() - stage.get("last", stage["since"]) < STAGE_HOLD:
             return
-        if stage.get("told"):
+        stages.pop(name)
+        unsent = [part for part in self.outbox.parts(stage.get("card") or "") if part["state"] == "queued"]
+        if unsent:
+            self.store.data["outbox"] = [part for part in self.store.data["outbox"] if part not in unsent]
+        elif stage.get("told"):
             label, _ = STAGES.get(name, (name.capitalize(), ""))
-            self._system_card(f"sys:back:{name}:{int(stage['since'])}", itui.GLYPH["succeeded"], f"{label} back",
-                              [f"it failed for {itui.span(self.clock() - stage['since'])}"])
+            self._stage_card(f"sys:back:{name}:{int(stage['since'])}", itui.GLYPH["succeeded"], f"{label} back",
+                             [f"it failed for {itui.span(self.clock() - stage['since'])}"])
         self.store.save()
+
+    def _stage_card(self, key: str, glyph: str, status: str, lines: list[str]) -> None:
+        """A stuck or back card never takes the tick down with it."""
+        try:
+            self._system_card(key, glyph, status, lines)
+        except UNCONTAINED:
+            raise
+        except Exception:
+            if strict():
+                raise
 
     def _contain(self, ref: str, action, *, event: dict | None = None, record: dict | None = None) -> bool:
         """Run one message's step. An unexpected error sets that message aside only: it is
         marked failed (nothing runs), the tick goes on, and the owner hears about it once.
         Known failures (PortalError) keep their existing handling; journal failures are never
         contained."""
-        self._runtime_called = False
+        # A record already past the runtime (an interrupted approve, a re-check) may have acted.
+        self._runtime_called = record is not None and (
+            record.get("state") == "runtime_pending" or bool(record.get("approval_attempt"))
+            or bool(record.get("internal_attempts")))
         try:
             action()
             return True
@@ -1011,14 +1091,21 @@ class Portal:
             key, title = f"sys:skipped:{token(ref)[:12]}", "Skipped"
             text = [f"One message was set aside after an internal error ({type(error).__name__}),",
                     "so nothing ran. Send it again if it mattered."]
+            job_id, menu = None, "notice"
+            if identity:
+                self._set_aside.add(identity)
             if record is not None and self._runtime_called:
                 # The task runtime was already called, so something may have started or stopped:
                 # look again (once) instead of claiming nothing ran.
                 attempts = record["internal_attempts"] = record.get("internal_attempts", 0) + 1
                 record.update(state="runtime_pending" if attempts < 2 else "failed", error=code)
-                key, title = f"{key}:{attempts}", "Checking"
-                text = ["Interrupted after the task runtime was called, so it may have started.",
-                        "Checking again; RAPP status shows it." if attempts < 2 else "Check it with RAPP status."]
+                job_id = self._record_job(record)
+                menu = "check" if job_id else "notice"
+                key, title = f"{key}:{attempts}", "Checking" if attempts < 2 else "May have run"
+                text = (["Interrupted after the task runtime was called, so it may have started.",
+                         "Checking again; RAPP status shows it."] if attempts < 2 else
+                        ["Interrupted twice after the task runtime was called, so it may have run.",
+                         "[1] Details shows what it did." if job_id else "Check it with RAPP status."])
             elif record is not None:
                 record.update(state="failed", error=code)
                 try:
@@ -1041,12 +1128,20 @@ class Portal:
             # The card is queued (saving the tombstone with it) before anything else: if queueing
             # fails, nothing was saved and the message is handled afresh next tick.
             if text and record is not None and record.get("actor") and record.get("target"):
-                self._notice(key, record["actor"], record["target"], "\n".join(text),
-                             title=title, glyph=itui.GLYPH["error"])
+                self._notice(key, record["actor"], record["target"], "\n".join(text), job_id,
+                             title=title, glyph=itui.GLYPH["error"], menu=menu)
             elif text:
                 self._system_card(key, itui.GLYPH["error"], title, text)
             self.store.error(code, self.clock())
             return False
+
+    def _record_job(self, record: dict) -> str | None:
+        """The job a message acted on, when it is known."""
+        pick = record.get("menu_pick")
+        parts = self.outbox.parts(pick["group"]) if pick else []
+        job_id = (record.get("job_id") or (record.get("approval_attempt") or {}).get("job_id")
+                  or (parts[0].get("job_id") if parts else None))
+        return job_id if job_id in self.store.data["jobs"] else None
 
     def _tombstone(self, event: dict, code: str) -> tuple[str | None, dict | None]:
         """The inbox record that keeps a set-aside row from being handled again."""
@@ -1143,12 +1238,12 @@ class Portal:
             answered = feed.capture(self.store, event, actor, answer, self.clock(), explicit=True,
                                     post_id=post["id"] if post else None,
                                     guard=self._post_guard(event, answer, refused, explicit=True))
-            self._remember_reply(identity, event, actor, target, "feed_reply")
             if refused:
                 self._post_refusal(identity, actor, target, refused[0])
             else:
                 self._notice(f"feed-reply:{identity}", actor, target,
                              "Got it." if answered else "There is no open update to answer right now.")
+            self._remember_reply(identity, event, actor, target, "feed_reply")
             return
         menu_pick = None
         if not match and not capture:
@@ -1173,8 +1268,8 @@ class Portal:
                 # Typed as the update landed, so meant for something else: a number gets the
                 # update again (so resending it answers); other text is left to the conversation.
                 if digit:
-                    self._remember_reply(identity, event, actor, target, "feed_race")
                     self._post_refusal(identity, actor, target, refused[0])
+                    self._remember_reply(identity, event, actor, target, "feed_race")
                 return
             if not digit:
                 return
@@ -1686,8 +1781,8 @@ class Portal:
         # Refusal follows the disk right now: freeing space works at once, without the hold.
         if self._disk_now() == "critical":
             raise PortalError("disk_low", "Disk space is critically low; free space before new tasks. Status and stop still work.")
-        if "disk" in self.store.data.get("stages", {}):
-            # Fail closed: a disk that cannot be checked is not assumed to have room.
+        if "disk" in self._failing:
+            # Fail closed: a disk that cannot be checked this tick is not assumed to have room.
             raise PortalError("disk_unknown", "The disk check is failing, so new tasks wait until it works again.")
         policy = self.runtime.profile_policy(record["submission"]["profile"])
         if "policy_snapshot" not in record:

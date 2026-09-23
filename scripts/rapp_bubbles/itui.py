@@ -66,10 +66,16 @@ FILLERS = frozenset("\u115f\u1160\u3164\uffa0")
 BIDI = frozenset("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
 
 
+# Numero signs and the ordinal marks written after N ("Nº2", "Nª2", "Nᵒ2"), which NFKC turns
+# into letters that would glue the number that follows into a word.
+NUMERO = frozenset("\u2116\u00ba\u00aa\u1d52\u2092")
+
+
 def _numeral(ch: str) -> str:
-    """A character read for the number it shows: a numeral sign stays a sign ("№2" is "#2",
-    not the word "No2" NFKC makes of it), and a number drawn as letters (Roman Ⅱ) is its digit."""
-    if ch == "\u2116":
+    """A character read for the number it shows: a numeral sign stays a sign ("№2" and "Nº2"
+    are "#2", not the word "No2" NFKC makes of them), and a number drawn as letters (Roman Ⅱ)
+    is its digit."""
+    if ch in NUMERO:
         return "#"
     value = unicodedata.numeric(ch, 0) if unicodedata.category(ch) == "Nl" else 0
     return str(int(value)) if value in range(1, 10) else ch

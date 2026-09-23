@@ -6244,3 +6244,22 @@ def test_zero_padded_and_roman_numbers_are_read_as_numbers():
         assert not itui.draws_numbers(text), text
     for text in ("Pick \u21162", "Pick 02", "Option \u2161"):
         assert itui.names_numbers(text), text
+
+
+# Round 8 review, pass 4.
+
+
+@pytest.mark.parametrize("text", ["Pick N\u00ba1 or N\u00ba2", "Pick n\u00ba1 or n\u00ba2", "Pick N\u00aa2", "Pick N\u1d522"])
+def test_an_agent_post_numbering_with_an_ordinal_numero_interrupts_rapp_n(env, text):
+    from rapp_bubbles import itui
+
+    assert itui.names_numbers(text)
+    line = timeline(env)
+    running_on_timeline(env, line)
+    env.clock.advance(10)
+    feed_post(env, text=text, options=0)
+    env.portal().tick()
+    env.clock.advance(10)
+    line.say("RAPP 2")
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel")

@@ -59,11 +59,17 @@ class SQLiteSource:
         return target if self.target_matches(target) else None
 
     def latest_prior_guid(self, event: dict) -> str | None:
+        # A tapback is not a message: reacting to a card must not break the reply after it.
+        reactions = (
+            "AND (m.associated_message_type IS NULL OR m.associated_message_type<2000 "
+            "OR m.associated_message_type>3006)"
+            if "associated_message_type" in self.columns else ""
+        )
         row = self.db.execute(
-            """SELECT m.guid FROM message m
+            f"""SELECT m.guid FROM message m
                JOIN chat_message_join j ON j.message_id=m.ROWID
                JOIN chat c ON c.ROWID=j.chat_id
-               WHERE c.guid=? AND m.ROWID<? AND m.guid!=?
+               WHERE c.guid=? AND m.ROWID<? AND m.guid!=? {reactions}
                ORDER BY m.ROWID DESC LIMIT 1""",
             (event["chat_guid"], event["id"], event["guid"]),
         ).fetchone()
@@ -79,6 +85,8 @@ class SQLiteSource:
             routes.append(f"(c.guid=? AND {sender_clause} AND c.style=?)")
             bindings.extend([route.chat, route.sender, 43 if ";+;" in route.chat and route.allow_group else 45])
         audio = "m.is_audio_message" if "is_audio_message" in self.columns else "0"
+        # iOS swipe-to-reply records the quoted message; it binds a reply to that bubble.
+        origin = "m.thread_originator_guid" if "thread_originator_guid" in self.columns else "NULL"
         reactions = (
             "AND (m.associated_message_type IS NULL OR m.associated_message_type<2000 "
             "OR m.associated_message_type>3006)"
@@ -89,7 +97,7 @@ class SQLiteSource:
             else "EXISTS(SELECT 1 FROM message_attachment_join WHERE message_id=m.ROWID)"
         )
         query = f"""
-            SELECT m.ROWID AS id,m.guid,substr(m.text,1,65537) AS text,{audio} AS audio,
+            SELECT m.ROWID AS id,m.guid,substr(m.text,1,65537) AS text,{audio} AS audio,{origin} AS reply_to,
                    m.date,m.is_from_me,m.service,h.id AS sender,{attached} AS has_attachments,
                    c.ROWID AS chat_id,c.guid AS chat_guid,c.style AS chat_style
             FROM message m JOIN chat_message_join j ON j.message_id=m.ROWID
@@ -119,6 +127,7 @@ class SQLiteSource:
                     "chat_guid": row["chat_guid"], "is_group": row["chat_style"] == 43,
                     "chat_style": row["chat_style"], "participants": participants,
                     "has_attachments": bool(row["has_attachments"]) or row["audio"] == 1,
+                    "reply_to": row["reply_to"] or None,
                     "created_at": datetime.fromtimestamp(
                         (row["date"] or 0) / 1e9 + 978307200, tz=timezone.utc
                     ).isoformat(),

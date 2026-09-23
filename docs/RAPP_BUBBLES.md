@@ -36,8 +36,8 @@ Only `RAPP …` / `RAPP: …` addresses this portal. Case does not matter.
 | `RAPP attach` | Open a bounded file-only intake window for this sender/thread. |
 | A photo/video/audio/file after `RAPP attach` | Stage it and acknowledge a useful next step; never execute file contents. |
 | `RAPP <task>` with files attached | Wait for all observed files, then prepare the task with their references. |
-| `1` / `2` | Approve / cancel the **single** unexpired pending task only with confirmed, exact latest approval-card evidence. |
-| `RAPP 1` / `RAPP 2` | Explicit portal approval / cancellation after interleaved conversation, still requiring one unexpired task and a confirmed card. |
+| `1` / `2` | Approve / cancel exactly the task of the confirmed, still-live approval card the number sits right under (or swipe-replies to). |
+| `RAPP 1` / `RAPP 2` | Approve / cancel only when the newest card sent before you typed is that task's live approval card; otherwise they pick the newest card's options. |
 | `RAPP approve <job-id>` | Approve that exact locally pending job using its stored, finite token. |
 | `RAPP status [job-id]` | Worker state and honest native output states. |
 | `RAPP list` | Bounded list of jobs scoped by the local adapter to this actor. |
@@ -49,19 +49,20 @@ Only `RAPP …` / `RAPP: …` addresses this portal. Case does not matter.
 | `RAPP clear files` | Clear the pending file selection and close its intake window. |
 | A reply directly under an operator update with options | Answers that update (numbers pick its options); see the operator feed. |
 | `RAPP reply <text>` | Answer the latest open operator update even after other messages. |
-| A digit right under a card, or `RAPP <n>` | Pick that card's numbered option (an open approval card keeps 1/2). |
+| A digit right under (or swiped onto) a card, or `RAPP <n>` for the newest card | Pick that card's numbered option; on a live approval card, 1/2 approve/cancel that task. |
 | `RAPP quiet [job]` | Stop a running task's automatic ETA updates; its result still arrives. |
 | `RAPP health` | iMessage verdict, free disk, journal size, and outbox states as one card. |
 | `RAPP help` | Explain routing and these commands. |
 
-When several tasks await approval, bare numbers cannot select one. Use an exact
-job id. Bare numbers also require the immediately preceding message in the
-chat to be that confirmed approval card: another AI's prompt, a different
-conversation turn, or an intervening status reply requires explicit
-`RAPP 1` / `RAPP 2`, or `RAPP approve <job-id>` instead. A bare number directly
-under an open operator update answers that update instead. The latest-card lookup
-checks the preceding row in the exact chat, including foreign outbound rows
-that are not eligible user commands. Attachment-only messages outside an armed intake window belong to the
+A number answers one card, never "the only pending task". A bare `1`/`2` approves or
+cancels the task of the approval card it answers: the message it swipe-replies to, or
+else the row directly above it, which must be that confirmed approval card, so two
+waiting tasks are never confused. Another AI's prompt, a different conversation turn,
+or an intervening status reply requires `RAPP 1` / `RAPP 2` (newest card only) or
+`RAPP approve <job-id>` instead. A bare number directly under an open operator update
+answers that update instead. The latest-card lookup checks the preceding row in the
+exact chat, including foreign outbound rows that are not eligible user commands, and
+skips tapback reactions, which are not messages. Attachment-only messages outside an armed intake window belong to the
 rest of the conversation and are not opened, acknowledged, or executed by this
 portal. Task ingestion freezes the preceding upload event identities, rather
 than reading a mutable “most recently downloaded files” list later. Inputs
@@ -486,14 +487,26 @@ next ~5m · ref 3fa9c1
   and the live status. Structural lines stay within 28 characters and nothing relies on
   right-aligned borders, because iOS Messages uses a proportional font.
 - **Every card ends with numbered options, under one digit rule.** A bare reply belongs
-  to rapp-bubbles only when the message directly above it is one of ours (GUID
-  adjacency). Anything else, even a `1` or `2` while an approval waits, is left alone
-  with no reply. A task's live menu stays open while the task runs; other menus stay
-  open for an hour after they were sent. A digit under one of our cards that no longer
-  offers it gets one live card (or "Card closed") and never runs a stale option. After
-  other messages intervene, `RAPP <n>` answers the newest open card sent before you
-  typed, operator posts included, and never falls back to an older card. While an
-  approval exists, `RAPP 1`/`RAPP 2` still go only through every approval check.
+  to rapp-bubbles only when it answers one of our messages: the bubble it swipe-replies
+  to (iOS inline reply), or else the message directly above it (GUID adjacency).
+  Tapbacks in between do not count as messages. A swipe-reply to another AI's message
+  is left alone even when our card sits right above it, and so is anything else, even
+  a `1` or `2` while an approval waits. A task's live menu stays open while the task
+  runs, an approval card only while its approval is live, and other menus for an hour
+  after they were sent. A digit under one of our cards that no longer offers it gets
+  one live card (`Expired` for an approval that lapsed, else "Card closed") and never
+  runs a stale option.
+- **Race guard.** Approve, Cancel, or Stop typed within 3 seconds after the card it
+  lands under reached the phone was probably meant for the card before, so nothing
+  runs: a bare digit gets that card again as a fresh bubble (the same approval, or the
+  live task card) saying `nothing ran`, and `RAPP <n>` answers `card_changed`.
+- **`RAPP <n>`** answers the newest card sent before you typed, operator posts
+  included, and never falls back to an older card. A newest card whose delivery is
+  unknown counts as closed ("check your phone"). `RAPP 1`/`RAPP 2` approve or cancel
+  only when that newest card is the task's live approval card (`approval_expired`
+  after it lapses), and `RAPP <n>` never picks Stop while an approval is waiting or
+  just expired, since `RAPP 2` may have meant Cancel. `RAPP 1 …` with extra words runs
+  nothing.
   Options only map to existing commands (`status`, `stop`, `result`, `list`, `help`,
   `retry`) plus `RAPP quiet [job]`, so a number can never grant anything new. A handled
   reply is recorded before dispatch, so the reader's late-row window never repeats it.
@@ -503,7 +516,9 @@ next ~5m · ref 3fa9c1
 - **Running tasks keep sending ETAs** until they end: a card when the task starts, then
   heartbeats about 2, 5, 10, 20, 35, and 60 minutes in and every 30 minutes after, plus
   milestones (a new state, forward worker progress by a quarter, running past its usual
-  time, stalling or resuming), at least 90 seconds apart and at most 10 per task.
+  time, stalling or resuming), at least 90 seconds apart and at most 10 per task. A
+  milestone counts against what the owner was last shown, so one held back by that
+  spacing or by a pause still goes out on the next poll.
   Heartbeats follow time slots, so a gap produces one catch-up card instead of a burst,
   and milestones never spend the last three updates. Updates pause, spending nothing,
   while iMessage is verified down or the disk is critical. The footer always states what
@@ -517,8 +532,10 @@ next ~5m · ref 3fa9c1
   profile (once there are 3) gives `~Xm left` and a time-based bar labelled `est` that
   never fills before the task ends; otherwise the card says `Xm in · no ETA yet`. A task
   past its usual time says `long · Xm`. A worker that went inactive, or has produced no
-  output for 10 minutes (or half its usual run), is shown as `stalled · Xm` with no ETA. Each finished run records its duration and the
-  error of its first estimate.
+  output for 10 minutes (or half its usual run), is shown as `stalled · Xm` with no ETA.
+  Only a running task can stall: time spent waiting for approval or queued is not
+  worker silence, and liveness starts fresh at approval. Each finished run records its
+  duration and the error of its first estimate.
 
 ## Operator feed, Messages health, and the doctor
 
@@ -565,10 +582,17 @@ rapp-bubbles tells the owner about its own trouble with one `[RAPP sys]` card pe
 event, each ending with `[1] Health` and `[2] Recent jobs`:
 
 - **Disk pressure**: every tick checks free space on the state volume. Below 10 GB (or
-  5%) one `Disk low` card is sent; below 2 GB (or 2%) a `Disk critical` card is sent,
-  new task preparation is refused with `disk_low` (status, stop, and results keep
-  working), and automatic ETA updates pause. Each level alerts once per six hours.
-  The overnight disk-full that silently failed 343 ticks now names itself.
+  5%) is `Disk low`; below 2 GB (or 2%) is `Disk critical`: automatic ETA updates pause
+  and new task preparation is refused with `disk_low` (status, stop, and results keep
+  working). Refusal follows the disk right now, so freeing space works at once. Cards
+  use hysteresis so a disk hovering at a line cannot flap: a worse level alerts at
+  once; a better one takes effect only after it has held for 10 minutes with 2 GB and
+  1 point of headroom above the line (12 GB and 6% to leave low; 4 GB and 3% to leave
+  critical). An episode sends each level's card at most once per six hours, and if it
+  alerted, it ends with one resolve card (`✓ Disk ok`, saying `tasks resume` after a
+  critical spell, or a `Disk low` card saying `tasks resume` when critical eases to low). Idle ticks
+  in any level write nothing. The overnight disk-full that silently failed 343 ticks
+  now names itself.
 - **iMessage back**: when the health gate has held sends for five minutes or more and
   iMessage reconnects, one card reports how long it was down, the verdict, and how many
   queued parts are now sending. It goes out first: sending waits one tick for it, and

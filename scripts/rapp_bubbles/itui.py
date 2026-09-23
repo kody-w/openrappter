@@ -171,6 +171,11 @@ def estimate(elapsed: float, progress: dict | None, history: list[float], *,
     }
 
 
+def quarter(progress: dict | None) -> int:
+    """How many quarters of a worker's declared steps are done; only a new quarter is news."""
+    return int(4 * progress["done"] / progress["total"]) if progress and progress.get("total") else 0
+
+
 def due(stream: dict, elapsed: float, now: float, *, milestone: bool = False) -> bool:
     """Whether an automatic update should go out now.
 

@@ -156,6 +156,7 @@ class Runtime:
         self.requests = {}
         self.outputs = {}
         self.errors = []
+        self.approval_ttl = 300
 
     def profile_policy(self, _profile):
         return {"available_tools": ["view", "glob", "rg"], "add_dirs": []}
@@ -176,7 +177,7 @@ class Runtime:
             })
             return {
                 "ok": True, "job": dict(job),
-                "approval": {"token": "finite-" + job_id, "expires_at": self.clock() + 300},
+                "approval": {"token": "finite-" + job_id, "expires_at": self.clock() + self.approval_ttl},
             }
         if operation in ("list", "recover"):
             return {"ok": True, "jobs": list(self.jobs.values())}
@@ -2905,14 +2906,20 @@ def test_a_stop_digit_that_lands_with_a_new_card_runs_nothing(env):
     assert card.startswith("[RAPP 0001] ● ") and "nothing ran" in card and "[2] Stop" in card
 
 
-def test_rapp_n_typed_as_a_new_card_lands_runs_nothing(env):
+def test_rapp_n_typed_as_a_new_card_lands_reoffers_it_and_runs_nothing(env):
     approved_running_job(env)
     running = running_part(env)
     env.clock.advance(10)
     env.source.events.append(message(3, "RAPP 2", created_at=at(running["submitted_at"] + 1)))
     env.portal().tick()
     assert not [call for call in env.runtime.calls if call["op"] == "cancel"]
-    assert any("card_changed" in call["text"] for call in env.native.calls)
+    offer = env.native.calls[-1]["text"]
+    assert offer.startswith("[RAPP 0001] ● ") and "nothing ran" in offer and "[2] Stop" in offer
+    # The re-offered card is now the newest, so sending it again does what was meant.
+    env.clock.advance(10)
+    env.source.events.append(message(4, "RAPP 2", created_at=at(env.clock.now)))
+    env.portal().tick()
+    assert [call["job_id"] for call in explicit_ops(env, "cancel")] == [JOB1]
 
 
 def test_rapp_1_approves_only_when_the_newest_card_is_that_approval(env):
@@ -2957,6 +2964,8 @@ def test_rapp_number_with_extra_words_approves_nothing(env):
     env.source.events.append(message(2, "RAPP 1 please"))
     env.portal().tick()
     assert not [call for call in env.runtime.calls if call["op"] == "approve"]
+    hint = env.native.calls[-1]["text"]
+    assert "RAPP approve <ref>" in hint and "waiting: 0001" in hint
 
 
 def test_an_unconfirmed_newest_card_blocks_rapp_n_without_falling_back(env):
@@ -2977,9 +2986,11 @@ def test_an_unconfirmed_newest_card_blocks_rapp_n_without_falling_back(env):
 
 
 def test_the_first_card_after_a_long_wait_for_approval_is_not_stalled(env):
+    # Longer than the stall line, so both output silence and worker inactivity would show.
+    env.runtime.approval_ttl = 3600
     env.source.events.append(message())
     env.portal().tick()
-    for _ in range(4):
+    for _ in range(11):
         env.clock.advance(60)
         env.portal().tick()
     env.source.events.append(message(2, "1"))
@@ -3085,3 +3096,161 @@ def test_leaving_critical_for_low_sends_one_card_and_no_reminder_after_it(env, m
         env.portal().tick()
     cards = disk_cards(env)
     assert len(cards) == 2 and cards[1].startswith("[RAPP sys] ! Disk low") and "tasks resume" in cards[1]
+
+
+def test_a_digit_typed_before_its_card_was_sent_runs_nothing(env):
+    approved_running_job(env)
+    running = running_part(env)
+    env.clock.advance(10)
+    # Typed before the card existed, though it reached chat.db after it: meant for something else.
+    env.source.events.append(message(3, "2", created_at=at(running["submitted_at"] - 30)))
+    env.portal().tick()
+    env.source.events.append(message(4, "RAPP 2", created_at=at(running["submitted_at"] - 1)))
+    env.portal().tick()
+    assert not [call for call in env.runtime.calls if call["op"] == "cancel"]
+    assert state(env)["jobs"][JOB1]["state"] == "running"
+
+
+def test_disk_hovering_at_the_exit_line_writes_once_then_resolves_after_the_hold(env, monkeypatch):
+    owner_target(env)
+    free = {"gib": 5}
+    disk(monkeypatch, free)
+    for _ in range(4):
+        env.portal().tick()
+        env.clock.advance(10)
+    assert len(disk_cards(env)) == 1
+    journal = Path(env.raw["state_dir"]) / "transport.json"
+    free["gib"] = 12.1
+    env.portal().tick()
+    written = journal.read_bytes()
+    for index in range(40):
+        free["gib"] = 11.9 if index % 2 == 0 else 12.1
+        env.clock.advance(10)
+        env.portal().tick()
+    assert journal.read_bytes() == written and len(disk_cards(env)) == 1
+    for index in range(30):
+        free["gib"] = 11.9 if index % 2 == 0 else 12.1
+        env.clock.advance(10)
+        env.portal().tick()
+    cards = disk_cards(env)
+    assert len(cards) == 2 and cards[1].startswith("[RAPP sys] ✓ Disk ok")
+
+
+def test_tasks_and_updates_resume_as_soon_as_the_disk_leaves_critical(env, monkeypatch):
+    owner_target(env)
+    free = {"gib": 1}
+    disk(monkeypatch, free)
+    env.portal().tick()
+    free["gib"] = 3  # out of critical, but not yet clear of its line: the card still waits
+    env.clock.advance(10)
+    card = approved_running_job(env)
+    assert "updates paused" not in card
+    for _ in range(4):
+        env.clock.advance(60)
+        env.portal().tick()
+    assert progress_parts(env)
+    assert [text.splitlines()[0] for text in disk_cards(env)] == ["[RAPP sys] ! Disk critical"]
+    env.source.events.append(message(3, "RAPP health"))
+    env.portal().tick()
+    assert "3.0 GB free · low · easing from critical" in env.native.calls[-1]["text"]
+
+
+def test_a_disk_that_worsens_again_after_its_resolve_card_alerts_at_once_and_holds_longer(env, monkeypatch):
+    owner_target(env)
+    free = {"gib": 1}
+    disk(monkeypatch, free)
+    env.portal().tick()
+    free["gib"] = 6
+    for _ in range(11):
+        env.clock.advance(60)
+        env.portal().tick()
+    headers = lambda: [text.splitlines()[0] for text in disk_cards(env)]  # noqa: E731
+    assert headers() == ["[RAPP sys] ! Disk critical", "[RAPP sys] ! Disk low"]
+    free["gib"] = 1
+    env.clock.advance(60)
+    env.portal().tick()
+    # Critical was announced minutes ago, but the owner was since told tasks resume.
+    assert headers()[-1] == "[RAPP sys] ! Disk critical" and len(headers()) == 3
+    free["gib"] = 6
+    for _ in range(15):
+        env.clock.advance(60)
+        env.portal().tick()
+    assert len(headers()) == 3  # after a flap the hold doubles
+    for _ in range(10):
+        env.clock.advance(60)
+        env.portal().tick()
+    assert len(headers()) == 4 and headers()[-1] == "[RAPP sys] ! Disk low"
+
+
+def test_a_resolve_card_after_a_long_quiet_spell_is_not_followed_by_a_reminder(env, monkeypatch):
+    owner_target(env)
+    free = {"gib": 1}
+    disk(monkeypatch, free)
+    env.portal().tick()
+    free["gib"] = 3  # tasks run again; no "tasks paused" reminder may claim otherwise
+    for _ in range(7 * 15):
+        env.clock.advance(240)
+        env.portal().tick()
+    assert len(disk_cards(env)) == 1
+    free["gib"] = 6
+    for _ in range(20):
+        env.clock.advance(60)
+        env.portal().tick()
+    cards = disk_cards(env)
+    assert len(cards) == 2 and cards[1].startswith("[RAPP sys] ! Disk low") and "tasks resume" in cards[1]
+
+
+def test_a_changed_group_never_gets_an_old_tasks_approval_card_again(env):
+    group = "iMessage;+;synthetic-group"
+    env.raw["authorized"] = [{"sender": SENDER, "chat": group, "allow_group": True}]
+    env.source.targets[1] = group
+    members = {"chat_guid": group, "is_group": True, "chat_style": 43, "participants": [SENDER]}
+    env.source.events.append(message(1, "RAPP inspect these files", **members))
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    assert env.native.calls[-1]["text"].startswith("[RAPP 0001] ? Approve task?")
+    before = len(env.native.calls)
+    grown = {**members, "participants": [SENDER, "new-member@example.invalid"]}
+    env.source.events.append(message(2, "3", **grown))
+    env.portal().tick()
+    sent = [call["text"] for call in env.native.calls[before:]]
+    assert sent and "This group changed" in sent[0]
+    assert not any("Approve task?" in text or "inspect these files" in text for text in sent)
+
+
+def test_an_unconfirmed_attachment_does_not_close_its_delivered_result_card(env):
+    approved_running_job(env)
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    for _ in range(2):
+        env.clock.advance(10)
+        env.portal().tick()
+    with Store(env.config().state_dir) as store:
+        final = next(part for part in store.data["outbox"] if part["group"] == f"job:{JOB1}:final")
+        assert final["state"] == "delivered"
+        bubble = copy.deepcopy(final)
+        bubble.update(id="final-file", index=1, state="unknown", file={"path": "/synthetic/rapp-final-file-report.txt"},
+                      caption="[RAPP artifact final-file]\nreport.txt", submitted_at=final["submitted_at"] + 1)
+        for field in ("text", "guid"):
+            bubble.pop(field, None)
+        store.data["outbox"].append(bubble)
+        store.save()
+    env.clock.advance(10)
+    env.source.events.append(message(3, "RAPP 1"))
+    env.portal().tick()
+    assert not any("may not have reached your phone" in call["text"] for call in env.native.calls)
+    assert any(part["group"].startswith(f"job:{JOB1}:requested:") for part in state(env)["outbox"])
+
+
+def test_a_swipe_reply_to_any_bubble_of_a_long_approval_card_approves_it(env):
+    tools = [f"synthetic-tool-{index:03d}" for index in range(160)]
+    env.runtime.profile_policy = lambda _profile: {"available_tools": tools, "add_dirs": []}
+    env.source.events.append(message())
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    pieces = [part for part in state(env)["outbox"] if part["group"] == f"job:{JOB1}:approval"]
+    assert len(pieces) == 2 and all(part["state"] in ("sent", "delivered") for part in pieces)
+    env.source.events.append(message(2, "1", reply_to=pieces[0]["guid"]))
+    env.portal().tick()
+    assert [call["job_id"] for call in env.runtime.calls if call["op"] == "approve"] == [JOB1]

@@ -28,7 +28,9 @@ DISK_MARGIN = (2, 1)  # a level is left only with this much headroom above its e
 DISK_HOLD = 600
 DISK_REALERT = 6 * 3600
 DISK_RANK = {"ok": 0, "low": 1, "critical": 2}
+DISK_FLAPS = 6  # the improvement hold doubles per re-worsening within DISK_REALERT, up to 6 h
 RACE_SECONDS = 3
+APPLE_EPOCH = 978307200
 RACE_NOTE = "Your reply landed as this card arrived, so nothing ran."
 JOB_ID = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{32}")
 TERMINAL = {"succeeded", "completed", "failed", "cancelled", "canceled", "interrupted", "expired"}
@@ -324,8 +326,14 @@ class Portal:
         self.outbox.enqueue(key, *route, text, menu=commands, menu_kind="system")
 
     def _resources(self) -> None:
-        """Free-space preflight with hysteresis: a worse level alerts at once, a better one only
-        after it has held with headroom, and one episode sends each card at most once per 6 h."""
+        """Free-space preflight with hysteresis.
+
+        A worse level alerts at once. A better one takes effect only after it has held with
+        headroom for DISK_HOLD, doubled each time the disk worsened again within 6 h of a
+        resolve card, so a flapping disk sends fewer and fewer cards. The same level is
+        re-announced at most every 6 h, and every alert ends with one resolve card. Refusing
+        tasks and pausing updates follow the disk right now; only the cards wait.
+        """
         usage = shutil.disk_usage(self.config.state_dir)
         free_gib, percent = usage.free / 2**30, 100 * usage.free / max(usage.total, 1)
         info = self.store.data.setdefault("resources", {})
@@ -334,54 +342,60 @@ class Portal:
         info["free_gib"], info["free_pct"] = round(free_gib, 1), round(percent, 1)
         raw, settled = disk_level(free_gib, percent), disk_level(free_gib, percent, DISK_MARGIN)
         info["now"] = raw
-        current = info.get("level", "ok")
-        if "episode" not in info:
-            info["episode"] = {current: info.pop("alerted_at", now)} if current != "ok" else {}
-            info["told"] = current
-        remind = current != "ok" and now - info["episode"].get(current, now) >= DISK_REALERT
-        if DISK_RANK[raw] > DISK_RANK[current]:
+        level = info.get("level", "ok")
+        if level != "ok" and "level_at" not in info:
+            info["level_at"] = info.pop("alerted_at", now)
+        if DISK_RANK[raw] > DISK_RANK[level]:
+            flapped = now - info.get("resolved_at", now - DISK_REALERT) < DISK_REALERT
+            info["flaps"] = min(info.get("flaps", 0) + 1, DISK_FLAPS) if flapped else 0
             info.pop("better_since", None)
             self._disk_card(info, raw, free_gib, percent, now)
-        elif DISK_RANK[settled] < DISK_RANK[current]:
+        elif DISK_RANK[settled] < DISK_RANK[level]:
+            # Dipping back between the two lines keeps the hold running, so a disk hovering at
+            # the exit line writes the start of the hold and nothing more.
+            started = "better_since" not in info
             held = now - info.setdefault("better_since", now)
-            if 0 < held < DISK_HOLD:
+            if not started and held < min(DISK_HOLD << info.get("flaps", 0), DISK_REALERT):
                 return
-            if held >= DISK_HOLD:
+            if not started:
                 del info["better_since"]
+                info["resolved_at"] = now
                 self._disk_card(info, settled, free_gib, percent, now)
-        elif remind:
-            info.pop("better_since", None)
-            self._disk_card(info, current, free_gib, percent, now)
-        elif info.pop("better_since", None) is None:
+        elif DISK_RANK[raw] == DISK_RANK[level] and "better_since" in info:
+            del info["better_since"]  # back below the entry line: the hold starts over
+        elif level != "ok" and DISK_RANK[raw] == DISK_RANK[level] and now - info["level_at"] >= DISK_REALERT:
+            self._disk_card(info, level, free_gib, percent, now)
+        else:
             return
         self.store.save()
 
     def _disk_card(self, info: dict, level: str, free_gib: float, percent: float, now: float) -> None:
-        """Move to a disk level and tell the owner only what changes what they believe."""
-        told, episode = info.get("told", "ok"), info["episode"]
+        """Move to a disk level and tell the owner: an alert when it is worse (or still bad
+        after 6 h), one resolve card when it is better."""
+        before = info.get("level", "ok")
         info["level"] = level
+        if level == "ok":
+            info.pop("level_at", None)
+        else:
+            info["level_at"] = now
         space = f"{free_gib:.1f} GB free ({percent:.0f}%)"
-        if DISK_RANK[level] >= DISK_RANK[told] and level != "ok":
-            if now - episode.get(level, -DISK_REALERT) >= DISK_REALERT:
-                episode[level] = now
-                info["told"] = level
-                self._system_card(
-                    f"sys:disk:{level}:{int(now)}", itui.GLYPH["attention"], f"Disk {level}",
-                    [space, "new tasks paused until space frees" if level == "critical" else "free space soon"],
-                )
-        elif DISK_RANK[level] < DISK_RANK[told]:
-            # A resolve card, only for an episode that alerted: the owner believes it is worse.
-            # It is also this level's card for the episode, so no reminder follows it at once.
-            info["told"] = level
-            episode[level] = now
-            resumed = "tasks resume" if told == "critical" else "space recovered"
+        if DISK_RANK[level] < DISK_RANK[before]:
+            resumed = "tasks resume" if before == "critical" else "space recovered"
             self._system_card(
                 f"sys:disk:{level}:resolved:{int(now)}",
                 itui.GLYPH["succeeded"] if level == "ok" else itui.GLYPH["attention"], f"Disk {level}",
                 [space, resumed + ("; free space soon" if level == "low" else "")],
             )
-        if level == "ok":
-            info["episode"] = {}
+        else:
+            self._system_card(
+                f"sys:disk:{level}:{int(now)}", itui.GLYPH["attention"], f"Disk {level}",
+                [space, "new tasks paused until space frees" if level == "critical" else "free space soon"],
+            )
+
+    def _disk_now(self) -> str:
+        """The disk level right now, which (not the last card) decides refusal and pausing."""
+        resources = self.store.data.get("resources", {})
+        return resources.get("now") or resources.get("level", "ok")
 
     def _outage_report(self) -> None:
         outage = self.store.data.get("imessage_health", {}).get("outage")
@@ -464,8 +478,9 @@ class Portal:
             journal = 0
         lines = [
             f"iMessage: {health.get('code', 'not checked')}",
-            f"Disk: {resources.get('free_gib', '?')} GB free · {resources.get('level', 'ok')}"
-            + (" · improving" if resources.get("better_since") else ""),
+            f"Disk: {resources.get('free_gib', '?')} GB free · {self._disk_now()}"
+            + (f" · easing from {resources['level']}"
+               if DISK_RANK.get(self._disk_now(), 0) < DISK_RANK.get(resources.get("level", "ok"), 0) else ""),
             f"Journal: {journal // 1024} KB",
             "Outbox: " + (", ".join(f"{count} {state}" for state, count in sorted(states.items())) or "empty"),
         ]
@@ -482,22 +497,33 @@ class Portal:
         return {key: value for key, value in (conversation or {}).get("approvals", {}).items()
                 if value["expires_at"] > now}
 
+    def _part_conversation(self, part: dict) -> dict | None:
+        """The conversation a sent card belongs to, looked up without creating state."""
+        return self.store.data["conversations"].get(self._conversation_key(part["actor"], part["target"]))
+
     def _card_approval(self, part: dict) -> dict | None:
-        """The live approval an approval card offers, looked up without creating state."""
+        """The live approval an approval card offers."""
         if part.get("menu_kind") != "approval":
             return None
-        conversation = self.store.data["conversations"].get(self._conversation_key(part["actor"], part["target"]))
-        return self._live_approvals(conversation).get(part.get("job_id") or "")
+        return self._live_approvals(self._part_conversation(part)).get(part.get("job_id") or "")
 
-    def _racing(self, part: dict, event: dict, chosen: str) -> bool:
-        """A mutating pick under a card that landed moments before the digit was meant for another."""
-        typed, sent = timestamp(event.get("created_at")), part.get("submitted_at")
+    def _racing(self, card: dict, event: dict, chosen: str) -> bool:
+        """A mutating pick typed before its card was sent, or within moments after, was meant for
+        something else: the owner cannot have read the card yet."""
+        typed, sent = timestamp(event.get("created_at")), card.get("submitted_at")
+        # A row without a chat.db date reads as the Apple epoch: its typing time is unknown.
+        known = typed > APPLE_EPOCH + 86400
         mutating = chosen in ("1", "2") or chosen.startswith("stop ")
-        return bool(mutating and typed and sent and 0 <= typed - sent < RACE_SECONDS)
+        return bool(mutating and known and sent and typed - sent < RACE_SECONDS)
 
-    def _settled(self, card: dict, record: dict, chosen: str) -> None:
-        if self._racing(card, record["event"], chosen):
-            raise PortalError("card_changed", f"{RACE_NOTE} Send it again if you meant the newest card.")
+    def _settled(self, identity: str, record: dict, card: dict, chosen: str) -> bool:
+        """False, after re-offering the card as the newest one, when RAPP <n> raced its card."""
+        if not self._racing(card, record["event"], chosen):
+            return True
+        parts = self.outbox.parts(card["group"])
+        part = next((item for item in parts if "text" in item), parts[0])
+        self._reoffer(identity, record["actor"], record["target"], part, note=RACE_NOTE)
+        return False
 
     def _menu_open(self, part: dict, now: float) -> bool:
         """A task's live menu stays open while it runs, an approval card while its approval is
@@ -522,9 +548,10 @@ class Portal:
         for part in self.store.data["outbox"]:
             # An attempted card whose receipt is unknown may be on the phone, so it still counts
             # as the newest card (a closed one) and blocks any fallback.
+            # Attachment bubbles carry their card's menu for bare replies, but the card is its text.
             if (
                 part["actor"] != actor or part["state"] not in ("submitted", "sent", "delivered", "unknown")
-                or part.get("send_after_rowid", -1) >= before_rowid
+                or part.get("send_after_rowid", -1) >= before_rowid or "file" in part
             ):
                 continue
             post = feed.post_for_group(self.store, part["group"]) if part["group"].startswith("feed:") else None
@@ -548,10 +575,18 @@ class Portal:
         """A digit under one of our cards that no longer offers it (or that it may not have been
         meant for): run nothing and show what is live instead."""
         self._remember_reply(identity, event, actor, target, "closed_menu")
+        self._reoffer(identity, actor, target, part, note=RACE_NOTE if racing else None)
+
+    def _reoffer(self, identity: str, actor: dict, target: dict, part: dict, *, note: str | None = None) -> None:
+        """Show what a card's options lead to now, instead of running one."""
         job = self.store.data["jobs"].get(part.get("job_id") or "")
         approval = self._card_approval(part)
-        note = RACE_NOTE if racing else None
-        if approval:
+        if approval and part["target"].get("roster_hash") != target.get("roster_hash"):
+            # Never echo a task to a group whose members changed since it was prepared.
+            self._notice(f"input:{identity}:closed", actor, target,
+                         "This group changed since that task was prepared, so its card cannot be "
+                         "answered here.\nPrepare the task again.", title="Card closed")
+        elif approval:
             # A fresh approval card for the same job, token, and expiry, so the next digit sits
             # right under a card the owner has seen.
             group = f"job:{part['job_id']}:approval:{identity[:8]}"
@@ -562,7 +597,8 @@ class Portal:
                      f"Expires in {itui.span(approval['expires_at'] - self.clock())}"],
                 body=[f"› {(job or {}).get('label') or part['job_id']}",
                       f"Profile: {(job or {}).get('profile') or self.config.profile}",
-                      "Details are on the first approval card."],
+                      "Details are on the first approval card.",
+                      f"Or send RAPP approve {itui.short(part['job_id'])}."],
                 options=options, footer=f"ref {token(f'{group}:0')[:6]}",
             )
             self.outbox.enqueue(group, actor, target, text, job_id=part["job_id"], menu=commands,
@@ -570,7 +606,7 @@ class Portal:
         elif job and job["state"] in ("queued", "running", "cancelling") and job.get("started_at"):
             self._job_card(f"input:{identity}:closed", part["job_id"], job, note=note)
         elif part.get("menu_kind") == "approval" and part.get("job_id") in (
-            self.store.data["conversations"].get(self._conversation_key(actor, target)) or {}
+            self._part_conversation(part) or {}
         ).get("approvals", {}):
             # Still on record but past its expiry: it lapsed unanswered (answered ones are removed).
             self._notice(f"input:{identity}:closed", actor, target,
@@ -1051,8 +1087,8 @@ class Portal:
             # is a live approval card, and then only that card's job.
             card = self._latest_card(actor, record["event"]["id"])
             if card and card["approval"] and command in ("1", "2"):
-                self._settled(card, record, command)
-                self._approve_or_cancel(identity, record, conversation, command, "", card=card["group"])
+                if self._settled(identity, record, card, command):
+                    self._approve_or_cancel(identity, record, conversation, command, "", card=card["group"])
                 return
             if card and not card["confirmed"]:
                 raise PortalError("no_open_menu", "The newest card may not have reached your phone, so its "
@@ -1074,7 +1110,8 @@ class Portal:
                 raise PortalError("approval_pending", "A task approval is waiting or just expired, so RAPP "
                                   f"{command} stops nothing. Use RAPP stop {itui.short(chosen.split()[-1])} "
                                   "to stop that task.")
-            self._settled(card, record, chosen)
+            if not self._settled(identity, record, card, chosen):
+                return
             record["body"] = chosen
             self._command(identity, record)
             return
@@ -1083,7 +1120,13 @@ class Portal:
             # newest card. There is no thread-wide "the only pending task" guess.
             pick = record.get("menu_pick")
             if record.get("explicit_address") or not pick:
-                raise PortalError("no_open_menu", "Send RAPP 1 or RAPP 2 by itself to answer the newest card.")
+                waiting = ", ".join(itui.short(job) for job in self._live_approvals(conversation))
+                raise PortalError(
+                    "rapp_number_alone",
+                    f"RAPP {command} takes no other words, so nothing ran. Swipe-reply {command} on the "
+                    f"approval card, or send RAPP {'approve' if command == '1' else 'cancel'} <ref>"
+                    + (f" (waiting: {waiting})" if waiting else "") + ".",
+                )
             self._approve_or_cancel(identity, record, conversation, command, "", card=pick["group"])
             return
         if command == "approve":
@@ -1229,7 +1272,7 @@ class Portal:
             }
             self.store.save()
         # Refusal follows the disk right now: freeing space works at once, without the hold.
-        if self.store.data.get("resources", {}).get("now") == "critical":
+        if self._disk_now() == "critical":
             raise PortalError("disk_low", "Disk space is critically low; free space before new tasks. Status and stop still work.")
         policy = self.runtime.profile_policy(record["submission"]["profile"])
         if "policy_snapshot" not in record:
@@ -1307,16 +1350,24 @@ class Portal:
             if not approval or notices[0]["actor"] != record["actor"]:
                 raise PortalError("approval_expired",
                                   "That approval card is no longer live, so this reply did nothing. Use RAPP status.")
+            explicit = f"RAPP {'approve' if command == '1' else 'cancel'} {itui.short(job_id)}"
             if (
                 not notices or not notices[-1].get("guid")
                 or not all(p["state"] in ("sent", "delivered") for p in notices)
             ):
-                raise PortalError("approval_notice_unconfirmed", "Use RAPP approve <job-id> while the approval notice receipt is unconfirmed.")
-            answered = record["event"].get("reply_to") or self.source.latest_prior_guid(record["event"])
-            if not record.get("explicit_address") and answered != notices[-1].get("guid"):
+                raise PortalError("approval_notice_unconfirmed", "The approval card's delivery is not "
+                                  f"confirmed yet, so nothing ran. Check your phone, then send {explicit}.")
+            # A swipe-reply may quote any bubble of the card; adjacency needs its last bubble,
+            # the one with the options, directly above.
+            quoted = record["event"].get("reply_to")
+            if not record.get("explicit_address") and not (
+                quoted in {part.get("guid") for part in notices} if quoted
+                else self.source.latest_prior_guid(record["event"]) == notices[-1].get("guid")
+            ):
                 raise PortalError(
                     "approval_context_changed",
-                    "Another message intervened after the approval card. Use RAPP 1 / RAPP 2 or RAPP approve <job-id> explicitly.",
+                    "Another message came between the approval card and your reply, so nothing ran. "
+                    f"Swipe-reply on the card, or send {explicit}.",
                 )
         else:
             job_id = self._job_ref(argument, record["actor"], valid)
@@ -1466,10 +1517,10 @@ class Portal:
                              active=job.get("worker_active") if running else None)
 
     def _updates_paused(self, now: float) -> bool:
-        """Critical disk, or a fresh verdict that iMessage cannot deliver right now."""
+        """A critical disk right now, or a fresh verdict that iMessage cannot deliver."""
         health = self.store.data.get("imessage_health", {})
         blocked = health.get("ok") is False and now - health.get("checked_at", 0) < 300
-        return blocked or self.store.data.get("resources", {}).get("level") == "critical"
+        return blocked or self._disk_now() == "critical"
 
     @staticmethod
     def _told(job: dict) -> dict:

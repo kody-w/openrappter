@@ -55,9 +55,9 @@ Only `RAPP …` / `RAPP: …` addresses this portal. Case does not matter.
 | `RAPP help` | Explain routing and these commands. |
 
 A number answers one card, never "the only pending task". A bare `1`/`2` approves or
-cancels the task of the approval card it answers: the message it swipe-replies to, or
-else the row directly above it, which must be that confirmed approval card, so two
-waiting tasks are never confused. Another AI's prompt, a different conversation turn,
+cancels the task of the approval card it answers: the message it swipe-replies to (any
+bubble of a long card), or else the row directly above it, which must be that confirmed
+approval card's last bubble, so two waiting tasks are never confused. Another AI's prompt, a different conversation turn,
 or an intervening status reply requires `RAPP 1` / `RAPP 2` (newest card only) or
 `RAPP approve <job-id>` instead. A bare number directly under an open operator update
 answers that update instead. The latest-card lookup checks the preceding row in the
@@ -496,17 +496,23 @@ next ~5m · ref 3fa9c1
   after they were sent. A digit under one of our cards that no longer offers it gets
   one live card (`Expired` for an approval that lapsed, else "Card closed") and never
   runs a stale option.
-- **Race guard.** Approve, Cancel, or Stop typed within 3 seconds after the card it
-  lands under reached the phone was probably meant for the card before, so nothing
-  runs: a bare digit gets that card again as a fresh bubble (the same approval, or the
-  live task card) saying `nothing ran`, and `RAPP <n>` answers `card_changed`.
+- **Race guard.** Approve, Cancel, or Stop typed before the card it answers was sent,
+  or within 3 seconds after (by the message's chat.db time), was meant for something
+  else, so nothing runs. Instead that card comes again as a fresh bubble saying
+  `nothing ran` (the same approval, or the live task card), for a bare digit and for
+  `RAPP <n>` alike, so sending the pick again answers the card that is now newest. A
+  row with no chat.db time is judged by position alone. A card from before a group's
+  members changed is never re-sent to the changed group.
 - **`RAPP <n>`** answers the newest card sent before you typed, operator posts
   included, and never falls back to an older card. A newest card whose delivery is
   unknown counts as closed ("check your phone"). `RAPP 1`/`RAPP 2` approve or cancel
   only when that newest card is the task's live approval card (`approval_expired`
   after it lapses), and `RAPP <n>` never picks Stop while an approval is waiting or
   just expired, since `RAPP 2` may have meant Cancel. `RAPP 1 …` with extra words runs
-  nothing.
+  nothing. An error card is itself the newest card, so refusals name a command that
+  still works (`RAPP approve 0001`, a swipe-reply on the card) rather than `RAPP 1`.
+  Attachment bubbles belong to their card: an unconfirmed attachment does not close a
+  delivered card's options.
   Options only map to existing commands (`status`, `stop`, `result`, `list`, `help`,
   `retry`) plus `RAPP quiet [job]`, so a number can never grant anything new. A handled
   reply is recorded before dispatch, so the reader's late-row window never repeats it.
@@ -584,15 +590,19 @@ event, each ending with `[1] Health` and `[2] Recent jobs`:
 - **Disk pressure**: every tick checks free space on the state volume. Below 10 GB (or
   5%) is `Disk low`; below 2 GB (or 2%) is `Disk critical`: automatic ETA updates pause
   and new task preparation is refused with `disk_low` (status, stop, and results keep
-  working). Refusal follows the disk right now, so freeing space works at once. Cards
-  use hysteresis so a disk hovering at a line cannot flap: a worse level alerts at
-  once; a better one takes effect only after it has held for 10 minutes with 2 GB and
-  1 point of headroom above the line (12 GB and 6% to leave low; 4 GB and 3% to leave
-  critical). An episode sends each level's card at most once per six hours, and if it
-  alerted, it ends with one resolve card (`✓ Disk ok`, saying `tasks resume` after a
-  critical spell, or a `Disk low` card saying `tasks resume` when critical eases to low). Idle ticks
-  in any level write nothing. The overnight disk-full that silently failed 343 ticks
-  now names itself.
+  working). Refusing tasks and pausing updates follow the disk right now, so freeing
+  space works at once. Only the cards use hysteresis, so a disk hovering at a line
+  cannot flap: a worse level always alerts at once; a better one is announced only
+  after it has held for 10 minutes with 2 GB and 1 point of headroom above the line
+  (12 GB and 6% to leave low; 4 GB and 3% to leave critical). Each time the disk worsens
+  again within six hours of a resolve card, the next hold doubles (up to six hours), so
+  a flapping disk sends fewer and fewer cards. A level still in force is re-announced at
+  most every six hours, and only while the disk is really at that level. Every alert
+  ends with one resolve card (`✓ Disk ok`, saying `tasks resume` after a critical
+  spell, or a `Disk low` card saying `tasks resume` when critical eases to low).
+  `RAPP health` shows the level right now (`low · easing from critical` while a card
+  waits out its hold). Hovering at either line writes the journal at most once. The
+  overnight disk-full that silently failed 343 ticks now names itself.
 - **iMessage back**: when the health gate has held sends for five minutes or more and
   iMessage reconnects, one card reports how long it was down, the verdict, and how many
   queued parts are now sending. It goes out first: sending waits one tick for it, and

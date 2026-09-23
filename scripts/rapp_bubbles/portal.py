@@ -420,7 +420,11 @@ class Portal:
         return now <= sent + itui.MENU_TTL
 
     def _latest_card(self, actor: dict, before_rowid: int) -> dict | None:
-        """The newest open card (outbox menu or feed post) sent before the owner's message."""
+        """The newest card with options sent before the owner's message, open or not.
+
+        A closed newest card must stop RAPP <n> right there: moving on to an older card
+        that is still open would run an option the owner never looked at (such as Stop).
+        """
         now, best = self.clock(), None
         for part in self.store.data["outbox"]:
             if (
@@ -428,10 +432,13 @@ class Portal:
                 or part.get("send_after_rowid", -1) >= before_rowid
             ):
                 continue
-            if self._menu_open(part, now):
-                card = {"group": part["group"], "menu": part["menu"], "options": len(part["menu"]), "post": None}
-            elif part["group"].startswith("feed:") and (post := feed.open_post(self.store, part["group"], actor, now)):
-                card = {"group": part["group"], "menu": None, "options": post["options"], "post": post["id"]}
+            post = feed.post_for_group(self.store, part["group"]) if part["group"].startswith("feed:") else None
+            if part.get("menu"):
+                card = {"group": part["group"], "menu": part["menu"], "options": len(part["menu"]),
+                        "post": None, "open": self._menu_open(part, now)}
+            elif post and post["options"] and post["actor"] == actor:
+                card = {"group": part["group"], "menu": None, "options": post["options"],
+                        "post": post["id"], "open": feed.is_open(post, actor, now)}
             else:
                 continue
             if best is None or part.get("submitted_at", 0) >= best[0]:
@@ -916,7 +923,7 @@ class Portal:
             # RAPP <n>: the newest open card the owner could have seen before typing, agent
             # posts included; never an older card when that one lacks the number.
             card = self._latest_card(actor, record["event"]["id"])
-            if not card or int(command) > card["options"]:
+            if not card or not card["open"] or int(command) > card["options"]:
                 raise PortalError("no_open_menu", "No open card offers that number. Use RAPP status or RAPP list.")
             record["menu_pick"] = {"group": card["group"], "n": int(command)}
             if card["post"]:

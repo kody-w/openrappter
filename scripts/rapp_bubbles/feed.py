@@ -113,13 +113,14 @@ def refresh(store, now: float) -> None:
         store.save()
 
 
-def open_post(store, group: str, actor: dict, now: float) -> dict | None:
-    """The post behind an outbox group, if it still takes an answer from this actor."""
-    for item in store.data.get("feed", {}).values():
-        if item["group"] == group:
-            live = item["state"] == "pending" or item["state"] == "open" and item.get("open_until", 0) >= now
-            return item if live and item["options"] and item["actor"] == actor else None
-    return None
+def post_for_group(store, group: str) -> dict | None:
+    return next((item for item in store.data.get("feed", {}).values() if item["group"] == group), None)
+
+
+def is_open(item: dict, actor: dict, now: float) -> bool:
+    """Whether a post still takes an answer from this actor."""
+    live = item["state"] == "pending" or item["state"] == "open" and item.get("open_until", 0) >= now
+    return bool(live and item["options"] and item["actor"] == actor)
 
 
 def capture(store, event: dict, actor: dict, text: str, now: float, *,

@@ -214,6 +214,8 @@ class Outbox:
         ):
             part.update(state="unknown", error=part.get("error", "receipt_unconfirmed"))
         part["last_checked"] = self.clock()
+        # Only a check that completed counts as the part's look; failures keep backing off.
+        part["receipt_looked_at"] = part["last_checked"]
         self.store.save()
 
     def pump(self, *, reconcile_only: bool = False) -> None:
@@ -226,6 +228,7 @@ class Outbox:
             if part["state"] in ("submitted", "sent", "unknown"):
                 age = now - part.get("submitted_at", now)
                 checked = part.get("last_checked", 0)
+                looked = part.get("receipt_looked_at", 0)
                 # Back off with age: fresh parts every 5 s, then a tenth of their age, at most
                 # hourly. A day-old part already checked after its receipt window retires (only
                 # an explicit RAPP resend/retry reconciles it), so one uncertain part can never
@@ -233,7 +236,7 @@ class Outbox:
                 # checked (the bridge was down) still gets its one look.
                 if receipt_budget == 0 or (
                     age > STALE_RECEIPT_SECONDS
-                    and checked >= part.get("submitted_at", 0) + self.config.receipt_seconds
+                    and looked >= part.get("submitted_at", 0) + self.config.receipt_seconds
                 ):
                     continue
                 if now - checked < min(max(5, age / 10), 3600):

@@ -2760,3 +2760,48 @@ def test_polls_of_a_quiet_running_job_do_not_rewrite_the_journal(env, monkeypatc
         env.clock.advance(10)
         env.portal().tick()
     assert len(saves) <= 1
+
+
+def test_rapp_n_never_acts_on_an_older_card_when_the_newest_one_closed(env):
+    approved_running_job(env)
+    env.clock.advance(130)
+    env.portal().tick()
+    assert state(env)["jobs"][JOB1]["stream"]["sent"] == 1
+    post_id = feed_post(env, text="Ship it?", options=2, ttl=60)
+    for step in (10, 10, 70):
+        env.clock.advance(step)
+        env.portal().tick()
+    assert state(env)["feed"][post_id]["state"] == "expired"
+    env.source.events.append(message(3, "RAPP 2"))
+    env.portal().tick()
+    assert not [call for call in env.runtime.calls if call["op"] == "cancel"]
+    assert any("no_open_menu" in call["text"] for call in env.native.calls)
+
+
+def test_a_failed_receipt_check_does_not_use_up_the_parts_one_look(env):
+    approved_running_job(env)
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    env.clock.advance(10)
+    env.portal().tick()
+    with Store(env.config().state_dir) as store:
+        final = next(part for part in store.data["outbox"] if part["group"] == f"job:{JOB1}:final")
+        final["state"] = "submitted"
+        for field in ("guid", "last_checked", "receipt_looked_at"):
+            final.pop(field, None)
+        store.save()
+    env.clock.advance(2 * 86400)
+    calls = []
+    original = env.native.history
+
+    def flaky(chat_id, since, until):
+        calls.append(chat_id)
+        if len(calls) == 1:
+            raise PortalError("native_timeout", "Synthetic boot-time timeout.")
+        return original(chat_id, since, until)
+
+    env.native.history = flaky
+    for _ in range(30):
+        env.clock.advance(600)
+        env.portal().tick()
+    final = next(part for part in state(env)["outbox"] if part["group"] == f"job:{JOB1}:final")
+    assert len(calls) >= 2 and final["state"] in ("sent", "delivered")

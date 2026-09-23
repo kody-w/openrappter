@@ -798,7 +798,8 @@ class Portal:
                 return True
             if any("file" in item for item in feed._bubbles(self.store, post)):
                 return False
-            return not itui.names_numbers(self._authored(post, part.get("text") or part.get("caption") or ""))
+            words = self._authored(post, part.get("text") or part.get("caption") or "")
+            return not (itui.names_numbers(words) or itui.draws_numbers(words))
         if row["is_from_me"]:
             return False
         return not event.get("is_group") or normalized(str(row.get("sender") or "")) == normalized(

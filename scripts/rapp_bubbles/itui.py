@@ -99,9 +99,10 @@ def draws_numbers(text: str) -> bool:
 
 
 def names_numbers(text: str) -> bool:
-    """Whether text shows a number 1-9 standing on its own anywhere ("Reply 1 or 2", "2️⃣",
-    "5/8"), not only at the start of a line: how another author's words are read, deny by
-    default, since any of them may be what the owner's number answers."""
+    """Whether text shows a number 1-9 that starts a word of its own anywhere ("Reply 1 or
+    2", "2️⃣", "5/8", "1st", "_2_"), not only at the start of a line: how another author's
+    words are read, deny by default, since any of them may be what the owner's number
+    answers. A digit inside a word or a longer number ("R8", "42", "v10") does not count."""
     for raw in text.splitlines():
         line, reordered = _shown(raw)
         if reordered and any(_digit(ch) for ch in line):
@@ -110,7 +111,7 @@ def names_numbers(text: str) -> bool:
             if not _digit(ch):
                 continue
             before, after = line[index - 1:index], line[index + 1:index + 2]
-            if not (before.isalnum() or before == "_") and not (after.isalnum() or after == "_"):
+            if not before.isalnum() and not (after and unicodedata.digit(after, None) is not None):
                 return True
     return False
 

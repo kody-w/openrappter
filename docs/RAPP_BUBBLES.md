@@ -510,8 +510,10 @@ next ~5m · ref 3fa9c1
     after the card: only the owner's own messages (any in a one-to-one chat; in a group,
     his handle's) and our own bubbles, except an agent's post of another update, which is
     read deny by default: its own words (without the `[RAPP <channel>]` envelope we put on
-    it) count when a number 1-9 stands alone anywhere in them (`[2] Hold`, `Reply 1 or 2`,
-    `2️⃣`, `❷`, fullwidth or other-script digits, `5/8`), and a post with a picture always
+    it) count when a number 1-9 starts a word anywhere in them (`[2] Hold`, `Reply 1 or 2`,
+    `1st`, `_2_`, `2️⃣`, `❷`, fullwidth or other-script digits, `5/8`), or when a line starts
+    with a number (`10. Ten`), while a digit inside a word or a longer number (`R8`, `42`)
+    does not; and a post with a picture always
     counts, since the picture may show numbers. Format characters and invisible fillers
     (Hangul fillers, zero-width marks) are skipped, and a line that bidi controls or
     right-to-left text may draw in another order counts when any digit is on it. Another

@@ -6189,3 +6189,29 @@ def test_a_flaky_sender_is_told_while_it_can_still_send(env, monkeypatch):
         env.portal().tick()
     assert [call["text"].split("\n", 1)[0] for call in env.native.calls
             if call["text"].startswith("[RAPP sys]")] == ["[RAPP sys] ! Sending flaky"]
+
+
+# Round 8 review, pass 2.
+
+
+@pytest.mark.parametrize("text", ["Pick one:\n_1_ Ship it\n_2_ Hold", "Pick one:\n1st: ship it\n2nd: hold",
+                                  "_2_ Hold", "\u33e1 Hold", "Pick 1st or 2nd", "Pick one:\n10. Ten"])
+def test_an_agent_post_offering_a_number_in_any_word_interrupts_rapp_n(env, text):
+    line = timeline(env)
+    running_on_timeline(env, line)
+    env.clock.advance(10)
+    feed_post(env, text=text, options=0)
+    env.portal().tick()
+    env.clock.advance(10)
+    line.say("RAPP 2")  # meant for the agent's second option
+    env.portal().tick()
+    assert not explicit_ops(env, "cancel")
+
+
+def test_a_number_that_starts_a_word_is_named_and_one_inside_a_word_is_not():
+    from rapp_bubbles import itui
+
+    for text in ("1st: ship", "Pick 2nd", "_2_ Hold", "\u33e1 Hold", "2FA on", "x (3)", "\u00b2 more"):
+        assert itui.names_numbers(text), text
+    for text in ("R8 ships", "Build 42", "v10 out", "Loop 01", "No numbers", "ref 64707a"):
+        assert not itui.names_numbers(text), text

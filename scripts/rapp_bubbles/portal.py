@@ -776,13 +776,16 @@ class Portal:
         if item["state"] == "open":
             # The copy is answerable for a reply window of its own, up to twice the first.
             opened = item.get("delivered_at") or item.get("created_at") or now
-            item["open_until"] = max(item.get("open_until", 0), min(now + item["ttl"], opened + 2 * item["ttl"]))
-            if item["open_until"] - now < COPY_WINDOW:
-                # Too little time is left to answer a copy: say so instead of inviting it.
+            until = max(item.get("open_until", 0), min(now + item["ttl"], opened + 2 * item["ttl"]))
+            if until - now < min(COPY_WINDOW, item["ttl"]):
+                # That cap leaves too little time to answer a copy: close the update now and
+                # say so, rather than inviting an answer it could not take.
+                item.update(state="expired", open_until=now)
                 item["refusals"] = [*item.get("refusals", []), {"at": now, "why": why, "copy": None}][-3:]
                 self._notice(f"input:{identity}:post-closed", actor, target, "That update is no longer open.",
                              title="Not answered")
                 return
+            item["open_until"] = until
         if group not in aliases:
             aliases.append(group)
         item["refusals"] = [*item.get("refusals", []), {"at": now, "why": why, "copy": token(f"{group}:0")[:6]}][-3:]

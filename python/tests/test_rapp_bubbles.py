@@ -5029,6 +5029,25 @@ def test_a_copy_is_not_sent_when_the_update_has_no_reply_window_left(env):
     assert not [text for text in texts if "Not answered ·" in text.split("\n", 1)[0]]
     assert any("That update is no longer open." in text for text in texts)
     assert state(env)["feed"][post_id]["refusals"][-1]["copy"] is None
+    # And it is closed, as the owner was told: an answer a second later is not taken.
+    assert state(env)["feed"][post_id]["state"] == "expired"
+    env.clock.advance(1)
+    line.say("RAPP reply 1")
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["state"] == "expired"
+
+
+def test_an_update_with_a_short_reply_window_still_gets_its_copy(env):
+    line = timeline(env)
+    post_id = delivered_feed_post(env, ttl=20)
+    part = next(item for item in state(env)["outbox"] if item["group"] == f"feed:{post_id}")
+    line.say("1", typed_ago=env.clock() - part["sent_at"] - 1)  # typed a second after it landed
+    sent = len(env.native.calls)
+    env.portal().tick()
+    texts = [call["text"] for call in env.native.calls[sent:]]
+    assert [text.split("\n", 1)[0] for text in texts] == ["[RAPP loop] Not answered · Loop 01"]
+    item = state(env)["feed"][post_id]
+    assert item["state"] == "open" and item["open_until"] - env.clock() == 20
 
 
 def dry_run_on(line, monkeypatch):

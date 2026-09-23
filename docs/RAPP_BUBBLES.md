@@ -534,8 +534,10 @@ next ~5m · ref 3fa9c1
     swiped on the copy, answers it. Only the newest copy waits to go out, and a copy still
     waiting is dropped when the update is answered, expires, or is replaced by a newer
     one. Each refusal keeps the update open for another reply window, up to twice the
-    first. The refusal is saved before the reply is recorded as handled, so a crash in
-    between never loses it. Other text is left alone.
+    first; when that cap would leave a copy too little time to be answered (under 30 s,
+    or under the update's own window), the update closes then and the owner is told it is
+    no longer open. The refusal is saved before the reply is recorded as handled, so a
+    crash in between never loses it. Other text is left alone.
   - A row with no chat.db time is judged by position alone. A card from before a group's
     members changed is never re-sent to the changed group.
 - **`RAPP <n>`** answers the card a swipe-reply quotes (nothing runs if the quoted

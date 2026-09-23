@@ -113,8 +113,17 @@ def refresh(store, now: float) -> None:
         store.save()
 
 
+def open_post(store, group: str, actor: dict, now: float) -> dict | None:
+    """The post behind an outbox group, if it still takes an answer from this actor."""
+    for item in store.data.get("feed", {}).values():
+        if item["group"] == group:
+            live = item["state"] == "pending" or item["state"] == "open" and item.get("open_until", 0) >= now
+            return item if live and item["options"] and item["actor"] == actor else None
+    return None
+
+
 def capture(store, event: dict, actor: dict, text: str, now: float, *,
-            prior=None, explicit: bool = False) -> dict | None:
+            prior=None, explicit: bool = False, post_id: str | None = None) -> dict | None:
     """Record the owner's answer to the latest open post.
 
     ``prior`` is a callable returning the GUID of the message just before this one; it is
@@ -147,6 +156,10 @@ def capture(store, event: dict, actor: dict, text: str, now: float, *,
         if LIFECYCLE.search(text.strip()) or not (text.strip() or has_files):
             return None
     else:
+        if post_id is not None:
+            candidates = [item for item in candidates if item["id"] == post_id]
+            if not candidates:
+                return None
         item = max(candidates, key=lambda value: value["created_at"])
         if item["state"] == "pending" and not any(
             part.get("guid") or part.get("caption_guid") for part in _parts(store, item)

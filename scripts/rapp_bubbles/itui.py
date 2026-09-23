@@ -50,6 +50,9 @@ HEARTBEATS = (120, 300, 600, 1200, 2100, 3600)
 REPEAT = 1800
 MIN_GAP = 90
 MAX_UPDATES = 10
+# Milestones may not spend the last few updates, so heartbeats never run dry.
+RESERVED_HEARTBEATS = 3
+STALL_SECONDS = 600
 MENU_TTL = 3600
 HISTORY = 20
 HEX_REF = re.compile(r"#?([0-9a-f]{4,32})", re.IGNORECASE)
@@ -79,8 +82,9 @@ def span(seconds: float) -> str:
     return f"{hours}h{rest:02d}m"
 
 
-def bar(fraction: float) -> str:
-    filled = max(0, min(CELLS, round(fraction * CELLS)))
+def bar(fraction: float, *, done: bool = False) -> str:
+    # Only a finished task earns the last cell; a running bar never looks complete.
+    filled = max(0, min(CELLS if done else CELLS - 1, round(fraction * CELLS)))
     return "▰" * filled + "▱" * (CELLS - filled)
 
 
@@ -119,11 +123,22 @@ def marker(events) -> dict | None:
     return found
 
 
-def estimate(elapsed: float, progress: dict | None, history: list[float]) -> dict:
+def estimate(elapsed: float, progress: dict | None, history: list[float], *,
+             idle: float | None = None, active: bool | None = None) -> dict:
     """An honest ETA: from worker markers, else past runs of this profile, else unknown.
 
-    Never claims completion: the bar stays below full until the job is terminal.
+    Never claims completion: the bar stays below full until the job is terminal. A worker
+    that went inactive, or produced no output for a long while, is reported as stalled
+    rather than given a confident countdown.
     """
+    typical_runs = sorted(value for value in history if value > 0)
+    typical = statistics.median(typical_runs) if len(typical_runs) >= 3 else 0
+    if idle is not None and (active is False or idle > max(STALL_SECONDS, 0.5 * typical)):
+        return {
+            "basis": "stall", "fraction": None, "remaining": None,
+            "status": f"stalled · {span(idle)}",
+            "detail": "worker inactive" if active is False else f"no output for {span(idle)}",
+        }
     if progress and progress["done"] > 0 and elapsed >= 30:
         fraction = progress["done"] / progress["total"]
         remaining = elapsed * (1 - fraction) / fraction
@@ -157,19 +172,32 @@ def estimate(elapsed: float, progress: dict | None, history: list[float]) -> dic
 
 
 def due(stream: dict, elapsed: float, now: float, *, milestone: bool = False) -> bool:
-    """Whether an automatic update should go out now (heartbeats back off, then repeat)."""
+    """Whether an automatic update should go out now.
+
+    Heartbeats are scheduled by time slot, not by how many were sent, so a gap (an outage,
+    a pause) yields one catch-up card instead of a burst, and milestones never shift the
+    schedule or spend the last RESERVED_HEARTBEATS updates.
+    """
     sent = stream.get("sent", 0)
     if stream.get("quiet") or sent >= MAX_UPDATES or now - stream.get("last_at", 0) < MIN_GAP:
         return False
-    if milestone:
+    if elapsed >= threshold(stream.get("slot", 0)):
         return True
-    return elapsed >= next_heartbeat(sent)
+    return milestone and sent < MAX_UPDATES - RESERVED_HEARTBEATS
 
 
-def next_heartbeat(sent: int) -> float:
-    if sent < len(HEARTBEATS):
-        return HEARTBEATS[sent]
-    return HEARTBEATS[-1] + REPEAT * (sent - len(HEARTBEATS) + 1)
+def threshold(slot: int) -> float:
+    if slot < len(HEARTBEATS):
+        return HEARTBEATS[slot]
+    return HEARTBEATS[-1] + REPEAT * (slot - len(HEARTBEATS) + 1)
+
+
+def next_slot(elapsed: float) -> int:
+    """The first heartbeat slot still in the future: missed slots collapse into one."""
+    slot = 0
+    while threshold(slot) <= elapsed:
+        slot += 1
+    return slot
 
 
 def remember(history: list, duration: float) -> list:

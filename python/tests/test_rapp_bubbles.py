@@ -1180,9 +1180,10 @@ def test_foreign_outbound_sql_row_blocks_bare_selection_but_not_explicit_rapp(en
     db.execute("UPDATE message SET is_from_me=1,handle_id=NULL WHERE ROWID=3")
     insert_message(db, 4, selection)
     env.clock.advance(10)
+    sent = len(env.native.calls)
     tick()
     assert not [call for call in env.runtime.calls if call["op"] in ("approve", "cancel")]
-    assert any("approval_context_changed" in call["text"] for call in env.native.calls)
+    assert len(env.native.calls) == sent
     insert_message(db, 5, f"RAPP {selection}")
     tick()
     assert len([call for call in env.runtime.calls if call["op"] == operation]) == 1
@@ -1442,16 +1443,16 @@ def test_receipts_reject_late_creation_but_accept_late_discovery_inside_attempt_
         original = copy.deepcopy(next(row for row in env.native.messages if row["attachments"]))
         env.native.messages = [{
             **original,
-            "created_at": datetime.fromtimestamp(env.clock() + 86400, timezone.utc).isoformat(),
+            "created_at": datetime.fromtimestamp(env.clock() + 3600, timezone.utc).isoformat(),
         }]
-        env.clock.advance(86400)
+        env.clock.advance(3600)
         outbox.pump()
         assert part["state"] == "unknown" and not part.get("guid")
         assert len([call for call in env.native.calls if call["file"]]) == 1
         env.native.messages = [original]
     with Store(env.config().state_dir) as store:
         outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
-        env.clock.advance(10)
+        env.clock.advance(400)  # the next poll on the age-based backoff schedule
         outbox.pump()
         part = next(part for part in store.data["outbox"] if "file" in part)
         assert part["state"] == "delivered"
@@ -1798,15 +1799,16 @@ def test_older_pending_upload_without_admission_evidence_fails_explicitly(env):
     assert any("intake_context_unknown" in call["text"] for call in env.native.calls)
 
 
-def test_an_intervening_ai_message_invalidates_bare_number_selection(env):
+def test_a_bare_number_answering_another_ai_is_left_alone_even_while_an_approval_waits(env):
     env.source.events.append(message())
     env.portal().tick()
     env.clock.advance(10)
+    sent = len(env.native.calls)
     env.source.prior_guids[CHAT] = "OTHER-AI-PROMPT"
     env.source.events.append(message(2, "1"))
     env.portal().tick()
     assert not [call for call in env.runtime.calls if call["op"] == "approve"]
-    assert any("approval_context_changed" in call["text"] for call in env.native.calls)
+    assert len(env.native.calls) == sent
     env.source.events.append(message(3, "RAPP 1"))
     env.portal().tick()
     assert len([call for call in env.runtime.calls if call["op"] == "approve"]) == 1
@@ -2506,7 +2508,13 @@ def test_day_old_sent_receipts_are_not_polled_forever(env):
     for _ in range(3):
         env.clock.advance(10)
         env.portal().tick()
-    assert len(checked) == before
+    # At most one look after its receipt window, then the part retires for good.
+    assert len(checked) <= before + 1
+    settled = len(checked)
+    for _ in range(6):
+        env.clock.advance(600)
+        env.portal().tick()
+    assert len(checked) == settled
 
 
 def test_a_stray_digit_after_an_approval_expires_never_stops_another_task(env):
@@ -2578,3 +2586,177 @@ def test_a_failing_final_result_records_the_job_duration_once(env):
         env.portal().tick()
     assert state(env)["jobs"][JOB1]["error"] == "artifact_missing"
     assert len(state(env)["eta_history"]["synthetic-workspace"]) == 1
+
+
+def running_card_guid(env):
+    return next(part for part in state(env)["outbox"] if part["group"].endswith(":approved"))["guid"]
+
+
+def test_stop_under_an_hour_old_running_card_still_stops_the_live_job(env):
+    approved_running_job(env)
+    card = running_card_guid(env)
+    for _ in range(8):
+        env.clock.advance(600)
+        env.portal().tick()
+    env.source.prior_guids[CHAT] = card
+    env.source.events.append(message(3, "2"))
+    env.portal().tick()
+    assert [call for call in env.runtime.calls if call["op"] == "cancel" and call["job_id"] == JOB1]
+
+
+def test_a_digit_under_a_closed_card_gets_one_card_closed_reply_and_runs_nothing(env):
+    approved_running_job(env)
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    env.clock.advance(10)
+    env.portal().tick()
+    env.clock.advance(2 * 3600)
+    env.portal().tick()
+    sent = len(env.native.calls)
+    env.source.events.append(message(3, "2"))
+    for _ in range(3):
+        env.clock.advance(10)
+        env.portal().tick()
+    fresh = [call["text"] for call in env.native.calls[sent:]]
+    assert len(fresh) == 1 and "Card closed" in fresh[0].splitlines()[0]
+    assert not explicit_ops(env, "list")
+
+
+def test_an_out_of_range_digit_under_a_live_card_gets_the_live_card_again(env):
+    approved_running_job(env)
+    sent = len(env.native.calls)
+    env.clock.advance(10)
+    env.source.events.append(message(3, "7"))
+    env.portal().tick()
+    fresh = [call["text"] for call in env.native.calls[sent:]]
+    assert len(fresh) == 1 and "[1] Details\n[2] Stop\n[3] Quiet" in fresh[0]
+    assert not [call for call in env.runtime.calls if call["op"] == "cancel"]
+
+
+def test_rapp_n_answers_the_newest_card_even_when_it_is_an_agent_post(env):
+    approved_running_job(env)
+    env.clock.advance(10)
+    post_id = feed_post(env, text="Loop 01", options=2)
+    env.portal().tick()
+    env.clock.advance(10)
+    env.source.prior_guids[CHAT] = "OTHER-AI-MESSAGE"
+    env.source.events.append(message(3, "RAPP 2"))
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["answer"]["number"] == 2
+    assert not [call for call in env.runtime.calls if call["op"] == "cancel"]
+    env.source.events.append(message(4, "RAPP 3"))
+    env.portal().tick()
+    assert any("no_open_menu" in call["text"] for call in env.native.calls)
+    assert not state(env)["jobs"][JOB1]["stream"].get("quiet")
+
+
+def test_rapp_n_ignores_cards_sent_after_the_owner_typed(env):
+    approved_running_job(env)
+    env.source.tail = lambda: 1000
+    env.clock.advance(130)
+    env.portal().tick()
+    assert state(env)["jobs"][JOB1]["stream"]["sent"] == 1
+    env.source.events.append(message(3, "RAPP 1"))
+    env.portal().tick()
+    record = next(value for value in state(env)["inbox"].values() if value["event"]["id"] == 3)
+    assert record["menu_pick"]["group"].endswith(":approved")
+
+
+def test_running_bars_never_fill_and_stalled_workers_are_named(env):
+    from rapp_bubbles import itui
+
+    assert itui.bar(0.95).count("▰") == 9 and itui.bar(1.0, done=True).count("▰") == 10
+    stalled = itui.estimate(1800, None, [600, 600, 600], idle=900, active=True)
+    assert stalled["basis"] == "stall" and stalled["status"] == "stalled · 15m" and stalled["fraction"] is None
+    assert itui.estimate(60, None, [], idle=60, active=False)["detail"] == "worker inactive"
+    approved_running_job(env)
+    for _ in range(16):
+        env.clock.advance(60)
+        env.portal().tick()
+    stalls = [call["text"] for call in env.native.calls if "stalled · " in call["text"].splitlines()[0]]
+    assert stalls and all("~" not in text.splitlines()[0] for text in stalls)
+
+
+def test_a_long_gap_yields_one_catch_up_update_not_a_burst(env):
+    approved_running_job(env)
+    env.clock.advance(2 * 3600)
+    env.portal().tick()
+    for _ in range(10):
+        env.clock.advance(60)
+        env.portal().tick()
+    assert len(progress_parts(env)) <= 2
+    assert state(env)["jobs"][JOB1]["stream"]["slot"] >= 6
+
+
+def test_the_footer_promises_exactly_the_next_heartbeat(env):
+    card = approved_running_job(env)
+    assert card.splitlines()[-1].startswith("next ~2m")
+    started = state(env)["jobs"][JOB1]["started_at"]
+    for _ in range(30):
+        env.clock.advance(20)
+        env.portal().tick()
+    first = progress_parts(env)[0]
+    assert 120 <= first["created_at"] - started <= 140
+
+
+def test_an_outage_does_not_spend_the_update_budget_and_iMessage_back_leads_the_backlog(env):
+    from rapp_bubbles.clients import _verdict
+
+    owner_target(env)
+    approved_running_job(env)
+    connected = [False]
+    env.native.health = lambda value, now: _verdict(
+        value, now, connected[0], "connected" if connected[0] else "imessage_account_blocked")
+    for _ in range(120):
+        env.clock.advance(60)
+        env.portal().tick()
+    assert state(env)["jobs"][JOB1]["stream"]["sent"] <= 1
+    sent = len(env.native.calls)
+    connected[0] = True
+    for _ in range(4):
+        env.clock.advance(60)
+        env.portal().tick()
+    fresh = [call["text"] for call in env.native.calls[sent:]]
+    assert fresh and fresh[0].startswith("[RAPP sys] ✓ iMessage back")
+
+
+def test_an_uncertain_part_backs_off_then_retires_but_explicit_resend_still_reconciles(env):
+    approved_running_job(env)
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    env.clock.advance(10)
+    env.portal().tick()
+    with Store(env.config().state_dir) as store:
+        final = next(part for part in store.data["outbox"] if part["group"] == f"job:{JOB1}:final")
+        final.update(state="unknown", error="receipt_unconfirmed", text="[RAPP 0001] ✓ Done\nnot yet visible")
+        final.pop("guid", None)
+        store.save()
+        ref = final["id"][:6]
+    polls = len(env.native.history_calls)
+    for _ in range(288):
+        env.clock.advance(300)
+        env.portal().tick()
+    first_day = len(env.native.history_calls) - polls
+    assert 0 < first_day <= 120
+    retired = len(env.native.history_calls)
+    for _ in range(48):
+        env.clock.advance(1800)
+        env.portal().tick()
+    assert len(env.native.history_calls) == retired
+    sends = len(env.native.calls)
+    env.source.events.append(message(3, f"RAPP resend {ref}"))
+    env.portal().tick()
+    assert len(env.native.history_calls) > retired
+    assert any("[RAPP retry " in call["text"] for call in env.native.calls[sends:])
+
+
+def test_polls_of_a_quiet_running_job_do_not_rewrite_the_journal(env, monkeypatch):
+    approved_running_job(env)
+    for _ in range(3):
+        env.clock.advance(10)
+        env.portal().tick()
+    saves = []
+    original = Store.save
+    monkeypatch.setattr(Store, "save", lambda self: saves.append(1) or original(self))
+    for _ in range(4):
+        env.clock.advance(10)
+        env.portal().tick()
+    assert len(saves) <= 1

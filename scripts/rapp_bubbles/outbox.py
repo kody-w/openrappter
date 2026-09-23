@@ -41,7 +41,7 @@ class Outbox:
         self, group: str, actor: dict, target: dict, text: str, *,
         artifacts: list[dict] | None = None, workspace: Path | None = None,
         declared: tuple[str, ...] = (), job_id: str | None = None,
-        menu: list[str] | None = None, card: str | None = None,
+        menu: list[str] | None = None, card: str | None = None, menu_kind: str | None = None,
     ) -> None:
         if self.parts(group):
             return
@@ -51,7 +51,7 @@ class Outbox:
         extra = {"card": card} if card else {}
         if menu:
             # Every part of the group carries the menu, so a reply under any bubble resolves.
-            extra.update(menu=list(menu), menu_until=self.clock() + itui.MENU_TTL)
+            extra.update(menu=list(menu), menu_kind=menu_kind or "notice")
         if framed and len(pieces) > 1:
             # Piece one needs its own unique line too: exact-text receipts must never collide.
             head, _, rest = pieces[0].partition("\n")
@@ -224,11 +224,19 @@ class Outbox:
                 part.update(state="unknown", error="interrupted_submission")
                 self.store.save()
             if part["state"] in ("submitted", "sent", "unknown"):
-                if now - part.get("last_checked", 0) < 5 or receipt_budget == 0:
+                age = now - part.get("submitted_at", now)
+                checked = part.get("last_checked", 0)
+                # Back off with age: fresh parts every 5 s, then a tenth of their age, at most
+                # hourly. A day-old part already checked after its receipt window retires (only
+                # an explicit RAPP resend/retry reconciles it), so one uncertain part can never
+                # cost an imsg spawn and a journal fsync every tick. A part that was never
+                # checked (the bridge was down) still gets its one look.
+                if receipt_budget == 0 or (
+                    age > STALE_RECEIPT_SECONDS
+                    and checked >= part.get("submitted_at", 0) + self.config.receipt_seconds
+                ):
                     continue
-                if part["state"] == "sent" and now - part.get("submitted_at", now) > STALE_RECEIPT_SECONDS:
-                    # A day-old "sent" receipt no longer changes; unknown and submitted parts keep
-                    # reconciling so late discovery still works, and RAPP resend/retry reconcile too.
+                if now - checked < min(max(5, age / 10), 3600):
                     continue
                 receipt_budget -= 1
                 try:
@@ -255,8 +263,12 @@ class Outbox:
                 self.store.save()
             if not healthy:
                 return
+            if (state.get("outage") or {}).get("reported") is False:
+                # Hold one tick so the portal's "iMessage back" card leads the backlog.
+                return
         budget = self.config.parts_per_tick
-        for part in self.store.data["outbox"]:
+        # System cards (disk, outage, back online) go first: they explain the backlog behind them.
+        for part in sorted(self.store.data["outbox"], key=lambda item: not item["group"].startswith("sys:")):
             if budget == 0:
                 break
             if part["state"] != "queued":
@@ -327,7 +339,8 @@ class Outbox:
                     continue
             elif part["state"] != "failed" or not part.get("retryable") or part.get("card") == "progress":
                 continue
-            if part.get("guid"):
+            if part.get("guid") or uncertain_part is not None:
+                # An explicit resend first looks again, so a late arrival is never duplicated.
                 self.reconcile(part)
                 if part["state"] in ("sent", "delivered"):
                     continue
@@ -393,23 +406,12 @@ class Outbox:
                     return True
         return False
 
-    def menu_part(self, guid: str | None, actor: dict, now: float) -> dict | None:
-        """The live menu of the message with this GUID, if it is ours, the actor's, and open."""
+    def part_for_guid(self, guid: str | None) -> dict | None:
+        """Our outbox part behind a chat.db message GUID, whether or not it offers a menu."""
         if not guid:
             return None
         for part in reversed(self.store.data["outbox"]):
             if guid in (part.get("guid"), part.get("caption_guid")):
-                if part["actor"] == actor and part.get("menu") and part.get("menu_until", 0) >= now:
-                    return part
-                return None
-        return None
-
-    def latest_menu(self, actor: dict, now: float) -> dict | None:
-        for part in reversed(self.store.data["outbox"]):
-            if (
-                part["actor"] == actor and part.get("menu") and part.get("menu_until", 0) >= now
-                and part["state"] in ("submitted", "sent", "delivered")
-            ):
                 return part
         return None
 

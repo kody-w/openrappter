@@ -485,10 +485,15 @@ next ~5m · ref 3fa9c1
   watcher's guard ignores), a status glyph (`? ○ ● ■ ✓ ✗ ! ·`, text presentation only),
   and the live status. Structural lines stay within 28 characters and nothing relies on
   right-aligned borders, because iOS Messages uses a proportional font.
-- **Every card ends with numbered options.** A bare digit answers the card directly above
-  it (proven by GUID adjacency); a digit anywhere else is left alone for other AIs.
-  After other messages intervene, `RAPP <n>` answers the latest open card (one hour). An
-  open approval card keeps `1`/`2` and still passes every existing approval check.
+- **Every card ends with numbered options, under one digit rule.** A bare reply belongs
+  to rapp-bubbles only when the message directly above it is one of ours (GUID
+  adjacency). Anything else, even a `1` or `2` while an approval waits, is left alone
+  with no reply. A task's live menu stays open while the task runs; other menus stay
+  open for an hour after they were sent. A digit under one of our cards that no longer
+  offers it gets one live card (or "Card closed") and never runs a stale option. After
+  other messages intervene, `RAPP <n>` answers the newest open card sent before you
+  typed, operator posts included, and never falls back to an older card. While an
+  approval exists, `RAPP 1`/`RAPP 2` still go only through every approval check.
   Options only map to existing commands (`status`, `stop`, `result`, `list`, `help`,
   `retry`) plus `RAPP quiet [job]`, so a number can never grant anything new. A handled
   reply is recorded before dispatch, so the reader's late-row window never repeats it.
@@ -497,8 +502,12 @@ next ~5m · ref 3fa9c1
   part ref.
 - **Running tasks keep sending ETAs** until they end: a card when the task starts, then
   heartbeats about 2, 5, 10, 20, 35, and 60 minutes in and every 30 minutes after, plus
-  milestones (a new state, a worker progress quarter, running past its usual time), at
-  least 90 seconds apart and at most 10 per task. Replying does not stop them;
+  milestones (a new state, forward worker progress by a quarter, running past its usual
+  time, stalling or resuming), at least 90 seconds apart and at most 10 per task.
+  Heartbeats follow time slots, so a gap produces one catch-up card instead of a burst,
+  and milestones never spend the last three updates. Updates pause, spending nothing,
+  while iMessage is verified down or the disk is critical. The footer always states what
+  happens next (`next ~5m`, `result next`, `result only`, `updates paused`). Replying does not stop them;
   `RAPP quiet` does, and the final result always arrives. A newer update replaces a
   still-queued one and the final replaces any queued update, so an outage never releases
   a burst; progress cards are never retried or flagged for delivery attention.
@@ -507,7 +516,8 @@ next ~5m · ref 3fa9c1
   extrapolated time left; otherwise the median of the last 20 finished runs of the
   profile (once there are 3) gives `~Xm left` and a time-based bar labelled `est` that
   never fills before the task ends; otherwise the card says `Xm in · no ETA yet`. A task
-  past its usual time says `long · Xm`. Each finished run records its duration and the
+  past its usual time says `long · Xm`. A worker that went inactive, or has produced no
+  output for 10 minutes (or half its usual run), is shown as `stalled · Xm` with no ETA. Each finished run records its duration and the
   error of its first estimate.
 
 ## Operator feed, Messages health, and the doctor
@@ -561,16 +571,21 @@ event, each ending with `[1] Health` and `[2] Recent jobs`:
   The overnight disk-full that silently failed 343 ticks now names itself.
 - **iMessage back**: when the health gate has held sends for five minutes or more and
   iMessage reconnects, one card reports how long it was down, the verdict, and how many
-  queued parts are now sending.
+  queued parts are now sending. It goes out first: sending waits one tick for it, and
+  system cards always lead the queue.
 - **Back online**: each successful tick touches a tiny `heartbeat` file; a gap of five
   minutes or more (failed ticks, a stopped watcher, a full disk) is reported once.
 
 ### Bounded journal and idle ticks
 
-Idle ticks no longer rewrite the journal: re-read late-window rows and unchanged
-recovery passes save nothing. Settled feed posts are skipped, and a part that has
-been `sent` for a day stops polling for a delivered receipt (`unknown` and `submitted`
-parts keep reconciling, so late discovery still works). Once an hour, delivered or
+Idle ticks no longer rewrite the journal: re-read late-window rows, unchanged recovery
+passes, and job polls that learned nothing save nothing. Settled feed posts are skipped.
+Receipts back off with age: fresh parts are checked every 5 seconds, then every tenth of
+their age, at most hourly. A part more than a day old that was already checked after
+its receipt window stops auto-polling (a part never checked, because the bridge was
+down, still gets its one look). `RAPP resend` and `retry` always look again first, so a
+late arrival is never duplicated. A tick reports `ok` when it completed; stuck parts are
+reported as `delivery_attention` rather than failing every tick. Once an hour, delivered or
 permanently failed parts older than 14 days, their staged files, handled inbox records,
 and ended jobs older than 30 days are removed, but only past the reader's late window
 (cursor − 256), so deduplication can never replay a row. Uncertain and retryable parts

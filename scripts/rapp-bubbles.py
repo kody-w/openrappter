@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility alias for rapp-bubbles.py (the former RAPP iMessage portal entry point)."""
+"""rapp-bubbles: local source entry point; does not import Brainstem or OpenRappter agents."""
 
 from rapp_bubbles.cli import main
 

@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from . import feed
 from .clients import RuntimeClient, NativeClient, NotSubmitted, SubmissionUnknown
 from .config import Config, PortalError, normalized, roster_digest
 from .files import copy_reference, filename, regular_file
@@ -46,6 +47,8 @@ HELP = (
     "RAPP retry <job-id> — retry only confirmed failed output parts.\n"
     "RAPP resend <part-id> — deliberately resend one uncertain part after checking your phone.\n"
     "RAPP clear files — discard the pending input selection.\n"
+    "Loop updates: a bare reply right after an update answers it (numbers pick its options). "
+    "RAPP reply <text> answers the latest open update even after other messages.\n"
     "Other conversation belongs to other AIs. Unprefixed wake/restart/shutdown remains Claude's."
 )
 
@@ -236,6 +239,7 @@ class Portal:
                     store.save()
                 self._recover_jobs()
                 self.outbox.pump(reconcile_only=True)
+                feed.refresh(store, self.clock())
                 approvals = [
                     (identity, record) for identity, record in store.data["inbox"].items()
                     if record["state"] == "runtime_pending" and record.get("approval_attempt")
@@ -258,6 +262,7 @@ class Portal:
                         self._advance(identity, record)
                 self._poll_jobs()
                 self.outbox.pump()
+                feed.refresh(store, self.clock())
                 self._delivery_attention()
                 failures = sum(
                     p["state"] in ("failed", "unknown") for p in store.data["outbox"]
@@ -342,8 +347,21 @@ class Portal:
         else:
             capture_eligible = has_files and conversation["capture_until"] >= self.clock()
         capture = not text.strip() and has_files and capture_eligible
-        if not match and not numeric and not capture:
+        if match and re.match(r"reply(\s|$)", body, re.IGNORECASE):
+            answered = feed.capture(self.store, event, actor, body[5:].strip(), self.clock(), explicit=True)
+            self._notice(
+                f"feed-reply:{identity}", actor, target,
+                "Got it." if answered else "There is no open update to answer right now.",
+            )
             return
+        if not match and not capture:
+            # Adjacency decides ownership in a thread shared with other AIs: a reply directly
+            # under an open update answers it, even a bare number while an approval waits.
+            if feed.capture(self.store, event, actor, text, self.clock(),
+                            prior=lambda: self.source.latest_prior_guid(event)):
+                return
+            if not numeric:
+                return
         if len(text) > 65536:
             self._notice(f"input:{identity}:large", actor, target, "RAPP message exceeds the 64 KiB limit.")
             return

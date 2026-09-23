@@ -224,6 +224,17 @@ class Outbox:
                     self.store.save()
         if reconcile_only:
             return
+        if not any(part["state"] == "queued" for part in self.store.data["outbox"]):
+            return
+        health = getattr(self.native, "health", None)
+        if callable(health):
+            state = self.store.data.setdefault("imessage_health", {})
+            before = dict(state)
+            healthy = health(state, now)
+            if state != before:
+                self.store.save()
+            if not healthy:
+                return
         budget = self.config.parts_per_tick
         for part in self.store.data["outbox"]:
             if budget == 0:

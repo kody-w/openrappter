@@ -18,13 +18,13 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from imessage_portal.clients import NativeClient, NotSubmitted, RuntimeClient, SubmissionUnknown
-from imessage_portal.config import Config, PortalError, MAX_FILE_BYTES, roster_digest
-from imessage_portal.files import copy_reference
-from imessage_portal.outbox import Outbox
-from imessage_portal.portal import Portal, addressed, HELP
-from imessage_portal.source import SQLiteSource
-from imessage_portal.state import Store
+from rapp_bubbles.clients import NativeClient, NotSubmitted, RuntimeClient, SubmissionUnknown
+from rapp_bubbles.config import Config, PortalError, MAX_FILE_BYTES, roster_digest
+from rapp_bubbles.files import copy_reference
+from rapp_bubbles.outbox import Outbox
+from rapp_bubbles.portal import Portal, addressed, HELP
+from rapp_bubbles.source import SQLiteSource
+from rapp_bubbles.state import Store
 
 
 SENDER = "owner@example.invalid"
@@ -282,13 +282,13 @@ def enqueue_native_test_batch(env, outbox, suffixes):
 def test_import_and_help_do_not_load_brainstem(env):
     process = subprocess.run(
         [sys.executable, "-c",
-         "import sys; sys.path.insert(0,sys.argv[1]); import imessage_portal.portal; "
+         "import sys; sys.path.insert(0,sys.argv[1]); import rapp_bubbles.portal; "
          "assert not any('brainstem' in name or name.startswith('openrappter') for name in sys.modules)",
          str(SCRIPTS)], capture_output=True, text=True, timeout=10,
     )
     assert process.returncode == 0, process.stderr
     process = subprocess.run(
-        [sys.executable, str(SCRIPTS / "imessage-portal.py"), "--help"],
+        [sys.executable, str(SCRIPTS / "rapp-bubbles.py"), "--help"],
         capture_output=True, text=True, timeout=10,
     )
     assert process.returncode == 0
@@ -1957,3 +1957,224 @@ def test_noncanonical_runtime_job_id_is_rejected(env, job_id):
     env.portal().tick()
     assert not state(env)["jobs"]
     assert any("runtime_protocol" in call["text"] for call in env.native.calls)
+
+
+def sample_report(*threads):
+    """Synthetic `sample` call graph: (count, queue, frames, wait_count) per thread."""
+    lines = ["Sampling process 1 for 1 second", "", "Call graph:"]
+    for index, (count, queue, frames, wait_count) in enumerate(threads, 1):
+        lines.append(f"    {count} Thread_{index}   DispatchQueue_{index}: {queue}  (serial)")
+        for depth, frame in enumerate(frames):
+            lines.append(f"    {'  ' * depth}+ {count} {frame}  (in Synthetic) + 4  [0x{depth:x}]")
+        lines.append(f"    {'  ' * len(frames)}+ {wait_count} xpc_connection_send_message_with_reply_sync  (in libxpc.dylib) + 8  [0xff]")
+    lines += ["", "Total number in stack (recursive counted multiple, when >=5):", "Binary Images:"]
+    return "\n".join(lines)
+
+
+def test_doctor_names_dasd_as_the_root_of_a_wedged_imessage_chain():
+    from rapp_bubbles import doctor
+
+    reports = {
+        "imagent": sample_report(
+            (500, "com.apple.bg.system.task.internal.queue", ["-[_DASScheduler submitTaskRequestWithIdentifier:]"], 500),
+            (500, "com.apple.IDSDaemonControllerConnectingQueue", ["??? (in IDS)"], 500),
+        ),
+        "identityservicesd": sample_report(
+            (500, "com.apple.main-thread", ["-[KTOptInManager getOptInState]"], 500),
+        ),
+        "transparencyd": sample_report(
+            (500, "com.apple.bg.system.task.internal.queue", ["-[BGSystemTaskScheduler submitTaskRequest:error:]"], 500),
+        ),
+        "callservicesd": sample_report(
+            (500, "com.apple.telephonyutilities.callcapabilitiesxpcclient", ["??? (in TelephonyUtilities)"], 500),
+        ),
+    }
+    pids = {"Messages": 1, "imagent": 2, "identityservicesd": 3, "transparencyd": 4, "callservicesd": 5}
+    result = doctor.diagnose(pids, reports, "timeout")
+    assert result["verdict"] == "dasd_unresponsive" and result["ok"] is False
+    assert result["roots"] == ["dasd"]
+    assert result["fix"] == "sudo launchctl kickstart -k system/com.apple.dasd"
+    assert {(edge["from"], edge["to"]) for edge in result["edges"]} == {
+        ("imagent", "dasd"), ("imagent", "identityservicesd"),
+        ("identityservicesd", "transparencyd"), ("transparencyd", "dasd"),
+    }
+
+
+def test_doctor_does_not_blame_brief_waits_and_reports_healthy_stack():
+    from rapp_bubbles import doctor
+
+    brief = sample_report((500, "com.apple.bg.system.task.internal.queue", ["-[_DASScheduler submitTask]"], 3))
+    assert doctor.blocked_waits(brief) == []
+    result = doctor.diagnose({"Messages": 1, "imagent": 2}, {"imagent": brief}, "connected")
+    assert result["verdict"] == "healthy" and result["ok"] is True and not result["edges"]
+
+
+def test_doctor_names_a_missing_dependency_and_a_missing_messages_app():
+    from rapp_bubbles import doctor
+
+    waiting = sample_report((500, "com.apple.IDSDaemonControllerConnectingQueue", ["??? (in IDS)"], 500))
+    result = doctor.diagnose({"Messages": 1, "imagent": 2}, {"imagent": waiting}, "timeout")
+    assert result["verdict"] == "blocked_on_identityservicesd"
+    assert "not running" in result["explanation"] and "fix" not in result
+    assert doctor.diagnose({"imagent": 2}, {}, None)["verdict"] == "messages_not_running"
+
+
+def feed_post(env, **changes):
+    from rapp_bubbles import feed
+
+    values = {"text": "Loop 01\n1. Ship it\n2. Hold", "options": 2, "ttl": 300, "channel": "loop"}
+    values.update(changes)
+    config = env.config()
+    with Store(config.state_dir) as store:
+        outbox = Outbox(config, store, env.native, env.clock, env.source.target_matches, env.source.tail)
+        return feed.post(store, outbox, ACTOR, TARGET, now=env.clock(), **values)["id"]
+
+
+def delivered_feed_post(env, **changes):
+    post_id = feed_post(env, **changes)
+    env.portal().tick()
+    env.clock.advance(10)
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["state"] == "open"
+    return post_id
+
+
+def test_feed_post_is_enveloped_and_the_adjacent_bare_reply_answers_it(env):
+    post_id = feed_post(env)
+    env.portal().tick()
+    assert [call["text"] for call in env.native.calls] == ["[RAPP loop]\nLoop 01\n1. Ship it\n2. Hold"]
+    env.clock.advance(10)
+    env.source.events.append(message(1, "2"))
+    env.portal().tick()
+    item = state(env)["feed"][post_id]
+    assert item["state"] == "answered"
+    assert item["answer"]["number"] == 2 and item["answer"]["explicit"] is False
+    assert len(env.native.calls) == 1 and not env.runtime.calls
+
+
+def test_feed_reply_after_an_intervening_message_needs_explicit_rapp_reply(env):
+    post_id = delivered_feed_post(env, options=3)
+    env.source.prior_guids[CHAT] = "OTHER-AI-UPDATE"
+    env.source.events.append(message(1, "2"))
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["state"] == "open"
+    env.source.events.append(message(2, "RAPP reply 3"))
+    env.portal().tick()
+    item = state(env)["feed"][post_id]
+    assert item["state"] == "answered" and item["answer"]["number"] == 3 and item["answer"]["explicit"] is True
+    assert any(call["text"].endswith("Got it.") for call in env.native.calls)
+
+
+def test_bare_number_under_a_feed_card_answers_it_instead_of_an_older_approval(env):
+    env.source.events.append(message(1, "RAPP inspect these files"))
+    env.portal().tick()
+    assert submitted(env)
+    env.clock.advance(10)
+    post_id = delivered_feed_post(env)
+    env.source.events.append(message(2, "2"))
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["answer"]["number"] == 2
+    assert not [call for call in env.runtime.calls if call["op"] in ("approve", "cancel")]
+
+
+@pytest.mark.parametrize("text", ["restart", "wake up", "Shut down"])
+def test_lifecycle_words_under_a_feed_card_stay_with_the_legacy_watcher(env, text):
+    post_id = delivered_feed_post(env)
+    env.source.events.append(message(1, text))
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["state"] == "open"
+
+
+def test_feed_reply_window_expires_after_delivery(env):
+    post_id = delivered_feed_post(env, ttl=30)
+    env.clock.advance(31)
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["state"] == "expired"
+    env.source.events.append(message(1, "1"))
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["answer"] is None
+
+
+def test_feed_image_card_reply_is_captured_by_attachment_adjacency(env):
+    card = env.root / "card.png"
+    card.write_bytes(b"synthetic card")
+    post_id = feed_post(env, text="Loop 01 card", file=str(card))
+    env.portal().tick()
+    call = env.native.calls[0]
+    assert call["file"].endswith("-card.png") and call["text"] == "[RAPP loop]\nLoop 01 card"
+    env.clock.advance(10)
+    env.portal().tick()
+    env.source.events.append(message(1, "1"))
+    env.portal().tick()
+    assert state(env)["feed"][post_id]["answer"]["number"] == 1
+
+
+def test_unhealthy_messages_holds_sends_and_a_newer_post_replaces_the_stale_one(env):
+    healthy = []
+
+    def health(value, _now):
+        value["code"] = "connected" if healthy else "imessage_account_blocked"
+        return bool(healthy)
+
+    env.native.health = health
+    first = feed_post(env, text="Loop 01")
+    env.portal().tick()
+    assert not env.native.calls
+    assert state(env)["imessage_health"]["code"] == "imessage_account_blocked"
+    second = feed_post(env, text="Loop 02")
+    assert state(env)["feed"][first]["state"] == "superseded"
+    healthy.append(True)
+    env.clock.advance(60)
+    env.portal().tick()
+    assert [call["text"] for call in env.native.calls] == ["[RAPP loop]\nLoop 02"]
+    assert state(env)["feed"][second]["state"] == "pending"
+
+
+def test_native_health_gate_relaunches_backs_off_and_fails_open(env, monkeypatch):
+    from rapp_bubbles import clients
+
+    calls, pid, answers = [], {"value": None}, {}
+    monkeypatch.setattr(clients, "messages_pid", lambda: pid["value"])
+    monkeypatch.setattr(clients, "launch_messages", lambda: calls.append("launch"))
+    monkeypatch.setattr(clients, "restart_messages", lambda value: calls.append(("restart", value)))
+    monkeypatch.setattr(clients, "osascript",
+                        lambda script, _timeout: answers["account" if "connection status" in script else "name"])
+    native, health = NativeClient(env.config()), {}
+    assert native.health(health, 1000) is False and health["code"] == "messages_relaunched" and calls == ["launch"]
+    assert native.health(health, 1010) is False and calls == ["launch"]
+    pid["value"] = 42
+    answers.update(name=("ok", "Messages"), account=("unresponsive", ""))
+    assert native.health(health, 1050) is False and health["code"] == "imessage_account_blocked"
+    assert "rapp_bubbles.doctor" in health["hint"]
+    answers["account"] = ("missing", "")
+    assert native.health(health, 1100) is False and health["code"] == "imessage_account_missing"
+    answers["account"] = ("ok", "connected")
+    assert native.health(health, 1150) is True and health["code"] == "connected" and "hint" not in health
+    assert native.health(health, 1250) is True
+    answers["name"] = ("unresponsive", "")
+    assert native.health(health, 1300) is False and health["code"] == "messages_unresponsive"
+    assert native.health(health, 1500) is False and health["code"] == "messages_unresponsive"
+    assert native.health(health, 1650) is False and health["code"] == "messages_restarted"
+    assert native.health(health, 1700) is False and native.health(health, 1900) is False
+    assert calls.count(("restart", 42)) == 1
+    answers["name"] = ("error", "")
+    assert native.health(health, 2000) is True and health["code"] == "health_unverified"
+
+
+def test_cli_post_targets_only_the_authorized_direct_thread_and_reports_status(env, capsys):
+    from rapp_bubbles import cli
+
+    make_database(env).close()
+    path = env.root / "private-portal.json"
+    path.write_text(json.dumps(env.raw))
+    path.chmod(0o600)
+    assert cli.main(["--config", str(path), "post", "--text", "Loop 01", "--options", "2"]) == 0
+    posted = json.loads(capsys.readouterr().out)
+    assert posted["ok"] is True and posted["state"] == "pending"
+    assert cli.main(["--config", str(path), "feed-status", "--id", posted["post"]]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["posts"][0]["parts"] == ["queued"] and report["posts"][0]["options"] == 2
+    assert cli.main(["--config", str(path), "post", "--text", "x", "--route", "5"]) == 1
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "feed_target"
+    assert cli.main(["--config", str(path), "transport-status"]) == 0
+    assert json.loads(capsys.readouterr().out)["feed"] == ["pending"]

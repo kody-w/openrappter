@@ -50,6 +50,14 @@ class SQLiteSource:
             return bool(target.get("roster_hash")) and roster_digest(participants) == target["roster_hash"]
         return True
 
+    def direct_target(self, chat_guid: str) -> dict | None:
+        """The authorized one-to-one iMessage chat for an operator post, if it exists."""
+        row = self.db.execute("SELECT ROWID FROM chat WHERE guid=?", (chat_guid,)).fetchone()
+        if row is None:
+            return None
+        target = {"chat_id": row[0], "chat_guid": chat_guid, "is_group": False}
+        return target if self.target_matches(target) else None
+
     def latest_prior_guid(self, event: dict) -> str | None:
         row = self.db.execute(
             """SELECT m.guid FROM message m

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import selectors
 import select
 import subprocess
@@ -242,3 +243,133 @@ class NativeClient:
         if not text.strip() and not event.get("has_attachments"):
             raise PortalError("text_decode_unavailable", "The native message body is not ready.")
         return text
+
+    def health(self, state: dict, now: float) -> bool:
+        """Gate native sends on a working Messages stack; relaunch Messages if it died.
+
+        Sending into a dead or wedged stack lets Apple Events succeed without ever creating
+        chat rows, stranding parts as unknown, so parts stay queued instead. Only positive
+        evidence holds sends; a probe that cannot run (for example, missing Automation
+        consent) fails open to the ungated behavior.
+        """
+        age = now - state.get("checked_at", float("-inf"))
+        if 0 <= age < (HEALTH_OK_SECONDS if state.get("ok") else HEALTH_RETRY_SECONDS):
+            return bool(state.get("ok"))
+        try:
+            return self._probe(state, now)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return _verdict(state, now, True, "health_unverified")
+
+    def _probe(self, state: dict, now: float) -> bool:
+        pid = messages_pid()
+        if pid is None:
+            launch_messages()
+            _restarted(state, now, "relaunched_messages")
+            return _verdict(state, now, False, "messages_relaunched")
+        outcome, _ = osascript('tell application "Messages" to get name', 5)
+        if outcome == "unresponsive":
+            since = state.setdefault("unresponsive_since", now)
+            backoff = min(RESTART_BACKOFF_SECONDS * 2 ** state.get("restart_streak", 0), RESTART_BACKOFF_MAX)
+            if now - since >= UNRESPONSIVE_SECONDS and now - state.get("last_restart", float("-inf")) >= backoff:
+                restart_messages(pid)
+                _restarted(state, now, "restarted_unresponsive_messages")
+                state["restart_streak"] = state.get("restart_streak", 0) + 1
+                state.pop("unresponsive_since", None)
+                return _verdict(state, now, False, "messages_restarted")
+            return _verdict(state, now, False, "messages_unresponsive")
+        state.pop("unresponsive_since", None)
+        if outcome == "error":
+            return _verdict(state, now, True, "health_unverified")
+        outcome, status = osascript(
+            'tell application "Messages" to get connection status of '
+            '(first account whose service type = iMessage)', 6,
+        )
+        if outcome == "unresponsive":
+            return _verdict(state, now, False, "imessage_account_blocked", hint=BLOCKED_HINT)
+        if outcome == "missing":
+            return _verdict(state, now, False, "imessage_account_missing")
+        if outcome == "error":
+            return _verdict(state, now, True, "health_unverified")
+        if status.casefold() != "connected":
+            return _verdict(state, now, False, "imessage_" + re.sub(r"[^a-z]+", "_", status.casefold()).strip("_")[:32])
+        state["restart_streak"] = 0
+        return _verdict(state, now, True, "connected")
+
+
+HEALTH_OK_SECONDS = 120
+HEALTH_RETRY_SECONDS = 45
+UNRESPONSIVE_SECONDS = 180
+RESTART_BACKOFF_SECONDS = 600
+RESTART_BACKOFF_MAX = 7200
+MESSAGES_EXECUTABLES = (
+    "/System/Applications/Messages.app/Contents/MacOS/Messages",
+    "/Applications/Messages.app/Contents/MacOS/Messages",
+)
+# AppleScript errors that mean Messages cannot answer yet, versus ones that mean the
+# probe itself is not possible (for example -1743, Automation consent not granted).
+UNRESPONSIVE_ERRORS = {"-600", "-609", "-1712"}
+MISSING_ERRORS = {"-1728", "-1719"}
+BLOCKED_HINT = (
+    "Messages is up but its iMessage account layer is not answering. Run the read-only "
+    "doctor (python -m rapp_bubbles.doctor) to name the stuck dependency; after a "
+    "disk-full it was the root scheduler dasd: sudo launchctl kickstart -k system/com.apple.dasd"
+)
+
+
+def messages_pid() -> int | None:
+    listing = subprocess.run(
+        ["/bin/ps", "-U", str(os.getuid()), "-o", "pid=,comm="],
+        capture_output=True, text=True, timeout=10,
+    ).stdout
+    for line in listing.splitlines():
+        fields = line.strip().split(None, 1)
+        if len(fields) == 2 and fields[1] in MESSAGES_EXECUTABLES:
+            return int(fields[0])
+    return None
+
+
+def osascript(script: str, timeout: float) -> tuple[str, str]:
+    """Returns (ok|unresponsive|missing|error, output)."""
+    try:
+        done = subprocess.run(["/usr/bin/osascript", "-e", script], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "unresponsive", ""
+    if done.returncode == 0:
+        return "ok", done.stdout.strip()
+    code = re.search(r"\((-?\d+)\)\s*$", done.stderr.strip())
+    number = code.group(1) if code else ""
+    if number in UNRESPONSIVE_ERRORS:
+        return "unresponsive", ""
+    return ("missing" if number in MISSING_ERRORS else "error"), ""
+
+
+def launch_messages() -> None:
+    subprocess.run(["/usr/bin/open", "-g", "-a", "Messages"], capture_output=True, timeout=20, check=False)
+
+
+def restart_messages(pid: int) -> None:
+    """Restart one hung Messages process by PID (never by name), then relaunch it."""
+    try:
+        os.kill(pid, 15)
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline and messages_pid() == pid:
+            time.sleep(0.25)
+        if messages_pid() == pid:
+            os.kill(pid, 9)
+    except ProcessLookupError:
+        pass
+    launch_messages()
+
+
+def _restarted(state: dict, now: float, reason: str) -> None:
+    state["last_restart"] = now
+    state["restarts"] = (state.get("restarts", []) + [{"at": now, "reason": reason}])[-10:]
+
+
+def _verdict(state: dict, now: float, ok: bool, code: str, *, hint: str | None = None) -> bool:
+    state.update(ok=ok, code=code, checked_at=now)
+    if hint:
+        state["hint"] = hint
+    else:
+        state.pop("hint", None)
+    return ok

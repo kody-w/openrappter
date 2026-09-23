@@ -1,4 +1,8 @@
-# RAPP media hook for an existing iMessage watcher
+# rapp-bubbles — RAPP's iMessage bridge for an existing watcher
+
+rapp-bubbles (formerly the RAPP iMessage portal / media hook) is our
+BlueBubbles-inspired bridge: RAPP tasks, approvals, media, operator updates,
+and Messages health from one authorized iMessage thread.
 
 This is a **local source hook**, not another bot, LaunchAgent, Messages account,
 network server, or model provider. It must be called by the existing watcher.
@@ -43,13 +47,16 @@ Only `RAPP …` / `RAPP: …` addresses this portal. Case does not matter.
 | `RAPP retry <job-id>` | Retry only confirmed failed output parts; never successful or uncertain parts. |
 | `RAPP resend <part-id>` | Explicitly redeliver one uncertain part **after checking the phone**; the old attempt may still arrive. |
 | `RAPP clear files` | Clear the pending file selection and close its intake window. |
+| A reply directly under an operator update with options | Answers that update (numbers pick its options); see the operator feed. |
+| `RAPP reply <text>` | Answer the latest open operator update even after other messages. |
 | `RAPP help` | Explain routing and these commands. |
 
 When several tasks await approval, bare numbers cannot select one. Use an exact
 job id. Bare numbers also require the immediately preceding message in the
 chat to be that confirmed approval card: another AI's prompt, a different
 conversation turn, or an intervening status reply requires explicit
-`RAPP 1` / `RAPP 2`, or `RAPP approve <job-id>` instead. The latest-card lookup
+`RAPP 1` / `RAPP 2`, or `RAPP approve <job-id>` instead. A bare number directly
+under an open operator update answers that update instead. The latest-card lookup
 checks the preceding row in the exact chat, including foreign outbound rows
 that are not eligible user commands. Attachment-only messages outside an armed intake window belong to the
 rest of the conversation and are not opened, acknowledged, or executed by this
@@ -229,7 +236,7 @@ at shell-source time and has no autonomous `run`/daemon mode.
 Use `check-config` before deployment:
 
 ```bash
-python3.12 scripts/imessage-portal.py --config /absolute/private-portal.json check-config
+python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json check-config
 ```
 
 At first operator-controlled `tick`, the portal records the current maximum
@@ -247,8 +254,8 @@ is tracked per job so a batch boundary cannot skip the remaining jobs when
 the watcher generation changes.
 
 ```bash
-python3.12 scripts/imessage-portal.py --config /absolute/private-portal.json tick
-python3.12 scripts/imessage-portal.py --config /absolute/private-portal.json transport-status
+python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json tick
+python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json transport-status
 ```
 
 Tick output contains counts/error codes, not handles, chat ids, prompt bodies,
@@ -451,6 +458,79 @@ discarding a potentially addressed message. Known audio-message metadata is
 kept as attachment input and is never promoted from automatic transcription
 into an approval/command. Actual phone-path acceptance remains separate.
 
+## Operator feed, Messages health, and the doctor
+
+### Operator feed (`post`, `feed-status`)
+
+Local agents post progress into the authorized direct thread through the same
+durable outbox and receipt reconciliation used for task results:
+
+```bash
+python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json post \
+  --text "Loop 01 · pick one" --file /absolute/card.png --options 3 --ttl 300 --channel loop
+python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json feed-status --id post-…
+```
+
+- Every post's text or caption begins with `[RAPP <channel>]`, so an echoed
+  update can never trigger the legacy watcher's lifecycle words.
+- A newer post in a channel replaces older posts there that have not left the
+  Mac, so an outage never releases a burst of stale cards.
+- Posts with `--options N` (1–9) collect one answer. The owner's next message is
+  captured only when it directly follows the post in the chat (GUID adjacency),
+  including a bare number while a task approval waits; lifecycle words
+  (restart, wake up, shut down, …) are never captured. After an intervening
+  message, `RAPP reply <text>` answers the latest open post explicitly. The reply
+  window starts at delivery and lasts `--ttl` seconds. Answers are read back
+  only through `feed-status`.
+
+### Messages health gate
+
+Before submitting queued parts, the outbox checks Messages. If Messages is not
+running it is relaunched. If it does not answer Apple Events for 3 minutes, that
+one PID is restarted (at most every 10 minutes, doubling to 2 hours). If the
+iMessage account does not answer (`imessage_account_blocked`) or is not
+connected, parts stay queued instead of becoming unknown. A probe that cannot
+run at all (for example, Automation consent is missing) fails open to the
+ungated behavior. Healthy results are cached for 120 s and unhealthy ones for
+45 s; nothing is probed while the outbox is empty. `transport-status` reports the
+verdict under `imessage`.
+
+### Doctor (read-only)
+
+```bash
+(cd scripts && python3.12 -m rapp_bubbles.doctor)
+python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json doctor
+```
+
+It samples only same-user iMessage processes (Messages, imagent,
+identityservicesd, transparencyd, syncdefaultsd, callservicesd, accountsd) for
+one second, recognizes synchronous XPC waits, and names the lowest unresponsive
+link and its fix. It restarts nothing and reads no message data.
+
+### Runbook: iMessage wedged after a disk-full (2026-09-22)
+
+- Symptoms: Messages hangs at launch, or answers `get name` but not the account
+  query; sends return `ok` but no chat.db row appears. The doctor reports
+  `dasd_unresponsive`: imagent, syncdefaultsd, and transparencyd block in
+  `-[_DASScheduler submitTaskRequest…]` and identityservicesd waits on
+  transparencyd.
+- Restarting Messages or the per-user iMessage daemons cannot help.
+- `sudo launchctl kickstart -k system/com.apple.dasd` is refused while System
+  Integrity Protection is on (error 150). What worked: an administrator stops the
+  dasd process by PID (`sudo kill -TERM <pid>`, then `-KILL` if it lingers);
+  launchd relaunches it and every daemon unblocked within seconds, with no other
+  restarts. A reboot also works; plan the FileVault unlock.
+- The trigger was the disk filling up; keep free space monitored.
+
+### What we took from BlueBubbles
+
+BlueBubbles (Apache-2.0) confirms AppleScript sends by awaiting chat.db rows
+with heuristic text matching, restarts Messages with quit/reopen, and offers a
+Private API that requires SIP to be disabled and still depends on imagent. It
+has no remedy for a wedged dasd. rapp-bubbles keeps exact-identity
+reconciliation, never automatically resends a part that may have left the Mac,
+and adds the health gate and the doctor.
+
 ## Synthetic validation, then separately authorized real acceptance
 
 Run the focused suite with an existing Python 3.10+ pytest environment.
@@ -463,7 +543,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   HOME="$PWD/.test-artifacts/home" TMPDIR="$PWD/.test-artifacts" \
   /absolute/path/to/existing-pytest-python -m pytest -q --noconftest \
   -p no:cacheprovider --basetemp=.test-artifacts/pytest \
-  python/tests/test_imessage_portal.py
+  python/tests/test_rapp_bubbles.py
 bash -n scripts/imessage-portal-watcher-hook.sh
 ```
 

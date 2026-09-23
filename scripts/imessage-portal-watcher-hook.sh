@@ -1,5 +1,6 @@
 #!/bin/bash
-# Source this file from the existing watcher; it starts nothing by itself.
+# rapp-bubbles hook. Source this file from the existing watcher; it starts nothing by itself.
+# The file and function names are kept so existing watchers keep working unchanged.
 
 imessage_portal_owns_text() {
   [[ "${1-}" =~ ^[[:space:]]*[Rr][Aa][Pp][Pp]([[:space:]:]|$) ]] \
@@ -13,7 +14,7 @@ imessage_portal_tick() {
     return 1
   fi
   if ! RAPP_PORTAL_WATCHER_INSTANCE="$$" \
-      "$RAPP_PORTAL_PYTHON" "$RAPP_PORTAL_SOURCE/scripts/imessage-portal.py" \
+      "$RAPP_PORTAL_PYTHON" "$RAPP_PORTAL_SOURCE/scripts/rapp-bubbles.py" \
       --config "$RAPP_PORTAL_CONFIG" tick; then
     if declare -F log >/dev/null; then log "RAPP portal transport needs attention; private state retained"; fi
     return 1

@@ -6,6 +6,7 @@ import errno
 import hashlib
 import os
 import re
+import shutil
 import stat
 import uuid
 from contextlib import contextmanager
@@ -89,6 +90,12 @@ def regular_file(
             os.close(descriptor)
         if directory is not None:
             os.close(directory)
+
+
+def room_for(directory: Path, size: int) -> bool:
+    """Whether a copy of ``size`` bytes leaves headroom. Copies are never tried into a full
+    disk: each attempt would drive the volume to zero for Messages and everything else."""
+    return shutil.disk_usage(directory).free >= size + 16 * 2**20
 
 
 def copy_reference(

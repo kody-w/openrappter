@@ -3746,13 +3746,14 @@ def test_a_full_disk_while_staging_is_not_called_an_unsafe_file(env, monkeypatch
 def test_a_file_part_waits_while_the_disk_is_full_and_goes_out_after(env, monkeypatch):
     from rapp_bubbles import outbox as outbox_module
 
-    free = {"bytes": 0}
+    free = {"bytes": 50 * 2**30}
     monkeypatch.setattr(shutil, "disk_usage",
                         lambda _path: SimpleNamespace(total=100 * 2**30, used=0, free=free["bytes"]))
     real = outbox_module.copy_reference
     with Store(env.config().state_dir) as store:
         outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
         enqueue_native_test_batch(env, outbox, [".png"])
+        free["bytes"] = 0
         for _ in range(3):
             outbox.pump()
             env.clock.advance(10)
@@ -3813,3 +3814,63 @@ def test_reader_does_not_vouch_for_a_long_or_inverted_gap(env):
     assert source.between(CHAT, "ROW-2", "ROW-4") == [{"guid": "ROW-3", "is_from_me": False}]
     source.close()
     db.close()
+
+
+def full_disk(monkeypatch, free):
+    monkeypatch.setattr(shutil, "disk_usage",
+                        lambda _path: SimpleNamespace(total=100 * 2**30, used=0, free=free["bytes"]))
+
+
+def test_copies_are_never_tried_into_a_full_disk(env, monkeypatch):
+    from rapp_bubbles import portal as portal_module
+
+    free = {"bytes": 0}
+    full_disk(monkeypatch, free)
+    attempts = []
+    real = portal_module.copy_reference
+    monkeypatch.setattr(portal_module, "copy_reference",
+                        lambda *args, **kwargs: (attempts.append(1), real(*args, **kwargs))[1])
+    env.source.events.extend([
+        message(1, "RAPP attach"), message(2, "", has_attachments=True, attachments=[attachment(env)]),
+    ])
+    for _ in range(3):
+        env.portal().tick()
+        env.clock.advance()
+    assert not attempts and next(
+        item for item in state(env)["inbox"].values() if item["event"]["id"] == 2
+    )["state"] == "receiving"
+    free["bytes"] = 50 * 2**30
+    for _ in range(3):
+        env.portal().tick()
+        env.clock.advance()
+    assert attempts and any("Saved 1 attachment" in call["text"] for call in env.native.calls)
+    free["bytes"] = 0
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        with pytest.raises(PortalError) as caught:
+            enqueue_native_test_batch(env, outbox, [".png"])
+    assert caught.value.code == "disk_full"
+
+
+def test_a_file_waiting_for_space_costs_no_health_probe_or_write(env, monkeypatch):
+    free = {"bytes": 50 * 2**30}
+    full_disk(monkeypatch, free)
+    probes = []
+
+    def health(value, now):
+        probes.append(now)
+        value["checked_at"] = now
+        return True
+
+    env.native.health = health
+    with Store(env.config().state_dir) as store:
+        outbox = Outbox(env.config(), store, env.native, env.clock, env.source.target_matches)
+        enqueue_native_test_batch(env, outbox, [".png"])
+        free["bytes"] = 0
+        outbox.pump()  # the text bubble goes; the file waits for space
+        before = len(probes)
+        for _ in range(5):
+            env.clock.advance(150)
+            outbox.pump()
+        assert len(probes) == before
+        assert next(part for part in store.data["outbox"] if "file" in part)["state"] == "queued"

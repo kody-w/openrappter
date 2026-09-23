@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import shutil
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +12,7 @@ from typing import Callable
 from .clients import NotSubmitted, SubmissionUnknown
 from .config import Config, PortalError, normalized
 from . import itui
-from .files import copy_reference, filename
+from .files import copy_reference, filename, room_for
 from .state import JournalWriteError, Store, strict
 
 
@@ -107,6 +106,8 @@ class Outbox:
                     self.config.state_dir / "outbox" / identity
                     / f"rapp-{identity}-{display_name}"
                 )
+                if not room_for(self.config.state_dir, size):
+                    raise PortalError("disk_full", "The disk is full; free space and it will be retried.")
                 try:
                     reference = copy_reference(
                         source, (workspace,), destination, self.config.max_file_bytes,
@@ -268,7 +269,9 @@ class Outbox:
                     self.store.save()
         if reconcile_only:
             return
-        if not any(part["state"] == "queued" for part in self.store.data["outbox"]):
+        # Only parts that can go now wake the health gate: a file waiting for disk space (or a
+        # part waiting on the bubble before it) must not cost a probe and a write each time.
+        if not any(part["state"] == "queued" and self._ready(part) for part in self.store.data["outbox"]):
             return
         health = getattr(self.native, "health", None)
         if callable(health):
@@ -287,17 +290,7 @@ class Outbox:
         for part in sorted(self.store.data["outbox"], key=lambda item: not item["group"].startswith("sys:")):
             if budget == 0:
                 break
-            if part["state"] != "queued":
-                continue
-            previous = [p for p in self.parts(part["group"]) if p["index"] < part["index"]]
-            if any(
-                p["state"] not in ({"sent", "delivered"} if "file" in p else ACCEPTED)
-                for p in previous
-            ):
-                continue
-            if "file" in part and not self._room_for(part["file"].get("size_bytes") or 0):
-                # Verifying a file copies it once more; on a full disk it waits, still queued
-                # and unwritten, and goes out by itself once space is freed.
+            if part["state"] != "queued" or not self._ready(part):
                 continue
             # A transient chat.db error here fails the tick with the part still queued.
             allowed = self._allowed(part)
@@ -368,8 +361,14 @@ class Outbox:
             self.store.save()
             budget -= 1
 
-    def _room_for(self, size: int) -> bool:
-        return shutil.disk_usage(self.config.state_dir).free >= size + 16 * 2**20
+    def _ready(self, part: dict) -> bool:
+        """A queued part can go now: the bubbles before it are accepted and, for a file, there
+        is room to verify it (on a full disk it waits, still queued and unwritten, and goes
+        out by itself once space is freed)."""
+        previous = [p for p in self.parts(part["group"]) if p["index"] < part["index"]]
+        if any(p["state"] not in ({"sent", "delivered"} if "file" in p else ACCEPTED) for p in previous):
+            return False
+        return "file" not in part or room_for(self.config.state_dir, part["file"].get("size_bytes") or 0)
 
     def retry(self, actor: dict, job_id: str, *, uncertain_part: str | None = None) -> int:
         changed = 0

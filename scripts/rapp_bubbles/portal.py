@@ -17,7 +17,7 @@ from pathlib import Path
 from . import feed, itui
 from .clients import RuntimeClient, NativeClient, NotSubmitted, SubmissionUnknown
 from .config import Config, PortalError, normalized, roster_digest
-from .files import copy_reference, filename, regular_file
+from .files import copy_reference, filename, regular_file, room_for
 from .outbox import Outbox, token
 from .source import SQLiteSource
 from .state import JournalWriteError, Store, strict
@@ -1226,6 +1226,11 @@ class Portal:
                         waiting = True
                         continue
                 name = filename(attachment.get("transfer_name") or Path(original).name)
+                if not room_for(self.config.state_dir, max(size, record["observations"][key]["value"][1])):
+                    # Never copy into a full disk; wait for space until the upload's deadline.
+                    record["staging_error"] = "disk_full"
+                    waiting = True
+                    continue
                 destination = self.config.state_dir / "inbox" / identity / f"{index}-{name}"
                 reference = copy_reference(
                     original, self.config.incoming_roots, destination, self.config.max_file_bytes,

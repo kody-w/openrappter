@@ -49,17 +49,20 @@ def post(store, outbox: Outbox, actor: dict, target: dict, *, text: str, file: s
         if other["channel"] != channel or other["state"] not in ("pending", "open", "delivered"):
             continue
         # A newer update replaces any older card that has not left this Mac yet, so an
-        # iMessage outage never releases a burst of stale cards when it recovers.
+        # iMessage outage never releases a burst of stale cards when it recovers. A card
+        # already on the phone stays answerable; adjacency decides which one a reply meant.
         stale = [part for part in _parts(store, other) if part["state"] == "queued"]
         for part in stale:
             if "file" in part:
                 Path(part["file"]["path"]).unlink(missing_ok=True)
         store.data["outbox"] = [part for part in store.data["outbox"] if part not in stale]
-        other.update(state="superseded", superseded_by=post_id)
+        if not _parts(store, other):
+            other.update(state="superseded", superseded_by=post_id)
     group = "feed:" + post_id
     identity = token(group + ":0")
-    # Every portal-sent text starts with "[RAPP " so the legacy watcher never acts on an echo.
-    envelope = f"[RAPP {channel}]\n"
+    # Every portal-sent text starts with "[RAPP " so the legacy watcher never acts on an echo;
+    # the post's own first line shares line one, which is what the lock screen shows.
+    envelope = f"[RAPP {channel}] "
     if file:
         source = Path(file).expanduser().resolve(strict=True)
         digest, size = hashlib.sha256(), 0
@@ -125,23 +128,29 @@ def capture(store, event: dict, actor: dict, text: str, now: float, *,
     ]
     if not candidates:
         return None
-    item = max(candidates, key=lambda value: value["created_at"])
     has_files = event.get("has_attachments") is True or bool(event.get("attachments"))
     if not explicit:
-        guids = {
-            value for part in _parts(store, item)
-            for value in (part.get("guid"), part.get("caption_guid")) if value
-        }
+        # The card directly above the reply, not the newest one: a newer card may still be
+        # queued while the owner answers the one on the phone.
         before = prior() if callable(prior) else prior
-        if not before or before not in guids:
+        adjacent = [
+            item for item in candidates if before and before in {
+                value for part in _parts(store, item)
+                for value in (part.get("guid"), part.get("caption_guid")) if value
+            }
+        ]
+        if not adjacent:
             return None
+        item = adjacent[0]
         if LIFECYCLE.search(text.strip()) or not (text.strip() or has_files):
             return None
-    elif item["state"] == "pending" and not any(
-        part.get("guid") or part.get("caption_guid") for part in _parts(store, item)
-    ):
-        # Nothing has reached the phone yet, so there is nothing to answer.
-        return None
+    else:
+        item = max(candidates, key=lambda value: value["created_at"])
+        if item["state"] == "pending" and not any(
+            part.get("guid") or part.get("caption_guid") for part in _parts(store, item)
+        ):
+            # Nothing has reached the phone yet, so there is nothing to answer.
+            return None
     stripped = text.strip()
     # ASCII only: "²" or "①" pass str.isdigit() but crash int() and would wedge every tick.
     number = int(stripped) if re.fullmatch(r"[1-9]", stripped) and int(stripped) <= item["options"] else None

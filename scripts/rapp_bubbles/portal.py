@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import feed
+from . import feed, itui
 from .clients import RuntimeClient, NativeClient, NotSubmitted, SubmissionUnknown
 from .config import Config, PortalError, normalized, roster_digest
 from .files import copy_reference, filename, regular_file
@@ -49,6 +49,10 @@ HELP = (
     "RAPP clear files — discard the pending input selection.\n"
     "Loop updates: a bare reply right after an update answers it (numbers pick its options). "
     "RAPP reply <text> answers the latest open update even after other messages.\n"
+    "Cards end with [n] options: reply the digit right under a card, or RAPP <n> after other "
+    "messages (an open approval card keeps 1/2). Running tasks keep sending ETA updates.\n"
+    "RAPP quiet [job] stops a task's automatic updates; its result still comes.\n"
+    "Short refs work as job ids: the 4 characters in [RAPP 9c1e].\n"
     "Other conversation belongs to other AIs. Unprefixed wake/restart/shutdown remains Claude's."
 )
 
@@ -181,6 +185,13 @@ class Portal:
     def _task_command(body: str) -> bool:
         words = body.split(maxsplit=1)
         command = words[0].casefold() if words else "help"
+        if re.fullmatch(r"[1-9]", command):
+            return len(words) > 1
+        if command == "quiet":
+            # "RAPP quiet the fans" is still a task; only "quiet" or "quiet <job ref>" is a command.
+            return len(words) > 1 and not (
+                itui.HEX_REF.fullmatch(words[1].strip()) or JOB_ID.fullmatch(words[1].strip())
+            )
         return body.casefold() != "clear files" and command not in {
             "help", "?", "attach", "1", "2", "approve", "files", "list", "resume", "recover",
             "status", "result", "stop", "cancel", "retry", "resend",
@@ -212,8 +223,63 @@ class Portal:
             ):
                 conversation["uploads"].append(selected)
 
-    def _notice(self, key: str, actor: dict, target: dict, text: str, job_id=None) -> None:
-        self.outbox.enqueue(key, actor, target, text, job_id=job_id)
+    def _notice(
+        self, key: str, actor: dict, target: dict, text: str, job_id=None, *,
+        title: str | None = None, glyph: str | None = None, menu: str | None = "notice",
+    ) -> None:
+        commands = None
+        if not text.startswith("[RAPP "):
+            ref = token(f"{key}:0")[:6]
+            lines = text.splitlines() or [""]
+            head = itui.header(itui.short(job_id) if job_id else ref, glyph or itui.GLYPH["info"], title or lines[0])
+            if not title and itui.clip(lines[0]) in head:
+                lines = lines[1:]
+            options, commands = itui.menu(menu, job_id) if menu else ([], None)
+            text = itui.card(head, body=lines, options=options, footer=f"ref {ref}" if job_id else None)
+        self.outbox.enqueue(key, actor, target, text, job_id=job_id, menu=commands)
+
+    def _job_card(self, key: str, job_id: str, job: dict, *, update: bool = False) -> None:
+        """A running task's live card: status and ETA on line one, then its options."""
+        now = self.clock()
+        stream = job.setdefault("stream", {"sent": 0, "last_at": 0, "quiet": False})
+        started = job.setdefault("started_at", now)
+        estimate = itui.estimate(now - started, job.get("progress"), self._history(job))
+        state = job["state"]
+        status = {"queued": "Queued", "cancelling": "Stopping"}.get(state, estimate["status"])
+        top = []
+        if estimate["fraction"] is not None:
+            top.append(itui.bar(estimate["fraction"]) + (" est" if estimate["basis"] == "history" else ""))
+        top.append(estimate["detail"])
+        kind = "cancelling" if state == "cancelling" else "quiet" if stream.get("quiet") else "running"
+        options, commands = itui.menu(kind, job_id)
+        if stream.get("quiet"):
+            upcoming = "result only"
+        elif stream["sent"] >= itui.MAX_UPDATES - 1 and update:
+            upcoming = "result next"
+        else:
+            upcoming = "next ~" + itui.span(max(60, started + itui.next_heartbeat(stream["sent"] + update) - now))
+        text = itui.card(
+            itui.header(itui.short(job_id), itui.GLYPH.get(state, "●"), status), top=top,
+            body=[job.get("label") or f"Task {job_id}"], options=options,
+            footer=f"{upcoming} · ref {token(f'{key}:0')[:6]}",
+        )
+        if estimate["remaining"] and not stream.get("first_eta"):
+            stream["first_eta"] = now + estimate["remaining"]
+        if update:
+            self.outbox.supersede(job_id)
+        self.outbox.enqueue(key, job["actor"], job["target"], text, job_id=job_id, menu=commands,
+                            card="progress" if update else None)
+
+    def _history(self, job: dict) -> list:
+        return self.store.data.get("eta_history", {}).get(job.get("profile") or self.config.profile, [])
+
+    def _remember_reply(self, identity: str, event: dict, actor: dict, target: dict, kind: str) -> None:
+        # Record handled replies so the reader's late-row window never dispatches them twice.
+        self.store.data["inbox"][identity] = {
+            "event": dict(event), "actor": actor, "target": target, "state": "done", "body": "",
+            "capture": False, "staged": {}, "has_files": False, "first_seen": self.clock(), "reply": kind,
+        }
+        self.store.save()
 
     def _request(self, request: dict) -> dict:
         response = self.runtime.request(request)
@@ -349,23 +415,38 @@ class Portal:
         capture = not text.strip() and has_files and capture_eligible
         if match and re.match(r"reply(\s|$)", body, re.IGNORECASE):
             answered = feed.capture(self.store, event, actor, body[5:].strip(), self.clock(), explicit=True)
+            self._remember_reply(identity, event, actor, target, "feed_reply")
             self._notice(
                 f"feed-reply:{identity}", actor, target,
                 "Got it." if answered else "There is no open update to answer right now.",
             )
             return
+        menu_pick = None
         if not match and not capture:
             # Adjacency decides ownership in a thread shared with other AIs: a reply directly
-            # under an open update answers it, even a bare number while an approval waits.
-            if feed.capture(self.store, event, actor, text, self.clock(),
-                            prior=lambda: self.source.latest_prior_guid(event)):
+            # under an open card answers it, even a bare number while an approval waits.
+            prior = []
+
+            def before():
+                if not prior:
+                    prior.append(self.source.latest_prior_guid(event))
+                return prior[0]
+
+            if feed.capture(self.store, event, actor, text, self.clock(), prior=before):
+                self._remember_reply(identity, event, actor, target, "feed_reply")
                 return
-            if not numeric:
+            digit = re.fullmatch(r"[1-9]", text.strip())
+            part = self.outbox.menu_part(before(), actor, self.clock()) if digit else None
+            if part and int(digit.group()) <= len(part["menu"]):
+                menu_pick = {"group": part["group"], "n": int(digit.group())}
+            elif not numeric:
                 return
         if len(text) > 65536:
             self._notice(f"input:{identity}:large", actor, target, "RAPP message exceeds the 64 KiB limit.")
             return
-        if numeric:
+        if menu_pick:
+            body = self.outbox.parts(menu_pick["group"])[0]["menu"][menu_pick["n"] - 1]
+        elif numeric:
             body = text.strip()
         record = {
             "event": dict(event), "actor": actor, "target": target, "body": body,
@@ -380,6 +461,8 @@ class Portal:
         }
         if previous.get("selected_by"):
             record["selected_by"] = previous["selected_by"]
+        if menu_pick:
+            record["menu_pick"] = menu_pick
         self.store.data["inbox"][identity] = record
         if record["capture"]:
             if identity not in conversation["uploads"] and not record.get("selected_by"):
@@ -488,6 +571,7 @@ class Portal:
                 f"input:{identity}:error", record["actor"], record["target"],
                 f"RAPP could not complete this request ({error.code}): {error}. "
                 "Use RAPP status to check any existing job. For failed intake, fix the cause and resend the task.",
+                title="Could not do that", glyph=itui.GLYPH["error"],
             )
 
     def _receive(self, identity: str, record: dict) -> bool:
@@ -581,13 +665,32 @@ class Portal:
         return True
 
     def _job_for_actor(self, identity: str | None, actor: dict, conversation: dict) -> tuple[str, dict]:
-        identity = identity or conversation.get("latest_job")
+        identity = self._job_ref(identity, actor) or conversation.get("latest_job")
         job = self.store.data["jobs"].get(identity)
         if not job or job["actor"] != actor:
             raise PortalError("job_not_in_thread", "No matching RAPP job belongs to this sender and thread.")
         if job["target"].get("roster_hash") != conversation["target"].get("roster_hash"):
             raise PortalError("job_audience_changed", "This job belongs to an earlier group roster. Prepare a new task for this group.")
         return identity, job
+
+    def _job_ref(self, value: str | None, actor: dict, candidates=None) -> str | None:
+        """Resolve a full job id or a unique short ref (the 4+ characters shown in [RAPP 9c1e])."""
+        if not value:
+            return value
+        jobs = self.store.data["jobs"] if candidates is None else candidates
+        if value in jobs:
+            return value
+        short = itui.HEX_REF.fullmatch(value.strip())
+        if not short:
+            return value
+        suffix = short.group(1).casefold()
+        matches = [
+            job_id for job_id in jobs
+            if job_id.casefold().endswith(suffix) and (candidates is not None or jobs[job_id]["actor"] == actor)
+        ]
+        if len(matches) > 1:
+            raise PortalError("job_ref_ambiguous", "That short job ref matches several jobs; use more characters.")
+        return matches[0] if matches else value
 
     def _command(self, identity: str, record: dict) -> None:
         actor, target, body = record["actor"], record["target"], record["body"]
@@ -616,8 +719,32 @@ class Portal:
             )
             self._notice(f"input:{identity}:cleared", actor, target, "Pending RAPP file selection cleared.")
             return
+        if re.fullmatch(r"[1-9]", command) and not argument and not (
+            command in ("1", "2") and any(
+                value["expires_at"] > self.clock() for value in conversation["approvals"].values()
+            )
+        ):
+            # RAPP <n>: the latest open card's option, after other messages intervened.
+            part = self.outbox.latest_menu(actor, self.clock())
+            if not part or int(command) > len(part["menu"]):
+                raise PortalError("no_open_menu", "No open card offers that number. Use RAPP status or RAPP list.")
+            chosen = part["menu"][int(command) - 1]
+            record["menu_pick"] = {"group": part["group"], "n": int(command)}
+            if chosen in ("1", "2"):
+                self._approve_or_cancel(identity, record, conversation, chosen, "")
+                return
+            record["body"] = chosen
+            self._command(identity, record)
+            return
         if command in ("1", "2", "approve"):
             self._approve_or_cancel(identity, record, conversation, command, argument)
+            return
+        if command == "quiet" and (not argument or itui.HEX_REF.fullmatch(argument) or JOB_ID.fullmatch(argument)):
+            job_id, job = self._job_for_actor(argument or None, actor, conversation)
+            job.setdefault("stream", {"sent": 0, "last_at": 0, "quiet": False})["quiet"] = True
+            self._notice(f"input:{identity}:quiet", actor, target,
+                         "No more automatic updates for this task.\nIts result still comes when it ends.",
+                         job_id, title="Quiet", menu="quiet")
             return
         if command == "files":
             raise PortalError("output_name_invalid", "This route accepts one output: RAPP file report.txt | task.")
@@ -678,14 +805,20 @@ class Portal:
                 job["state"] = state
                 if operation == "cancel":
                     conversation["approvals"].pop(job_id, None)
-                self._notice(f"input:{identity}:{operation}", actor, target,
-                             f"Task {job_id}: {state}. Native output: {self.outbox.summary(job_id)}.", job_id)
+                if state in ("queued", "running", "cancelling") and job.get("started_at"):
+                    self._job_card(f"input:{identity}:{operation}", job_id, job)
+                else:
+                    self._notice(f"input:{identity}:{operation}", actor, target,
+                                 f"Task {job_id}: {state}. Native output: {self.outbox.summary(job_id)}.", job_id,
+                                 title=state.capitalize(), glyph=itui.GLYPH.get(state, "·"),
+                                 menu="final" if state in TERMINAL else "notice")
             return
         if command == "resend":
-            part = next(
-                (p for p in self.store.data["outbox"] if p["id"] == argument and p["actor"] == actor),
-                None,
-            )
+            matches = [
+                p for p in self.store.data["outbox"]
+                if p["actor"] == actor and len(argument) >= 6 and p["id"].startswith(argument)
+            ]
+            part = matches[0] if len({p["id"] for p in matches}) == 1 else None
             if not part or not part.get("job_id"):
                 raise PortalError("part_not_in_thread", "No uncertain result part belongs to this thread.")
             count = self.outbox.retry(actor, part["job_id"], uncertain_part=argument)
@@ -767,6 +900,7 @@ class Portal:
             "state": state, "declared": list(record["submission"]["artifact_paths"]), "metadata": metadata,
             "last_poll": 0, "last_notice": 0, "final_queued": False,
             "stdout_offset": 0, "stderr_offset": 0, "event_offset": 0,
+            "label": itui.label(prompt), "profile": record["submission"]["profile"],
         })
         record["job_id"] = job_id
         conversation["latest_job"] = job_id
@@ -781,21 +915,26 @@ class Portal:
             conversation["approvals"][job_id] = {
                 "token": str(approval["token"]), "expires_at": expiry, "notice_group": group,
             }
-            self._notice(
-                group, record["actor"], record["target"],
-                f"Task {job_id} prepared; NOT running.\nProfile: {record['submission']['profile']}; model: gpt-6-astra\n"
-                f"Available tools: {', '.join(policy['available_tools']) or 'none'}\n"
-                f"Allow grants: {', '.join(policy.get('allow_tools', [])) or 'none'}\n"
-                f"Deny grants: {', '.join(policy.get('deny_tools', [])) or 'runtime deny-by-default'}\n"
-                f"Extra directories: {', '.join(policy.get('add_dirs', [])) or 'isolated job workspace only'}\n"
-                f"URL grants: {', '.join(policy.get('allow_urls', [])) or 'none'}\n"
-                f"{prompt[:700]}\nInputs: {len(record['submission']['attachments'])}; "
-                f"declared outputs: {', '.join(record['submission']['artifact_paths']) or 'text only'}.\n"
-                "1. Approve\n2. Cancel\n"
-                "Numbers apply only when this thread has one unexpired pending task. "
-                f"Otherwise: RAPP approve {job_id}. Approval expires in {max(0, int(expiry-self.clock()))}s.",
-                job_id,
+            options, commands = itui.menu("approval", job_id)
+            card = itui.card(
+                itui.header(itui.short(job_id), itui.GLYPH["approval"], "Approve task?"),
+                top=["Task prepared; NOT running.", f"Expires in {itui.span(expiry - self.clock())}"],
+                body=[
+                    *(f"› {line}" for line in prompt[:700].splitlines()),
+                    f"Profile: {record['submission']['profile']}; model: gpt-6-astra",
+                    f"Available tools: {', '.join(policy['available_tools']) or 'none'}",
+                    f"Allow grants: {', '.join(policy.get('allow_tools', [])) or 'none'}",
+                    f"Deny grants: {', '.join(policy.get('deny_tools', [])) or 'runtime deny-by-default'}",
+                    f"Extra directories: {', '.join(policy.get('add_dirs', [])) or 'isolated job workspace only'}",
+                    f"URL grants: {', '.join(policy.get('allow_urls', [])) or 'none'}",
+                    f"Inputs: {len(record['submission']['attachments'])}; "
+                    f"declared outputs: {', '.join(record['submission']['artifact_paths']) or 'text only'}.",
+                    "Numbers apply only right under this card with one pending task.",
+                    f"Otherwise: RAPP approve {itui.short(job_id)}.",
+                ],
+                options=options, footer=f"ref {token(f'{group}:0')[:6]}",
             )
+            self.outbox.enqueue(group, record["actor"], record["target"], card, job_id=job_id, menu=commands)
         else:
             self._notice(f"job:{job_id}:submitted", record["actor"], record["target"],
                          f"Task {job_id}: {state}. No new execution was authorized by this receipt.", job_id)
@@ -825,7 +964,7 @@ class Portal:
                     "Another message intervened after the approval card. Use RAPP 1 / RAPP 2 or RAPP approve <job-id> explicitly.",
                 )
         else:
-            job_id = argument
+            job_id = self._job_ref(argument, record["actor"], valid)
             approval = valid.get(job_id)
             if not approval:
                 raise PortalError("approval_expired", "No unexpired task-bound approval exists in this thread.")
@@ -854,8 +993,13 @@ class Portal:
         if returned != job_id:
             raise PortalError("runtime_protocol", "Approval response did not match the requested job.")
         job.update(state=state, metadata=metadata)
-        self._notice(f"input:{identity}:approved", record["actor"], record["target"],
-                     f"Task {job_id}: {state}. Use RAPP status / stop / result.", job_id)
+        if request["op"] == "cancel":
+            self._notice(f"input:{identity}:approved", record["actor"], record["target"],
+                         f"Task {job_id}: {state}.", job_id, title="Cancelled", glyph=itui.GLYPH["cancelled"])
+        else:
+            job["started_at"] = self.clock()
+            job.setdefault("stream", {"sent": 0, "last_at": 0, "quiet": False})["last_at"] = self.clock()
+            self._job_card(f"input:{identity}:approved", job_id, job)
 
     def _recover_jobs(self) -> None:
         instance = os.environ.get("RAPP_PORTAL_WATCHER_INSTANCE", "manual")
@@ -923,23 +1067,17 @@ class Portal:
                     if type(value) is int and value >= job[key]:
                         job[key] = value
                 cursors = tuple(job[key] for key in ("stdout_offset", "stderr_offset", "event_offset"))
+                if cursors != old_cursors:
+                    job["output_at"] = self.clock()
                 if state in TERMINAL:
+                    self.outbox.supersede(job_id)
+                    self._finish_timing(job, state)
                     self._result(job_id, job, group=f"job:{job_id}:final")
                     job["final_queued"] = True
                     conversation = self._conversation(job["actor"], job["target"])
                     conversation["approvals"].pop(job_id, None)
-                elif (
-                    state in ("queued", "running", "cancelling")
-                    and (changed or cursors != old_cursors)
-                    and self.clock() - job["last_notice"] >= self.config.progress_seconds
-                ):
-                    self._notice(
-                        f"job:{job_id}:progress:{state}:{cursors}", job["actor"], job["target"],
-                        f"Task {job_id}: {state}; retained stdout {job['stdout_offset']} bytes, "
-                        f"stderr {job['stderr_offset']} bytes, event cursor {job['event_offset']}. "
-                        "Use RAPP result for bounded output.", job_id,
-                    )
-                    job["last_notice"] = self.clock()
+                elif state in ("queued", "running", "cancelling"):
+                    self._stream(job_id, job, changed, response)
                 self.store.save()
             except PortalError as error:
                 job["last_poll"] = self.clock()
@@ -948,6 +1086,40 @@ class Portal:
                 self._notice(f"job:{job_id}:error:{error.code}", job["actor"], job["target"],
                              f"Task {job_id}: status/result unavailable ({error.code}). "
                              "Its durable record remains intact; use RAPP status/resume.", job_id)
+
+    def _stream(self, job_id: str, job: dict, changed: bool, response: dict) -> None:
+        """Keep a running task's owner informed until it ends: milestones plus backoff heartbeats."""
+        now = self.clock()
+        job.setdefault("started_at", now)
+        stream = job.setdefault("stream", {"sent": 0, "last_at": 0, "quiet": False})
+        milestone = changed and job["state"] in ("running", "cancelling")
+        progress = itui.marker(response.get("events"))
+        if progress:
+            before = job.get("progress")
+            job["progress"] = {**progress, "at": now}
+            quarter = lambda value: int(4 * value["done"] / value["total"])  # noqa: E731
+            milestone = milestone or bool(before and quarter(before) != quarter(progress))
+        estimate = itui.estimate(now - job["started_at"], job.get("progress"), self._history(job))
+        if estimate["basis"] == "history" and estimate["remaining"] is None and not stream.get("overrun"):
+            stream["overrun"] = milestone = True
+        if itui.due(stream, now - job["started_at"], now, milestone=milestone):
+            self._job_card(f"job:{job_id}:update:{stream['sent']}", job_id, job, update=True)
+            stream["sent"] += 1
+            stream["last_at"] = now
+
+    def _finish_timing(self, job: dict, state: str) -> None:
+        now = self.clock()
+        started = job.get("started_at")
+        job["finished_at"] = now
+        if not started or state not in ("succeeded", "completed"):
+            return
+        duration = now - started
+        history = self.store.data.setdefault("eta_history", {})
+        profile = job.get("profile") or self.config.profile
+        history[profile] = itui.remember(history.get(profile, []), duration)
+        first = (job.get("stream") or {}).get("first_eta")
+        if first:
+            job["eta_error"] = round(abs(now - first) / max(duration, 1), 3)
 
     def _result(self, job_id: str, job: dict, *, group: str) -> None:
         if self.outbox.parts(group):
@@ -981,10 +1153,7 @@ class Portal:
                 return
             group = canonical
         exit_code = result.get("exit_code")
-        text = (
-            f"Task {job_id}: {state}; worker exit {exit_code if exit_code is not None else 'unknown'}. "
-            "This is worker state, not a delivery receipt.\n"
-        )
+        text = ""
         output = result.get("response") or output_text(response, "stdout")
         if not isinstance(output, str):
             raise PortalError("runtime_protocol", "The durable response must be text.")
@@ -1038,16 +1207,32 @@ class Portal:
             })
         if (artifacts or state == "succeeded") and remaining_indices:
             raise PortalError("artifact_missing", "The runtime did not publish the complete declared artifact batch.")
+        took = job.get("finished_at", self.clock()) - job["started_at"] if job.get("started_at") else None
+        title = {
+            "succeeded": "Done", "completed": "Done", "failed": "Failed", "cancelled": "Stopped",
+            "canceled": "Stopped", "interrupted": "Interrupted", "expired": "Expired",
+        }.get(state, "Output so far")
+        if took is not None and state in TERMINAL:
+            title += f" · {itui.span(took)}"
+        options, commands = itui.menu("final" if state in TERMINAL else "running", job_id)
+        files = f" · {len(granted)} file(s) follow" if granted else ""
+        card = itui.card(
+            itui.header(itui.short(job_id), itui.GLYPH.get(state, "·"), title),
+            top=[f"worker exit {exit_code if exit_code is not None else 'unknown'}", *([files[3:]] if files else [])],
+            body=[job.get("label") or f"Task {job_id}", *text.splitlines()],
+            options=options, footer=f"not a receipt · ref {token(f'{group}:0')[:6]}",
+        )
         self.outbox.enqueue(
-            group, job["actor"], job["target"], text, artifacts=granted,
+            group, job["actor"], job["target"], card, artifacts=granted,
             workspace=export_root, declared=tuple(item["relative_path"] for item in granted), job_id=job_id,
+            menu=commands,
         )
 
     def _delivery_attention(self) -> None:
         for part in list(self.store.data["outbox"]):
             if (
                 part["state"] not in ("failed", "unknown") or not part.get("job_id")
-                or part["group"].startswith("transport-attention:")
+                or part["group"].startswith("transport-attention:") or part.get("card") == "progress"
             ):
                 continue
             if (

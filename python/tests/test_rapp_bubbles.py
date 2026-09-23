@@ -842,14 +842,19 @@ def test_transport_lock_prevents_two_ticks(env):
     assert not env.native.calls and not env.runtime.calls
 
 
-def test_progress_notifications_are_bounded_without_fabricated_completion(env):
+def test_running_task_keeps_sending_bounded_eta_updates_without_fabricated_completion(env):
     env.source.events.append(message())
     env.portal().tick()
     env.runtime.jobs[JOB1]["status"] = "running"
     for _ in range(10):
         env.clock.advance(60)
         env.portal().tick()
-    assert len(env.native.calls) <= 2
+    updates = [call["text"] for call in env.native.calls[1:]]
+    assert 1 <= len(updates) <= 4
+    for text in updates:
+        first = text.splitlines()[0]
+        assert first.startswith("[RAPP 0001] ● ") and "no ETA yet" in text
+        assert "[1] Details\n[2] Stop\n[3] Quiet" in text and "Done" not in first
     assert state(env)["jobs"][JOB1]["state"] == "running"
     assert not state(env)["jobs"][JOB1]["final_queued"]
 
@@ -2042,7 +2047,7 @@ def delivered_feed_post(env, **changes):
 def test_feed_post_is_enveloped_and_the_adjacent_bare_reply_answers_it(env):
     post_id = feed_post(env)
     env.portal().tick()
-    assert [call["text"] for call in env.native.calls] == ["[RAPP loop]\nLoop 01\n1. Ship it\n2. Hold"]
+    assert [call["text"] for call in env.native.calls] == ["[RAPP loop] Loop 01\n1. Ship it\n2. Hold"]
     env.clock.advance(10)
     env.source.events.append(message(1, "2"))
     env.portal().tick()
@@ -2062,7 +2067,7 @@ def test_feed_reply_after_an_intervening_message_needs_explicit_rapp_reply(env):
     env.portal().tick()
     item = state(env)["feed"][post_id]
     assert item["state"] == "answered" and item["answer"]["number"] == 3 and item["answer"]["explicit"] is True
-    assert any(call["text"].endswith("Got it.") for call in env.native.calls)
+    assert any("Got it." in call["text"] for call in env.native.calls)
 
 
 def test_bare_number_under_a_feed_card_answers_it_instead_of_an_older_approval(env):
@@ -2101,7 +2106,7 @@ def test_feed_image_card_reply_is_captured_by_attachment_adjacency(env):
     post_id = feed_post(env, text="Loop 01 card", file=str(card))
     env.portal().tick()
     call = env.native.calls[0]
-    assert call["file"].endswith("-card.png") and call["text"] == "[RAPP loop]\nLoop 01 card"
+    assert call["file"].endswith("-card.png") and call["text"] == "[RAPP loop] Loop 01 card"
     env.clock.advance(10)
     env.portal().tick()
     env.source.events.append(message(1, "1"))
@@ -2126,7 +2131,7 @@ def test_unhealthy_messages_holds_sends_and_a_newer_post_replaces_the_stale_one(
     healthy.append(True)
     env.clock.advance(60)
     env.portal().tick()
-    assert [call["text"] for call in env.native.calls] == ["[RAPP loop]\nLoop 02"]
+    assert [call["text"] for call in env.native.calls] == ["[RAPP loop] Loop 02"]
     assert state(env)["feed"][second]["state"] == "pending"
 
 
@@ -2188,3 +2193,200 @@ def test_non_ascii_or_oversized_digit_replies_never_wedge_ticks(env, reply):
     env.portal().tick()
     answer = state(env)["feed"][post_id]["answer"]
     assert answer is not None and answer["number"] is None
+
+
+def approved_running_job(env):
+    env.source.events.append(message(1, "RAPP inspect these files"))
+    env.portal().tick()
+    env.clock.advance(10)
+    env.source.events.append(message(2, "1"))
+    env.portal().tick()
+    assert [call for call in env.runtime.calls if call["op"] == "approve"]
+    return env.native.calls[-1]["text"]
+
+
+def explicit_ops(env, op):
+    return [call for call in env.runtime.calls if call["op"] == op and "stdout_offset" not in call]
+
+
+def progress_parts(env):
+    return [part for part in state(env)["outbox"] if part.get("card") == "progress"]
+
+
+def test_bare_digits_under_a_running_card_pick_its_options(env):
+    card = approved_running_job(env)
+    assert card.splitlines()[0].startswith("[RAPP 0001] ● ")
+    assert "[1] Details\n[2] Stop\n[3] Quiet" in card
+    env.clock.advance(10)
+    env.source.events.append(message(3, "1"))
+    env.portal().tick()
+    assert len(explicit_ops(env, "status")) == 1
+    env.clock.advance(10)
+    env.source.events.append(message(4, "3"))
+    env.portal().tick()
+    assert state(env)["jobs"][JOB1]["stream"]["quiet"] is True
+    env.clock.advance(10)
+    env.source.events.append(message(5, "2"))
+    env.portal().tick()
+    assert [call for call in env.runtime.calls if call["op"] == "cancel" and call["job_id"] == JOB1]
+
+
+def test_bare_digit_not_directly_under_a_card_is_left_for_other_ais(env):
+    approved_running_job(env)
+    sent = len(env.native.calls)
+    env.source.prior_guids[CHAT] = "OTHER-AI-MESSAGE"
+    env.source.events.append(message(3, "3"))
+    env.portal().tick()
+    assert not state(env)["jobs"][JOB1]["stream"].get("quiet") and len(env.native.calls) == sent
+    env.source.events.append(message(4, "RAPP 3"))
+    env.portal().tick()
+    assert state(env)["jobs"][JOB1]["stream"]["quiet"] is True
+
+
+def test_a_number_under_one_tasks_card_never_approves_another_pending_task(env):
+    approved_running_job(env)
+    env.clock.advance(10)
+    env.source.events.append(message(3, "RAPP another task"))
+    env.portal().tick()
+    env.clock.advance(200)
+    env.portal().tick()
+    assert env.native.calls[-1]["text"].startswith("[RAPP 0001] ● ")
+    env.clock.advance(10)
+    env.source.events.append(message(4, "1"))
+    env.portal().tick()
+    assert not [call for call in env.runtime.calls if call["op"] == "approve" and call["job_id"] != JOB1]
+    assert len(explicit_ops(env, "status")) == 1
+
+
+def test_silent_long_task_backs_off_caps_updates_and_still_delivers_the_final(env):
+    approved_running_job(env)
+    started = env.clock.now
+    for _ in range(6 * 60):
+        env.clock.advance(60)
+        env.portal().tick()
+    updates = progress_parts(env)
+    assert len(updates) == 10
+    gaps = [b["created_at"] - a["created_at"] for a, b in zip(updates, updates[1:])]
+    assert updates[0]["created_at"] - started >= 120
+    assert all(later >= earlier - 60 for earlier, later in zip(gaps, gaps[1:]))
+    assert max(gaps) <= 1800 + 60 and min(gaps) >= 90
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    env.clock.advance(60)
+    env.portal().tick()
+    final = env.native.calls[-1]["text"]
+    assert final.splitlines()[0].startswith("[RAPP 0001] ✓ Done")
+    assert "[1] Full result\n[2] Recent jobs" in final and "worker exit 0" in final
+    assert len(state(env)["eta_history"]["synthetic-workspace"]) == 1
+
+
+def test_quiet_stops_automatic_updates_but_not_the_final(env):
+    approved_running_job(env)
+    env.clock.advance(10)
+    env.source.events.append(message(3, "RAPP quiet 0001"))
+    env.portal().tick()
+    before = len(env.native.calls)
+    for _ in range(60):
+        env.clock.advance(60)
+        env.portal().tick()
+    assert len(env.native.calls) == before
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    env.clock.advance(10)
+    env.portal().tick()
+    assert env.native.calls[-1]["text"].startswith("[RAPP 0001] ✓ Done")
+
+
+def test_outage_keeps_one_queued_update_and_the_final_replaces_it(env):
+    approved_running_job(env)
+    healthy = [False]
+    env.native.health = lambda value, now: healthy[0]
+    sent = len(env.native.calls)
+    for _ in range(90):
+        env.clock.advance(60)
+        env.portal().tick()
+    assert len([part for part in progress_parts(env) if part["state"] == "queued"]) == 1
+    assert len(env.native.calls) == sent
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    env.clock.advance(10)
+    env.portal().tick()
+    assert not [part for part in progress_parts(env) if part["state"] == "queued"]
+    healthy[0] = True
+    env.clock.advance(60)
+    env.portal().tick()
+    fresh = [call["text"] for call in env.native.calls[sent:]]
+    assert len(fresh) == 1 and fresh[0].startswith("[RAPP 0001] ✓ Done")
+
+
+def test_itui_eta_is_honest_about_its_basis():
+    from rapp_bubbles import itui
+
+    unknown = itui.estimate(240, None, [])
+    assert unknown["basis"] == "none" and unknown["fraction"] is None and "no ETA yet" in unknown["detail"]
+    typical = itui.estimate(120, None, [600, 660, 540])
+    assert typical["status"] == "~8m left" and 0 < typical["fraction"] < 0.9
+    overdue = itui.estimate(1000, None, [600, 660, 540])
+    assert overdue["status"] == "long · 17m" and overdue["remaining"] is None
+    worker = itui.estimate(300, {"done": 3, "total": 6, "label": "encode"}, [])
+    assert worker["status"] == "~5m left" and worker["fraction"] == 0.5 and "step 3/6" in worker["detail"]
+    assert itui.marker([{"type": "progress", "done": 2, "total": 0}, {"id": "x"}]) is None
+    assert itui.marker([{"type": "progress", "done": 2, "total": 5, "label": "frames"}])["done"] == 2
+
+
+def test_every_itui_card_is_guarded_and_its_structural_lines_fit_a_phone(env):
+    import re
+
+    from rapp_bubbles import itui
+
+    approved_running_job(env)
+    for _ in range(30):
+        env.clock.advance(60)
+        env.portal().tick()
+    env.runtime.jobs[JOB1]["status"] = "succeeded"
+    env.clock.advance(10)
+    env.portal().tick()
+    assert len(env.native.calls) >= 5
+    for call in env.native.calls:
+        text, lines = call["text"], call["text"].splitlines()
+        assert re.match(r"\s*\[rapp\s", text, re.IGNORECASE)
+        structural = [lines[0]] + [
+            line for line in lines
+            if line == itui.RULE or re.fullmatch(r"\[\d\] .+", line) or " · ref " in line or line.startswith("ref ")
+        ]
+        assert all(len(line) <= itui.WIDTH for line in structural), structural
+        assert itui.parse(text)["options"], text
+
+
+def test_a_menu_reply_is_dispatched_once_even_when_reread(env):
+    approved_running_job(env)
+    env.clock.advance(10)
+    env.source.events.append(message(3, "1"))
+    for _ in range(3):
+        env.portal().tick()
+    assert len(explicit_ops(env, "status")) == 1
+
+
+def test_short_job_refs_work_and_quiet_words_can_still_start_tasks(env):
+    approved_running_job(env)
+    env.clock.advance(10)
+    env.source.events.append(message(3, "RAPP status 0001"))
+    env.portal().tick()
+    assert len(explicit_ops(env, "status")) == 1
+    env.source.events.append(message(4, "RAPP quiet the fans"))
+    env.portal().tick()
+    assert len(submitted(env)) == 2
+
+
+def test_rapp_number_without_an_open_card_explains_instead_of_guessing(env):
+    env.source.events.append(message(1, "RAPP 5"))
+    env.portal().tick()
+    assert any("no_open_menu" in call["text"] for call in env.native.calls)
+    assert not env.runtime.calls
+
+
+def test_reply_to_the_card_on_the_phone_is_not_stolen_by_a_newer_queued_card(env):
+    first = delivered_feed_post(env, text="Loop 01")
+    env.native.health = lambda value, now: False
+    second = feed_post(env, text="Loop 02")
+    env.source.events.append(message(1, "2"))
+    env.portal().tick()
+    assert state(env)["feed"][first]["answer"]["number"] == 2
+    assert state(env)["feed"][second]["state"] == "pending"

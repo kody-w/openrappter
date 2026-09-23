@@ -10,6 +10,7 @@ from typing import Callable
 
 from .clients import NotSubmitted, SubmissionUnknown
 from .config import Config, PortalError, normalized
+from . import itui
 from .files import copy_reference, filename
 from .state import Store
 
@@ -37,19 +38,27 @@ class Outbox:
         self, group: str, actor: dict, target: dict, text: str, *,
         artifacts: list[dict] | None = None, workspace: Path | None = None,
         declared: tuple[str, ...] = (), job_id: str | None = None,
+        menu: list[str] | None = None, card: str | None = None,
     ) -> None:
         if self.parts(group):
             return
         pieces = [text[i:i + 2400] for i in range(0, len(text), 2400)]
+        # iTUI cards arrive already framed with their "[RAPP …] status" first line.
+        framed = text.startswith("[RAPP ")
+        extra = {"card": card} if card else {}
+        if menu:
+            # Every part of the group carries the menu, so a reply under any bubble resolves.
+            extra.update(menu=list(menu), menu_until=self.clock() + itui.MENU_TTL)
         prepared = []
         staged = []
         try:
             for index, body in enumerate(pieces):
                 identity = token(f"{group}:{index}")
-                prepared.append(self._part(
-                    group, index, identity, actor, target, job_id,
-                    text=f"[RAPP {identity}]\n{body}",
-                ))
+                if not framed:
+                    body = f"[RAPP {identity}]\n{body}"
+                elif index:
+                    body = f"[RAPP {identity[:6]}] ⋯ {index + 1}/{len(pieces)}\n{body}"
+                prepared.append(self._part(group, index, identity, actor, target, job_id, text=body, **extra))
             for artifact in artifacts or []:
                 if (
                     not isinstance(artifact, dict)
@@ -97,7 +106,7 @@ class Outbox:
                 prepared.append(self._part(
                     group, index, identity, actor, target, job_id,
                     file=reference, mime=str(artifact.get("mime") or "application/octet-stream"),
-                    caption=f"[RAPP artifact {identity}]\n{display_name}",
+                    caption=f"[RAPP artifact {identity}]\n{display_name}", **extra,
                 ))
             self.store.data["outbox"].extend(prepared)
             self.store.save()
@@ -305,7 +314,7 @@ class Outbox:
             if uncertain_part is not None:
                 if part["id"] != uncertain_part or part["state"] != "unknown":
                     continue
-            elif part["state"] != "failed" or not part.get("retryable"):
+            elif part["state"] != "failed" or not part.get("retryable") or part.get("card") == "progress":
                 continue
             if part.get("guid"):
                 self.reconcile(part)
@@ -372,6 +381,36 @@ class Outbox:
                 ):
                     return True
         return False
+
+    def menu_part(self, guid: str | None, actor: dict, now: float) -> dict | None:
+        """The live menu of the message with this GUID, if it is ours, the actor's, and open."""
+        if not guid:
+            return None
+        for part in reversed(self.store.data["outbox"]):
+            if guid in (part.get("guid"), part.get("caption_guid")):
+                if part["actor"] == actor and part.get("menu") and part.get("menu_until", 0) >= now:
+                    return part
+                return None
+        return None
+
+    def latest_menu(self, actor: dict, now: float) -> dict | None:
+        for part in reversed(self.store.data["outbox"]):
+            if (
+                part["actor"] == actor and part.get("menu") and part.get("menu_until", 0) >= now
+                and part["state"] in ("submitted", "sent", "delivered")
+            ):
+                return part
+        return None
+
+    def supersede(self, job_id: str, card: str = "progress") -> int:
+        """Drop never-attempted parts of an older card, so outages never release a backlog."""
+        stale = [
+            part for part in self.store.data["outbox"]
+            if part.get("job_id") == job_id and part.get("card") == card and part["state"] == "queued"
+        ]
+        if stale:
+            self.store.data["outbox"] = [part for part in self.store.data["outbox"] if part not in stale]
+        return len(stale)
 
     def summary(self, job_id: str) -> str:
         parts = [p for p in self.store.data["outbox"] if p.get("job_id") == job_id]

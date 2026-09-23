@@ -458,6 +458,55 @@ discarding a potentially addressed message. Known audio-message metadata is
 kept as attachment input and is never promoted from automatic transcription
 into an approval/command. Actual phone-path acceptance remains separate.
 
+## iTUI: messages laid out like a terminal UI
+
+Every rapp-bubbles message is plain iMessage text framed as a small terminal card (the
+owner named it "iTUI"). The design is the majority solution of eight independent
+strategy reviews (failure modes, competitors, phone journeys, red team, SRE, simplicity,
+test oracle, agent-first).
+
+```text
+[RAPP 9c1e] ● ~4m left
+▰▰▰▰▱▱▱▱▱▱ est
+6m of ~10m (5 runs)
+──────────────
+render the promo video
+──────────────
+[1] Details
+[2] Stop
+[3] Quiet
+next ~5m · ref 3fa9c1
+```
+
+- **Line one is the lock-screen line**: the `[RAPP <ref>]` envelope (which the legacy
+  watcher's guard ignores), a status glyph (`? ○ ● ■ ✓ ✗ ! ·`, text presentation only),
+  and the live status. Structural lines stay within 28 characters and nothing relies on
+  right-aligned borders, because iOS Messages uses a proportional font.
+- **Every card ends with numbered options.** A bare digit answers the card directly above
+  it (proven by GUID adjacency); a digit anywhere else is left alone for other AIs.
+  After other messages intervene, `RAPP <n>` answers the latest open card (one hour). An
+  open approval card keeps `1`/`2` and still passes every existing approval check.
+  Options only map to existing commands (`status`, `stop`, `result`, `list`, `help`,
+  `retry`) plus `RAPP quiet [job]`, so a number can never grant anything new. A handled
+  reply is recorded before dispatch, so the reader's late-row window never repeats it.
+- **Short refs**: the four characters in `[RAPP 9c1e]` work wherever a job id does
+  (`RAPP status 9c1e`, `RAPP approve 9c1e`); `RAPP resend` accepts a unique 6+ character
+  part ref.
+- **Running tasks keep sending ETAs** until they end: a card when the task starts, then
+  heartbeats about 2, 5, 10, 20, 35, and 60 minutes in and every 30 minutes after, plus
+  milestones (a new state, a worker progress quarter, running past its usual time), at
+  least 90 seconds apart and at most 10 per task. Replying does not stop them;
+  `RAPP quiet` does, and the final result always arrives. A newer update replaces a
+  still-queued one and the final replaces any queued update, so an outage never releases
+  a burst; progress cards are never retried or flagged for delivery attention.
+- **ETAs are honest about their basis**: worker progress markers
+  (`{"type": "progress", "done": n, "total": m}` events) give a step count and
+  extrapolated time left; otherwise the median of the last 20 finished runs of the
+  profile (once there are 3) gives `~Xm left` and a time-based bar labelled `est` that
+  never fills before the task ends; otherwise the card says `Xm in · no ETA yet`. A task
+  past its usual time says `long · Xm`. Each finished run records its duration and the
+  error of its first estimate.
+
 ## Operator feed, Messages health, and the doctor
 
 ### Operator feed (`post`, `feed-status`)
@@ -471,12 +520,14 @@ python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json post \
 python3.12 scripts/rapp-bubbles.py --config /absolute/private-portal.json feed-status --id post-…
 ```
 
-- Every post's text or caption begins with `[RAPP <channel>]`, so an echoed
-  update can never trigger the legacy watcher's lifecycle words.
+- Every post's text or caption begins with `[RAPP <channel>] ` followed by its own
+  first line (the lock-screen line), so an echoed update can never trigger the legacy
+  watcher's lifecycle words.
 - A newer post in a channel replaces older posts there that have not left the
   Mac, so an outage never releases a burst of stale cards.
 - Posts with `--options N` (1–9) collect one answer. The owner's next message is
-  captured only when it directly follows the post in the chat (GUID adjacency),
+  captured only when it directly follows that post in the chat (GUID adjacency, so a
+  newer card that is still queued cannot take it),
   including a bare number while a task approval waits; lifecycle words
   (restart, wake up, shut down, …) are never captured. After an intervening
   message, `RAPP reply <text>` answers the latest open post explicitly. The reply

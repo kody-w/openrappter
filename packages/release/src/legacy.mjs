@@ -9,11 +9,13 @@ const POLICY = readContract('legacy-policy.json');
 const ALLOWLIST = readContract('legacy-allowlist.json');
 invariant(ALLOWLIST.schema === 'rapp-work.legacy-allowlist/1'
   && ALLOWLIST.migrationFixtures.every(entry => /^tests\/fixtures\/migration\/[a-z0-9-]+\.json$/u.test(entry.path) && typeof entry.reason === 'string' && entry.reason.length > 0)
+  && ALLOWLIST.networkMetadata.every(entry => entry.path === '.rapp/member.md' && typeof entry.reason === 'string' && entry.reason.length > 0)
   && ALLOWLIST.normativeWireIdentifiers.every(entry => /^[a-z][a-z0-9-]+\/[1-9]\d*$/u.test(entry.identifier) && typeof entry.reason === 'string' && entry.reason.length > 0),
-'Only exact normative wire identifiers and inert JSON migration fixtures may be allowlisted');
+'Only exact normative wire identifiers, exact RAPP/1 network metadata, and inert JSON migration fixtures may be allowlisted');
 const CODE = /\.(?:[cm]?[jt]sx?)$/iu;
 const TEST_FIXTURES = new Set(ALLOWLIST.migrationFixtures.map(entry => entry.path));
 const WIRE_IDS = new Set(ALLOWLIST.normativeWireIdentifiers.map(entry => entry.identifier));
+const NETWORK_METADATA = new Set(ALLOWLIST.networkMetadata.map(entry => entry.path));
 
 function decoded(text) {
   return text.replace(/\\u\{([a-f\d]{1,6})\}|\\u([a-f\d]{4})|\\x([a-f\d]{2})/giu, (_, wide, short, byte) => {
@@ -227,7 +229,9 @@ export async function scanSource(root) {
       else if (stat.isSymbolicLink()) errors.push(`Source symlink is not allowlisted: ${candidate}`);
       else if (stat.isFile()) {
         files.push(candidate);
-        checkBytes(await readFile(path.join(root, candidate)), candidate, errors, { source: true });
+        if (!NETWORK_METADATA.has(candidate)) {
+          checkBytes(await readFile(path.join(root, candidate)), candidate, errors, { source: true });
+        }
       } else errors.push(`Special source file: ${candidate}`);
     }
   }

@@ -6,6 +6,12 @@
       "reason": "An existing normative evidence wire identifier, not a runtime module or product name."
     }
   ],
+  "networkMetadata": [
+    {
+      "path": ".rapp/member.md",
+      "reason": "RAPP/1 station identity metadata must name the repository slug; it is not packaged product source or a runtime module."
+    }
+  ],
   "migrationFixtures": [
     {
       "path": "tests/fixtures/migration/legacy-home.json",

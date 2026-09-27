@@ -41,12 +41,13 @@ export interface LocalServiceOptions {
   copilot?: ManagedCopilotTransport;
   commands?: FixedCommandTransport;
   persistenceFault?: FaultInjector;
+  persistenceDurability?: "durable" | "none";
 }
 export function createLocalServices(options: LocalServiceOptions): HostServices & {
   persistence: LocalPersistence; runtime: LocalRuntime; work: LocalWork;
   createAgentSession(context: RequestContext, agentId: string): Promise<{ token: string; principal: Principal }>;
 } {
-  const persistence = new LocalPersistence(options.directory, options.token, options.persistenceFault);
+  const persistence = new LocalPersistence(options.directory, options.token, options.persistenceFault, options.persistenceDurability);
   const work = new LocalWork(persistence);
   const transport = options.copilot ?? new CopilotSdkTransport({
     directory: join(persistence.directory, "providers", "github-copilot"), home: homedir(),

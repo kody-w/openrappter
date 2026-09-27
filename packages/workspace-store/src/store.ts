@@ -66,6 +66,7 @@ interface StoreOptions {
   signatures?: SignaturePolicy;
   lockTimeoutMs?: number;
   fault?: FaultInjector;
+  durability?: 'durable' | 'none';
 }
 const WORKSPACE_TOKEN = Symbol('workspace-constructor');
 declare const artifactBrand: unique symbol;
@@ -84,13 +85,16 @@ export class WorkspaceStore {
   private constructor(root: PrivateRoot, options: StoreOptions) { this.#root = root; this.#options = options; }
 
   static async open(options: StoreOptions): Promise<WorkspaceStore> {
-    assertOptions(options, ['root', 'security', 'signatures', 'lockTimeoutMs', 'fault'], ['root', 'security']);
+    assertOptions(options, ['root', 'security', 'signatures', 'lockTimeoutMs', 'fault', 'durability'], ['root', 'security']);
     if (!(options.security instanceof SecurityAuthority)
       || (options.fault !== undefined && typeof options.fault !== 'function')
+      || (options.durability !== undefined && !['durable', 'none'].includes(options.durability))
       || (options.lockTimeoutMs !== undefined && (!Number.isSafeInteger(options.lockTimeoutMs) || options.lockTimeoutMs <= 0))) {
       throw new TypeError('Invalid workspace store dependencies');
     }
-    return new WorkspaceStore(await PrivateRoot.open(options.root, true), Object.freeze({ ...options }));
+    return new WorkspaceStore(await PrivateRoot.open(options.root, true, {
+      sync: options.durability === 'none' ? 'none' : 'durable',
+    }), Object.freeze({ ...options }));
   }
 
   #grant(capability: Capability, permission: Permission): CapabilityView {

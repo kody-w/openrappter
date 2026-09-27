@@ -116,7 +116,7 @@ export async function productionFixture(options: { computer?: boolean; commands?
   let remainingCommits: number | undefined;
   const token = randomBytes(48).toString("base64url");
   const services = createLocalServices({
-    directory, token, commands, copilot,
+    directory, token, commands, copilot, persistenceDurability: "none",
     persistenceFault: (point) => {
       if (point !== "before-commit") return;
       if (remainingCommits !== undefined && --remainingCommits === 0) fault = true;

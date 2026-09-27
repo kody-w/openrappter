@@ -24,12 +24,18 @@ function privateNode(stat: Stats, directory: boolean): void {
 }
 
 /** Private POSIX roots are an integrity boundary, not a sandbox against the host UID. */
+export interface PrivateRootOptions { sync?: 'durable' | 'none' }
+
 export class PrivateRoot {
   readonly #root: string;
   readonly #anchor: Stats;
-  private constructor(root: string, anchor: Stats) { this.#root = root; this.#anchor = anchor; }
+  readonly #sync: 'durable' | 'none';
+  private constructor(root: string, anchor: Stats, options: PrivateRootOptions = {}) {
+    this.#root = root; this.#anchor = anchor; this.#sync = options.sync ?? 'durable';
+  }
 
-  static async open(root: string, create = false): Promise<PrivateRoot> {
+  static async open(root: string, create = false, options: PrivateRootOptions = {}): Promise<PrivateRoot> {
+    if (!['durable', 'none'].includes(options.sync ?? 'durable')) throw new WorkspaceError('sync', 'Invalid sync mode');
     if (typeof root !== 'string' || !isAbsolute(root) || resolve(root) !== root || root === parse(root).root) {
       throw new WorkspaceError('root', 'A canonical absolute private root is required');
     }
@@ -41,7 +47,7 @@ export class PrivateRoot {
       stat = await fs.lstat(root);
     }
     privateNode(stat, true);
-    return new PrivateRoot(root, stat);
+    return new PrivateRoot(root, stat, options);
   }
 
   private static async ancestors(path: string): Promise<void> {
@@ -83,7 +89,7 @@ export class PrivateRoot {
 
   async child(relative: string, create = false): Promise<PrivateRoot> {
     await this.guard(relative);
-    return PrivateRoot.open(this.#path(relative), create);
+    return PrivateRoot.open(this.#path(relative), create, { sync: this.#sync });
   }
 
   async mkdir(relative: string): Promise<boolean> {
@@ -151,7 +157,7 @@ export class PrivateRoot {
     try {
       privateNode(await handle.stat(), false);
       await handle.writeFile(bytes);
-      await handle.sync();
+      if (this.#sync === 'durable') await handle.sync();
       await handle.close();
       await this.guard(relative);
       const latest = await this.stat(relative);
@@ -193,6 +199,7 @@ export class PrivateRoot {
   }
 
   async syncDirectory(relative?: string): Promise<void> {
+    if (this.#sync === 'none') return;
     await this.guard(relative === undefined ? undefined : `${relative}/entry`);
     const handle = await fs.open(relative === undefined ? this.#root : this.#path(relative),
       constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);

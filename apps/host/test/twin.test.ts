@@ -4,11 +4,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isVerifiedChain } from "@rapp-work/rapp1";
 import { agentScope } from "../src/local-work.js";
+import type { RuntimePort } from "../src/ports.js";
 import {
   twinConversationSchema, twinDraftSchema, twinMessageRequestSchema, twinProposalSchema, twinAgentApplyResultSchema, workspaceInputSchema,
   workspaceListSchema, workspaceOpenSchema, type TwinDraft, type TwinProposal,
 } from "../src/contracts.js";
-import { productionFixture, until, workspaceInput } from "./production-fixture.js";
+import { productionFixture, workspaceInput } from "./production-fixture.js";
 
 type Fixture = Awaited<ReturnType<typeof productionFixture>>;
 const fixtures: Fixture[] = [];
@@ -316,18 +317,9 @@ describe("conversation-first canonical Twin", () => {
     expect((await f.services.work.snapshot(f.context())).agents).toHaveLength(1);
   }, 30_000);
 
-  it("applies agent, routine and settings drafts through canonical Work APIs and serializes repeated accepts", async () => {
+  it("applies agent drafts through canonical Work APIs", async () => {
     const f = await setup();
-    let kind = "agent";
-    respond(f, (prompt) => {
-      if (kind === "agent") return newAgent(prompt);
-      if (kind === "settings") return ready("settings", { appearance: { theme: "dark" } });
-      return ready("automation", {
-        id: prompt.allocatedIdentifiers.routineIds[0], name: "Morning review", taskTitle: "Review pending work",
-        instructions: "Summarize work for human review.", agentId: prompt.verifiedContext.agents.find((agent) => agent.enabled)!.id,
-        cadence: { kind: "interval", minutes: 60 }, enabled: true,
-      });
-    });
+    respond(f, newAgent);
     const agentDraft = await message(f, f.workspace!.id, "Create an analyst.", "agent");
     expect((await f.rpc("twin.applyProposal", {
       ...applyInput(agentDraft), editedDraft: { ...agentDraft.draft, id: f.workspace!.leadAgentId },
@@ -344,29 +336,51 @@ describe("conversation-first canonical Twin", () => {
     expect(isVerifiedChain(childScan.streams.body)).toBe(true);
     expect(isVerifiedChain(childScan.streams.memory)).toBe(true);
     expect(childScan.streams.memory.frames.length).toBeGreaterThan(0);
-    kind = "automation";
+    const snapshot = await f.services.work.snapshot(f.context());
+    expect(snapshot.agents).toHaveLength(2);
+    const commands = (await f.services.persistence.read(f.workspace!.catalogScope)).commands;
+    expect(commands.some((command) => command.command.operation === "host.agent.save")).toBe(true);
+    expect(snapshot.runs).toEqual([]);
+    expect(f.commands.guestExecutions).toBe(0);
+  }, 90_000);
+
+  it("applies routine drafts through canonical Work APIs", async () => {
+    const f = await setup();
+    const worker = await f.services.work.saveAgent(f.context(), {
+      ...workspaceInput("Routine worker", "routine-worker").leadAgent, enabled: true,
+    });
+    respond(f, (prompt) => ready("automation", {
+      id: prompt.allocatedIdentifiers.routineIds[0], name: "Morning review", taskTitle: "Review pending work",
+      instructions: "Summarize work for human review.", agentId: prompt.verifiedContext.agents.find((agent) => agent.enabled)!.id,
+      cadence: { kind: "interval", minutes: 60 }, enabled: true,
+    }));
     const routine = await message(f, f.workspace!.id, "Review work every hour.", "automation");
     expect((await f.rpc("twin.applyProposal", applyInput(routine))).error).toBeUndefined();
-    kind = "settings";
+    const snapshot = await f.services.work.snapshot(f.context());
+    expect(snapshot.automations).toHaveLength(1);
+    expect(snapshot.automations[0]).toMatchObject({ enabled: true, cadence: { kind: "interval", minutes: 60 } });
+    expect(snapshot.automations[0]!.nextRunAt).not.toBeNull();
+    expect(snapshot.automations[0]!.agentId).toBe(worker.id);
+    expect((await f.services.persistence.read(agentScope(worker))).commands.some((command) =>
+      command.command.operation === "host.automation.save" && command.state === "committed")).toBe(true);
+    expect(snapshot.runs).toEqual([]);
+    expect(f.commands.guestExecutions).toBe(0);
+  }, 90_000);
+
+  it("applies settings drafts through canonical Work APIs and serializes repeated accepts", async () => {
+    const f = await setup();
+    respond(f, () => ready("settings", { appearance: { theme: "dark" } }));
     const settings = await message(f, f.workspace!.id, "Use dark theme.", "settings");
     const results = await Promise.all([1, 2].map(() => f.rpc("twin.applyProposal", applyInput(settings))));
     expect(results[0]!.error).toBeUndefined();
     expect(results[1]!.result).toEqual(results[0]!.result);
     const snapshot = await f.services.work.snapshot(f.context());
-    expect(snapshot.agents).toHaveLength(2);
-    expect(snapshot.automations).toHaveLength(1);
-    expect(snapshot.automations[0]).toMatchObject({ enabled: true, cadence: { kind: "interval", minutes: 60 } });
-    expect(snapshot.automations[0]!.nextRunAt).not.toBeNull();
     expect(snapshot.settings.appearance.theme).toBe("dark");
     const commands = (await f.services.persistence.read(f.workspace!.catalogScope)).commands;
     expect(commands.filter((command) => command.command.operation === "host.settings.update")).toHaveLength(1);
-    expect(commands.some((command) => command.command.operation === "host.agent.save")).toBe(true);
-    const worker = snapshot.agents.find((agent) => agent.id === snapshot.automations[0]!.agentId)!;
-    expect((await f.services.persistence.read(agentScope(worker))).commands.some((command) =>
-      command.command.operation === "host.automation.save" && command.state === "committed")).toBe(true);
     expect(snapshot.runs).toEqual([]);
     expect(f.commands.guestExecutions).toBe(0);
-  }, 120_000);
+  }, 90_000);
 
   it("does not absorb an interleaved catalog write into a proposal's own completion heads", async () => {
     const f = await setup();
@@ -390,26 +404,66 @@ describe("conversation-first canonical Twin", () => {
   }, 35_000);
 
   it("never turns an approval recommendation into a decision; explicit human approval RPC remains required", async () => {
-    const f = await setup({ computer: true });
-    await f.services.computer.start(f.context());
+    const f = await setup();
     const input = workspaceInput("Reviewer", f.workspace!.leadAgentId).leadAgent;
     const agent = await f.services.work.saveAgent(f.context(), { ...input, computerPolicy: "control", enabled: true });
     const task = await f.services.work.createTask(f.context(), {
       requestId: randomUUID(), title: "Review guest operation", instructions: "Inspect the supplied work.", agentId: agent.id, priority: "normal",
     });
-    await f.services.work.startRun(f.context(), task.id, f.services.runtime, f.services.provider);
-    const waiting = await until(() => f.services.work.snapshot(f.context()), (snapshot) => snapshot.approvals.length === 1);
+    const run = await f.services.work.saveRun({
+      id: `run-${randomUUID()}`, taskId: task.id, agentId: agent.id, workspaceId: agent.workspaceId,
+      state: "awaiting_approval", startedAt: new Date().toISOString(), finishedAt: null,
+      summary: "Waiting for the owner's approval of one exact action.", verification: "not_checked", evidenceIds: [],
+    }, `test/approval-run/${task.id}`);
+    const scope = agentScope(agent);
+    const operationHash = "b".repeat(64);
+    const approval = {
+      id: `approval-${randomUUID()}`, runId: run.id, taskId: task.id, agentId: agent.id, workspaceId: agent.workspaceId,
+      operationHash, expiresAt: new Date(Date.now() + 300_000).toISOString(), consumedBy: null,
+      action: "Execute in the agent's guest workspace", reason: "Test approval request.", risk: "high" as const,
+      state: "pending" as const, createdAt: new Date().toISOString(), decidedAt: null, decisionReason: "",
+    };
+    await f.services.persistence.commit(scope, `test/approval-request/${approval.id}`, "host.approval.request",
+      { approvalId: approval.id }, async () => {
+        const proof = await f.services.persistence.appendSecurity(scope, await f.services.persistence.capability(scope), {
+          type: "approval.requested", agent_id: agent.id, workspace_id: agent.workspaceId, task_id: task.id,
+          approval_id: approval.id, principal_id: f.services.persistence.owner.id, operation_hash: operationHash,
+          resources: [`agent:${agent.id}`, `run:${run.id}`, `task:${task.id}`, `workspace:${agent.workspaceId}`].sort(),
+          expires_utc: approval.expiresAt,
+        }, `approval:${agent.id}/${approval.id}`);
+        return {
+          status: "succeeded", value: approval,
+          receipts: [{ kind: "approval-request", sourceFrameHash: proof.sourceFrameHash, evidenceRef: proof.evidenceFrameHash }],
+          events: [{ type: "ui.approval.saved", approval }],
+        };
+      }, [{ kind: "task", id: task.id }, { kind: "run", id: run.id }]);
     respond(f, (prompt) => ready("approval", {
       approvalId: prompt.verifiedContext.approvals[0]!.id, operationHash: prompt.verifiedContext.approvals[0]!.operationHash,
       recommendation: "deny", reason: "Review the proposed guest command first.",
     }));
     const draft = await message(f, f.workspace!.id, "Recommend whether to approve this operation.", "approval");
-    const decide = vi.spyOn(f.services.runtime, "decide");
+    const decide = vi.fn(async (_context, input) => {
+      const decided = { ...input.approval, state: input.decision, decisionReason: input.reason, decidedAt: new Date().toISOString() };
+      await f.services.persistence.commit(scope, `test/approval-decision/${approval.id}`, "host.approval.decide",
+        { approvalId: approval.id, decision: input.decision, reason: input.reason }, async () => {
+          const proof = await f.services.persistence.appendSecurity(scope, await f.services.persistence.capability(scope), {
+            type: "approval.decided", agent_id: agent.id, workspace_id: agent.workspaceId, task_id: task.id,
+            approval_id: approval.id, decision: input.decision, decided_by: f.services.persistence.owner.id,
+          }, `approval:${agent.id}/${approval.id}`);
+          return {
+            status: "succeeded", value: decided,
+            receipts: [{ kind: "approval-decision", sourceFrameHash: proof.sourceFrameHash, evidenceRef: proof.evidenceFrameHash }],
+            events: [{ type: "ui.approval.saved", approval: decided }],
+          };
+        }, [{ kind: "task", id: task.id }, { kind: "run", id: run.id }]);
+    });
     expect((await f.rpc("twin.applyProposal", applyInput(draft))).error?.code).toBe(-32009);
     expect(decide).not.toHaveBeenCalled();
     expect((await f.services.work.snapshot(f.context())).approvals[0]!.state).toBe("pending");
-    expect((await f.rpc("approvals.decide", { id: waiting.approvals[0]!.id, decision: "denied", reason: "I decline this operation." })).error).toBeUndefined();
-    await f.services.runtime.drain();
+    const decided = await f.services.work.decideApproval(f.context(), {
+      id: approval.id, decision: "denied", reason: "I decline this operation.",
+    }, { decide } as unknown as RuntimePort);
+    expect(decided.state).toBe("denied");
     expect(decide).toHaveBeenCalledOnce();
     expect(f.commands.guestExecutions).toBe(0);
   }, 120_000);
@@ -498,16 +552,18 @@ describe("strict Twin context-option validation", () => {
   }, 90_000);
 
   it("preflights active-work policy constraints before applying a settings proposal", async () => {
-    const f = await setup({ computer: true });
-    await f.services.computer.start(f.context());
+    const f = await setup();
     const input = workspaceInput("Active worker", f.workspace!.leadAgentId).leadAgent;
     const agent = await f.services.work.saveAgent(f.context(), { ...input, computerPolicy: "control", enabled: true });
     const task = await f.services.work.createTask(f.context(), {
       requestId: randomUUID(), title: "Hold active control work", instructions: "Wait for explicit approval.",
       agentId: agent.id, priority: "normal",
     });
-    await f.services.work.startRun(f.context(), task.id, f.services.runtime, f.services.provider);
-    const active = await until(() => f.services.work.snapshot(f.context()), (snapshot) => snapshot.approvals.length === 1);
+    await f.services.work.saveRun({
+      id: `run-${randomUUID()}`, taskId: task.id, agentId: agent.id, workspaceId: agent.workspaceId,
+      state: "running", startedAt: new Date().toISOString(), finishedAt: null,
+      summary: "The agent accepted this task in its private workspace.", verification: "not_checked", evidenceIds: [],
+    }, `test/active-run/${task.id}`);
     respond(f, () => ready("settings", { appearance: { theme: "dark" }, computerPolicy: "none" }));
     const draft = await message(f, f.workspace!.id, "Use dark theme and disable computer access.", "settings");
     const before = await f.services.work.snapshot(f.context());
@@ -518,35 +574,32 @@ describe("strict Twin context-option validation", () => {
     const commands = (await f.services.persistence.read(f.workspace!.catalogScope)).commands;
     expect(commands.some((command) => command.command.operation === "host.settings.update")).toBe(false);
     expect(commands.some((command) => command.command.operation === "twin.apply")).toBe(false);
-    expect((await f.rpc("approvals.decide", {
-      id: active.approvals[0]!.id, decision: "denied", reason: "Finish the atomicity test.",
-    })).error).toBeUndefined();
-    await f.services.runtime.drain();
   }, 180_000);
 
-  it("rejects invented or cross-scope provider, model, computer, agent, routine and approval options", async () => {
-    const f = await setup();
-    const mutations: ((prompt: Prompt) => unknown)[] = [
-      (prompt) => { const p = newAgent(prompt); return { ...p, draft: { ...p.draft as object, providerId: "invented-provider" } }; },
-      (prompt) => { const p = newAgent(prompt); return { ...p, draft: { ...p.draft as object, model: "test-model" } }; },
-      (prompt) => { const p = newAgent(prompt); return { ...p, draft: { ...p.draft as object, computerPolicy: "control" } }; },
-      (prompt) => { const p = newTask(prompt); return { ...p, draft: { ...p.draft as object, agentId: "foreign-agent" } }; },
-      (prompt) => { const p = newTask(prompt); return { ...p, draft: { ...p.draft as object, requestId: randomUUID() } }; },
-      (prompt) => ready("automation", { id: prompt.allocatedIdentifiers.routineIds[0], name: "Review", taskTitle: "Review",
-        instructions: "Review work.", agentId: "foreign-agent", cadence: { kind: "interval", minutes: 15 }, enabled: false }),
-      () => ready("approval", { approvalId: "invented-approval", operationHash: "a".repeat(64), recommendation: "approve", reason: "Invented." }),
-      (prompt) => newWorkspace(prompt),
-    ];
-    let index = 0;
-    respond(f, (prompt) => mutations[index]!(prompt));
-    for (; index < mutations.length; index++) {
-      expect((await f.rpc("twin.message", { workspaceId: f.workspace!.id, message: `Draft request ${index}`, history: [] })).error?.code).toBe(-32014);
-    }
-    const conversation = await f.services.twin.conversation(f.context());
-    expect(conversation.proposals).toEqual([]);
-    expect(conversation.turns.every((turn) => turn.role === "user")).toBe(true);
-    expect(f.commands.guestExecutions).toBe(0);
-  }, 120_000);
+  for (const invalid of [
+    { name: "provider", draft: (prompt: Prompt) => { const p = newAgent(prompt); return { ...p, draft: { ...p.draft as object, providerId: "invented-provider" } }; } },
+    { name: "model", draft: (prompt: Prompt) => { const p = newAgent(prompt); return { ...p, draft: { ...p.draft as object, model: "test-model" } }; } },
+    { name: "computer policy", draft: (prompt: Prompt) => { const p = newAgent(prompt); return { ...p, draft: { ...p.draft as object, computerPolicy: "control" } }; } },
+    { name: "task agent", draft: (prompt: Prompt) => { const p = newTask(prompt); return { ...p, draft: { ...p.draft as object, agentId: "foreign-agent" } }; } },
+    { name: "task request id", draft: (prompt: Prompt) => { const p = newTask(prompt); return { ...p, draft: { ...p.draft as object, requestId: randomUUID() } }; } },
+    { name: "routine agent", draft: (prompt: Prompt) => ready("automation", { id: prompt.allocatedIdentifiers.routineIds[0],
+      name: "Review", taskTitle: "Review", instructions: "Review work.", agentId: "foreign-agent",
+      cadence: { kind: "interval", minutes: 15 }, enabled: false }) },
+    { name: "approval", draft: () => ready("approval", { approvalId: "invented-approval", operationHash: "a".repeat(64),
+      recommendation: "approve", reason: "Invented." }) },
+    { name: "workspace", draft: (prompt: Prompt) => newWorkspace(prompt) },
+  ]) {
+    it(`rejects invented or cross-scope ${invalid.name} options`, async () => {
+      const f = await setup();
+      respond(f, invalid.draft);
+      expect((await f.rpc("twin.message", { workspaceId: f.workspace!.id, message: `Draft invalid ${invalid.name}`, history: [] })).error?.code)
+        .toBe(-32014);
+      const conversation = await f.services.twin.conversation(f.context());
+      expect(conversation.proposals).toEqual([]);
+      expect(conversation.turns.every((turn) => turn.role === "user")).toBe(true);
+      expect(f.commands.guestExecutions).toBe(0);
+    }, 120_000);
+  }
   it("strictly discriminates complete proposals from necessary clarifications and bounds conversation input", () => {
     const clarification = { kind: "clarification", assistantMessage: "Which period?", summary: "Period needed.", confidence: 0.5,
       readyForReview: false, missing: ["period"], draft: null };

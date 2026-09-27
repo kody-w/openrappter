@@ -129,7 +129,12 @@ export class LocalPersistence {
   private opened = false;
   private closed = false;
 
-  constructor(directory: string, private readonly credential: string, private readonly fault?: FaultInjector) {
+  constructor(
+    directory: string,
+    private readonly credential: string,
+    private readonly fault?: FaultInjector,
+    private readonly durability: "durable" | "none" = "durable",
+  ) {
     this.directory = resolve(directory);
     this.security = new SecurityAuthority({
       authenticate: (credential) => credential === this.credential && this.identity
@@ -387,7 +392,7 @@ export class LocalPersistence {
   }
   private async open(): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    this.root = await PrivateRoot.open(this.directory);
+    this.root = await PrivateRoot.open(this.directory, false, { sync: this.durability === "none" ? "none" : "durable" });
     await this.root.lock(async () => {
       if (await this.root.stat("owner.json") === null) {
         await this.root.writeAtomic("owner.json", canonicalJson({
@@ -429,6 +434,7 @@ export class LocalPersistence {
       root: join(this.directory, "workspaces"), security: this.security,
       lockTimeoutMs: 30_000,
       ...(this.fault ? { fault: this.fault } : {}),
+      ...(this.durability === "none" ? { durability: this.durability } : {}),
     });
     this.opened = true;
     for (const scope of [this.identity.catalog, this.identity.computer]) {

@@ -53,6 +53,15 @@ test('an allowlisted inert migration fixture is source-only, not a packaging exe
   await assert.rejects(scanAsar(asar), /Removed identifier/u);
 });
 
+test('RAPP member metadata may name the repository slug but source files still may not', async t => {
+  const root = await sourceFixture(t);
+  const legacyName = ['open', 'rappter'].join('');
+  await put(root, '.rapp/member.md', `---\nmember: ${legacyName}\nrepo: kody-w/${legacyName}\n---\n`);
+  await scanSource(root);
+  await put(root, 'README.md', `# ${legacyName}\n`);
+  await assert.rejects(scanSource(root), new RegExp(`Removed identifier ${legacyName} in README\\.md`, 'u'));
+});
+
 test('undeclared workspaces, old dependencies, and source symlink escapes fail', async t => {
   const root = await sourceFixture(t);
   await put(root, 'packages/unexpected/package.json', { name: '@rapp-work/unexpected' });

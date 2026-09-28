@@ -25,14 +25,20 @@ const decode = JSON.parse;
 const sort = Function.call.bind(Array.prototype.sort) as (values: string[]) => string[];
 const join = Function.call.bind(Array.prototype.join) as (values: string[], separator: string) => string;
 
+/** I-JSON text: no unpaired surrogate and no noncharacter (U+FDD0-U+FDEF, U+xxFFFE, U+xxFFFF). */
 export function assertUnicode(value: string): void {
   for (let i = 0; i < value.length; i++) {
     const unit = value.charCodeAt(i);
     if (unit >= 0xd800 && unit <= 0xdbff) {
       const next = value.charCodeAt(++i);
       if (!(next >= 0xdc00 && next <= 0xdfff)) throw new TypeError('Unpaired UTF-16 surrogate');
+      if ((((unit - 0xd800) * 0x400 + (next - 0xdc00) + 0x10000) & 0xfffe) === 0xfffe) {
+        throw new TypeError('Unicode noncharacter');
+      }
     } else if (unit >= 0xdc00 && unit <= 0xdfff) {
       throw new TypeError('Unpaired UTF-16 surrogate');
+    } else if ((unit >= 0xfdd0 && unit <= 0xfdef) || unit >= 0xfffe) {
+      throw new TypeError('Unicode noncharacter');
     }
   }
 }
@@ -263,17 +269,23 @@ export function sha256(bytes: string | Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function assertDomain(domain: string): void {
-  if (typeof domain !== 'string' || !/^[\x21-\x7e]+$/.test(domain)) throw new TypeError('Invalid hash domain');
+// Each tag belongs to exactly one function; any other tag is refused.
+const VALUE_DOMAINS: readonly string[] = Object.freeze([
+  PARTICLE_DOMAIN, WAVE_DOMAIN, 'rapp/1:egg-manifest', 'rapp/1:sealed-aad', 'rapp/1:sealed-key-request',
+]);
+const BYTES_DOMAINS: readonly string[] = Object.freeze([EGG_DOMAIN, IDENTITY_DOMAIN, 'rapp/1:grail', 'rapp/1:seal']);
+
+function assertDomain(domain: string, allowed: readonly string[]): void {
+  if (typeof domain !== 'string' || !allowed.includes(domain)) throw new TypeError('Invalid hash domain for this function');
 }
 
 export function hashValue(domain: string, value: unknown): string {
-  assertDomain(domain);
+  assertDomain(domain, VALUE_DOMAINS);
   return sha256(`${domain}\n${canonicalJson(value)}`);
 }
 
 export function hashBytes(domain: string, bytes: Uint8Array): string {
-  assertDomain(domain);
+  assertDomain(domain, BYTES_DOMAINS);
   if (!(bytes instanceof Uint8Array) || isProxy(bytes)) throw new TypeError('Expected raw bytes');
   return createHash('sha256').update(`${domain}\n`).update(bytes).digest('hex');
 }

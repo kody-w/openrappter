@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { createHash, createPublicKey, ECDH, generateKeyPairSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
@@ -7,7 +7,7 @@ import {
   buildEvidencePayload, buildFrame, canonicalJson, createFrameSigner, frameDigest, frameHead,
   hashBytes, hashValue, identityFromTail, isBodyStream, isSelectedAuthority, isUtc, isVerifiedChain,
   keyedIdentity, kindFamily, mergeFrames, mintIdentity, parseCanonicalJson, parseJson, scanChain,
-  scanFrame, scanFrameJson, selectChainTrust, selectSignaturePolicy, sha256, snapshotJson,
+  scanFrame, scanFrameJson, selectChainTrust, selectSignaturePolicy, sha256, snapshotJson, verifyFrameSignature,
   streamFamily, validateEvidencePayload, verifyEvidenceLink, wavePreimage,
   type FrameHead, type JsonObject, type RappFrame, type VerifiedChain,
 } from '../src/index.js';
@@ -174,12 +174,12 @@ describe('frame envelope, binding, ordering and trust', () => {
     expect(scanFrame({ ...body(), [key]: value }, { head: null, streamId: BODY })).toMatchObject({ ok: false, error: { code } });
   });
   it.each([
-    '0000-01-01T00:00:00.000Z', '2026-13-01T00:00:00.000Z', '2026-01-01T24:00:00.000Z',
+    '2026-13-01T00:00:00.000Z', '2026-01-01T24:00:00.000Z',
     '2026-01-01T00:00:60.000Z', '2100-02-29T00:00:00.000Z', '2026-01-01t00:00:00.000z',
     '2026-01-01T00:00:00.000+00:00',
   ])('refuses invalid UTC %s', (value) => expect(isUtc(value)).toBe(false));
   it('accepts leap years and byte-exact timestamp limits', () => {
-    for (const time of ['2000-02-29T00:00:00.000Z', '0001-01-01T00:00:00.000Z', '9999-12-31T23:59:59.999Z']) {
+    for (const time of ['2000-02-29T00:00:00.000Z', '0000-01-01T00:00:00.000Z', '0001-01-01T00:00:00.000Z', '9999-12-31T23:59:59.999Z']) {
       expect(isUtc(time)).toBe(true);
     }
   });
@@ -205,7 +205,7 @@ describe('frame envelope, binding, ordering and trust', () => {
     expect(scanFrame({ ...frame, utc: nextUtc }, { head: null, streamId: BODY }))
       .toMatchObject({ ok: false, error: { code: 'frame-hash', step: '3' } });
     expect(scanFrame({ ...frame, sig: 'a..b' }, { head: null, streamId: BODY }))
-      .toMatchObject({ ok: false, error: { code: 'signature-profile', step: '6' } });
+      .toMatchObject({ ok: false, error: { code: 'signature-format', step: '1' } });
   });
   it('enforces exact predecessor particle and wave, sequence ceiling and monotonic time', () => {
     const first = body();
@@ -262,11 +262,12 @@ describe('frame envelope, binding, ordering and trust', () => {
       `rappid:alice:${'a'.repeat(64)}`, `rappid:@Alice/worker:${'a'.repeat(64)}`,
       `rappid:@alice/a--b:${'a'.repeat(64)}`, `rappid:@alice/../x:${'a'.repeat(64)}`,
       `rappid:@${'a'.repeat(40)}/worker:${'a'.repeat(64)}`, `${BODY}:${'a'.repeat(65)}`,
-      `net:${'a'.repeat(65)}`, `${BODY}:instance:extra`,
+      `net:a--b`, `${BODY}:instance:extra`,
     ]) expect(streamFamily(stream)).toBeNull();
     expect(isBodyStream(identityFromTail('a', 'b', '1'.repeat(64)))).toBe(true);
     expect(streamFamily(MEMORY)).toBe('memory');
     expect(streamFamily('net:team')).toBe('swarm');
+    expect(streamFamily(`net:${'a'.repeat(65)}`)).toBe('swarm');
   });
   it('merges only scanned chains in normative UTC then wave order', () => {
     const a = body();
@@ -357,5 +358,60 @@ describe('normative evidence particles and source occurrences', () => {
     expect(Object.isFrozen(payload.reference_hashes)).toBe(true);
     expect(payload.schema).toBe(EVIDENCE_SCHEMA);
     expect(HEX64.test(hashValue(PARTICLE_DOMAIN, payload))).toBe(true);
+  });
+});
+
+describe('rev-17 clarifications', () => {
+  it('refuses noncharacters in strings and member names (E-3)', () => {
+    for (const text of ['"\\ufdd0"', '"\\uffff"', '{"\\ufffe":1}', '["\\udbff\\udfff"]', '"\u{1fffe}"']) {
+      expect(() => parseJson(text)).toThrow();
+    }
+    expect(() => canonicalJson({ '\ufdef': 1 })).toThrow();
+    expect(parseJson('"\\ufdcf\\ufdf0\\ufffd"')).toBe('\ufdcf\ufdf0\ufffd');
+  });
+  it('binds every hash tag to exactly one function (E-7)', () => {
+    expect(() => hashValue(IDENTITY_DOMAIN, {})).toThrow();
+    expect(() => hashBytes(PARTICLE_DOMAIN, new Uint8Array())).toThrow();
+    expect(() => hashValue('rapp/1:unknown', {})).toThrow();
+    expect(hashValue('rapp/1:egg-manifest', {})).toMatch(HEX64);
+    expect(hashBytes('rapp/1:seal', new Uint8Array())).toMatch(HEX64);
+  });
+  it('mints keyed identities only for Ed25519 and P-256 keys (E-8)', () => {
+    expect(() => keyedIdentity('alice', 'key', generateKeyPairSync('x25519').publicKey)).toThrow();
+    const p256 = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey;
+    expect(keyedIdentity('alice', 'key', p256)).toMatch(/^rappid:@alice\/key:/);
+    const point = ECDH.convertKey(p256.export({ type: 'spki', format: 'der' }).subarray(26), 'prime256v1', undefined, undefined, 'compressed') as Buffer;
+    const prefix = Buffer.from('3039301306072a8648ce3d020106082a8648ce3d030107032200', 'hex');
+    expect(() => keyedIdentity('alice', 'key', createPublicKey({ key: Buffer.concat([prefix, point]), format: 'der', type: 'spki' }))).toThrow();
+    const undecodable = Buffer.from(`302a300506032b6570032100ed${'ff'.repeat(30)}7f`, 'hex');
+    expect(() => keyedIdentity('alice', 'key', createPublicKey({ key: undecodable, format: 'der', type: 'spki' }))).toThrow();
+  });
+  it('checks the sig form and the re-genesis payload at step 1, and non-values before the checklist (E-10, E-22)', () => {
+    const frame = buildFrame({ kind: 'body.pulse', streamId: BODY, utc: UTC, payload: {}, head: null });
+    expect(scanFrame({ ...frame, sig: `${'a'.repeat(8)}..${'b'.repeat(8)}` }, { head: null, streamId: BODY }))
+      .toMatchObject({ ok: false, error: { code: 'signature-format', step: '1' } });
+    expect(scanFrame({ ...frame, kind: 'body.re-genesis' }, { head: null, streamId: BODY }))
+      .toMatchObject({ ok: false, error: { code: 're-genesis-payload', step: '1' } });
+    expect(scanFrameJson('{"spec":', { head: null, streamId: BODY })).toMatchObject({ ok: false, error: { step: null } });
+    expect(scanFrameJson(canonicalJson(frame).replace('"seq":0', '"seq":0.0'), { head: null, streamId: BODY }))
+      .toMatchObject({ ok: false, error: { code: 'canonical', step: '1' } });
+  });
+  it('refuses payload member names that are not NFC or hold unassigned code points (E-5, E-6)', () => {
+    expect(() => buildFrame({ kind: 'body.pulse', streamId: BODY, utc: UTC, payload: { 'e\u0301': 1 }, head: null })).toThrow();
+    expect(() => buildFrame({ kind: 'body.pulse', streamId: BODY, utc: UTC, payload: { nested: { '\u0378': 1 } }, head: null })).toThrow();
+    expect(buildFrame({ kind: 'body.pulse', streamId: BODY, utc: UTC, payload: { '\u00e9': 'e\u0301' }, head: null }).payload)
+      .toEqual({ '\u00e9': 'e\u0301' });
+  });
+  it('verifies Ed25519 with the cofactorless check and S < L, never refusing a key for its order (E-20)', () => {
+    const point = Buffer.from('01'.padEnd(64, '0'), 'hex');
+    const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), point]);
+    const kid = identityFromTail('alice', 'ident', hashBytes(IDENTITY_DOMAIN, spki));
+    const signatures = selectSignaturePolicy([{ kid, spki_der_b64: spki.toString('base64'), revoked_utc: null, superseded_utc: null }]);
+    const header = Buffer.from(canonicalJson({ alg: 'EdDSA', b64: false, crit: ['b64'], kid })).toString('base64url');
+    const frame = buildFrame({ kind: 'body.pulse', streamId: BODY, utc: UTC, payload: {}, head: null });
+    const sig = (s: Buffer): string => `${header}..${Buffer.concat([point, s]).toString('base64url')}`;
+    expect(verifyFrameSignature({ ...frame, sig: sig(Buffer.alloc(32)) }, signatures)).toBe(true);
+    const order = Buffer.from((2n ** 252n + 27742317777372353535851937790883648493n).toString(16).padStart(64, '0'), 'hex').reverse();
+    expect(verifyFrameSignature({ ...frame, sig: sig(order) }, signatures)).toBe(false);
   });
 });

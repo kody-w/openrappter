@@ -23,7 +23,14 @@ unpaired surrogates, lossy decimal tokens, invalid UTF-8, depth greater than 64,
 and inputs/canonical forms greater than 1 MiB. In particular, the normative text
 accepts round-tripping decimals such as `0.1`; an older summary sentence inside
 the authority payload does not override the normative input-domain profile.
-Existing text is never Unicode-normalized. Programmatic inputs are snapshotted
+Existing text is never Unicode-normalized.
+The rev-17 clarifications (kody-w/rapp-1 `f6bafe7`) apply: noncharacters are
+refused like unpaired surrogates, `utc` years run 0000-9999, swarm labels have
+no 64-character cap, each hash tag belongs to exactly one of `hashValue` or
+`hashBytes`, `keyedIdentity` takes only Ed25519 or P-256 keys, a present `sig`
+must have the detached JWS form (`parseDetachedJws`) and a re-genesis payload
+its exact shape at step 1, and `buildFrame` refuses payload member names that
+are not NFC or hold unassigned code points. Programmatic inputs are snapshotted
 without invoking getters, proxies or `toJSON`.
 
 `hashValue(space, value)` and `hashBytes(space, bytes)` use the exact

@@ -23,7 +23,7 @@ export function streamFamily(value: unknown): StreamFamily | null {
   if (isBodyStream(value)) return 'body';
   const last = value.lastIndexOf(':');
   if (isBodyStream(value.slice(0, last)) && isLabel(value.slice(last + 1))) return 'memory';
-  if (value.startsWith('net:') && isLabel(value.slice(4))) return 'swarm';
+  if (value.startsWith('net:') && isLabel(value.slice(4), Infinity)) return 'swarm';
   return null;
 }
 
@@ -35,8 +35,6 @@ export function isKind(value: unknown): value is string {
 
 export function isUtc(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value)) return false;
-  const year = Number(value.slice(0, 4));
-  if (year < 1) return false;
   const time = Date.parse(value);
   return Number.isFinite(time) && new Date(time).toISOString() === value;
 }
@@ -54,7 +52,12 @@ export function mintIdentity(owner: string, slug: string): string {
   return identityFromTail(owner, slug, hashBytes(IDENTITY_DOMAIN, octets));
 }
 
+/** Only a §10 key: Ed25519, or P-256 (whose SPKI export carries the uncompressed point). */
 export function keyedIdentity(owner: string, slug: string, publicKey: KeyObject): string {
+  if (publicKey.asymmetricKeyType !== 'ed25519' && !(publicKey.asymmetricKeyType === 'ec'
+    && publicKey.asymmetricKeyDetails?.namedCurve === 'prime256v1')) {
+    throw new TypeError('A keyed identity requires an Ed25519 or P-256 key');
+  }
   const spki = publicKey.export({ type: 'spki', format: 'der' });
   return identityFromTail(owner, slug, hashBytes(IDENTITY_DOMAIN, spki));
 }

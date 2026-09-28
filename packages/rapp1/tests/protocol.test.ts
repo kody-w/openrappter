@@ -387,6 +387,8 @@ describe('rev-17 clarifications', () => {
     expect(scanFrame({ ...frame, kind: 'body.re-genesis' }, { head: null, streamId: BODY }))
       .toMatchObject({ ok: false, error: { code: 're-genesis-payload', step: '1' } });
     expect(scanFrameJson('{"spec":', { head: null, streamId: BODY })).toMatchObject({ ok: false, error: { step: null } });
+    expect(scanFrameJson(canonicalJson(frame).replace('"seq":0', '"seq":0.0'), { head: null, streamId: BODY }))
+      .toMatchObject({ ok: false, error: { code: 'canonical', step: '1' } });
   });
   it('refuses payload member names that are not NFC or hold unassigned code points (E-5, E-6)', () => {
     expect(() => buildFrame({ kind: 'body.pulse', streamId: BODY, utc: UTC, payload: { 'e\u0301': 1 }, head: null })).toThrow();

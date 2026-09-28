@@ -68,10 +68,14 @@ function encodePoint([x, y, z]: Point): Buffer {
   return bytes;
 }
 const BASE = decodePoint(Buffer.from('58'.padEnd(64, '6'), 'hex'))!;
-function verifyEd25519(publicKey: Uint8Array, message: Uint8Array, signature: Uint8Array): boolean {
+function verifyEd25519(key: KeyObject, message: Uint8Array, signature: Uint8Array): boolean {
+  const publicKey = key.export({ type: 'spki', format: 'der' }).subarray(12);
   const a = decodePoint(publicKey);
   const s = littleEndian(signature.subarray(32));
   if (!a || s >= L) return false;
+  // OpenSSL evaluates the same cofactorless equation and only refuses more (small-order inputs), so its
+  // acceptance is final; the exact arithmetic runs only for a signature it refuses.
+  if (verify(null, message, key, signature)) return true;
   const k = littleEndian(createHash('sha512').update(signature.subarray(0, 32)).update(publicKey).update(message).digest()) % L;
   const [x, y, z, t] = multiply(a, k);
   return encodePoint(add(multiply(BASE, s), [mod(-x), y, z, mod(-t)])).equals(signature.subarray(0, 32));
@@ -176,7 +180,7 @@ export function verifyFrameSignature(frame: RappFrame, policy: SignaturePolicy |
       || (selected.revoked !== null && frame.utc >= selected.revoked)
       || (selected.superseded !== null && frame.utc >= selected.superseded)) return false;
     const input = signingInput(frame, protectedHeader);
-    if (selected.alg === 'EdDSA') return verifyEd25519(selected.key.export({ type: 'spki', format: 'der' }).subarray(12), input, signature);
+    if (selected.alg === 'EdDSA') return verifyEd25519(selected.key, input, signature);
     return verify('sha256', input, { key: selected.key, dsaEncoding: 'ieee-p1363' }, signature);
   } catch {
     return false;

@@ -1,7 +1,7 @@
 import { AUTHORITY_IDENTITY, kindFamily, type AuthorityIdentity, type StreamFamily } from './authority.js';
 import {
-  arrayItems, assertOptions, canonicalJson, hashValue, isJsonObject, parseCanonicalJson,
-  PARTICLE_DOMAIN, snapshotJson, WAVE_DOMAIN, type JsonObject,
+  arrayItems, assertOptions, canonicalJson, hashValue, isJsonObject, parseJson,
+  PARTICLE_DOMAIN, snapshotJson, WAVE_DOMAIN, type JsonObject, type JsonValue,
 } from './json.js';
 import { HEX64, isKind, isUtc, streamFamily } from './identity.js';
 import { parseDetachedJws, signFrame, verifyFrameSignature, type FrameSigner, type SignaturePolicy } from './signature.js';
@@ -235,9 +235,18 @@ export function scanFrame(value: unknown, options: ScanOptions): FrameScan {
   } catch (error) { return failure(error); }
 }
 
+/** Octets that are not a §4 value are refused before the checklist (step null); a §4 value in
+ *  non-canonical form is refused at step 1. */
+function parseFrameJson(source: string | Uint8Array): JsonValue {
+  const value = parseJson(source);
+  const text = typeof source === 'string' ? source : Buffer.from(source).toString('utf8');
+  if (canonicalJson(value) !== text) refuse('canonical', '1', 'Non-canonical frame bytes; repair is forbidden');
+  return value;
+}
+
 /** Stored and transported frames must already be canonical; never whitespace-repair. */
 export function scanFrameJson(source: string | Uint8Array, options: ScanOptions): FrameScan {
-  try { return scanFrame(parseCanonicalJson(source), options); } catch (error) { return failure(error); }
+  try { return scanFrame(parseFrameJson(source), options); } catch (error) { return failure(error); }
 }
 
 export function buildFrame<P extends JsonObject>(input: {
@@ -277,7 +286,7 @@ export function scanChain(values: readonly unknown[], selection: ChainTrust, opt
     if (options.family !== undefined && !['body', 'memory', 'swarm'].includes(options.family)) throw new TypeError('Invalid family policy');
     if (!items.length) refuse('empty-chain', null, 'A trusted chain cannot be empty');
     const frames = items.map((item, i) => {
-      try { return intrinsic(typeof item === 'string' || item instanceof Uint8Array ? parseCanonicalJson(item) : item, selected.genesis.stream_id); }
+      try { return intrinsic(typeof item === 'string' || item instanceof Uint8Array ? parseFrameJson(item) : item, selected.genesis.stream_id); }
       catch (error) { const e = failure(error).error; throw new FrameError(e.code, e.step, e.message, i); }
     });
     const sequences = new Map<number, RappFrame>();

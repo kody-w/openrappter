@@ -52,12 +52,31 @@ export function mintIdentity(owner: string, slug: string): string {
   return identityFromTail(owner, slug, hashBytes(IDENTITY_DOMAIN, octets));
 }
 
-/** Only a §10 key: Ed25519, or P-256 whose SPKI carries the uncompressed point. */
+// RFC 8032 §5.1.3: the 32 octets decode to a point (y < p, x recoverable, no x = 0 with sign 1).
+const P = 2n ** 255n - 19n;
+function power(base: bigint, exponent: bigint): bigint {
+  let result = 1n;
+  for (let b = base % P, e = exponent; e > 0n; e >>= 1n, b = b * b % P) if (e & 1n) result = result * b % P;
+  return result;
+}
+function ed25519PointDecodes(key: Uint8Array): boolean {
+  const y = BigInt(`0x${Buffer.from(key).reverse().toString('hex')}`) & (2n ** 255n - 1n);
+  if (y >= P) return false;
+  const d = (P - 121665n) * power(121666n, P - 2n) % P;
+  const u = (y * y - 1n + P) % P, v = (d * y * y + 1n) % P;
+  const x = u * power(v, 3n) % P * power(u * power(v, 7n) % P, (P - 5n) / 8n) % P;
+  const vxx = v * x % P * x % P;
+  if (vxx !== u && (vxx + u) % P !== 0n) return false;
+  return !(u === 0n && key[31]! >> 7 === 1);
+}
+
+/** Only a §10 key: Ed25519 whose point decodes, or P-256 whose SPKI carries the uncompressed point. */
 export function keyedIdentity(owner: string, slug: string, publicKey: KeyObject): string {
   const spki = publicKey.export({ type: 'spki', format: 'der' });
   const p256 = publicKey.asymmetricKeyType === 'ec' && publicKey.asymmetricKeyDetails?.namedCurve === 'prime256v1';
-  if (!(publicKey.asymmetricKeyType === 'ed25519' || (p256 && spki.length === 91 && spki[26] === 0x04))) {
-    throw new TypeError('A keyed identity requires an Ed25519 key or a P-256 key with an uncompressed point');
+  if (!((publicKey.asymmetricKeyType === 'ed25519' && ed25519PointDecodes(spki.subarray(12)))
+    || (p256 && spki.length === 91 && spki[26] === 0x04))) {
+    throw new TypeError('A keyed identity requires a decodable Ed25519 key or a P-256 key with an uncompressed point');
   }
   return identityFromTail(owner, slug, hashBytes(IDENTITY_DOMAIN, spki));
 }

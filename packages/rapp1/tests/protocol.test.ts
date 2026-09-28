@@ -383,6 +383,8 @@ describe('rev-17 clarifications', () => {
     const point = ECDH.convertKey(p256.export({ type: 'spki', format: 'der' }).subarray(26), 'prime256v1', undefined, undefined, 'compressed') as Buffer;
     const prefix = Buffer.from('3039301306072a8648ce3d020106082a8648ce3d030107032200', 'hex');
     expect(() => keyedIdentity('alice', 'key', createPublicKey({ key: Buffer.concat([prefix, point]), format: 'der', type: 'spki' }))).toThrow();
+    const undecodable = Buffer.from(`302a300506032b6570032100ed${'ff'.repeat(30)}7f`, 'hex');
+    expect(() => keyedIdentity('alice', 'key', createPublicKey({ key: undecodable, format: 'der', type: 'spki' }))).toThrow();
   });
   it('checks the sig form and the re-genesis payload at step 1, and non-values before the checklist (E-10, E-22)', () => {
     const frame = buildFrame({ kind: 'body.pulse', streamId: BODY, utc: UTC, payload: {}, head: null });

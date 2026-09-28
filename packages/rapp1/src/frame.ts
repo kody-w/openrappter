@@ -4,7 +4,7 @@ import {
   PARTICLE_DOMAIN, snapshotJson, WAVE_DOMAIN, type JsonObject,
 } from './json.js';
 import { HEX64, isKind, isUtc, streamFamily } from './identity.js';
-import { signFrame, verifyFrameSignature, type FrameSigner, type SignaturePolicy } from './signature.js';
+import { parseDetachedJws, signFrame, verifyFrameSignature, type FrameSigner, type SignaturePolicy } from './signature.js';
 
 export const FRAME_SPEC = 'rapp/1';
 export const UINT53_MAX = 2 ** 53 - 1;
@@ -80,7 +80,7 @@ function refuse(code: string, step: VerificationStep | null, message: string): n
 }
 function failure(error: unknown): { ok: false; error: FrameError } {
   return { ok: false, error: error instanceof FrameError ? error
-    : new FrameError('canonical', '1', error instanceof Error ? error.message : 'Invalid frame') };
+    : new FrameError('canonical', null, error instanceof Error ? error.message : 'Invalid frame') };
 }
 
 export function frameHead(frame: RappFrame): FrameHead {
@@ -139,6 +139,28 @@ export function selectChainTrust(input: {
   return handle;
 }
 
+const isReGenesis = (kind: string): boolean => kind.endsWith('.re-genesis');
+function reGenesisPayload(payload: unknown): boolean {
+  if (!isJsonObject(payload as never)) return false;
+  const outer = payload as JsonObject;
+  if (Object.keys(outer).length !== 1 || !isJsonObject(outer.migrated_from as never)) return false;
+  const moved = outer.migrated_from as JsonObject;
+  return Object.keys(moved).length === 3 && streamFamily(moved.stream_id) !== null
+    && typeof moved.terminal_seal === 'string' && HEX64.test(moved.terminal_seal)
+    && Number.isSafeInteger(moved.terminal_seq) && (moved.terminal_seq as number) >= 0 && !Object.is(moved.terminal_seq, -0);
+}
+
+/** A producer treats every payload member name as new: NFC with only assigned code points, never normalized. */
+function assertNewNames(value: unknown): void {
+  if (value === null || typeof value !== 'object') return;
+  for (const [key, item] of Object.entries(value)) {
+    if (!Array.isArray(value) && (key.normalize('NFC') !== key || /\p{Cn}/u.test(key))) {
+      refuse('payload-name', '1', 'Payload member names must be NFC and contain only assigned code points');
+    }
+    assertNewNames(item);
+  }
+}
+
 function intrinsic(value: unknown, streamId: string): RappFrame {
   const frame = snapshotJson(value);
   try { assertOptions(frame, FRAME_KEYS); } catch { refuse('key-set', '1', 'Frame requires exactly eleven own keys'); }
@@ -162,7 +184,12 @@ function intrinsic(value: unknown, streamId: string): RappFrame {
       refuse(`${key.replace('_', '-')}-format`, '1', 'Invalid predecessor hash');
     }
   }
-  if (frame.sig !== null && typeof frame.sig !== 'string') refuse('signature-format', '1', 'Invalid sig type');
+  if (frame.sig !== null) {
+    try { parseDetachedJws(frame.sig); } catch { refuse('signature-format', '1', 'sig is not a detached JWS with the protected-header profile'); }
+  }
+  if (isReGenesis(frame.kind as string) && !reGenesisPayload(frame.payload)) {
+    refuse('re-genesis-payload', '1', 'Re-genesis payload must be exactly {migrated_from: {stream_id, terminal_seal, terminal_seq}}');
+  }
   canonicalJson(frame);
   if (frame.stream_id !== streamId) refuse('stream-binding', '1a', 'Frame belongs to another stream of record');
   if (frame.payload_hash !== hashValue(PARTICLE_DOMAIN, frame.payload)) refuse('payload-hash', '2', 'Particle mismatch');
@@ -172,6 +199,9 @@ function intrinsic(value: unknown, streamId: string): RappFrame {
 }
 
 function continuation(frame: RappFrame, head: FrameHead | null, signatures?: SignaturePolicy): void {
+  if (isReGenesis(frame.kind) && (frame.seq !== 0 || frame.prev !== null)) {
+    refuse('re-genesis-profile', '4', 'A re-genesis frame is a genesis: seq 0 and prev null');
+  }
   if (head === null) {
     if (frame.seq !== 0 || frame.prev !== null) refuse('genesis', '4', 'Genesis requires seq 0 and prev null');
   } else {
@@ -184,7 +214,7 @@ function continuation(frame: RappFrame, head: FrameHead | null, signatures?: Sig
   if (frame.prev_wave !== (swarm && head !== null ? head.frame_hash : null)) {
     refuse('prev-wave', '5', 'Incorrect wave predecessor');
   }
-  if (frame.kind.endsWith('.re-genesis')) {
+  if (isReGenesis(frame.kind)) {
     refuse('re-genesis-profile', '6', 'Re-genesis requires a dedicated owner-signed registry authorization');
   }
   if (swarm && frame.sig === null) refuse('signature-required', '6', 'Swarm frames must be signed');
@@ -220,6 +250,7 @@ export function buildFrame<P extends JsonObject>(input: {
   if (head?.seq === UINT53_MAX) refuse('seq-continuity', '4', 'Sequence ceiling reached');
   const payload = snapshotJson(input.payload);
   if (!isJsonObject(payload)) refuse('payload', '1', 'payload must be an object');
+  assertNewNames(payload);
   const draft: RappFrame = {
     spec: FRAME_SPEC, kind: input.kind, stream_id: input.streamId, seq: head === null ? 0 : head.seq + 1,
     utc: input.utc, payload, payload_hash: hashValue(PARTICLE_DOMAIN, payload), frame_hash: '0'.repeat(64),

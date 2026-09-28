@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { createHash, createPublicKey, ECDH, generateKeyPairSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
@@ -378,7 +378,11 @@ describe('rev-17 clarifications', () => {
   });
   it('mints keyed identities only for Ed25519 and P-256 keys (E-8)', () => {
     expect(() => keyedIdentity('alice', 'key', generateKeyPairSync('x25519').publicKey)).toThrow();
-    expect(keyedIdentity('alice', 'key', generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey)).toMatch(/^rappid:@alice\/key:/);
+    const p256 = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey;
+    expect(keyedIdentity('alice', 'key', p256)).toMatch(/^rappid:@alice\/key:/);
+    const point = ECDH.convertKey(p256.export({ type: 'spki', format: 'der' }).subarray(26), 'prime256v1', undefined, undefined, 'compressed') as Buffer;
+    const prefix = Buffer.from('3039301306072a8648ce3d020106082a8648ce3d030107032200', 'hex');
+    expect(() => keyedIdentity('alice', 'key', createPublicKey({ key: Buffer.concat([prefix, point]), format: 'der', type: 'spki' }))).toThrow();
   });
   it('checks the sig form and the re-genesis payload at step 1, and non-values before the checklist (E-10, E-22)', () => {
     const frame = buildFrame({ kind: 'body.pulse', streamId: BODY, utc: UTC, payload: {}, head: null });

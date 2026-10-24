@@ -67,8 +67,8 @@ separate Bots as a security boundary". We invert the weak part and keep the stro
 | 1 | Mind client + runner: health, chat, senses parse, attach-or-launch | LANDED 2026-10-23: app + curl got `response` from the :7181 kernel; pinned kernel launched on :18790 (evidence/v2-phase1) |
 | 2 | Voice loop: hold key → text → /chat → spoken reply; creature states driven end to end | LANDED 2026-10-23: on-device ears, system voice, dictation into the front app, screen read via OCR; spoken-reply round trip proven from the signed app (evidence/v2-phase2-3). Live microphone round trip: unverified until a person holds the key |
 | 3 | Needs: tower cards in the notch, answered by button and by voice, action queued | LANDED 2026-10-23: needs folder + watcher, card with Allow once / No / Always / Later, Claude Code hook answers PermissionRequest from the notch (hook proven allow+deny; a real click answered a card). Voice answer: not built |
-| 4 | Ship: hardened runtime, notarized DMG on `v2.0.0` tag via the existing Actions, Homebrew cask updated | fresh user account installs the DMG and completes phase 2 |
-| 5 | Retire v1 by aliasing: README pointer, `legacy-v1` tag, install.sh prints "this is now OpenRappter.app" | old URLs still 200, drift check blocks new v1 edits |
+| 4 | Ship: hardened runtime, notarized DMG on `v2.0.0-app` tag via the cloned Actions lane, Homebrew cask | IN FLIGHT 2026-10-23: signed bundle + launchd service proven locally; tag pushed; fresh-account install unverified |
+| 5 | Retire v1 by aliasing: README pointer, `legacy-v1` tag, install.sh prints "this is now OpenRappter.app" | LANDED 2026-10-23 (tag legacy-v1, docs/v1, dashboard.html kept); drift check not built |
 
 Phase 0 landed 2026-10-23 (branch `v2`, evidence in docs/evidence/v2-phase0). Known, cause unverified: the compact view
 rendered in 1 of 3 runs at the first capture while the expanded view rendered in 3 of 3; carry into phase 1.

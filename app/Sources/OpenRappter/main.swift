@@ -163,8 +163,8 @@ final class Coordinator: NSObject, NSApplicationDelegate {
                 model.posture = .needsYou; model.line = "Allow OpenRappter in Accessibility so I can type for you."; return
             }
             model.posture = .speaking; model.line = heard
-            await Dictation.paste(heard)
-            log("pasted \(heard.count) chars")
+            let how = await Dictation.paste(heard)
+            log("typed \(heard.count) chars via \(how) trusted=\(AXIsProcessTrusted()) canPost=\(CGPreflightPostEventAccess())")
             try? await Task.sleep(for: .seconds(1))
             rest()
         case .screen:

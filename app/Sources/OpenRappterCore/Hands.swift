@@ -9,9 +9,16 @@ public enum Dictation {
         AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary)
     }
 
-    /// Pastes `text` into the frontmost app via the clipboard and ⌘V, then restores the clipboard.
+    /// Puts `text` where the cursor is. First through Accessibility (inserts at the selection, no clipboard),
+    /// then by clipboard + ⌘V for apps that don't expose their text field (terminals, some Electron apps).
+    /// Returns a short word for the log: "ax", "paste", or "denied".
     @MainActor
-    public static func paste(_ text: String) async {
+    @discardableResult
+    public static func paste(_ text: String) async -> String {
+        let trusted = AXIsProcessTrusted()
+        let canPost = CGPreflightPostEventAccess()
+        guard trusted || canPost else { return "denied" }
+        if trusted, insertViaAccessibility(text) { return "ax" }
         let pb = NSPasteboard.general
         let saved = pb.string(forType: .string)
         pb.clearContents()
@@ -24,6 +31,19 @@ public enum Dictation {
         down?.post(tap: .cghidEventTap); up?.post(tap: .cghidEventTap)
         try? await Task.sleep(for: .milliseconds(600))
         if let saved { pb.clearContents(); pb.setString(saved, forType: .string) }
+        return "paste"
+    }
+
+    /// Sets the selected text of the focused element to `text`, which inserts it at the cursor.
+    static func insertViaAccessibility(_ text: String) -> Bool {
+        let system = AXUIElementCreateSystemWide()
+        var focused: AnyObject?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let el = focused else { return false }
+        let element = el as! AXUIElement
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable) == .success, settable.boolValue else { return false }
+        return AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success
     }
 }
 

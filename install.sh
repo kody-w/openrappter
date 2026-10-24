@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+# OpenRappter 2 is a Mac app. This script still installs the v1 gateway (retiring; see docs/v1/README-v1.md).
+printf "\nOpenRappter 2 is now a Mac app: https://github.com/kody-w/openrappter/releases/latest\nThis script installs the v1 gateway, which still works but is retiring.\n\n" >&2
+
+
 # OpenRappter Installer for macOS and Linux
 # Usage: curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash
 

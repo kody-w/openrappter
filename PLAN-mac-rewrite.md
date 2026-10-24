@@ -65,8 +65,8 @@ separate Bots as a security boundary". We invert the weak part and keep the stro
 |---|-------|----------------------|
 | 0 | Branch `v2`, SwiftPM app, DynamicNotchKit pinned, compact+expanded notch with placeholder | screenshot of the notch on this M4 Max, both states |
 | 1 | Mind client + runner: health, chat, senses parse, attach-or-launch | LANDED 2026-10-23: app + curl got `response` from the :7181 kernel; pinned kernel launched on :18790 (evidence/v2-phase1) |
-| 2 | Voice loop: hold key → text → /chat → spoken reply; creature states driven end to end | screen recording of one round trip, transcript matches |
-| 3 | Needs: tower cards in the notch, answered by button and by voice, action queued | a morning card answered from the notch, queue file shows it |
+| 2 | Voice loop: hold key → text → /chat → spoken reply; creature states driven end to end | LANDED 2026-10-23: on-device ears, system voice, dictation into the front app, screen read via OCR; spoken-reply round trip proven from the signed app (evidence/v2-phase2-3). Live microphone round trip: unverified until a person holds the key |
+| 3 | Needs: tower cards in the notch, answered by button and by voice, action queued | LANDED 2026-10-23: needs folder + watcher, card with Allow once / No / Always / Later, Claude Code hook answers PermissionRequest from the notch (hook proven allow+deny; a real click answered a card). Voice answer: not built |
 | 4 | Ship: hardened runtime, notarized DMG on `v2.0.0` tag via the existing Actions, Homebrew cask updated | fresh user account installs the DMG and completes phase 2 |
 | 5 | Retire v1 by aliasing: README pointer, `v1-legacy` tag, install.sh prints "this is now OpenRappter.app" | old URLs still 200, drift check blocks new v1 edits |
 

@@ -106,7 +106,8 @@ public struct MindRunner {
         var c: [URL] = []
         if let s = env["OPENRAPPTER_MIND"], let u = URL(string: s) { c.append(u) }
         c.append(URL(string: "http://127.0.0.1:18790")!)
-        c.append(URL(string: "http://127.0.0.1:7071")!)
+        // OPENRAPPTER_OWN_MIND=1: never share a Brainstem someone else installed on :7071; run your own.
+        if env["OPENRAPPTER_OWN_MIND"] != "1" { c.append(URL(string: "http://127.0.0.1:7071")!) }
         self.candidates = c
     }
 
@@ -151,5 +152,57 @@ public struct MindRunner {
             try? await Task.sleep(for: .seconds(2))
         }
         throw MindError.unreachable("own kernel did not answer /health within \(Int(wait))s")
+    }
+}
+
+// MARK: - The kernel outlives the app (launchd)
+
+extension MindRunner {
+    public static let serviceLabel = "com.openrappter.kernel"
+    public var launchAgentURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(Self.serviceLabel).plist")
+    }
+
+    /// Copies kernel.json + run.sh into the kernel home (so the service does not depend on where the app lives),
+    /// writes the LaunchAgent, and loads it. KeepAlive restarts it; RunAtLoad starts it at login. Never touches :7071.
+    public func installService() throws {
+        let fm = FileManager.default
+        let dst = kernelHome.appendingPathComponent("launcher")
+        try fm.createDirectory(at: dst, withIntermediateDirectories: true)
+        for f in ["kernel.json", "run.sh"] {
+            let to = dst.appendingPathComponent(f)
+            if fm.fileExists(atPath: to.path) { try fm.removeItem(at: to) }
+            try fm.copyItem(at: kernelDir.appendingPathComponent(f), to: to)
+        }
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dst.appendingPathComponent("run.sh").path)
+        let logDir = kernelHome.appendingPathComponent("logs"); try fm.createDirectory(at: logDir, withIntermediateDirectories: true)
+        let plist: [String: Any] = [
+            "Label": Self.serviceLabel,
+            "ProgramArguments": ["/bin/sh", dst.appendingPathComponent("run.sh").path],
+            "EnvironmentVariables": ["OPENRAPPTER_KERNEL_HOME": kernelHome.path, "OPENRAPPTER_KERNEL_PORT": String(ownPort),
+                                     "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"],
+            "RunAtLoad": true, "KeepAlive": true,
+            "StandardOutPath": logDir.appendingPathComponent("kernel.log").path,
+            "StandardErrorPath": logDir.appendingPathComponent("kernel.err.log").path,
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try fm.createDirectory(at: launchAgentURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: launchAgentURL, options: .atomic)
+        _ = Self.launchctl(["bootout", "gui/\(getuid())/\(Self.serviceLabel)"])   // reload if present; harmless otherwise
+        let r = Self.launchctl(["bootstrap", "gui/\(getuid())", launchAgentURL.path])
+        log("service \(Self.serviceLabel) bootstrap exit \(r)")
+    }
+
+    public func removeService() {
+        _ = Self.launchctl(["bootout", "gui/\(getuid())/\(Self.serviceLabel)"])
+        try? FileManager.default.removeItem(at: launchAgentURL)
+    }
+
+    public var serviceInstalled: Bool { FileManager.default.fileExists(atPath: launchAgentURL.path) }
+
+    static func launchctl(_ args: [String]) -> Int32 {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/launchctl"); p.arguments = args
+        p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+        do { try p.run(); p.waitUntilExit(); return p.terminationStatus } catch { return -1 }
     }
 }

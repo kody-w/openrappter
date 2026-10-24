@@ -9,9 +9,12 @@ NAME="OpenRappter"; BUNDLE_ID="com.openrappter.app"; APP="$DIST/$NAME.app"
 ARCHS="${ARCHS:-$(uname -m)}"
 cd "$APP_SRC"
 bins=()
+mkdir -p "$DIST/slices"
 for a in $ARCHS; do
   swift build -c release --arch "$a" --product OpenRappter
-  bins+=("$(swift build -c release --arch "$a" --product OpenRappter --show-bin-path)/OpenRappter")
+  # Copy each slice out: newer SwiftPM layouts reuse one bin path across arches, so the next build would overwrite it.
+  cp "$(swift build -c release --arch "$a" --product OpenRappter --show-bin-path)/OpenRappter" "$DIST/slices/OpenRappter-$a"
+  bins+=("$DIST/slices/OpenRappter-$a")
 done
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 if [ ${#bins[@]} -gt 1 ]; then lipo -create "${bins[@]}" -output "$APP/Contents/MacOS/$NAME"; else cp "${bins[0]}" "$APP/Contents/MacOS/$NAME"; fi

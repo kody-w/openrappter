@@ -35,3 +35,12 @@ final class NeedsTests: XCTestCase {
         XCTAssertEqual(n.opts.count, 2); XCTAssertEqual(n.opts[0].rec, true); XCTAssertNil(n.created)
     }
 }
+
+final class NeedCardTests: XCTestCase {
+    func testOneOrangeButtonPerCard() {
+        XCTAssertEqual(primaryIndex([NeedOption(label: "Allow once", rec: true), NeedOption(label: "No"), NeedOption(label: "Always")]), 0)
+        XCTAssertEqual(primaryIndex([NeedOption(label: "No"), NeedOption(label: "Ship", rec: true)]), 1, "the recommended option is the orange one")
+        XCTAssertEqual(primaryIndex([NeedOption(label: "OK"), NeedOption(label: "Later")]), 0, "no recommendation: the first is primary")
+        XCTAssertNil(primaryIndex([]))
+    }
+}

@@ -20,8 +20,12 @@ def drop(card):
 if kind == "PermissionRequest":
     tool = ev.get("tool_name", "a tool"); ti = ev.get("tool_input") or {}
     ctx = ti.get("command") or ti.get("description") or ti.get("file_path") or json.dumps(ti)[:160]
+    # Plain words on the card (and spoken aloud): never the raw tool name.
+    verb = {"Bash": "run a command", "Edit": "change a file", "Write": "change a file", "MultiEdit": "change a file",
+            "NotebookEdit": "change a file", "Read": "read a file", "WebFetch": "look something up",
+            "WebSearch": "look something up"}.get(tool, "use a tool")
     cid = f"cc-{sid}-{int(now*1000)}"
-    p = drop({"id": cid, "title": f"Claude Code in {cwd} wants to run {tool}", "ctx": str(ctx)[:300],
+    p = drop({"id": cid, "title": f"Claude Code in {cwd} wants to {verb}", "ctx": str(ctx)[:300],
               "opts": [{"label": "Allow once", "rec": True, "action": "allow"},
                        {"label": "No", "action": "deny"},
                        {"label": "Always", "action": "allow-always"}],
@@ -51,7 +55,7 @@ elif kind == "Notification":
     nt = ev.get("notification_type", "")
     if nt not in ("idle_prompt", "agent_needs_input", "elicitation_dialog", "elicitation_url_dialog"): sys.exit(0)
     drop({"id": f"cc-{sid}-note-{int(now)}", "title": f"Claude Code in {cwd} is waiting for you",
-          "ctx": (ev.get("message") or "")[:200], "opts": [{"label": "Seen", "rec": True}], "source": "claude-code", "created": now})
+          "ctx": (ev.get("message") or "")[:200], "opts": [{"label": "OK", "rec": True}], "source": "claude-code", "created": now})
 elif kind == "Stop":
     if ev.get("stop_hook_active"): sys.exit(0)
     msg = (ev.get("last_assistant_message") or "").strip().replace("\n", " ")

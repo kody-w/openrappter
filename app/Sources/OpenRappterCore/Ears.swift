@@ -30,9 +30,10 @@ public final class Ears: NSObject {
         if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
         let input = engine.inputNode
         let fmt = input.outputFormat(forBus: 0)
+        input.removeTap(onBus: 0)   // a second tap on the same bus is an uncatchable crash; never leave one behind
         input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { buf, _ in req.append(buf) }
         engine.prepare()
-        try engine.start()
+        do { try engine.start() } catch { input.removeTap(onBus: 0); throw error }
         latest = ""
         listening = true
         task = recognizer.recognitionTask(with: req) { [weak self] res, err in

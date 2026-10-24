@@ -162,18 +162,30 @@ final class Coordinator: NSObject, NSApplicationDelegate {
 
     func signIn() {
         guard let mind else { return }
-        NSWorkspace.shared.open(mind.baseURL.appendingPathComponent("login"))
-        model.line = "Finish the GitHub sign-in in your browser. I'll notice."
         Task { @MainActor in
-            for _ in 0..<60 {   // poll two minutes
+            let s: SignIn
+            do { s = try await mind.beginSignIn() } catch {
+                log("sign-in failed to start: \(error)")
+                model.line = "I couldn't start the sign-in. Is my mind awake? Try again in a moment."
+                return
+            }
+            let pb = NSPasteboard.general; pb.clearContents(); pb.setString(s.code, forType: .string)
+            model.signInCode = s.code
+            model.line = "I copied this code. Paste it on the GitHub page I just opened, then approve."
+            log("sign-in code \(s.code) copied; opening \(s.url)")
+            NSWorkspace.shared.open(s.url)
+            for _ in 0..<450 {   // GitHub codes live 15 minutes
                 try? await Task.sleep(for: .seconds(2))
+                if !model.hungry { return }   // fed some other way (menu, restart)
                 if let h = try? await mind.health(), !h.isHungry {
-                    model.hungry = false; log("fed: signed in")
+                    model.hungry = false; model.signInCode = nil; log("fed: signed in")
                     model.line = "Fed. Hold ⌥ Space and talk to me."
                     model.posture = .speaking; await voice.speak("Thanks. I'm fed.")
                     rest(); return
                 }
             }
+            model.signInCode = nil
+            model.line = "That code ran out. Press Sign me in for a fresh one."
         }
     }
 
@@ -332,6 +344,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     // MARK: proofs driven from outside (no microphone needed)
 
     func runEnvDrivenProofs() async {
+        if env["OPENRAPPTER_SIGNIN"] == "1", model.hungry { signIn() }   // proof: press "Sign me in" from the environment
         if let q = env["OPENRAPPTER_SAY"] { await act(.ask, q) }
         if let t = env["OPENRAPPTER_DICTATE"] { await act(.dictate, t) }
         if let q = env["OPENRAPPTER_SCREEN_ASK"] { await act(.screen, q) }

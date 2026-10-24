@@ -34,6 +34,8 @@ public final class CreatureModel: ObservableObject {
     @Published public var need: Need?
     /// Mind is up but not signed in.
     @Published public var hungry: Bool = false
+    /// A GitHub device code the person has to paste; shown big while a sign-in is in flight.
+    @Published public var signInCode: String?
     /// The first-run card is up: the four powers and one button.
     @Published public var setup: Bool = false
     @Published public var powers: [Power: PowerState] = [:]
@@ -148,7 +150,13 @@ public struct Expanded: View {
                 } else if model.hungry && model.posture == .needsYou {
                     Text("rappter").font(.headline).foregroundStyle(.white)
                     Text(model.line).font(.callout).foregroundStyle(.white.opacity(0.85)).lineLimit(3)
-                    Button("Sign me in") { model.onSignIn?() }.buttonStyle(.borderedProminent).tint(.orange)
+                    if let code = model.signInCode {
+                        Text(code).font(.system(size: 26, weight: .bold, design: .monospaced)).foregroundStyle(.orange)
+                            .accessibilityLabel("Your code is \(code.map { String($0) }.joined(separator: " "))")
+                        Button("Open GitHub again") { model.onSignIn?() }.buttonStyle(.bordered)
+                    } else {
+                        Button("Sign me in") { model.onSignIn?() }.buttonStyle(Primary())
+                    }
                 } else {
                     Text("rappter").font(.headline).foregroundStyle(.white)
                     Text(model.line).font(.callout).foregroundStyle(.white.opacity(0.85)).lineLimit(4)

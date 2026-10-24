@@ -19,6 +19,21 @@ public struct MindReply: Sendable, Equatable {
     public var voice: String { senses["voice"] ?? "" }
 }
 
+/// What the kernel hands back when a GitHub sign-in starts: a short code to paste on GitHub's device page.
+public struct SignIn: Sendable, Equatable {
+    public var code: String
+    public var url: URL
+    public init(code: String, url: URL) { self.code = code; self.url = url }
+
+    /// Parses the kernel's `POST /login` (or `GET /login/status`) body. Nil when there is no code in it.
+    public static func parse(_ data: Data) -> SignIn? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let code = obj["user_code"] as? String, !code.isEmpty,
+              let u = obj["verification_uri"] as? String, let url = URL(string: u), url.scheme == "https" else { return nil }
+        return SignIn(code: code, url: url)
+    }
+}
+
 public enum MindError: Error, Equatable {
     case unreachable(String)
     case badStatus(Int)
@@ -82,6 +97,19 @@ public struct MindClient: Sendable {
         let parsed = Senses.parse(response)
         return MindReply(text: parsed.text, senses: parsed.senses,
                          sessionId: obj["session_id"] as? String ?? obj["sessionId"] as? String, raw: response)
+    }
+
+    /// Starts (or resumes) the kernel's GitHub device sign-in. The kernel keeps polling GitHub by itself;
+    /// the app only has to show the code, open the page, and watch `/health` turn from hungry to fed.
+    public func beginSignIn() async throws -> SignIn {
+        var req = URLRequest(url: baseURL.appendingPathComponent("login"))
+        req.httpMethod = "POST"
+        let (data, resp): (Data, URLResponse)
+        do { (data, resp) = try await session.data(for: req) } catch { throw MindError.unreachable(error.localizedDescription) }
+        guard let http = resp as? HTTPURLResponse else { throw MindError.unreachable(baseURL.absoluteString) }
+        guard http.statusCode == 200 else { throw MindError.badStatus(http.statusCode) }
+        guard let s = SignIn.parse(data) else { throw MindError.badBody(String(decoding: data.prefix(200), as: UTF8.self)) }
+        return s
     }
 
     private func get(_ path: String) async throws -> (Data, URLResponse) {

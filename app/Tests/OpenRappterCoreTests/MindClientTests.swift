@@ -55,6 +55,9 @@ final class FakeKernel: @unchecked Sendable {
             } else {
                 body = #"{"schema":"rapp-chat/1.0","status":"success","response":"Hello!\n\n|||VOICE||| Hi there.","content":"Hello!","session_id":"s-1","agent_logs":""}"#
             }
+        } else if path == "/login" {
+            if req.hasPrefix("POST") { body = #"{"user_code":"ABCD-1234","verification_uri":"https://github.com/login/device"}"# }
+            else { status = "405 Method Not Allowed"; body = "Method Not Allowed" }   // exactly what the grail does to a GET
         } else { status = "404 Not Found" }
         let resp = "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
         c.send(content: resp.data(using: .utf8), completion: .contentProcessed { _ in c.cancel() })
@@ -90,5 +93,19 @@ final class MindClientTests: XCTestCase {
         runner.candidates = [URL(string: "http://127.0.0.1:1")!] + runner.candidates   // a dead one first
         let attached = await runner.attach()
         XCTAssertEqual(attached?.0.baseURL.port, Int(k.port))
+    }
+
+    func testSignInIsAPostThatHandsBackACode() async throws {
+        let k = try FakeKernel()
+        let client = MindClient(baseURL: URL(string: "http://127.0.0.1:\(k.port)")!, timeout: 5)
+        let s = try await client.beginSignIn()
+        XCTAssertEqual(s, SignIn(code: "ABCD-1234", url: URL(string: "https://github.com/login/device")!))
+    }
+
+    func testSignInParseRejectsJunk() {
+        XCTAssertNil(SignIn.parse(Data("Method Not Allowed".utf8)))
+        XCTAssertNil(SignIn.parse(Data(#"{"user_code":"","verification_uri":"https://github.com/login/device"}"#.utf8)))
+        XCTAssertNil(SignIn.parse(Data(#"{"user_code":"X","verification_uri":"http://evil.example/"}"#.utf8)))
+        XCTAssertNotNil(SignIn.parse(Data(#"{"pending":true,"user_code":"3FA0-965E","verification_uri":"https://github.com/login/device","expires_in":892}"#.utf8)))
     }
 }

@@ -19,7 +19,7 @@ build on v1 and do not delete it.
 
 - `cd app && swift test` must stay green. Add a test for every piece of pure logic.
 - Proofs run from the environment, never from a microphone: `OPENRAPPTER_SAY`, `OPENRAPPTER_DICTATE`,
-  `OPENRAPPTER_SCREEN_ASK`, `OPENRAPPTER_SETUP=1`, `OPENRAPPTER_SETUP_FAKE`, `OPENRAPPTER_DEMO_EXIT=1`,
+  `OPENRAPPTER_SCREEN_ASK`, `OPENRAPPTER_SIGNIN=1`, `OPENRAPPTER_SETUP=1`, `OPENRAPPTER_SETUP_FAKE`, `OPENRAPPTER_DEMO_EXIT=1`,
   `OPENRAPPTER_EVIDENCE=<log>`. Attach to a running kernel with `OPENRAPPTER_MIND=http://127.0.0.1:<port>`.
 - On Kody's Mac, evidence runs attach to :7181, never :7071.
 - Plain words on every screen. No "AI", no jargon, one primary button per card.

@@ -9,7 +9,7 @@ Now the app posts, copies the code, opens GitHub's device page, shows the code b
 - `signin-card.png` — the card in the notch, cropped: the code, the plain words, one button.
 - `signin-live.log` — the run on Kody's Mac attached to the app's own kernel on :18790 (`OPENRAPPTER_SIGNIN=1`
   presses the button from the environment). `sign-in code … copied; opening https://github.com/login/device`;
-  the clipboard held the same code.
+  the clipboard held the same code. Kody approved on GitHub and 20 seconds later: `fed: signed in`; the kernel's `/health` went from `unauthenticated` to `ok`.
 
 Tests: `cd app && swift test` → 17 of 17 (the fake kernel now answers `GET /login` with 405 exactly like the grail,
 and `POST /login` with a code).

@@ -311,3 +311,56 @@ extension MindRunner {
         do { try p.run(); p.waitUntilExit(); return p.terminationStatus } catch { return -1 }
     }
 }
+
+// MARK: - Opt-in service, and the tools the kernel needs before it can start
+
+extension MindRunner {
+    /// Stops the login service and removes it. Throws when the plist is there but cannot be removed.
+    public func uninstallService() throws {
+        _ = Self.launchctl(["bootout", "gui/\(getuid())/\(Self.serviceLabel)"])
+        if FileManager.default.fileExists(atPath: launchAgentURL.path) {
+            try FileManager.default.removeItem(at: launchAgentURL)
+        }
+        log("service \(Self.serviceLabel) removed")
+    }
+
+    /// What run.sh needs: git and python3. On a Mac without Apple's command line tools, /usr/bin holds stubs
+    /// that pop the "install the tools?" dialog instead of running, so those count as missing too.
+    public static let kernelTools = ["git", "python3"]
+    public static let kernelPath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
+    public static func missingTools() -> [String] {
+        let clt = run("/usr/bin/xcode-select", ["-p"]).status == 0
+        var resolved: [String: String?] = [:]
+        for t in kernelTools {
+            let r = run("/bin/sh", ["-c", "command -v \(t)"], path: kernelPath)
+            let p = r.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            resolved[t] = (r.status == 0 && !p.isEmpty) ? p : nil
+        }
+        return missingTools(commandLineToolsInstalled: clt, resolved: resolved)
+    }
+
+    /// The pure half: a tool is missing when it is not on the path, or when it is Apple's /usr/bin stub
+    /// and the command line tools are not installed.
+    public static func missingTools(commandLineToolsInstalled: Bool, resolved: [String: String?]) -> [String] {
+        kernelTools.filter { t in
+            guard let p = resolved[t] ?? nil else { return true }
+            return !commandLineToolsInstalled && p.hasPrefix("/usr/bin/")
+        }
+    }
+
+    /// Pops Apple's "install the command line tools" dialog. Returns once the dialog is up, not when it finishes.
+    public static func installCommandLineTools() {
+        _ = run("/usr/bin/xcode-select", ["--install"])
+    }
+
+    static func run(_ exe: String, _ args: [String], path: String? = nil) -> (status: Int32, output: String) {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
+        if let path { var env = ProcessInfo.processInfo.environment; env["PATH"] = path; p.environment = env }
+        let out = Pipe(); p.standardOutput = out; p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return (-1, "") }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return (p.terminationStatus, String(decoding: data, as: UTF8.self))
+    }
+}

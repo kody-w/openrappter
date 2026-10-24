@@ -7,8 +7,24 @@ public struct MindHealth: Sendable, Equatable {
     public var version: String
     public var model: String
     public var agentCount: Int
+    /// `copilot` from /health: "✓", "pending" or "no_access" (grail 0.6.16). Empty when the kernel does not say.
+    public var copilot: String = ""
+    /// `copilot_username` from /health when the account is signed in but has no Copilot.
+    public var copilotUsername: String = ""
+    /// `auth_error` from /health ("invalid_credentials" = the stored GitHub sign-in is bad; sign in again).
+    public var authError: String = ""
     /// The kernel is up but has no Copilot sign-in. The creature shows this as hungry before it even asks.
     public var isHungry: Bool { status == "unauthenticated" }
+    /// Signed in, but the GitHub account has no Copilot. Not hungry (a sign-in will not fix it) and not fed.
+    public var needsCopilot: Bool { copilot == "no_access" }
+}
+
+extension MindError {
+    /// The plain sentence for a signed-in account that has no Copilot. `who` is the GitHub login when the kernel says it.
+    public static func noCopilotSentence(_ who: String) -> String {
+        let account = who.isEmpty ? "This GitHub account" : "The GitHub account \(who)"
+        return "\(account) can't use Copilot yet. Turn it on at github.com/settings/copilot, then ask me again."
+    }
 }
 
 public struct MindReply: Sendable, Equatable {
@@ -25,6 +41,8 @@ public enum MindError: Error, Equatable {
     case badBody(String)
     /// The kernel is up but cannot think: no Copilot sign-in. The creature shows this as "hungry".
     case hungry(String)
+    /// Signed in, but the GitHub account has no Copilot. Carries the plain sentence to show and say. Never "fed".
+    case noCopilot(String)
 }
 
 public struct MindClient: Sendable {
@@ -49,7 +67,10 @@ public struct MindClient: Sendable {
             status: obj["status"] as? String ?? "",
             version: obj["version"] as? String ?? "",
             model: obj["model"] as? String ?? "",
-            agentCount: (obj["agents"] as? [Any])?.count ?? 0
+            agentCount: (obj["agents"] as? [Any])?.count ?? 0,
+            copilot: obj["copilot"] as? String ?? "",
+            copilotUsername: obj["copilot_username"] as? String ?? "",
+            authError: obj["auth_error"] as? String ?? ""
         )
     }
 
@@ -72,9 +93,16 @@ public struct MindClient: Sendable {
         let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         let err = (obj["error"] as? String) ?? ""
         let e = err.lowercased()
+        // Signed in, no Copilot: grail 0.6.16 answers HTTP 200 {"error":"NO_COPILOT_ACCESS:<user>","no_copilot_access":true}.
+        if obj["no_copilot_access"] as? Bool == true || e.hasPrefix("no_copilot_access:") {
+            let who = (obj["copilot_username"] as? String) ?? String(err.drop(while: { $0 != ":" }).dropFirst())
+            throw MindError.noCopilot(MindError.noCopilotSentence(who == "this account" ? "" : who))
+        }
         if http.statusCode == 401 || e.contains("sign in") || e.contains("not authenticated") || e.contains("token") {
             throw MindError.hungry(err.isEmpty ? "HTTP \(http.statusCode)" : err)
         }
+        // A 5xx with the kernel's own plain sentence (usage limit, model timeout): keep the sentence, the creature says it.
+        if http.statusCode >= 500, !err.isEmpty { throw MindError.badBody(err) }
         guard http.statusCode == 200 else { throw MindError.badStatus(http.statusCode) }
         guard let response = obj["response"] as? String else {
             throw MindError.badBody(String(decoding: data.prefix(200), as: UTF8.self))

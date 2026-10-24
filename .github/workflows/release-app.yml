@@ -181,7 +181,7 @@ jobs:
           (
             cd dist
             shasum -a 256 "OpenRappter-${RELEASE_VERSION}.dmg" \
-              > "OpenRappter-Bar-${RELEASE_VERSION}.dmg.sha256"
+              > "OpenRappter-${RELEASE_VERSION}.dmg.sha256"
           )
 
       - name: Remove temporary signing material

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OpenRappter</title>
-<meta name="description" content="A creature that lives in your Mac's notch. Hold a key and talk. It thinks with the GitHub Copilot sign-in you already have, answers out loud, types for you anywhere, and reads your screen. Speech stays on your Mac.">
+<meta name="description" content="A creature that lives in your Mac's notch. Hold a key and talk. It thinks with the GitHub Copilot sign-in you already have, answers out loud, types for you anywhere, and reads your screen. Your voice becomes words on your Mac; only the words go to GitHub Copilot.">
 <meta property="og:title" content="OpenRappter">
 <meta property="og:description" content="A creature in your Mac's notch. Hold a key and talk.">
 <meta property="og:image" content="https://kody-w.github.io/openrappter/docs/launch/gallery-1-notch-speaking.png">
@@ -47,15 +47,16 @@ footer a{margin:0 10px}
   <p class="lead">It thinks with the GitHub Copilot sign-in you already have. It answers out loud, types for you in any app, reads your screen, and waits in the notch when something needs you.</p>
   <a class="cta" href="https://github.com/kody-w/openrappter/releases/latest">Download for Mac</a>
   <p class="sub">Free, open source, signed and notarized. macOS 14+. Or <code>brew tap kody-w/tap && brew trust kody-w/tap && brew install --cask openrappter</code></p>
-  <img class="shot" src="docs/launch/gallery-1-notch-speaking.png" alt="OpenRappter answering in the notch: Hey Kody. Orion here. What do you need?" width="830">
+  <p class="sub">First launch: a setup card asks for four powers, then it sets up its own mind, which takes a few minutes and needs an internet connection and Apple's command line tools (macOS offers to install them). Sign in once with a GitHub code it copies for you.</p>
+  <img class="shot" src="docs/launch/gallery-1-notch-speaking.png" alt="OpenRappter answering out loud in the notch after a hold-and-talk question" width="830">
 </header>
 
 <section class="wrap">
   <h2>Three keys. That's the whole manual.</h2>
   <div class="grid">
-    <div class="card"><kbd>hold ⌥ Space</kbd><h3>Talk</h3><p>Say it, let go, hear the answer. Speech is recognised on your Mac.</p></div>
+    <div class="card"><kbd>hold ⌥ Space</kbd><h3>Talk</h3><p>Say it, let go, hear the answer. Your voice becomes words on your Mac when it can (Apple's servers otherwise); the words go to GitHub Copilot through your own sign-in.</p></div>
     <div class="card"><kbd>hold ⌃⌥ Space</kbd><h3>Type for me</h3><p>What you said lands where your cursor is. Any app, any field.</p></div>
-    <div class="card"><kbd>hold ⇧⌥ Space</kbd><h3>Ask about my screen</h3><p>It reads the window in front of you and answers about it. Nothing leaves the device but the question.</p></div>
+    <div class="card"><kbd>hold ⇧⌥ Space</kbd><h3>Ask about my screen</h3><p>It takes a picture of the window in front of you, turns it into text on your Mac, and sends that text with your question to GitHub Copilot. Only while you hold the key.</p></div>
   </div>
 </section>
 
@@ -80,7 +81,7 @@ footer a{margin:0 10px}
     <div>
       <ul class="plain">
         <li><b>No new keys, no new bill.</b> It uses the GitHub Copilot seat you already pay for.</li>
-        <li><b>A mind you can read.</b> The brain is an unchanged, pinned <a href="https://github.com/kody-w/rapp-installer">RAPP Brainstem</a> kernel running as a login service on your Mac. The app only talks to it through one HTTP door.</li>
+        <li><b>A mind you can read.</b> The brain is an unchanged, pinned <a href="https://github.com/kody-w/rapp-installer">RAPP Brainstem</a> kernel running as a login service on your Mac. The app only talks to it through three plain HTTP calls: health, chat and sign-in.</li>
         <li><b>Keeps working when you quit.</b> The mind is a service, the app is a face.</li>
         <li><b>Off until you say yes.</b> Typing needs Accessibility, screen reading needs Screen Recording. Asked once, never assumed.</li>
       </ul>

@@ -3,7 +3,7 @@
 > **Also in this repo: OpenRappter, the notch app.** A creature that lives in your Mac's notch: hold ⌥ Space and
 > talk, it answers out loud, types for you anywhere, reads your screen, and shows Claude Code's permission prompts
 > as cards. [Download](https://github.com/kody-w/openrappter/releases/latest) · [Site](https://kody-w.github.io/openrappter/notch/) ·
-> [Source](apps/notch/) · `brew tap kody-w/tap && brew install --cask openrappter`
+> [Source](apps/notch/) · `brew tap kody-w/tap && brew trust kody-w/tap && brew install --cask openrappter`
 
 Serious local AI for real business work.
 

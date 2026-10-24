@@ -51,6 +51,9 @@ Which of the three grail routes: **distro** (pinned unchanged kernel + pack) wit
 | 4 | Ship: hardened runtime, notarized DMG on `v2.0.0` tag via the existing Actions, Homebrew cask updated | fresh user account installs the DMG and completes phase 2 |
 | 5 | Retire v1 by aliasing: README pointer, `v1-legacy` tag, install.sh prints "this is now OpenRappter.app" | old URLs still 200, drift check blocks new v1 edits |
 
+Phase 0 landed 2026-10-23 (branch `v2`, evidence in docs/evidence/v2-phase0). Known, cause unverified: the compact view
+rendered in 1 of 3 runs at the first capture while the expanded view rendered in 3 of 3; carry into phase 1.
+
 Phase 3 of the pack (iMessage) comes after 5, as an agent in the pack, never in the app.
 
 ## Borrowed from Grok Bot (xAI, Aug 2026) and Notchling, what they got right

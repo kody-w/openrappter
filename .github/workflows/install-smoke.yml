@@ -18,7 +18,7 @@ on:
       - 'typescript/package.json'
       - 'typescript/package-lock.json'
       - 'python/pyproject.toml'
-      - '.github/workflows/**'
+      - '.github/workflows/install-smoke.yml'
   pull_request:
     branches: [main]
     paths: *install-smoke-paths

@@ -25,7 +25,8 @@ OpenRappter.app (Swift 6, SwiftUI, macOS 14+, no Dock icon)
  │           in agents/. Quitting the app never stops the work (Grok Bot's one real breakthrough, done locally).
  └─ Needs    Decision cards in the rapp-tower shape {id,title,ctx,opts[]} queue up; the creature changes posture and
              waits. Answer by button or voice. Mind down / Copilot sign-in expired shows as "hungry", never as a crash.
-OpenRappter pack (expansion pack, plain agents/):  morning_brief, decisions, (phase 3) imessage.
+OpenRappter pack (expansion pack, plain agents/):  morning_brief, decisions. Text/phone door = Hermes Agent in front
+of /chat (habit 2026-10-23: never build a gateway); no iMessage code in the app or the pack.
 ```
 Which of the three grail routes: **distro** (pinned unchanged kernel + pack) with a native face. The kernel is not touched.
 
@@ -54,7 +55,8 @@ Which of the three grail routes: **distro** (pinned unchanged kernel + pack) wit
 Phase 0 landed 2026-10-23 (branch `v2`, evidence in docs/evidence/v2-phase0). Known, cause unverified: the compact view
 rendered in 1 of 3 runs at the first capture while the expanded view rendered in 3 of 3; carry into phase 1.
 
-Phase 3 of the pack (iMessage) comes after 5, as an agent in the pack, never in the app.
+Grok Bot is the kill test, not the model: what can it architecturally not do? Run local, live on the device,
+tolerate delay, keep a body alive between tokens. Ours-first: real people use our creature before any comparison.
 
 ## Borrowed from Grok Bot (xAI, Aug 2026) and Notchling, what they got right
 Grok Bot: named, focused teammates whose description *is* the rulebook; a runtime that outlives the app window;

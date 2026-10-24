@@ -2,7 +2,7 @@ name: Release macOS
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "!v*-app"]
 
 permissions:
   contents: read

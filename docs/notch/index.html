@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenRappter</title>
+<meta name="description" content="A creature that lives in your Mac's notch. Hold a key and talk. It thinks with the GitHub Copilot sign-in you already have, answers out loud, types for you anywhere, and reads your screen. Speech stays on your Mac.">
+<meta property="og:title" content="OpenRappter">
+<meta property="og:description" content="A creature in your Mac's notch. Hold a key and talk.">
+<meta property="og:image" content="https://kody-w.github.io/openrappter/launch/gallery-1-notch-speaking.png">
+<link rel="icon" href="AppIcon-1024.png">
+<style>
+:root{--bg:#0d0d0f;--ink:#f4f4f5;--muted:#a1a1aa;--accent:#ff8a3d;--card:#161618;--line:#26262a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:900px;margin:0 auto;padding:0 20px}
+header{padding:72px 0 28px;text-align:center}
+.notch{display:inline-flex;align-items:center;gap:14px;background:#000;border-radius:0 0 22px 22px;padding:10px 22px 12px;margin:-72px auto 40px;box-shadow:0 10px 40px rgba(0,0,0,.6)}
+.notch svg{width:24px;height:24px;fill:var(--accent)}
+.notch .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);margin-left:14px}
+h1{font-size:clamp(36px,7vw,64px);line-height:1.05;letter-spacing:-.02em;margin:0 0 14px;font-weight:700}
+.lead{font-size:clamp(18px,2.6vw,22px);color:var(--muted);max-width:640px;margin:0 auto 30px}
+.cta{display:inline-block;background:var(--accent);color:#000;font-weight:700;text-decoration:none;padding:16px 28px;border-radius:14px;font-size:18px}
+.cta:hover{filter:brightness(1.08)}
+.sub{color:var(--muted);font-size:14px;margin-top:12px}
+.sub code{background:var(--card);border:1px solid var(--line);padding:2px 7px;border-radius:6px;font-size:13px}
+.shot{display:block;max-width:100%;border-radius:18px;margin:44px auto 0;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+section{padding:56px 0;border-top:1px solid var(--line)}
+h2{font-size:28px;letter-spacing:-.01em;margin:0 0 24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}
+.card kbd{display:inline-block;font:600 13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;background:#000;border:1px solid #333;border-bottom-width:3px;border-radius:7px;padding:7px 10px;margin-bottom:12px;color:#fff}
+.card h3{margin:0 0 6px;font-size:18px}
+.card p{margin:0;color:var(--muted);font-size:15px}
+.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;align-items:center}
+.pair img{width:100%;border-radius:16px;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+ul.plain{padding-left:20px;color:var(--muted)}ul.plain li{margin:8px 0}ul.plain b{color:var(--ink)}
+footer{padding:40px 0 60px;color:var(--muted);font-size:14px;text-align:center;border-top:1px solid var(--line)}
+footer a{margin:0 10px}
+</style>
+</head>
+<body>
+<header class="wrap">
+  <div class="notch" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2c-2.6 0-4.5 1.7-4.5 4 0 1.1.4 2 1 2.7L5 12l-2.5-1 1 3 3 .5-1 3.5 3-1.5 1.5 3.5 1.5-3.5 3 1.5-1-3.5 3-.5 1-3-2.5 1-3.5-3.3c.6-.7 1-1.6 1-2.7 0-2.3-1.9-4-4.5-4z"/></svg><span class="dot"></span></div>
+  <h1>A creature in your Mac's notch.<br>Hold a key and talk.</h1>
+  <p class="lead">It thinks with the GitHub Copilot sign-in you already have. It answers out loud, types for you in any app, reads your screen, and waits in the notch when something needs you.</p>
+  <a class="cta" href="https://github.com/kody-w/openrappter/releases/latest">Download for Mac</a>
+  <p class="sub">Free, open source, signed and notarized. macOS 14+. Or <code>brew tap kody-w/tap && brew install --cask openrappter</code></p>
+  <img class="shot" src="launch/gallery-1-notch-speaking.png" alt="OpenRappter answering in the notch: Hey Kody. Orion here. What do you need?" width="830">
+</header>
+
+<section class="wrap">
+  <h2>Three keys. That's the whole manual.</h2>
+  <div class="grid">
+    <div class="card"><kbd>hold ⌥ Space</kbd><h3>Talk</h3><p>Say it, let go, hear the answer. Speech is recognised on your Mac.</p></div>
+    <div class="card"><kbd>hold ⌃⌥ Space</kbd><h3>Type for me</h3><p>What you said lands where your cursor is. Any app, any field.</p></div>
+    <div class="card"><kbd>hold ⇧⌥ Space</kbd><h3>Ask about my screen</h3><p>It reads the window in front of you and answers about it. Nothing leaves the device but the question.</p></div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>When something needs you, it waits.</h2>
+  <div class="pair">
+    <img src="launch/gallery-2-card.png" alt="A card in the notch: Claude Code in openrappter wants to run Bash, with Allow once, No, Always, Later buttons">
+    <div>
+      <p>No invented needs. It never speaks first. The creature changes posture and the card sits in the notch until you answer.</p>
+      <ul class="plain">
+        <li><b>Claude Code</b> permission prompts show here, with Allow once, No, Always. One click in the menu bar connects it.</li>
+        <li><b>Any script or cron job</b> can ask you something: drop a JSON file in <code>~/.openrappter/needs/</code>.</li>
+        <li><b>Hungry is honest.</b> If its mind isn't signed in, it says so and gives you the one button that fixes it.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>Your Mac is the computer. Not someone's cloud.</h2>
+  <div class="pair">
+    <div>
+      <ul class="plain">
+        <li><b>No new keys, no new bill.</b> It uses the GitHub Copilot seat you already pay for.</li>
+        <li><b>A mind you can read.</b> The brain is an unchanged, pinned <a href="https://github.com/kody-w/rapp-installer">RAPP Brainstem</a> kernel running as a login service on your Mac. The app only talks to it through one HTTP door.</li>
+        <li><b>Keeps working when you quit.</b> The mind is a service, the app is a face.</li>
+        <li><b>Off until you say yes.</b> Typing needs Accessibility, screen reading needs Screen Recording. Asked once, never assumed.</li>
+      </ul>
+    </div>
+    <img src="launch/gallery-3-hungry.png" alt="The creature in the notch saying: I can't think yet. Sign me in and I'm fed.">
+  </div>
+</section>
+
+<footer class="wrap">
+  <a href="https://github.com/kody-w/openrappter">Source</a> · <a href="https://github.com/kody-w/openrappter/releases/latest">Releases</a> · <a href="../">RAPP Work</a> · MIT
+</footer>
+</body>
+</html>

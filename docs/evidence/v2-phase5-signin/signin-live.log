@@ -1,0 +1,13 @@
+2026-10-24T18:06:40Z compact shown
+2026-10-24T18:06:40Z attached http://127.0.0.1:18790 v0.6.16 gpt-4o agents=3
+2026-10-24T18:06:40Z mind http://127.0.0.1:18790 v0.6.16 model=gpt-4o agents=3 hungry=true
+2026-10-24T18:06:40Z sign-in code 3FA0-965E copied; opening https://github.com/login/device
+2026-10-24T18:07:00Z fed: signed in
+2026-10-24T18:07:38Z setup shown microphone=notAsked speech=notAsked typing=notAsked screen=notAsked
+2026-10-24T18:07:44Z allow microphone was notAsked
+2026-10-24T18:07:49Z power microphone -> granted
+2026-10-24T18:07:52Z allow speech was notAsked
+2026-10-24T18:07:53Z power speech -> granted
+2026-10-24T18:07:56Z allow typing was notAsked
+2026-10-24T18:08:07Z power typing -> granted
+2026-10-24T18:08:20Z allow screen was notAsked

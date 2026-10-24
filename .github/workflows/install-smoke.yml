@@ -1,4 +1,4 @@
-name: Install Smoke Tests
+name: "Install Smoke Tests (v1, retired; run by hand)"
 
 on:
   workflow_call:
@@ -8,20 +8,9 @@ on:
         required: false
         type: string
         default: ''
-  push:
-    branches: [main]
-    paths: &install-smoke-paths
-      - 'install.sh'
-      - 'docs/install.sh'
-      - 'tests/install/**'
-      - 'tests/test_install.sh'
-      - 'typescript/package.json'
-      - 'typescript/package-lock.json'
-      - 'python/pyproject.toml'
-      - '.github/workflows/**'
-  pull_request:
-    branches: [main]
-    paths: *install-smoke-paths
+  # install.sh is retired (v2 ships a signed app; install.sh prints a pointer). These tests stay runnable by hand
+  # for the legacy-v1 line and no longer gate pushes or pull requests.
+  workflow_dispatch:
 
 concurrency:
   group: install-smoke-${{ github.event_name }}-${{ github.event_name == 'workflow_call' && github.run_id || github.ref }}

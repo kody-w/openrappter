@@ -41,6 +41,6 @@ public enum ClaudeCodeHook {
             let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: settings, options: .atomic)
         } catch { return "Couldn't write Claude Code settings: \(error.localizedDescription)" }
-        return added.isEmpty ? "Claude Code was already connected." : "Connected. Claude Code's prompts now show here (\(added.joined(separator: ", ")))."
+        return added.isEmpty ? "Claude Code was already connected." : "Connected. When Claude Code asks you something, it shows up here."
     }
 }

@@ -1,0 +1,4 @@
+2026-10-24T19:11:08Z compact shown
+2026-10-24T19:11:08Z attached http://127.0.0.1:18790 v0.6.16 claude-haiku-5.5 agents=3
+2026-10-24T19:11:08Z mind http://127.0.0.1:18790 v0.6.16 model=claude-haiku-5.5 agents=3 hungry=false
+2026-10-24T19:11:10Z reply "A notch is the black cutout at the top center of certain MacBook screens that houses the front camera and sensors, leaving the menu bar split around it." voice="The notch is the black cutout at the top middle of some MacBook screens. It holds the camera and sensors."

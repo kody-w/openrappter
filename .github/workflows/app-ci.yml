@@ -1,0 +1,43 @@
+name: App
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['app/**', '.github/workflows/app-ci.yml']
+  pull_request:
+    branches: [main]
+    paths: ['app/**', '.github/workflows/app-ci.yml']
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: swift test (macOS)
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 16
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+          xcodebuild -version
+          swift --version
+      # One run, its own exit status: non-zero on a build error or any failing test.
+      - name: Build and test
+        run: swift test
+      # The bundle script is what the release tag runs; an ad-hoc build here catches it breaking before tag time.
+      - name: Build the app bundle (ad-hoc signed, host arch)
+        run: VERSION=0.0.0 bash scripts/build-app.sh
+      - name: Check the bundle
+        run: |
+          test -f dist/OpenRappter.app/Contents/Resources/kernel/run.sh
+          test -f dist/OpenRappter.app/Contents/Resources/kernel/kernel.json
+          codesign --verify --deep --strict dist/OpenRappter.app

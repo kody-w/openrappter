@@ -216,9 +216,11 @@ jobs:
             ### Homebrew
             ```bash
             brew tap kody-w/tap
+            brew trust kody-w/tap
             brew install --cask openrappter
             ```
           files: |
             app/dist/OpenRappter-${{ env.RELEASE_VERSION }}.dmg
             app/dist/OpenRappter-${{ env.RELEASE_VERSION }}.dmg.sha256
+          make_latest: true
           fail_on_unmatched_files: true

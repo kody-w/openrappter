@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-24
+
+OpenRappter is now a native Mac app: a creature in the notch (release tag `v2.0.0-app`, Homebrew cask
+`kody-w/tap/openrappter`). Entries from 1.10.0 down describe the retired TypeScript/Python gateway.
+
+### Added
+
+- **The notch creature.** Hold **⌥ Space** to talk and hear the answer, **⌃⌥ Space** to have what you said typed where
+  your cursor is, **⇧⌥ Space** to ask about the window in front of you (its text is read on your Mac and sent with
+  the question).
+- **First-run setup card** for the four powers: Hear you, Understand you, Type for you, See your screen. One
+  primary button per card, **Later** always available.
+- **A pinned mind.** The app finds a Brainstem kernel or starts its own on `127.0.0.1:18790` from the commit in
+  `app/kernel/kernel.json`, as a login service that outlives the app. It talks to it only through `GET /health`,
+  `POST /chat` and `POST /login`.
+- **Sign-in from the card.** GitHub device code shown in the notch and copied to the clipboard; the creature notices
+  when the sign-in lands and says it is fed.
+- **Needs cards** from `~/.openrappter/needs/`, and a Claude Code hook that turns permission prompts into cards
+  (Allow once / No / Always).
+- Signed, notarized universal `.app` and DMG from `app/scripts/build-app.sh`; `release-app.yml` on `vX.Y.Z-app` tags.
+
+### Changed
+
+- **v1 retired by aliasing.** The TypeScript/Python gateway still exists at tag `legacy-v1`; its install URLs and
+  dashboard keep working. `docs/v1/README-v1.md` says where things went. Channels are left to Hermes Agent in
+  front of a Brainstem.
+
 ## [1.10.0] - 2026-07-11
 
 ### Added

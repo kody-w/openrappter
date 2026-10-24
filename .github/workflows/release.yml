@@ -1,11 +1,10 @@
-name: Release
+name: "Release (v1, retired)"
 
+# Retired: this publishes the v1 npm and Python packages. It no longer fires on any tag; run it by hand on a plain
+# vX.Y.Z tag ref. Its releases are never Latest, so the Mac app's releases/latest link keeps pointing at the newest
+# -app release built by release-app.yml.
 on:
-  push:
-    tags:
-      - 'v*'
-      - '!v*-bar'
-      - '!v*-app'
+  workflow_dispatch:
 
 # Serialize retries of the same package tag without allowing a newer tag or
 # the separate macOS lane to replace a pending release.
@@ -383,6 +382,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: v${{ env.RELEASE_VERSION }}
+          make_latest: false
           generate_release_notes: true
           fail_on_unmatched_files: true
           overwrite_files: true

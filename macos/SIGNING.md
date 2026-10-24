@@ -25,7 +25,8 @@ access-controlled recovery copy outside the repository and GitHub.
    required by Apple's notary service.
 4. Replace all five repository secrets in one maintenance window.
 5. Manually run **macOS Signing Health**.
-6. Publish a canary `vX.Y.Z-bar` release and verify:
+6. Publish a canary `vX.Y.Z-app` release (the `Release OpenRappter.app`
+   workflow, which builds with `app/scripts/build-app.sh`) and verify:
    - `codesign --verify --deep --strict`
    - `xcrun stapler validate`
    - `spctl --assess` reports `Notarized Developer ID`
@@ -38,7 +39,7 @@ The weekly health workflow opens an Issue when the certificate has fewer than
 
 1. Revoke the affected certificate or API key in Apple Developer/App Store
    Connect immediately.
-2. Disable Bar releases until replacement secrets validate.
+2. Disable app releases (`vX.Y.Z-app` tags) until replacement secrets validate.
 3. Audit recent release workflow runs and published asset digests.
 4. Replace the credential, run the health workflow, and publish a new release.
 5. Document affected versions and advise users to update if artifact integrity

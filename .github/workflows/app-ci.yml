@@ -30,7 +30,14 @@ jobs:
           sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
           xcodebuild -version
           swift --version
+      # One run, its own exit status: non-zero on a build error or any failing test.
       - name: Build and test
-        run: swift test 2>&1 | tail -40
-      - name: Fail if any test failed
-        run: swift test 2>&1 | grep -q "with 0 failures" || (echo "tests failed"; exit 1)
+        run: swift test
+      # The bundle script is what the release tag runs; an ad-hoc build here catches it breaking before tag time.
+      - name: Build the app bundle (ad-hoc signed, host arch)
+        run: VERSION=0.0.0 bash scripts/build-app.sh
+      - name: Check the bundle
+        run: |
+          test -f dist/OpenRappter.app/Contents/Resources/kernel/run.sh
+          test -f dist/OpenRappter.app/Contents/Resources/kernel/kernel.json
+          codesign --verify --deep --strict dist/OpenRappter.app

@@ -13,6 +13,11 @@ cask "openrappter" do
 
   app "OpenRappter.app"
 
+  # The app installs a LaunchAgent (label from Mind.swift installService) that keeps the kernel running
+  # from ~/.openrappter; boot it out and drop its plist on uninstall, not only on zap.
+  uninstall quit:      "com.openrappter.app",
+            launchctl: "com.openrappter.kernel"
+
   zap trash: [
     "~/Library/LaunchAgents/com.openrappter.kernel.plist",
     "~/.openrappter",

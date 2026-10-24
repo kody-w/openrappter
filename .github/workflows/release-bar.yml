@@ -1,9 +1,10 @@
-name: Release macOS Menu Bar
+name: "Release macOS Menu Bar (v1, retired)"
 
+# Retired: the shipping Mac app is built by release-app.yml on vX.Y.Z-app tags. This lane no longer fires on any
+# tag; run it by hand on a vX.Y.Z-bar tag ref if the v1 menu bar app ever needs a build. Its releases are marked
+# prerelease and never Latest, so the app's download link keeps pointing at the newest -app release.
 on:
-  push:
-    tags:
-      - 'v*-bar'
+  workflow_dispatch:
 
 # Serialize retries of the same macOS tag without allowing another tag or the
 # package lane to replace a pending release.
@@ -197,6 +198,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: "OpenRappter Bar ${{ env.RELEASE_VERSION }}"
+          prerelease: true
+          make_latest: false
           body: |
             ## OpenRappter Bar ${{ env.RELEASE_VERSION }}
 

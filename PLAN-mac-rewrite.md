@@ -30,6 +30,24 @@ of /chat (habit 2026-10-23: never build a gateway); no iMessage code in the app 
 ```
 Which of the three grail routes: **distro** (pinned unchanged kernel + pack) with a native face. The kernel is not touched.
 
+## The creature's computer, local-first (the Grok Bot "persistent cloud computer", cloned with a real boundary)
+Grok Bot gives every user one cloud computer shared by all bots, durable only under /workspace, and says "do not use
+separate Bots as a security boundary". We invert the weak part and keep the strong part:
+- **Mind on the host, hands in a box.** The kernel (grail, launchd) stays on the Mac and only ever answers `/chat`.
+  Anything that runs a shell, a browser or a tool runs inside an Apple `container` (one lightweight VM per container,
+  sub-second start, already installed here: 1.5.0 on macOS 27). One container per agent, never one shared computer.
+- **Disposable box, durable workspace.** The container is thrown away after the job; the only durable thing is the
+  mounted workspace folder, which is GODD on disk (`~/.openrappter/workspace/<agent>/`). "Persistent does not mean
+  permanent" becomes "the box is never permanent, your folder always is".
+- **Secrets never enter the box.** The keyring broker on the host signs or fetches on the agent's behalf per call;
+  the container gets a result, never a key. Grok's masked field, done one level stronger.
+- **Egress through the host only.** Grok's optional "route egress through this desktop" is our only path: the box
+  has no network except a host proxy with a prose allowlist. Datacenter-IP blocks disappear, the Mac is the identity.
+- **The computer is a file in the folder.** Like devcontainer.json: each agent folder carries what its box needs
+  (image pinned by digest, mounts, allowlist). Same file runs the same box on the NAS or battlestation when the Mac
+  sleeps, so the creature's computer follows you instead of living in someone's cloud.
+- **Off is the default.** No box, no host access, until a prose rule or a one-time "allow once" says so.
+
 ## Tamagotchi rules (how the creature earns the right to be in your notch)
 1. Needs are real or absent: a waiting decision, a dead sign-in, a finished job. No invented needs.
 2. It never speaks first. Posture changes; sound only after you asked for that class of thing.

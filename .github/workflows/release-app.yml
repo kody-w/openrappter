@@ -38,7 +38,7 @@ jobs:
   build-and-release:
     name: Build & Release DMG
     needs: validate-tag
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
     env:
       RELEASE_VERSION: ${{ needs.validate-tag.outputs.version }}
@@ -48,9 +48,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: '6.0'
+      - name: Use the runner's Xcode (macOS 15 SDK, needed by DynamicNotchKit's @Entry)
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+          xcodebuild -version
+          swift --version
 
       - name: Run tests
         run: swift test

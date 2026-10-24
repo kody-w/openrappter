@@ -5,6 +5,7 @@ on:
     tags:
       - 'v*'
       - '!v*-bar'
+      - '!v*-app'
 
 # Serialize retries of the same package tag without allowing a newer tag or
 # the separate macOS lane to replace a pending release.

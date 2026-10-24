@@ -58,7 +58,7 @@ cd app && swift test && VERSION=2.0.0 bash scripts/build-app.sh   # dist/OpenRap
 
 ## v1
 
-OpenRappter 1.x was a TypeScript and Python agent gateway with twenty chat channels. It still works and its install URLs still resolve, but it is **retiring**: v2 keeps the `/chat` contract and the creature, and leaves channels to [Hermes Agent](https://github.com/NousResearch/hermes-agent) in front of a Brainstem. The v1 docs are in [`docs/v1/README-v1.md`](docs/v1/README-v1.md), the code at tag [`v1-legacy`](https://github.com/kody-w/openrappter/tree/v1-legacy), and the old web dashboard at [`dashboard.html`](https://kody-w.github.io/openrappter/dashboard.html).
+OpenRappter 1.x was a TypeScript and Python agent gateway with twenty chat channels. It still works and its install URLs still resolve, but it is **retiring**: v2 keeps the `/chat` contract and the creature, and leaves channels to [Hermes Agent](https://github.com/NousResearch/hermes-agent) in front of a Brainstem. The v1 docs are in [`docs/v1/README-v1.md`](docs/v1/README-v1.md), the code at tag [`legacy-v1`](https://github.com/kody-w/openrappter/tree/legacy-v1), and the old web dashboard at [`dashboard.html`](https://kody-w.github.io/openrappter/dashboard.html).
 
 ## License
 

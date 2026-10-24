@@ -1,3 +1,10 @@
+> **This is OpenRappter 1.x, which is retiring.** The current product is the Mac notch app described in
+> [`../../README.md`](../../README.md) (everything that ships is under `app/`). The 1.x code lives at the tag
+> [`legacy-v1`](https://github.com/kody-w/openrappter/tree/legacy-v1); its install URLs and the old web dashboard
+> ([`dashboard.html`](https://kody-w.github.io/openrappter/dashboard.html)) still resolve. v2 keeps the `/chat`
+> contract and the creature; chat channels are left to [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+> in front of a Brainstem. The text below is the untouched 1.x README, kept for reference.
+
 <div align="center">
 
 # openrappter
@@ -6,17 +13,17 @@
 
 **No extra API keys. No new accounts. No additional monthly bills. Your data stays local.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](../../LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3b82f6.svg)](https://python.org)
 [![Node.js 18+](https://img.shields.io/badge/Node.js-18+-22c55e.svg)](https://nodejs.org)
 [![RappterHub](https://img.shields.io/badge/RappterHub-Agents-a855f7.svg)](https://github.com/rappterhub/rappterhub)
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [v1.10.0 Release Notes](./docs/release-notes-1.10.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](../../skills.md) | [Documentation](../../docs) | [Architecture](../../docs/architecture.html) | [v1.10.0 Release Notes](../../docs/release-notes-1.10.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
-[TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
-[iMessage reliability contract](./docs/imessage-reliability.md)
+[TypeScript macOS iMessage assistant setup](../../docs/typescript-imessage.md) ·
+[iMessage reliability contract](../../docs/imessage-reliability.md)
 
 ---
 
@@ -45,7 +52,7 @@ Or try the quickstart demo: `git clone https://github.com/kody-w/openrappter.git
 
 ## Get Started — Let Your AI Agent Do It
 
-The fastest way to install and use openrappter is to hand [`skills.md`](./skills.md) to any AI agent. It contains everything an agent needs — prerequisites, installation, startup, configuration, and usage — in a single file.
+The fastest way to install and use openrappter is to hand [`skills.md`](../../skills.md) to any AI agent. It contains everything an agent needs — prerequisites, installation, startup, configuration, and usage — in a single file.
 
 **Paste this into Copilot, Claude, ChatGPT, or any AI assistant:**
 
@@ -70,7 +77,7 @@ A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copil
 rapplications, Brainstems, and neighborhood peers. Python and TypeScript accept
 the same `rapp-chat/1.0` envelope; UI, TUI, menu bar, and other clients are
 projections over that headless contract, not separate capability paths. See
-[`contracts/rapp-chat-v1.json`](contracts/rapp-chat-v1.json).
+[`contracts/rapp-chat-v1.json`](../../contracts/rapp-chat-v1.json).
 
 ```bash
 # Install and go
@@ -159,10 +166,10 @@ Release builds are signed with Apple Developer ID and notarized by Apple.
 git tag v1.0.1-bar && git push origin v1.0.1-bar
 ```
 
-This separate platform workflow builds a universal binary (Apple Silicon + Intel), packages a DMG, and creates a GitHub Release. npm and PyPI releases use the strict `vX.Y.Z` process documented in [CONTRIBUTING.md](CONTRIBUTING.md#releasing-npm-and-pypi-packages).
+This separate platform workflow builds a universal binary (Apple Silicon + Intel), packages a DMG, and creates a GitHub Release. npm and PyPI releases use the strict `vX.Y.Z` process documented in [CONTRIBUTING.md](../../CONTRIBUTING.md#releasing-npm-and-pypi-packages).
 
 Signing credential setup, health checks, rotation, and compromise response are
-documented in [`macos/SIGNING.md`](macos/SIGNING.md).
+documented in [`macos/SIGNING.md`](../../macos/SIGNING.md).
 
 ## Manual Setup
 
@@ -526,7 +533,7 @@ It's a **rapp**id prototyping **agent** that's open source. Plus, who doesn't wa
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
+We welcome contributions! See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ```bash
 git clone https://github.com/kody-w/openrappter.git
@@ -542,6 +549,6 @@ MIT - [Kody W](https://github.com/kody-w)
 
 <div align="center">
 
-**[Star on GitHub](https://github.com/kody-w/openrappter)** | **[Documentation](./docs)** | **[Skills Reference](./skills.md)**
+**[Star on GitHub](https://github.com/kody-w/openrappter)** | **[Documentation](../../docs)** | **[Skills Reference](../../skills.md)**
 
 </div>

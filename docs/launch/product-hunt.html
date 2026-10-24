@@ -15,12 +15,12 @@ pre{white-space:pre-wrap;margin:0;font:inherit}.n{color:var(--muted);font-size:1
 
 <section><h2>Name <button data-copy="name">Copy</button></h2><pre id="name">OpenRappter</pre></section>
 <section><h2>Tagline (60 max) <button data-copy="tag">Copy</button></h2><pre id="tag">A creature in your Mac's notch. Hold a key and talk.</pre></section>
-<section><h2>Description (260 max) <button data-copy="desc">Copy</button></h2><pre id="desc">Hold ⌥ Space and talk. It answers out loud, types for you in any app, reads your screen, and waits in the notch when something needs you. Thinks with the GitHub Copilot sign-in you already have. No new keys, no cloud computer, speech stays on your Mac.</pre></section>
+<section><h2>Description (260 max) <button data-copy="desc">Copy</button></h2><pre id="desc">Hold ⌥ Space and talk. It answers out loud, types for you in any app, reads your screen, and waits in the notch when something needs you. Thinks with the GitHub Copilot sign-in you already have. No new keys, no cloud computer. Speech becomes text on your Mac.</pre></section>
 <section><h2>Topics</h2><pre>Mac · Artificial Intelligence · Productivity · Developer Tools · Open Source</pre></section>
 <section><h2>Links</h2><pre>Website: https://kody-w.github.io/openrappter/
 Download: https://github.com/kody-w/openrappter/releases/latest
 Source: https://github.com/kody-w/openrappter</pre></section>
-<section><h2>First comment (maker) <button data-copy="first">Copy</button></h2><pre id="first">Hi Product Hunt. I'm Kody. I talk to my computer for a living, so I wanted an AI on my Mac that I could talk to the way I'd talk to a person sitting next to me, without opening an app.
+<section><h2>First comment (maker) <button data-copy="first">Copy</button></h2><pre id="first">Hi Product Hunt. I'm Kody. I talk to my computer for a living, so I wanted something on my Mac I could talk to the way I'd talk to a person sitting next to me, without opening an app.
 
 OpenRappter lives in the notch. Hold ⌥ Space and talk; it answers out loud. Hold ⌃⌥ Space and it types what you said wherever your cursor is. Hold ⇧⌥ Space and it reads the window in front of you and answers about it.
 
@@ -28,13 +28,13 @@ When something needs you, it changes posture and waits. If you use Claude Code, 
 
 Three decisions I'm proud of:
 • It thinks through the GitHub Copilot sign-in you already have. No new API keys, no new bill.
-• There's no cloud computer. The brain is an open RAPP Brainstem kernel running on your Mac as a login service, and the app only talks to it through one HTTP door, so you can read everything it does.
+• There's no cloud computer. The brain is an open RAPP Brainstem kernel running on your Mac as a login service, and the app only talks to it through three plain HTTP calls (health, chat, sign-in), so you can read everything it does. What you ask, and the text of a window you ask about, goes to GitHub Copilot through your own sign-in.
 • It never invents a need and it never speaks first. Tamagotchi, not Clippy.
 
 MIT licensed. Signed and notarized. macOS 14+.
 
 What would you want it to do next?</pre></section>
-<section><h2>Gallery (in this order)</h2><pre>1. docs/launch/gallery-1-notch-speaking.png   the creature answering in the notch
+<section><h2>Gallery (in this order)</h2><pre>1. docs/launch/gallery-1-notch-speaking.png   the creature answering in the notch (RESHOOT before launch: the current frame greets "Kody" and says "Orion"; shoot against the app's own :18790 kernel with OPENRAPPTER_SAY="What can you do?")
 2. docs/launch/gallery-2-card.png             a Claude Code permission card with the three buttons
 3. docs/launch/gallery-3-hungry.png           the honest hungry state: "Sign me in and I'm fed"
 4. app/Resources/AppIcon-1024.png             icon
@@ -43,7 +43,7 @@ Thumbnail: app/Resources/AppIcon-1024.png (square)</pre>
 <section><h2>Pre-launch checklist</h2><pre>☐ Release v2.0.0-app exists with a notarized DMG and the sha256 asset
 ☐ Website hero "Download for Mac" resolves to that DMG
 ☐ Homebrew tap cask updated with the sha256
-☐ Fresh user account: download, open, hold ⌥ Space, hear an answer
+☐ Fresh Mac (not just a fresh user account; command line tools must be absent): install, open, allow the four powers on the setup card, wait for the mind (a few minutes), sign in with the copied code, hold ⌥ Space, hear an answer
 ☐ README screenshots load on GitHub
 ☐ Hunter/maker account ready; launch at 12:01 am PT on a weekday</pre></section>
 <script>

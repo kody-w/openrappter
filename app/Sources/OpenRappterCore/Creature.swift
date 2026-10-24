@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// The five honest postures. A posture is a state; reactions are one-shot events that release.
-enum Posture: String, CaseIterable {
+public enum Posture: String, CaseIterable {
     case idle, listening, thinking, speaking, needsYou
 
-    var label: String {
+    public var label: String {
         switch self {
         case .idle: return "resting"
         case .listening: return "listening"
@@ -14,7 +14,7 @@ enum Posture: String, CaseIterable {
         }
     }
 
-    var tint: Color {
+    public var tint: Color {
         switch self {
         case .idle: return .secondary
         case .listening: return .green
@@ -26,16 +26,18 @@ enum Posture: String, CaseIterable {
 }
 
 @MainActor
-final class CreatureModel: ObservableObject {
-    @Published var posture: Posture = .idle
-    @Published var line: String = "Hold ⌥ Space and talk to me."
+public final class CreatureModel: ObservableObject {
+    public init() {}
+    @Published public var posture: Posture = .idle
+    @Published public var line: String = "Hold ⌥ Space and talk to me."
 }
 
 /// Placeholder silhouette until the 3D rappter (rappter-vui) is hosted in the expanded view.
-struct CreatureGlyph: View {
-    @ObservedObject var model: CreatureModel
-    var size: CGFloat = 18
-    var body: some View {
+public struct CreatureGlyph: View {
+    @ObservedObject public var model: CreatureModel
+    public var size: CGFloat = 18
+    public init(model: CreatureModel, size: CGFloat = 18) { self.model = model; self.size = size }
+    public var body: some View {
         Image(systemName: "lizard.fill")
             .font(.system(size: size, weight: .semibold))
             .foregroundStyle(model.posture.tint)
@@ -44,21 +46,24 @@ struct CreatureGlyph: View {
     }
 }
 
-struct CompactLeading: View {
-    @ObservedObject var model: CreatureModel
-    var body: some View { CreatureGlyph(model: model).padding(.leading, 4) }
+public struct CompactLeading: View {
+    @ObservedObject public var model: CreatureModel
+    public init(model: CreatureModel) { self.model = model }
+    public var body: some View { CreatureGlyph(model: model).padding(.leading, 4) }
 }
 
-struct CompactTrailing: View {
-    @ObservedObject var model: CreatureModel
-    var body: some View {
+public struct CompactTrailing: View {
+    @ObservedObject public var model: CreatureModel
+    public init(model: CreatureModel) { self.model = model }
+    public var body: some View {
         Circle().fill(model.posture.tint).frame(width: 8, height: 8).padding(.trailing, 6)
     }
 }
 
-struct Expanded: View {
-    @ObservedObject var model: CreatureModel
-    var body: some View {
+public struct Expanded: View {
+    @ObservedObject public var model: CreatureModel
+    public init(model: CreatureModel) { self.model = model }
+    public var body: some View {
         HStack(alignment: .center, spacing: 14) {
             CreatureGlyph(model: model, size: 44).frame(width: 64, height: 64)
             VStack(alignment: .leading, spacing: 6) {

@@ -64,7 +64,7 @@ separate Bots as a security boundary". We invert the weak part and keep the stro
 | # | Build | Done when I observed |
 |---|-------|----------------------|
 | 0 | Branch `v2`, SwiftPM app, DynamicNotchKit pinned, compact+expanded notch with placeholder | screenshot of the notch on this M4 Max, both states |
-| 1 | Mind client + runner: health, chat, senses parse, attach-or-launch | curl and the app both get `response` from a live kernel |
+| 1 | Mind client + runner: health, chat, senses parse, attach-or-launch | LANDED 2026-10-23: app + curl got `response` from the :7181 kernel; pinned kernel launched on :18790 (evidence/v2-phase1) |
 | 2 | Voice loop: hold key → text → /chat → spoken reply; creature states driven end to end | screen recording of one round trip, transcript matches |
 | 3 | Needs: tower cards in the notch, answered by button and by voice, action queued | a morning card answered from the notch, queue file shows it |
 | 4 | Ship: hardened runtime, notarized DMG on `v2.0.0` tag via the existing Actions, Homebrew cask updated | fresh user account installs the DMG and completes phase 2 |

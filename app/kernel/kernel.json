@@ -1,0 +1,7 @@
+{
+  "repo": "https://github.com/kody-w/rapp-installer",
+  "sha": "0e43ee580e78c150b1c59002456822d2e779388e",
+  "version": "0.6.16",
+  "contract": "POST /chat answers in `response`; GET /health returns status, version, model, agents, quarantined",
+  "rule": "Never patch the kernel. Move the pin on purpose, then rerun the checks."
+}

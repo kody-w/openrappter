@@ -1,0 +1,35 @@
+name: App
+
+on:
+  push:
+    branches: [main]
+    paths: ['app/**', '.github/workflows/app-ci.yml']
+  pull_request:
+    branches: [main]
+    paths: ['app/**', '.github/workflows/app-ci.yml']
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: swift test (macOS)
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 16
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+          xcodebuild -version
+          swift --version
+      - name: Build and test
+        run: swift test 2>&1 | tail -40
+      - name: Fail if any test failed
+        run: swift test 2>&1 | grep -q "with 0 failures" || (echo "tests failed"; exit 1)

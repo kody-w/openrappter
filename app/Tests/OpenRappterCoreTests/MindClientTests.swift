@@ -134,4 +134,75 @@ final class MindClientTests: XCTestCase {
         let attached = await runner.attach()
         XCTAssertEqual(attached?.0.baseURL.port, Int(k.port))
     }
+
+    func testCandidatesHonourEnv() {
+        let d = URL(fileURLWithPath: "/nonexistent")
+        XCTAssertEqual(MindRunner(kernelDir: d, env: [:]).candidates.map(\.absoluteString),
+                       ["http://127.0.0.1:18790", "http://127.0.0.1:7071"])
+        // Never share a Brainstem someone else installed on :7071.
+        XCTAssertEqual(MindRunner(kernelDir: d, env: ["OPENRAPPTER_OWN_MIND": "1"]).candidates.map(\.absoluteString),
+                       ["http://127.0.0.1:18790"])
+        // An explicit mind comes first (evidence runs on Kody's Mac attach to :7181, never :7071).
+        let explicit = MindRunner(kernelDir: d, env: ["OPENRAPPTER_MIND": "http://127.0.0.1:7181"]).candidates
+        XCTAssertEqual(explicit.first?.port, 7181)
+        XCTAssertEqual(explicit.count, 3)
+    }
+
+    /// A temp kernelDir + kernelHome with the given pins written as kernel.json (nil = no file).
+    private func pinDirs(bundled: (sha: String, version: String)?, installed: (sha: String, version: String)?) throws -> (URL, URL) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("openrappter-pin-\(UUID().uuidString)")
+        let dir = root.appendingPathComponent("kernel"), home = root.appendingPathComponent("home")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home.appendingPathComponent("launcher"), withIntermediateDirectories: true)
+        if let b = bundled { try #"{"sha":"\#(b.sha)","version":"\#(b.version)"}"#.write(to: dir.appendingPathComponent("kernel.json"), atomically: true, encoding: .utf8) }
+        if let i = installed { try #"{"sha":"\#(i.sha)","version":"\#(i.version)"}"#.write(to: home.appendingPathComponent("launcher/kernel.json"), atomically: true, encoding: .utf8) }
+        return (dir, home)
+    }
+
+    func testAttachSkipsOwnKernelBehindThePin() async throws {
+        let k = try FakeKernel()   // reports 0.6.16
+        let own = URL(string: "http://127.0.0.1:\(k.port)")!
+        func runner(_ dir: URL, _ home: URL) -> MindRunner {
+            var r = MindRunner(kernelDir: dir, kernelHome: home, env: [:]); r.ownPort = Int(k.port); r.candidates = [own]; return r
+        }
+        // Same version and sha as the pin: attach.
+        var (dir, home) = try pinDirs(bundled: ("aaa", "0.6.16"), installed: ("aaa", "0.6.16"))
+        var r = runner(dir, home)
+        var h = try await MindClient(baseURL: own).health()
+        XCTAssertFalse(r.ownKernelIsStale(h))
+        var got = await r.attach(); XCTAssertNotNil(got)
+        // The app ships a newer version than the running kernel reports: skip it so the app relaunches the pinned one.
+        (dir, home) = try pinDirs(bundled: ("bbb", "0.6.17"), installed: ("aaa", "0.6.16"))
+        r = runner(dir, home)
+        h = try await MindClient(baseURL: own).health()
+        XCTAssertTrue(r.ownKernelIsStale(h))
+        got = await r.attach(); XCTAssertNil(got)
+        // Same version, but the pin moved to another sha: the service copy tells.
+        (dir, home) = try pinDirs(bundled: ("ccc", "0.6.16"), installed: ("aaa", "0.6.16"))
+        got = await runner(dir, home).attach(); XCTAssertNil(got)
+        // No service copy (kernel started another way): only the version can be compared.
+        (dir, home) = try pinDirs(bundled: ("ccc", "0.6.16"), installed: nil)
+        got = await runner(dir, home).attach(); XCTAssertNotNil(got)
+        // No readable pin: nothing to compare, attach as before.
+        (dir, home) = try pinDirs(bundled: nil, installed: ("aaa", "0.6.16"))
+        got = await runner(dir, home).attach(); XCTAssertNotNil(got)
+        // A kernel that is not ours is never judged by our pin.
+        (dir, home) = try pinDirs(bundled: ("bbb", "0.6.17"), installed: nil)
+        var other = MindRunner(kernelDir: dir, kernelHome: home, env: [:]); other.candidates = [own]   // ownPort stays 18790
+        got = await other.attach(); XCTAssertNotNil(got)
+    }
+
+    func testServicePlistCanBeBootedOutLater() {
+        let home = URL(fileURLWithPath: "/tmp/openrappter-home")
+        let r = MindRunner(kernelDir: URL(fileURLWithPath: "/nonexistent"), kernelHome: home, env: [:])
+        let p = r.servicePlist()
+        // `launchctl bootout gui/$UID/<Label>` needs the label to match the plist file name.
+        XCTAssertEqual(p["Label"] as? String, MindRunner.serviceLabel)
+        XCTAssertEqual(r.launchAgentURL.lastPathComponent, "\(MindRunner.serviceLabel).plist")
+        XCTAssertEqual(p["ProgramArguments"] as? [String], ["/bin/sh", "/tmp/openrappter-home/launcher/run.sh"])
+        XCTAssertEqual((p["EnvironmentVariables"] as? [String: String])?["OPENRAPPTER_KERNEL_PORT"], "18790")
+        XCTAssertEqual(p["KeepAlive"] as? Bool, true)
+        XCTAssertEqual(p["RunAtLoad"] as? Bool, true)
+        XCTAssertNoThrow(try PropertyListSerialization.data(fromPropertyList: p, format: .xml, options: 0))
+    }
 }

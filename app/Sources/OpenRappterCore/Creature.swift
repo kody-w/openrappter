@@ -34,9 +34,65 @@ public final class CreatureModel: ObservableObject {
     @Published public var need: Need?
     /// Mind is up but not signed in.
     @Published public var hungry: Bool = false
+    /// The first-run card is up: the four powers and one button.
+    @Published public var setup: Bool = false
+    @Published public var powers: [Power: PowerState] = [:]
     public var onAnswer: ((Need, NeedOption) -> Void)?
     public var onLater: ((Need) -> Void)?
     public var onSignIn: (() -> Void)?
+    public var onAllow: ((Power) -> Void)?
+    public var onSetupLater: (() -> Void)?
+}
+
+/// The one primary button. Drawn by hand so it stays orange even though the notch window is never the key window.
+public struct Primary: ButtonStyle {
+    public var color: Color = .orange
+    public init(color: Color = .orange) { self.color = color }
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .foregroundStyle(.black)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8).fill(color.opacity(configuration.isPressed ? 0.7 : 1)))
+    }
+}
+
+/// First run: what I'm allowed to do, one row each, one button for the next thing to allow.
+public struct SetupCard: View {
+    @ObservedObject public var model: CreatureModel
+    public init(model: CreatureModel) { self.model = model }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Let me set up").font(.headline).foregroundStyle(.white)
+            Text(model.line).font(.callout).foregroundStyle(.white.opacity(0.85)).lineLimit(2)
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Power.allCases) { p in
+                    let st = model.powers[p] ?? .notAsked
+                    HStack(spacing: 8) {
+                        Image(systemName: st == .granted ? "checkmark.circle.fill" : (st == .denied ? "xmark.circle.fill" : "circle"))
+                            .foregroundStyle(st == .granted ? Color.green : (st == .denied ? Color.red : Color.white.opacity(0.5)))
+                        Image(systemName: p.symbol).foregroundStyle(.white.opacity(0.8)).frame(width: 16)
+                        Text(p.title).foregroundStyle(.white)
+                        Spacer()
+                        Text(st.label).font(.caption).foregroundStyle(.white.opacity(0.6))
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(p.title), \(st.label)")
+                }
+            }.padding(.vertical, 2)
+            HStack(spacing: 8) {
+                if let next = Powers.next(model.powers) {
+                    let st = model.powers[next] ?? .notAsked
+                    Button(st == .denied || next == .typing || next == .screen ? "Allow: \(next.title) (opens Settings)" : "Allow: \(next.title)") { model.onAllow?(next) }
+                        .buttonStyle(Primary())
+                    Button("Later") { model.onSetupLater?() }.buttonStyle(.bordered)
+                } else {
+                    Button("Done") { model.onSetupLater?() }.buttonStyle(Primary(color: .green))
+                }
+            }.padding(.top, 2)
+        }
+    }
 }
 
 /// Placeholder silhouette until the 3D rappter (rappter-vui) is hosted in the expanded view.
@@ -74,7 +130,9 @@ public struct Expanded: View {
         HStack(alignment: .top, spacing: 14) {
             CreatureGlyph(model: model, size: 44).frame(width: 64, height: 64)
             VStack(alignment: .leading, spacing: 6) {
-                if let need = model.need, model.posture == .needsYou {
+                if model.setup {
+                    SetupCard(model: model)
+                } else if let need = model.need, model.posture == .needsYou {
                     Text(need.title).font(.headline).foregroundStyle(.white).lineLimit(2)
                     if let ctx = need.ctx, !ctx.isEmpty {
                         Text(ctx).font(.callout).foregroundStyle(.white.opacity(0.8)).lineLimit(3)

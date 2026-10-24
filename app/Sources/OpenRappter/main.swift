@@ -30,6 +30,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     var needsSub: Any?
     var runner: MindRunner!
     var kernelProcess: Process?
+    var setupWatch: Task<Void, Never>?
     let env = ProcessInfo.processInfo.environment
     var home: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter") }
 
@@ -49,6 +50,8 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         model.onAnswer = { [weak self] need, opt in self?.answer(need, opt) }
         model.onLater = { [weak self] need in self?.needs.later(need); self?.showNextNeedOrRest() }
         model.onSignIn = { [weak self] in self?.signIn() }
+        model.onAllow = { [weak self] p in self?.allow(p) }
+        model.onSetupLater = { [weak self] in self?.setupLater() }
 
         installHotKeys()
         installMenu()
@@ -57,20 +60,78 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             await notch.compact()
             log("compact shown")
+            if env["OPENRAPPTER_SETUP"] == "1" || (!Powers.allGranted(Powers.states(fake: env["OPENRAPPTER_SETUP_FAKE"])) && !UserDefaults.standard.bool(forKey: "setupSeen")) {
+                showSetup()
+            }
             await findMind()
             await runEnvDrivenProofs()
         }
     }
 
+    // MARK: first run: the four powers
+
+    func refreshPowers() { model.powers = Powers.states(fake: env["OPENRAPPTER_SETUP_FAKE"]) }
+
+    func showSetup(reason: String? = nil) {
+        refreshPowers()
+        model.setup = true
+        model.posture = .needsYou
+        model.line = reason ?? "A minute of setup and I can hear you, type for you and see your screen."
+        log("setup shown " + Power.allCases.map { "\($0.rawValue)=\((model.powers[$0] ?? .notAsked).rawValue)" }.joined(separator: " "))
+        Task { await notch.expand() }
+        setupWatch?.cancel()
+        setupWatch = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled, self.model.setup {
+                try? await Task.sleep(for: .milliseconds(1500))
+                let before = self.model.powers
+                self.refreshPowers()
+                for p in Power.allCases where before[p] != self.model.powers[p] { log("power \(p.rawValue) -> \((self.model.powers[p] ?? .notAsked).rawValue)") }
+                if Powers.allGranted(self.model.powers) { await self.setupDone(); return }
+            }
+        }
+    }
+
+    func allow(_ p: Power) {
+        let was = model.powers[p] ?? .notAsked
+        log("allow \(p.rawValue) was \(was.rawValue)")
+        model.line = p.why
+        Task { @MainActor in
+            await Powers.request(p, current: was)
+            refreshPowers()
+            if let st = model.powers[p], st != was { log("power \(p.rawValue) -> \(st.rawValue)") }
+            if Powers.allGranted(model.powers) { await setupDone() }
+        }
+    }
+
+    func setupDone() async {
+        guard model.setup else { return }
+        setupWatch?.cancel(); model.setup = false
+        UserDefaults.standard.set(true, forKey: "setupSeen")
+        log("setup done")
+        model.posture = .speaking; model.line = "All set. Hold ⌥ Space and talk to me."
+        await voice.speak("All set. Hold option space and talk to me.")
+        try? await Task.sleep(for: .seconds(1))
+        afterSetup()
+    }
+
+    func setupLater() {
+        setupWatch?.cancel(); model.setup = false
+        UserDefaults.standard.set(true, forKey: "setupSeen")
+        log("setup later")
+        afterSetup()
+    }
+
+    func afterSetup() { if model.hungry { showHungry() } else { showNextNeedOrRest() } }
+
     // MARK: mind
 
     func findMind() async {
-        model.posture = .thinking; model.line = "Finding my mind…"
+        if !model.setup { model.posture = .thinking; model.line = "Finding my mind…" }
         do {
             let (client, health): (MindClient, MindHealth)
             if let a = await runner.attach() { (client, health) = a }
             else {
-                model.line = "Setting up my mind (first time, about a minute)…"
+                if !model.setup { model.line = "Setting up my mind (first time, about a minute)…" }
                 try runner.installService()
                 let own = MindClient(baseURL: URL(string: "http://127.0.0.1:\(runner.ownPort)")!, timeout: 3)
                 var got: MindHealth?
@@ -81,16 +142,19 @@ final class Coordinator: NSObject, NSApplicationDelegate {
             mind = client
             model.hungry = health.isHungry
             log("mind \(client.baseURL) v\(health.version) model=\(health.model) agents=\(health.agentCount) hungry=\(health.isHungry)")
+            if model.setup { return }   // the setup card is up; afterSetup() takes it from here
             if health.isHungry { showHungry() } else { rest() }
         } catch {
             log("mind error \(error)")
             model.hungry = true
+            if model.setup { return }
             model.posture = .needsYou; model.line = "I can't find my mind."
         }
     }
 
     func showHungry() {
         model.hungry = true
+        guard !model.setup else { return }
         model.posture = .needsYou
         model.line = "I can't think yet. Sign me in and I'm fed."
         Task { await notch.expand() }
@@ -114,6 +178,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     }
 
     func rest() {
+        guard !model.setup else { return }
         model.posture = .idle
         model.line = "Hold ⌥ Space and talk to me."
         Task { await notch.compact() }
@@ -133,8 +198,8 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     }
 
     func beginListening(_ m: Mode) async {
-        guard mode == nil else { return }
-        guard await Ears.authorize() else { model.posture = .needsYou; model.line = "Allow the microphone and speech recognition in System Settings."; await notch.expand(); return }
+        guard mode == nil, !model.setup else { return }
+        guard await Ears.authorize() else { log("key \(m) but not allowed to hear"); showSetup(reason: "I can't hear you yet. Allow the two things below and try the key again."); return }
         mode = m
         voice.stop()
         model.posture = .listening
@@ -159,8 +224,8 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         case .ask:
             await ask(heard, screen: nil)
         case .dictate:
-            guard Dictation.trusted(prompt: true) else {
-                model.posture = .needsYou; model.line = "Allow OpenRappter in Accessibility so I can type for you."; return
+            guard Dictation.trusted(prompt: false) else {
+                log("dictate but not allowed to type"); showSetup(reason: "I heard you, but I'm not allowed to type yet. Allow it below and try again."); return
             }
             model.posture = .speaking; model.line = heard
             let how = await Dictation.paste(heard)
@@ -174,7 +239,9 @@ final class Coordinator: NSObject, NSApplicationDelegate {
                 log("screen app=\(app) chars=\(text.count)")
                 await ask(heard, screen: "The user is looking at \(app). Text on that window:\n\(text.prefix(6000))")
             } catch {
-                model.posture = .needsYou; model.line = "Allow Screen Recording so I can read your screen."; log("screen error \(error)")
+                log("screen error \(error)")
+                if Powers.state(.screen) != .granted { showSetup(reason: "I can't see your screen yet. Allow it below and ask again.") }
+                else { model.posture = .needsYou; model.line = "I couldn't read that window." }
             }
         }
     }
@@ -235,6 +302,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Type for me: hold ⌃⌥ Space", action: nil, keyEquivalent: "")
         menu.addItem(withTitle: "Ask about my screen: hold ⇧⌥ Space", action: nil, keyEquivalent: "")
         menu.addItem(.separator())
+        menu.addItem(withTitle: "Set up what I'm allowed to do…", action: #selector(menuSetup), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Sign in to my mind…", action: #selector(menuSignIn), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Connect Claude Code (answer its prompts here)", action: #selector(menuConnectClaude), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Keep my mind running at login", action: #selector(menuInstallService), keyEquivalent: "").target = self
@@ -245,6 +313,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
+    @objc func menuSetup() { showSetup(reason: "Here's what I'm allowed to do right now.") }
     @objc func menuSignIn() { if mind == nil { Task { await findMind() } } else { signIn() } }
     @objc func menuOpenFolder() { NSWorkspace.shared.open(home) }
     @objc func menuInstallService() {
@@ -266,6 +335,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         if let q = env["OPENRAPPTER_SAY"] { await act(.ask, q) }
         if let t = env["OPENRAPPTER_DICTATE"] { await act(.dictate, t) }
         if let q = env["OPENRAPPTER_SCREEN_ASK"] { await act(.screen, q) }
+        if let s = env["OPENRAPPTER_HOLD"], let secs = Double(s) { try? await Task.sleep(for: .seconds(secs)) }
         if env["OPENRAPPTER_DEMO_EXIT"] == "1" { log("done"); NSApp.terminate(nil) }
     }
 }

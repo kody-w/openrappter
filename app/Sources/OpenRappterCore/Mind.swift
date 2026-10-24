@@ -7,8 +7,24 @@ public struct MindHealth: Sendable, Equatable {
     public var version: String
     public var model: String
     public var agentCount: Int
+    /// `copilot` from /health: "✓", "pending" or "no_access" (grail 0.6.16). Empty when the kernel does not say.
+    public var copilot: String = ""
+    /// `copilot_username` from /health when the account is signed in but has no Copilot.
+    public var copilotUsername: String = ""
+    /// `auth_error` from /health ("invalid_credentials" = the stored GitHub sign-in is bad; sign in again).
+    public var authError: String = ""
     /// The kernel is up but has no Copilot sign-in. The creature shows this as hungry before it even asks.
     public var isHungry: Bool { status == "unauthenticated" }
+    /// Signed in, but the GitHub account has no Copilot. Not hungry (a sign-in will not fix it) and not fed.
+    public var needsCopilot: Bool { copilot == "no_access" }
+}
+
+extension MindError {
+    /// The plain sentence for a signed-in account that has no Copilot. `who` is the GitHub login when the kernel says it.
+    public static func noCopilotSentence(_ who: String) -> String {
+        let account = who.isEmpty ? "This GitHub account" : "The GitHub account \(who)"
+        return "\(account) can't use Copilot yet. Turn it on at github.com/settings/copilot, then ask me again."
+    }
 }
 
 public struct MindReply: Sendable, Equatable {
@@ -40,6 +56,8 @@ public enum MindError: Error, Equatable {
     case badBody(String)
     /// The kernel is up but cannot think: no Copilot sign-in. The creature shows this as "hungry".
     case hungry(String)
+    /// Signed in, but the GitHub account has no Copilot. Carries the plain sentence to show and say. Never "fed".
+    case noCopilot(String)
 }
 
 public struct MindClient: Sendable {
@@ -64,7 +82,10 @@ public struct MindClient: Sendable {
             status: obj["status"] as? String ?? "",
             version: obj["version"] as? String ?? "",
             model: obj["model"] as? String ?? "",
-            agentCount: (obj["agents"] as? [Any])?.count ?? 0
+            agentCount: (obj["agents"] as? [Any])?.count ?? 0,
+            copilot: obj["copilot"] as? String ?? "",
+            copilotUsername: obj["copilot_username"] as? String ?? "",
+            authError: obj["auth_error"] as? String ?? ""
         )
     }
 
@@ -87,9 +108,16 @@ public struct MindClient: Sendable {
         let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         let err = (obj["error"] as? String) ?? ""
         let e = err.lowercased()
+        // Signed in, no Copilot: grail 0.6.16 answers HTTP 200 {"error":"NO_COPILOT_ACCESS:<user>","no_copilot_access":true}.
+        if obj["no_copilot_access"] as? Bool == true || e.hasPrefix("no_copilot_access:") {
+            let who = (obj["copilot_username"] as? String) ?? String(err.drop(while: { $0 != ":" }).dropFirst())
+            throw MindError.noCopilot(MindError.noCopilotSentence(who == "this account" ? "" : who))
+        }
         if http.statusCode == 401 || e.contains("sign in") || e.contains("not authenticated") || e.contains("token") {
             throw MindError.hungry(err.isEmpty ? "HTTP \(http.statusCode)" : err)
         }
+        // A 5xx with the kernel's own plain sentence (usage limit, model timeout): keep the sentence, the creature says it.
+        if http.statusCode >= 500, !err.isEmpty { throw MindError.badBody(err) }
         guard http.statusCode == 200 else { throw MindError.badStatus(http.statusCode) }
         guard let response = obj["response"] as? String else {
             throw MindError.badBody(String(decoding: data.prefix(200), as: UTF8.self))
@@ -118,6 +146,20 @@ public struct MindClient: Sendable {
     }
 }
 
+/// The kernel pin (kernel/kernel.json): which grail commit the app runs. Read-only; the pin is moved on purpose.
+public struct KernelPin: Sendable, Equatable {
+    public var sha: String
+    public var version: String
+
+    public init?(contentsOf url: URL) {
+        guard let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let sha = obj["sha"] as? String, !sha.isEmpty else { return nil }
+        self.sha = sha
+        self.version = obj["version"] as? String ?? ""
+    }
+}
+
 /// Attach-or-launch. Candidates in order: `OPENRAPPTER_MIND`, the app's own kernel on :18790, the grail default :7071.
 /// Launch = the pinned grail kernel (kernel/kernel.json) in its own home on :18790. It never touches another kernel.
 public struct MindRunner {
@@ -139,16 +181,42 @@ public struct MindRunner {
         self.candidates = c
     }
 
-    /// First candidate whose /health answers.
+    /// First candidate whose /health answers. The app's own kernel on `ownPort` is skipped when it is behind the
+    /// pin (see `ownKernelIsStale`): the caller then relaunches the pinned one instead of attaching to the old one.
+    /// A stale own kernel stops the search (never falls through to a stranger's :7071 while ours needs relaunching).
     public func attach() async -> (MindClient, MindHealth)? {
         for url in candidates {
             let client = MindClient(baseURL: url, timeout: 4)
             if let h = try? await client.health() {
+                if isOwn(url), ownKernelIsStale(h) {
+                    log("own kernel \(url) v\(h.version) is behind the pin v\(pinnedKernel?.version ?? "?"); relaunching")
+                    return nil
+                }
                 log("attached \(url) v\(h.version) \(h.model) agents=\(h.agentCount)")
                 return (MindClient(baseURL: url), h)
             }
         }
         return nil
+    }
+
+    /// The pin the app ships (kernel/kernel.json). nil when it cannot be read (then nothing is compared).
+    public var pinnedKernel: KernelPin? { KernelPin(contentsOf: kernelDir.appendingPathComponent("kernel.json")) }
+    /// The pin the login service runs from (copied there by `installService`). nil when the kernel was started another way.
+    public var installedKernel: KernelPin? { KernelPin(contentsOf: kernelHome.appendingPathComponent("launcher/kernel.json")) }
+
+    func isOwn(_ url: URL) -> Bool {
+        url.port == ownPort && ["127.0.0.1", "localhost", "::1"].contains(url.host ?? "")
+    }
+
+    /// How a stale own kernel is detected. /health gives only `version` (no sha), so:
+    /// 1. `health.version` != the pinned version → stale (the VERSION file in the kernel repo moves with releases);
+    /// 2. same version, but the service's copied kernel.json carries another sha than the pin → stale (a pin moved
+    ///    within a version). When the service copy is missing, only (1) applies. No pin readable → never stale.
+    public func ownKernelIsStale(_ h: MindHealth) -> Bool {
+        guard let pin = pinnedKernel else { return false }
+        if !h.version.isEmpty, h.version != pin.version { return true }
+        if let installed = installedKernel, installed.sha != pin.sha { return true }
+        return false
     }
 
     /// Launch the pinned kernel as a child (phase 1). Phase 4 moves this under launchd so it outlives the app.
@@ -191,8 +259,26 @@ extension MindRunner {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(Self.serviceLabel).plist")
     }
 
+    /// The LaunchAgent as written. `Label` equals the plist file name, so `launchctl bootout gui/$UID/<label>` and
+    /// deleting `launchAgentURL` take the service out again cleanly. Pure: nothing is written here.
+    public func servicePlist() -> [String: Any] {
+        let dst = kernelHome.appendingPathComponent("launcher")
+        let logDir = kernelHome.appendingPathComponent("logs")
+        return [
+            "Label": Self.serviceLabel,
+            "ProgramArguments": ["/bin/sh", dst.appendingPathComponent("run.sh").path],
+            "EnvironmentVariables": ["OPENRAPPTER_KERNEL_HOME": kernelHome.path, "OPENRAPPTER_KERNEL_PORT": String(ownPort),
+                                     "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"],
+            "RunAtLoad": true, "KeepAlive": true,
+            "StandardOutPath": logDir.appendingPathComponent("kernel.log").path,
+            "StandardErrorPath": logDir.appendingPathComponent("kernel.err.log").path,
+        ]
+    }
+
     /// Copies kernel.json + run.sh into the kernel home (so the service does not depend on where the app lives),
     /// writes the LaunchAgent, and loads it. KeepAlive restarts it; RunAtLoad starts it at login. Never touches :7071.
+    /// Explicit only: the app calls this on first run with no kernel and from the login menu item; nothing in
+    /// MindRunner calls it on its own (a stale own kernel makes `attach()` return nil and leaves the choice to the app).
     public func installService() throws {
         let fm = FileManager.default
         let dst = kernelHome.appendingPathComponent("launcher")
@@ -204,16 +290,7 @@ extension MindRunner {
         }
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dst.appendingPathComponent("run.sh").path)
         let logDir = kernelHome.appendingPathComponent("logs"); try fm.createDirectory(at: logDir, withIntermediateDirectories: true)
-        let plist: [String: Any] = [
-            "Label": Self.serviceLabel,
-            "ProgramArguments": ["/bin/sh", dst.appendingPathComponent("run.sh").path],
-            "EnvironmentVariables": ["OPENRAPPTER_KERNEL_HOME": kernelHome.path, "OPENRAPPTER_KERNEL_PORT": String(ownPort),
-                                     "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"],
-            "RunAtLoad": true, "KeepAlive": true,
-            "StandardOutPath": logDir.appendingPathComponent("kernel.log").path,
-            "StandardErrorPath": logDir.appendingPathComponent("kernel.err.log").path,
-        ]
-        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        let data = try PropertyListSerialization.data(fromPropertyList: servicePlist(), format: .xml, options: 0)
         try fm.createDirectory(at: launchAgentURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: launchAgentURL, options: .atomic)
         _ = Self.launchctl(["bootout", "gui/\(getuid())/\(Self.serviceLabel)"])   // reload if present; harmless otherwise

@@ -33,7 +33,7 @@ No needs are invented. It never speaks first. One action per card.
 2. Hold **⌥ Space** and talk. The first time, allow the microphone and speech recognition.
 3. The first time it needs to think, it sets up its mind (about a minute) and asks you to sign in with GitHub once.
 
-Or: `brew tap kody-w/tap && brew install --cask openrappter`
+Or: `brew tap kody-w/tap && brew trust kody-w/tap && brew install --cask openrappter`
 
 Signed with Apple Developer ID and notarized. macOS 14 or later, Apple Silicon and Intel.
 

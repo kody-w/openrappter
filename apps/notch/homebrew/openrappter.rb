@@ -7,7 +7,7 @@ cask "openrappter" do
   url "https://github.com/kody-w/openrappter/releases/download/v#{version}-app/OpenRappter-#{version}.dmg"
   name "OpenRappter"
   desc "A creature in your Mac's notch: hold a key and talk, it thinks with your Copilot sign-in"
-  homepage "https://kody-w.github.io/openrappter/"
+  homepage "https://kody-w.github.io/openrappter/notch/"
 
   depends_on macos: :sonoma
 

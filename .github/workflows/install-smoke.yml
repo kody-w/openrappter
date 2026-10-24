@@ -1,4 +1,4 @@
-name: Install Smoke Tests (v1, retired: run by hand)
+name: "Install Smoke Tests (v1, retired; run by hand)"
 
 on:
   workflow_call:

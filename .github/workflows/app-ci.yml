@@ -1,6 +1,7 @@
 name: App
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths: ['app/**', '.github/workflows/app-ci.yml']

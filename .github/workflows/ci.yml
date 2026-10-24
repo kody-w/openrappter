@@ -1,4 +1,4 @@
-name: CI (v1, retired: runs only when v1 files change)
+name: "CI (v1, retired; runs only when v1 files change)"
 
 on:
   workflow_call:
@@ -10,10 +10,10 @@ on:
         default: ''
   push:
     branches: [main]
-    paths: ['typescript/**', 'python/**', 'macos/**', '.github/workflows/ci.yml']
+    paths: ['typescript/**', 'python/**', 'macos/**']
   pull_request:
     branches: [main]
-    paths: ['typescript/**', 'python/**', 'macos/**', '.github/workflows/ci.yml']
+    paths: ['typescript/**', 'python/**', 'macos/**']
 
 # Cancel superseded runs on the same ref (branch/PR/tag) to save CI minutes.
 concurrency:

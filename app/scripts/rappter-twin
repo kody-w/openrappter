@@ -22,7 +22,8 @@ def local_twin(prompt, context):
     cli = "/opt/homebrew/bin/copilot"
     try:
         r = subprocess.run([cli, "-p", full, "--model", os.environ.get("OPENRAPPTER_TWIN_MODEL", "claude-sonnet-5.5"), "--no-color", "-s"],
-                           capture_output=True, text=True, timeout=90, cwd="/tmp")
+                           capture_output=True, text=True, timeout=90, cwd="/tmp",
+                           env={**os.environ, "PATH": "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "/usr/bin:/bin")})
         return r.stdout
     except Exception:
         return ""

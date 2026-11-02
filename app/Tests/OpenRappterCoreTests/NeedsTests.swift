@@ -34,4 +34,11 @@ final class NeedsTests: XCTestCase {
         let n = try JSONDecoder().decode(Need.self, from: Data(json.utf8))
         XCTAssertEqual(n.opts.count, 2); XCTAssertEqual(n.opts[0].rec, true); XCTAssertNil(n.created)
     }
+
+    func testDoorCardsJumpTheQueue() {
+        let q = NeedsQueue(dir: tempDir())
+        q.add(Need(id: "old", title: "Claude finished", opts: [NeedOption(label: "OK")], source: "claude-code", created: 1))
+        q.add(Need(id: "door", title: "beam wants to reminders.open", opts: [NeedOption(label: "No")], source: "doors", created: 9))
+        XCTAssertEqual(q.top?.id, "door")
+    }
 }

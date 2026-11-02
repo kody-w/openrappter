@@ -55,7 +55,11 @@ public final class NeedsQueue: ObservableObject {
             if answered.contains(n.id) || snoozed.contains(n.id) { continue }
             found.append(n)
         }
-        needs = found.sorted { ($0.created ?? 0) < ($1.created ?? 0) }
+        // A door request has a caller waiting on the socket: it goes before older notices, then oldest first.
+        needs = found.sorted { a, b in
+            let da = a.source == "doors", db = b.source == "doors"
+            return da != db ? da : (a.created ?? 0) < (b.created ?? 0)
+        }
     }
 
     public var top: Need? { needs.first }

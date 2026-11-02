@@ -30,6 +30,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     var needsSub: Any?
     var runner: MindRunner!
     var kernelProcess: Process?
+    var doors: DoorServer?
     let env = ProcessInfo.processInfo.environment
     var home: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter") }
 
@@ -50,6 +51,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         model.onLater = { [weak self] need in self?.needs.later(need); self?.showNextNeedOrRest() }
         model.onSignIn = { [weak self] in self?.signIn() }
 
+        startDoors()
         installHotKeys()
         installMenu()
         needsSub = needs.$needs.sink { [weak self] _ in Task { @MainActor in self?.showNextNeedOrRest() } }
@@ -60,6 +62,18 @@ final class Coordinator: NSObject, NSApplicationDelegate {
             await findMind()
             await runEnvDrivenProofs()
         }
+    }
+
+    // MARK: doors/1 (contracts/doors.md): other programs ask us; we hold the macOS approvals once
+
+    func startDoors() {
+        let sock = env["OPENRAPPTER_DOORS_SOCK"] ?? DoorServer.defaultSocket
+        let allowURL = URL(fileURLWithPath: env["OPENRAPPTER_DOORS_ALLOW"] ?? home.appendingPathComponent("doors-allow.json").path)
+        let s = DoorServer(socketPath: sock, allow: DoorAllowList(url: allowURL))
+        s.log = { m in DispatchQueue.main.async { log(m) } }
+        s.approve = doorApprovalViaNeeds(needsDir: needs.dir)
+        MacDoors.install(on: s)
+        do { try s.start(); doors = s } catch { log("doors failed to start: \(error)") }
     }
 
     // MARK: mind

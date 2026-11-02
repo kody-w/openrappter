@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""rappter-door <door> [json-args]  — doors/1 CLI. Prints the reply as JSON; exit 0 when ok, 1 otherwise.
+   rappter-door doors.hello
+   rappter-door reminders.open
+   rappter-door notes.publish '{"topic":"Errands","headline":"hi","body":"x"}'
+Set RAPPTER_DOOR_CALLER to name yourself on the approval card."""
+import json, os, sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import rappter_doors as doors  # noqa: E402
+
+if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+    print(__doc__.strip()); sys.exit(0 if len(sys.argv) > 1 else 1)
+try:
+    args = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+    if not isinstance(args, dict):
+        raise ValueError("args must be a JSON object")
+except ValueError as e:
+    print(json.dumps({"ok": False, "error": "bad args: {}".format(e)})); sys.exit(1)
+try:
+    r = doors.raw(sys.argv[1], args, caller=os.environ.get("RAPPTER_DOOR_CALLER") or "rappter-door")
+except doors.DoorError as e:
+    r = {"ok": False, "error": str(e)}
+print(json.dumps(r, ensure_ascii=False))
+sys.exit(0 if r.get("ok") else 1)

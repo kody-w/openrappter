@@ -38,7 +38,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>OpenRappter listens while you hold the key so it can hear what you say. Speech stays on this Mac.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>OpenRappter turns what you say into text on this Mac.</string>
-  <key>NSAppleEventsUsageDescription</key><string>OpenRappter types what you dictated into the app you are using.</string>
+  <key>NSAppleEventsUsageDescription</key><string>OpenRappter types what you dictated, and does Reminders, Notes and Messages work for the scripts you allowed.</string>
+  <key>NSRemindersUsageDescription</key><string>OpenRappter reads and ticks off reminders for the scripts you allowed.</string>
+  <key>NSRemindersFullAccessUsageDescription</key><string>OpenRappter reads and ticks off reminders for the scripts you allowed.</string>
   <key>CFBundleURLTypes</key><array><dict>
     <key>CFBundleURLName</key><string>$BUNDLE_ID</string>
     <key>CFBundleURLSchemes</key><array><string>openrappter</string></array>
@@ -50,6 +52,8 @@ cat > "$DIST/OpenRappter.entitlements" <<ENT
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>com.apple.security.device.audio-input</key><true/>
+  <key>com.apple.security.automation.apple-events</key><true/>
+  <key>com.apple.security.personal-information.calendars</key><true/>
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key><false/>
 </dict></plist>
 ENT

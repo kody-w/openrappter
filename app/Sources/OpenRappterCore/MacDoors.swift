@@ -9,7 +9,8 @@ public enum MacDoors {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
-    /// NSAppleScript is not thread safe: run it on the main thread.
+    /// NSAppleScript must run on the main thread (off it, it crashes). Callers never hang on it:
+    /// every door call has its own time limit in DoorServer.handle.
     public static func runScript(_ src: String) throws -> String {
         var out: String?; var err: String?
         let work = {
@@ -36,9 +37,13 @@ public enum MacDoors {
             let src = """
             tell application "Reminders"
              if not (exists list \(l)) then make new list with properties {name:\(l)}
+             set rs to (reminders of list \(l) whose completed is false)
+             if (count of rs) is 0 then return ""
+             set ids to id of rs
+             set names to name of rs
              set out to ""
-             repeat with r in (reminders of list \(l) whose completed is false)
-              set out to out & (id of r) & tab & (name of r) & linefeed
+             repeat with i from 1 to count of ids
+              set out to out & (item i of ids) & tab & (item i of names) & linefeed
              end repeat
              return out
             end tell

@@ -36,6 +36,7 @@ public final class NeedsQueue: ObservableObject {
     private var fd: Int32 = -1
     private var source: DispatchSourceFileSystemObject?
     private var snoozed: Set<String> = []
+    private var reloadPending = false
 
     public init(dir: URL? = nil) {
         self.dir = dir ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/needs")
@@ -49,10 +50,25 @@ public final class NeedsQueue: ObservableObject {
         let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         let answered = Set(files.filter { $0.lastPathComponent.hasSuffix(".answer.json") }
             .map { $0.lastPathComponent.replacingOccurrences(of: ".answer.json", with: "") })
+        // Keep the folder small: answered cards and notices older than two days move to needs/archive (never deleted).
+        let archive = dir.appendingPathComponent("archive")
+        let stale = Date().addingTimeInterval(-2 * 86400)
+        func shelve(_ f: URL) {
+            try? fm.createDirectory(at: archive, withIntermediateDirectories: true)
+            let to = archive.appendingPathComponent(f.lastPathComponent)
+            try? fm.removeItem(at: to); try? fm.moveItem(at: f, to: to)
+        }
         var found: [Need] = []
         for f in files where f.pathExtension == "json" && !f.lastPathComponent.hasSuffix(".answer.json") {
             guard let data = try? Data(contentsOf: f), let n = try? JSONDecoder().decode(Need.self, from: data) else { continue }
-            if answered.contains(n.id) || snoozed.contains(n.id) { continue }
+            if answered.contains(n.id) {
+                if let at = (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate, at < Date().addingTimeInterval(-600) {
+                    shelve(f); shelve(dir.appendingPathComponent("\(n.id).answer.json"))
+                }
+                continue
+            }
+            if n.source != "doors", let at = (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate, at < stale { shelve(f); continue }
+            if snoozed.contains(n.id) { continue }
             found.append(n)
         }
         // A door request has a caller waiting on the socket: it goes before older notices, then oldest first.
@@ -90,7 +106,12 @@ public final class NeedsQueue: ObservableObject {
         fd = open(dir.path, O_EVTONLY)
         guard fd >= 0 else { return }
         let s = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename], queue: .main)
-        s.setEventHandler { [weak self] in self?.reload() }
+        // Coalesce bursts of file events into one reload a quarter second later.
+        s.setEventHandler { [weak self] in
+            guard let self, !self.reloadPending else { return }
+            self.reloadPending = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.reloadPending = false; self?.reload() }
+        }
         s.setCancelHandler { [fd = self.fd] in close(fd) }
         s.resume()
         source = s

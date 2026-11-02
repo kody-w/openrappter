@@ -139,4 +139,24 @@ final class DoorsTests: XCTestCase {
         MacDoors.install(on: s)
         XCTAssertEqual(call(s, #"{"door":"reminders.add","args":{}}"#)["error"] as? String, "missing \"title\"")
     }
+
+    /// Speed guard: a stuck door times out in plain words, and 20 calls at once all answer fast beside it.
+    func testStuckDoorTimesOutAndOthersStayFast() {
+        let d = tmp(); let s = DoorServer(socketPath: d.appendingPathComponent("s").path, allow: DoorAllowList(url: d.appendingPathComponent("a.json")))
+        DoorServer.callTimeout = 1
+        defer { DoorServer.callTimeout = 30 }
+        s.handlers["doors.hello"] = { _ in Thread.sleep(forTimeInterval: 5); return "late" }
+        let t0 = Date()
+        let r = call(s, #"{"door":"doors.hello"}"#)
+        XCTAssertLessThan(Date().timeIntervalSince(t0), 2)
+        XCTAssertEqual(r["ok"] as? Bool, false)
+        XCTAssertTrue((r["error"] as? String ?? "").contains("taking too long"))
+        s.handlers["doors.hello"] = { _ in "hi" }
+        let g = DispatchGroup(); let t1 = Date(); var oks = 0; let lock = NSLock()
+        for _ in 0..<20 { g.enter(); DispatchQueue.global().async { let x = self.call(s, #"{"door":"doors.hello"}"#); lock.lock(); if x["ok"] as? Bool == true { oks += 1 }; lock.unlock(); g.leave() } }
+        g.wait()
+        XCTAssertEqual(oks, 20)
+        XCTAssertLessThan(Date().timeIntervalSince(t1), 1)
+    }
+
 }

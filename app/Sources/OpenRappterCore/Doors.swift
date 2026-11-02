@@ -144,6 +144,8 @@ public final class DoorServer: @unchecked Sendable {
     }
 
     /// One request line in, one reply line out. Public so tests can drive it without a socket.
+    public static var callTimeout: TimeInterval = 30
+
     public func handle(line: Data, pid: Int32 = 0, program: String = "test") -> Data {
         func reply(_ obj: [String: Any]) -> Data {
             (try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data(#"{"ok":false,"error":"could not encode the result"}"#.utf8)
@@ -164,7 +166,15 @@ public final class DoorServer: @unchecked Sendable {
             }
         }
         do {
-            let r = try h(args)
+            // Each call gets its own worker and a time limit: one stuck call never holds up the others.
+            var res: Result<Any, Error> = .failure(DoorError("no answer"))
+            let sem = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async { res = Result { try h(args) }; sem.signal() }
+            if sem.wait(timeout: .now() + DoorServer.callTimeout) == .timedOut {
+                log("door \(door) by \(name) timed out")
+                return reply(["ok": false, "error": "\(door) is taking too long (over \(Int(DoorServer.callTimeout)) seconds); try again in a minute"])
+            }
+            let r = try res.get()
             log("door \(door) by \(name) ok" + (why.isEmpty ? "" : " why=\(why)"))
             return reply(["ok": true, "result": r])
         } catch let e as DoorError {

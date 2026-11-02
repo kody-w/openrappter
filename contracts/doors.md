@@ -37,6 +37,12 @@ No answer counts as No. `doors.hello` never asks.
 | `messages.send` | `to`, `text` | `{"sent":true}` via this Mac's iMessage |
 | `messages.recent` | `since_rowid`, `limit` (≤1000), `newest` (true = the latest `limit` rows) | `[{"rowid","ts","text","from_me","handle"}]` from chat.db |
 
+## MCP door
+`rappter-doors-mcp` (stdio MCP server, app/doors) serves the same doors with the same approvals to any MCP client
+(Claude Code, Copilot CLI, Codex). Caller = the client's `clientInfo.name` from `initialize`, so the notch card names
+who asks. Each door is one tool (`.` becomes `_`, e.g. `reminders_open`), its input schema read from the table above;
+a new door is a new tool, and an existing tool never changes meaning.
+
 ## Errors
 `ok:false` with an `error` sentence a person can read: unknown door, missing argument, Kody said no, macOS
 refused (the sentence names the System Settings switch when known). The CLI exits 1; the SDK raises
@@ -50,4 +56,5 @@ only a change of meaning makes `doors/2`, served beside `doors/1`.
 ## Clients
 - CLI: `rappter-door <door> [json-args]` (app/doors, installed to `~/bin` by `app/doors/install.sh`).
 - SDK: `app/doors/rappter_doors.py` — `doors.call(name, **args)` plus one helper per door.
+- MCP: `rappter-doors-mcp` (see app/doors/README-mcp.md).
 - Any language: open the socket, write a line, read a line.

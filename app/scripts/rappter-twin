@@ -1,8 +1,31 @@
 #!/usr/bin/env python3
 """Ask Kody's twin to pick one option. stdin: {"question", "options":[labels], "context"}.
 stdout: {"pick": label, "confidence": 0..1} or {"error": "..."}. Never asks anyone else.
-Hosts come from ~/.claude/away.json (helper_host + standby_hosts); OPENRAPPTER_TWIN_CMD overrides (tests)."""
+Runs on this Mac (Copilot CLI + Kody's rulings); OPENRAPPTER_TWIN_CMD overrides (tests)."""
 import json, os, re, shlex, subprocess, sys
+
+RESERVED = ("Never allow, whatever your confidence: money, accounts or sign-ins, publishing anything public, legal or "
+            "employment matters, contacting outside people, secrets/keys/passwords, deleting things that cannot be rebuilt.")
+
+def local_twin(prompt, context):
+    """Kody's twin on this Mac (the minis are offline): his own rulings, read fresh each time, through Copilot CLI."""
+    home = os.path.expanduser("~")
+    mem = os.path.join(home, ".claude/projects/-Users-kodywildfeuer/memory/MEMORY.md")
+    try:
+        rulings = open(mem).read()[:24000]
+    except Exception:
+        rulings = ""
+    full = ("You are Kody's decision twin. Decide the way Kody would, from his rulings below. He prefers to only object, "
+            "never to confirm: say yes to ordinary, reversible, local things that serve his own tools; say no to anything odd. "
+            + RESERVED + "\n\nKODY'S RULINGS (index):\n" + rulings + ("\n\nCONTEXT:\n" + context if context else "")
+            + "\n\nQUESTION:\n" + prompt + "\nAnswer with the two lines only, each on its own line.")
+    cli = "/opt/homebrew/bin/copilot"
+    try:
+        r = subprocess.run([cli, "-p", full, "--model", os.environ.get("OPENRAPPTER_TWIN_MODEL", "claude-sonnet-5.5"), "--no-color", "-s"],
+                           capture_output=True, text=True, timeout=90, cwd="/tmp")
+        return r.stdout
+    except Exception:
+        return ""
 
 def main():
     req = json.load(sys.stdin)
@@ -11,30 +34,12 @@ def main():
               "\nEnd with two lines: PICK: <option> and CONFIDENCE: <0-100>")
     override = os.environ.get("OPENRAPPTER_TWIN_CMD")
     if override:
-        r = subprocess.run(override, shell=True, input=prompt, capture_output=True, text=True, timeout=90)
-        out = r.stdout
+        out = subprocess.run(override, shell=True, input=prompt, capture_output=True, text=True, timeout=90).stdout
     else:
-        try:
-            cfg = json.load(open(os.path.expanduser("~/.claude/away.json")))
-        except Exception:
-            cfg = {}
-        hosts = [h for h in [cfg.get("helper_host", "")] + list(cfg.get("standby_hosts", [])) if h]
-        if not hosts:
-            return {"error": "no twin machine set up"}
-        out = ""
-        cmd = 'ctx=$(cat); ~/kody-twin/decide.sh --dry-run --context "$ctx" ' + shlex.quote(prompt)
-        for h in hosts:
-            try:
-                r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", h, cmd],
-                                   input=req.get("context", ""), capture_output=True, text=True, timeout=90)
-            except subprocess.TimeoutExpired:
-                continue
-            if r.returncode != 255:
-                out = r.stdout
-                break
+        out = local_twin(prompt, req.get("context", ""))
         if not out:
-            return {"error": "the twin's machines are not answering"}
-    pick = re.findall(r"PICK:\s*(.+)", out)
+            return {"error": "the twin on this Mac did not answer"}
+    pick = re.findall(r"PICK:\s*(.+?)(?:\s+and\s+CONFIDENCE|\n|$)", out)
     conf = re.findall(r"CONFIDENCE:\s*([0-9.]+)", out)
     if not pick or not conf:
         return {"error": "the twin gave no clear pick"}

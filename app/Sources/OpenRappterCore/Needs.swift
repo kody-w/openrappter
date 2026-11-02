@@ -37,12 +37,15 @@ public final class NeedsQueue: ObservableObject {
     private var source: DispatchSourceFileSystemObject?
     private var snoozed: Set<String> = []
     private var reloadPending = false
+    private var tick: Timer?
+    private var firstSeen: [String: Double] = [:]
 
     public init(dir: URL? = nil) {
         self.dir = dir ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/needs")
         try? FileManager.default.createDirectory(at: self.dir, withIntermediateDirectories: true)
         reload()
         watch()
+        tick = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in Task { @MainActor in self?.reload() } }
     }
 
     public func reload() {
@@ -71,6 +74,28 @@ public final class NeedsQueue: ObservableObject {
             if snoozed.contains(n.id) { continue }
             found.append(n)
         }
+        // Object, don't confirm (Kody 2026-11-02): a card left alone takes its recommended option on its own.
+        // FYI cards (one OK) fade after 30 seconds; cards with a real choice after 10. Door requests are not touched here.
+        // Only the newest "finished" note per session stays on screen.
+        let nowT = Date().timeIntervalSince1970
+        for n in found where firstSeen[n.id] == nil { firstSeen[n.id] = (n.created ?? nowT) > nowT - 86400 ? (n.created ?? nowT) : nowT }
+        var newestPerSession: [String: Need] = [:]
+        var kept: [Need] = []
+        for n in found {
+            if n.source == "claude-code", let sess = n.id.split(separator: "-").dropFirst().first.map(String.init) {
+                if let cur = newestPerSession[sess], (cur.created ?? 0) >= (n.created ?? 0) { autoAnswer(n); continue }
+                if let old = newestPerSession[sess] { autoAnswer(old); kept.removeAll { $0.id == old.id } }
+                newestPerSession[sess] = n
+            }
+            kept.append(n)
+        }
+        found = kept.filter { n in
+            guard n.source != "doors", let rec = n.opts.first(where: { $0.rec == true }) ?? (n.opts.count == 1 ? n.opts.first : nil),
+                  let c = firstSeen[n.id] ?? min(n.created ?? .infinity, Date().timeIntervalSince1970) as Double? else { return true }
+            let wait: TimeInterval = n.opts.count == 1 ? 30 : 600
+            if Date().timeIntervalSince1970 - c > wait { write(n, rec, by: "default"); return false }
+            return true
+        }
         // A door request has a caller waiting on the socket: it goes before older notices, then oldest first.
         needs = found.sorted { a, b in
             let da = a.source == "doors", db = b.source == "doors"
@@ -89,6 +114,14 @@ public final class NeedsQueue: ObservableObject {
             _ = try? FileManager.default.replaceItemAt(url, withItemAt: tmp)   // atomic: a waiting hook never sees a half file
         }
         reload()
+    }
+
+    private func autoAnswer(_ n: Need) {
+        if let rec = n.opts.first(where: { $0.rec == true }) ?? n.opts.first { write(n, rec, by: "default") }
+    }
+    private func write(_ need: Need, _ opt: NeedOption, by: String) {
+        let a = NeedAnswer(id: need.id, label: opt.label, action: opt.action, answered: Date().timeIntervalSince1970)
+        if let data = try? JSONEncoder().encode(a) { try? data.write(to: dir.appendingPathComponent("\(need.id).answer.json"), options: .atomic) }
     }
 
     public func later(_ need: Need) { snoozed.insert(need.id); reload() }

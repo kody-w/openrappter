@@ -41,4 +41,17 @@ final class NeedsTests: XCTestCase {
         q.add(Need(id: "door", title: "beam wants to reminders.open", opts: [NeedOption(label: "No")], source: "doors", created: 9))
         XCTAssertEqual(q.top?.id, "door")
     }
+
+    /// Object, don't confirm: an old FYI card clears itself; only the newest "finished" per session shows.
+    @MainActor func testIdleCardsTakeTheirDefault() {
+        let d = URL(fileURLWithPath: "/tmp/nd-\(UUID().uuidString.prefix(6))")
+        let q = NeedsQueue(dir: d)
+        let now = Date().timeIntervalSince1970
+        q.add(Need(id: "cc-s1-done-1", title: "old", opts: [NeedOption(label: "OK", rec: true)], source: "claude-code", created: now - 5))
+        q.add(Need(id: "cc-s1-done-2", title: "new", opts: [NeedOption(label: "OK", rec: true)], source: "claude-code", created: now))
+        q.add(Need(id: "fyi", title: "stale", opts: [NeedOption(label: "OK")], source: "x", created: now - 60))
+        q.add(Need(id: "pick", title: "choice", opts: [NeedOption(label: "A", rec: true), NeedOption(label: "B")], source: "x", created: now - 60))
+        XCTAssertEqual(q.needs.map(\.id).sorted(), ["cc-s1-done-2", "pick"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: d.appendingPathComponent("fyi.answer.json").path))
+    }
 }

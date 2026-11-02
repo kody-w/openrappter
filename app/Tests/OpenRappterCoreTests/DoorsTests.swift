@@ -89,6 +89,54 @@ final class DoorsTests: XCTestCase {
         try p.run(); p.waitUntilExit()
         let rows = try MacDoors.recentMessages(since: 5, limit: 10, db: db)
         XCTAssertEqual(rows.count, 1); XCTAssertEqual(rows[0]["text"] as? String, "yo")
+        let last = try MacDoors.recentMessages(since: 0, limit: 1, newest: true, db: db)
+        XCTAssertEqual(last.map { $0["text"] as? String }, ["yo"], "newest:true gives the latest rows, oldest first")
         XCTAssertThrowsError(try MacDoors.recentMessages(since: 0, limit: 1, db: d.appendingPathComponent("none.db").path))
+    }
+
+    func dial(_ path: String) -> Int32 {
+        let c = socket(AF_UNIX, SOCK_STREAM, 0)
+        var addr = sockaddr_un(); addr.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &addr.sun_path) { p in for (i, b) in Array(path.utf8).enumerated() { p[i] = b } }
+        _ = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(c, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+        return c
+    }
+
+    /// The 2026-11-02 quits: a caller hanging up before its reply raised SIGPIPE and ended the app silently.
+    /// If this regresses, the test process itself dies here.
+    func testCallerHangingUpDoesNotKillTheServer() throws {
+        let d = tmp(); let path = d.appendingPathComponent("doors.sock").path
+        let s = DoorServer(socketPath: path, allow: DoorAllowList(url: d.appendingPathComponent("a.json")))
+        s.handlers["slow.door"] = { _ in Thread.sleep(forTimeInterval: 0.2); return String(repeating: "x", count: 200_000) }
+        s.approve = { _, _ in .once }
+        try s.start(); defer { s.stop() }
+        for _ in 0..<5 {
+            let c = dial(path); let req = Array("{\"door\":\"slow.door\"}\n".utf8); _ = write(c, req, req.count); close(c)
+        }
+        Thread.sleep(forTimeInterval: 0.6)
+        let c = dial(path); defer { close(c) }
+        let req = Array("{\"door\":\"doors.hello\"}\n".utf8); _ = write(c, req, req.count)
+        var buf = [UInt8](repeating: 0, count: 4096); var got = Data()
+        while !got.contains(0x0A) { let n = read(c, &buf, buf.count); if n <= 0 { break }; got.append(contentsOf: buf[0..<n]) }
+        XCTAssertTrue(String(decoding: got, as: UTF8.self).contains("\"ok\":true"))
+    }
+
+    func testWhyReachesTheApprovalCard() {
+        let d = tmp(); let s = DoorServer(socketPath: d.appendingPathComponent("s").path, allow: DoorAllowList(url: d.appendingPathComponent("a.json")))
+        s.handlers["notes.read"] = { _ in "ok" }
+        final class Box: @unchecked Sendable { var why = "" }
+        let box = Box()
+        s.approve = { c, _ in box.why = c.why; return .once }
+        _ = call(s, #"{"door":"notes.read","caller":"notes_agent","why":"Read the note you asked about"}"#)
+        XCTAssertEqual(box.why, "Read the note you asked about")
+        let card = doorApprovalViaNeeds(needsDir: d.appendingPathComponent("n"), timeout: 0.3)
+        _ = card(DoorCaller(name: "a", pid: 1, program: "/x", why: "W"), "notes.read")   // times out; card written then removed
+    }
+
+    func testRemindersAddNeedsATitle() {
+        let d = tmp(); let s = DoorServer(socketPath: d.appendingPathComponent("s").path, allow: DoorAllowList(url: d.appendingPathComponent("a.json")))
+        s.approve = { _, _ in .once }
+        MacDoors.install(on: s)
+        XCTAssertEqual(call(s, #"{"door":"reminders.add","args":{}}"#)["error"] as? String, "missing \"title\"")
     }
 }

@@ -49,9 +49,23 @@ public enum MacDoors {
                 return p.count == 2 ? ["id": p[0], "title": p[1]] : nil
             }
         }
+        s.handlers["reminders.add"] = { a in
+            let title = try str(a, "title"); let note = try str(a, "note", required: false)
+            let l = osaString((a["list"] as? String) ?? remindersList)
+            let id = try runScript("tell application \"Reminders\"\n if not (exists list \(l)) then make new list with properties {name:\(l)}\n set r to make new reminder at end of list \(l) with properties {name:\(osaString(title)), body:\(osaString(note))}\n return id of r\nend tell")
+            return ["id": id, "title": title]
+        }
         s.handlers["reminders.done"] = { a in
             let id = try str(a, "id"); let note = try str(a, "note", required: false)
-            _ = try runScript("tell application \"Reminders\"\n set r to reminder id \(osaString(id))\n set completed of r to true\n set body of r to \(osaString(note.isEmpty ? "Done" : note))\nend tell")
+            let body = osaString(note.isEmpty ? "Done" : note)
+            if let list = a["list"] as? String {
+                // Walk the open reminders of that list, like reminders.open: `reminder id` alone can hang Reminders for minutes.
+                let l = osaString(list)
+                let found = try runScript("tell application \"Reminders\"\n repeat with r in (reminders of list \(l) whose completed is false)\n  if (id of r) is \(osaString(id)) then\n   set body of r to \(body)\n   set completed of r to true\n   return \"yes\"\n  end if\n end repeat\n return \"no\"\nend tell")
+                if found != "yes" { throw DoorError("no open reminder with that id in \(list)") }
+            } else {
+                _ = try runScript("tell application \"Reminders\"\n set r to reminder id \(osaString(id))\n set completed of r to true\n set body of r to \(body)\nend tell")
+            }
             return ["id": id, "done": true] as [String: Any]
         }
         s.handlers["notes.read"] = { a in
@@ -89,12 +103,13 @@ public enum MacDoors {
         s.handlers["messages.recent"] = { a in
             let since = Int64((a["since_rowid"] as? NSNumber)?.int64Value ?? Int64((a["since_rowid"] as? String) ?? "0") ?? 0)
             let limit = min((a["limit"] as? NSNumber)?.intValue ?? 200, 1000)
-            return try recentMessages(since: since, limit: limit)
+            let newest = (a["newest"] as? Bool) ?? false
+            return try recentMessages(since: since, limit: limit, newest: newest)
         }
     }
 
     /// Kody's chat.db, read-only, inside the app (needs Full Disk Access for OpenRappter).
-    public static func recentMessages(since: Int64, limit: Int, db path: String? = nil) throws -> [[String: Any]] {
+    public static func recentMessages(since: Int64, limit: Int, newest: Bool = false, db path: String? = nil) throws -> [[String: Any]] {
         let p = path ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Messages/chat.db").path
         var db: OpaquePointer?
         guard sqlite3_open_v2("file:\(p)?mode=ro", &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK else {
@@ -102,7 +117,7 @@ public enum MacDoors {
             throw DoorError("cannot open the Messages database; give OpenRappter Full Disk Access in System Settings")
         }
         defer { sqlite3_close(db) }
-        let q = "select m.ROWID, m.date/1000000000+978307200, m.text, m.is_from_me, coalesce(h.id,'') from message m left join handle h on h.ROWID=m.handle_id where m.ROWID>? and m.text is not null order by m.ROWID limit ?"
+        let q = "select m.ROWID, m.date/1000000000+978307200, m.text, m.is_from_me, coalesce(h.id,'') from message m left join handle h on h.ROWID=m.handle_id where m.ROWID>? and m.text is not null order by m.ROWID \(newest ? "desc" : "") limit ?"
         var st: OpaquePointer?
         guard sqlite3_prepare_v2(db, q, -1, &st, nil) == SQLITE_OK else {
             throw DoorError("cannot read the Messages database: \(String(cString: sqlite3_errmsg(db))) (Full Disk Access?)")
@@ -116,7 +131,7 @@ public enum MacDoors {
                          "from_me": sqlite3_column_int(st, 3) == 1,
                          "handle": sqlite3_column_text(st, 4).map { String(cString: $0) } ?? ""])
         }
-        return rows
+        return newest ? rows.reversed() : rows
     }
 
     /// Same tappable link beam_local makes: the note's iCloud identifier through the bounce page. nil when unreadable.

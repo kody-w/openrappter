@@ -35,6 +35,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
+  <key>NSSupportsSuddenTermination</key><false/>
+  <key>NSSupportsAutomaticTermination</key><false/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>OpenRappter listens while you hold the key so it can hear what you say. Speech stays on this Mac.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>OpenRappter turns what you say into text on this Mac.</string>

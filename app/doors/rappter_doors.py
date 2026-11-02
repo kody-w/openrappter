@@ -29,13 +29,15 @@ def available(path=None):
     return os.path.exists(path or SOCK)
 
 
-def raw(door, args=None, caller=None, timeout=180, path=None):
+def raw(door, args=None, caller=None, timeout=180, path=None, why=None):
     """One request, the whole reply dict ({"ok":..., "result"|"error":...})."""
     path = path or SOCK
     msg = {"door": door, "args": args or {}}
     caller = caller or os.environ.get("RAPPTER_DOOR_CALLER")
     if caller:
         msg["caller"] = caller
+    if why:
+        msg["why"] = why  # one line, shown on the notch card when OpenRappter asks
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(timeout)  # the first call may wait for Kody's click in the notch
     try:
@@ -60,8 +62,8 @@ def raw(door, args=None, caller=None, timeout=180, path=None):
     return json.loads(buf.split(b"\n", 1)[0])
 
 
-def call(door, caller=None, timeout=180, **args):
-    r = raw(door, args, caller=caller, timeout=timeout)
+def call(door, caller=None, timeout=180, why=None, **args):
+    r = raw(door, args, caller=caller, timeout=timeout, why=why)
     if not r.get("ok"):
         raise DoorRefused(r.get("error") or "the door said no")
     return r.get("result")
@@ -70,6 +72,7 @@ def call(door, caller=None, timeout=180, **args):
 # Typed helpers (one per door in doors/1).
 def hello(**kw): return call("doors.hello", **kw)
 def reminders_open(list="Beam", **kw): return call("reminders.open", list=list, **kw)
+def reminders_add(title, note="", list="Beam", **kw): return call("reminders.add", title=title, note=note, list=list, **kw)
 def reminders_done(id, note="", **kw): return call("reminders.done", id=id, note=note, **kw)
 def notes_publish(topic, headline, body="", **kw): return call("notes.publish", topic=topic, headline=headline, body=body, **kw)
 def notes_read(title, **kw): return call("notes.read", title=title, **kw)

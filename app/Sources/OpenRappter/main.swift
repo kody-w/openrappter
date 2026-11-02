@@ -6,6 +6,11 @@ import OpenRappterCore
 func log(_ s: String) {
     let line = "\(ISO8601DateFormatter().string(from: Date())) \(s)\n"
     FileHandle.standardError.write(line.data(using: .utf8)!)
+    // Always keep our own log, so a quit is never a mystery again (~/.openrappter/app.log).
+    let own = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/app.log").path
+    if let h = FileHandle(forWritingAtPath: own) ?? (FileManager.default.createFile(atPath: own, contents: nil) ? FileHandle(forWritingAtPath: own) : nil) {
+        h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile()
+    }
     if let path = ProcessInfo.processInfo.environment["OPENRAPPTER_EVIDENCE"],
        let h = FileHandle(forWritingAtPath: path) ?? (FileManager.default.createFile(atPath: path, contents: nil) ? FileHandle(forWritingAtPath: path) : nil) {
         h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile()
@@ -34,8 +39,16 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     let env = ProcessInfo.processInfo.environment
     var home: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter") }
 
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationWillTerminate(_ notification: Notification) { log("quitting (normal quit); the login item brings me back"); doors?.stop() }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        // The broker must stay up with no windows: never let macOS end us as an idle app.
+        ProcessInfo.processInfo.disableSuddenTermination()
+        ProcessInfo.processInfo.disableAutomaticTermination("doors/1 broker")
+        log("started pid \(ProcessInfo.processInfo.processIdentifier) launchd=\(env["XPC_SERVICE_NAME"] ?? "-")")
+        KeepAlive.install(log: { log($0) })
         let model = self.model
         notch = DynamicNotch(hoverBehavior: .all, style: .auto,
                              expanded: { Expanded(model: model) },
@@ -52,6 +65,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         model.onSignIn = { [weak self] in self?.signIn() }
 
         startDoors()
+        askForFullDiskAccessIfMissing()
         installHotKeys()
         installMenu()
         needsSub = needs.$needs.sink { [weak self] _ in Task { @MainActor in self?.showNextNeedOrRest() } }
@@ -75,6 +89,21 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         MacDoors.install(on: s)
         do { try s.start(); doors = s } catch { log("doors failed to start: \(error)") }
     }
+
+    /// Texts (chat.db) and Notes links (NoteStore) need Full Disk Access; say so once, in plain words, with the button.
+    func askForFullDiskAccessIfMissing() {
+        let chat = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Messages/chat.db").path
+        let fd = open(chat, O_RDONLY)
+        if fd >= 0 { close(fd); try? FileManager.default.removeItem(at: needs.dir.appendingPathComponent("full-disk-access.json")); return }
+        log("no Full Disk Access yet (chat.db unreadable)")
+        needs.add(Need(id: "full-disk-access", title: "To read your texts and make Notes links, add OpenRappter to Full Disk Access",
+                       ctx: "Open the settings, switch on OpenRappter, and I'll do the rest.",
+                       opts: [NeedOption(label: "Open Full Disk Access", rec: true, action: "open:" + Self.fullDiskAccessPane),
+                              NeedOption(label: "Not now")],
+                       source: "openrappter", created: Date().timeIntervalSince1970))
+    }
+    static let fullDiskAccessPane = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+    @objc func menuFullDiskAccess() { NSWorkspace.shared.open(URL(string: Self.fullDiskAccessPane)!) }
 
     // MARK: mind
 
@@ -252,9 +281,10 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Sign in to my mind…", action: #selector(menuSignIn), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Connect Claude Code (answer its prompts here)", action: #selector(menuConnectClaude), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Keep my mind running at login", action: #selector(menuInstallService), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Let me read your texts (Full Disk Access)…", action: #selector(menuFullDiskAccess), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Open my folder", action: #selector(menuOpenFolder), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit OpenRappter", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: "Restart OpenRappter", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
         statusItem = item
     }
@@ -284,6 +314,45 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     }
 }
 
+/// The login item that brings the broker back after a quit, a crash or a reboot:
+/// ~/Library/LaunchAgents/com.openrappter.app.plist (RunAtLoad + KeepAlive), pointing at this copy of the app.
+enum KeepAlive {
+    static let label = "com.openrappter.app"
+    static var plist: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist") }
+
+    static func install(log: (String) -> Void) {
+        guard ProcessInfo.processInfo.environment["OPENRAPPTER_NO_LOGIN_ITEM"] == nil, let exe = Bundle.main.executablePath,
+              Bundle.main.bundlePath.hasSuffix(".app") else { return }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let want: [String: Any] = ["Label": label, "ProgramArguments": [exe], "RunAtLoad": true, "KeepAlive": true,
+                                   "ThrottleInterval": 5, "ProcessType": "Interactive",
+                                   "StandardErrorPath": home + "/.openrappter/app.stderr.log"]
+        if let have = NSDictionary(contentsOf: plist), have.isEqual(to: want) { return }
+        let fresh = !FileManager.default.fileExists(atPath: plist.path)
+        try? FileManager.default.createDirectory(at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard (want as NSDictionary).write(to: plist, atomically: true) else { log("could not write \(plist.path)"); return }
+        let dom = "gui/\(getuid())"
+        if !fresh { run(["bootout", "\(dom)/\(label)"]) }
+        run(["bootstrap", dom, plist.path])
+        log("login item installed: \(plist.path) -> \(exe)")
+    }
+
+    @discardableResult static func run(_ args: [String]) -> Int32 {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/launchctl"); p.arguments = args
+        p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+        try? p.run(); p.waitUntilExit(); return p.terminationStatus
+    }
+
+    /// One broker at a time. A second copy (e.g. `open` while launchd's is up) waits quietly until the first is gone.
+    static func waitForOtherCopy() {
+        let me = ProcessInfo.processInfo.processIdentifier
+        while NSRunningApplication.runningApplications(withBundleIdentifier: label).contains(where: { $0.processIdentifier != me && !$0.isTerminated }) {
+            Thread.sleep(forTimeInterval: 2)
+        }
+    }
+}
+
+KeepAlive.waitForOtherCopy()
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = Coordinator()

@@ -53,6 +53,9 @@ public struct DoorCaller: Sendable, Equatable {
     public var name: String
     public var pid: Int32
     public var program: String
+    /// One line from the caller saying why it wants this door; shown on the notch card. Optional.
+    public var why: String = ""
+    public init(name: String, pid: Int32, program: String, why: String = "") { self.name = name; self.pid = pid; self.program = program; self.why = why }
 }
 
 /// The socket server. Handlers do the work; `approve` asks the human (blocking, off the main thread).
@@ -81,6 +84,9 @@ public final class DoorServer: @unchecked Sendable {
     public func start() throws {
         let dir = (socketPath as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // A caller that hangs up before its reply (a timeout while the notch card waits) must not take the app
+        // down: writing to a closed socket raises SIGPIPE, which ends the process silently, with no crash report.
+        signal(SIGPIPE, SIG_IGN)
         unlink(socketPath)
         fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw DoorError("socket() failed") }
@@ -100,6 +106,8 @@ public final class DoorServer: @unchecked Sendable {
             while true {
                 let c = accept(lfd, nil, nil)
                 if c < 0 { if errno == EINTR { continue }; return }
+                var one: Int32 = 1
+                setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
                 DispatchQueue.global().async { self?.serve(c) }
             }
         }
@@ -145,7 +153,8 @@ public final class DoorServer: @unchecked Sendable {
         }
         let args = obj["args"] as? [String: Any] ?? [:]
         let name = (obj["caller"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(80)) } ?? (program as NSString).lastPathComponent
-        let caller = DoorCaller(name: name, pid: pid, program: program)
+        let why = (obj["why"] as? String).map { String($0.prefix(200)) } ?? ""
+        let caller = DoorCaller(name: name, pid: pid, program: program, why: why)
         guard let h = handlers[door] else { return reply(["ok": false, "error": "there is no door called \(door)", "contract": DoorsSpec.version]) }
         if !DoorsSpec.open.contains(door) && !allow.allows(name, door) {
             switch approve(caller, door) {
@@ -156,7 +165,7 @@ public final class DoorServer: @unchecked Sendable {
         }
         do {
             let r = try h(args)
-            log("door \(door) by \(name) ok")
+            log("door \(door) by \(name) ok" + (why.isEmpty ? "" : " why=\(why)"))
             return reply(["ok": true, "result": r])
         } catch let e as DoorError {
             log("door \(door) by \(name) error \(e.message)")
@@ -171,7 +180,7 @@ public final class DoorServer: @unchecked Sendable {
 public func doorApprovalViaNeeds(needsDir: URL, timeout: TimeInterval = 120) -> @Sendable (DoorCaller, String) -> DoorDecision {
     return { caller, door in
         let id = "door-\(UUID().uuidString.prefix(8))"
-        let need = Need(id: id, title: "\(caller.name) wants to \(door)", ctx: "Program: \(caller.program) (pid \(caller.pid))",
+        let need = Need(id: id, title: "\(caller.name) wants to \(door)", ctx: (caller.why.isEmpty ? "" : "Why: \(caller.why)\n") + "Program: \(caller.program) (pid \(caller.pid))",
                         opts: [NeedOption(label: "Allow once", action: "door:once"), NeedOption(label: "Always", rec: true, action: "door:always"),
                                NeedOption(label: "No", action: "door:no")],
                         source: "doors", created: Date().timeIntervalSince1970)

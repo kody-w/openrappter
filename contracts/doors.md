@@ -16,7 +16,8 @@ One JSON object per line, one reply line per request. Several requests may share
     ← {"ok": true, "result": [{"id": "x-apple-reminder://…", "title": "…"}]}
     ← {"ok": false, "error": "plain words"}
 
-`caller` is optional; without it the caller is the program file behind the socket (from the kernel).
+`caller` and `why` are optional. `why` is one line (≤200 chars) the notch card shows Kody when it asks;
+device agents always send it. Without `caller` the caller is the program file behind the socket (from the kernel).
 
 ## Approval
 The first call to a door by a new caller shows a needs card in the notch: "<caller> wants to <door>" with
@@ -29,11 +30,12 @@ No answer counts as No. `doors.hello` never asks.
 |---|---|---|
 | `doors.hello` | — | `{"contract":"doors/1","doors":[…]}` |
 | `reminders.open` | `list` (default `Beam`) | `[{"id","title"}]` open reminders |
-| `reminders.done` | `id`, `note` | `{"id","done":true}` ticks it off, note in its body |
+| `reminders.add` | `title`, `note`, `list` (default `Beam`) | `{"id","title"}` the new reminder |
+| `reminders.done` | `id`, `note`, `list` (optional; faster) | `{"id","done":true}` ticks it off, note in its body |
 | `notes.publish` | `topic`, `headline`, `body`, `folder` (default `Beam`) | `{"note_id","link"}` newest-first entry in note "Beam · <topic>" |
 | `notes.read` | `title`, `folder` | `{"title","body"}` (HTML body) |
 | `messages.send` | `to`, `text` | `{"sent":true}` via this Mac's iMessage |
-| `messages.recent` | `since_rowid`, `limit` (≤1000) | `[{"rowid","ts","text","from_me","handle"}]` from chat.db |
+| `messages.recent` | `since_rowid`, `limit` (≤1000), `newest` (true = the latest `limit` rows) | `[{"rowid","ts","text","from_me","handle"}]` from chat.db |
 
 ## Errors
 `ok:false` with an `error` sentence a person can read: unknown door, missing argument, Kody said no, macOS

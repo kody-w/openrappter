@@ -34,6 +34,8 @@ public final class CreatureModel: ObservableObject {
     @Published public var need: Need?
     /// Mind is up but not signed in.
     @Published public var hungry: Bool = false
+    /// The quiet stream: FYI notes that never pop the notch; seen only when Kody hovers over it.
+    @Published public var stream: [Need] = []
     public var onAnswer: ((Need, NeedOption) -> Void)?
     public var onLater: ((Need) -> Void)?
     public var onSignIn: (() -> Void)?
@@ -95,11 +97,28 @@ public struct Expanded: View {
                     Text("rappter").font(.headline).foregroundStyle(.white)
                     Text(model.line).font(.callout).foregroundStyle(.white.opacity(0.85)).lineLimit(4)
                     Text(model.posture.label).font(.caption).foregroundStyle(model.posture.tint)
+                    if !model.stream.isEmpty {
+                        Divider().overlay(Color.white.opacity(0.15)).padding(.vertical, 2)
+                        ForEach(model.stream.prefix(6), id: \.id) { n in
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(StreamTime.ago(n.created)).font(.caption2).foregroundStyle(.white.opacity(0.45)).frame(width: 34, alignment: .leading)
+                                Text(n.title).font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                            }
+                        }
+                    }
                 }
             }
             Spacer(minLength: 0)
         }
         .padding(16)
         .frame(width: 440)
+    }
+}
+
+public enum StreamTime {
+    public static func ago(_ t: Double?) -> String {
+        guard let t else { return "" }
+        let s = max(0, Int(Date().timeIntervalSince1970 - t))
+        return s < 60 ? "now" : s < 3600 ? "\(s / 60)m" : s < 86400 ? "\(s / 3600)h" : "\(s / 86400)d"
     }
 }

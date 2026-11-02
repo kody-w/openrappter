@@ -32,6 +32,8 @@ public struct NeedAnswer: Codable, Equatable, Sendable {
 @MainActor
 public final class NeedsQueue: ObservableObject {
     @Published public private(set) var needs: [Need] = []
+    /// FYI notes (one plain OK, nothing to decide): they never pop the notch; they flow here, newest first.
+    @Published public private(set) var stream: [Need] = []
     public let dir: URL
     private var fd: Int32 = -1
     private var source: DispatchSourceFileSystemObject?
@@ -73,6 +75,14 @@ public final class NeedsQueue: ObservableObject {
             if n.source != "doors", let at = (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate, at < stale { shelve(f); continue }
             if snoozed.contains(n.id) { continue }
             found.append(n)
+        }
+        // Only when Kody is needed does a card pop: an FYI settles at once and joins the quiet stream.
+        let fyi = found.filter { $0.source != "doors" && $0.opts.count == 1 && $0.opts[0].action == nil }
+        if !fyi.isEmpty {
+            for n in fyi { autoAnswer(n) }
+            let ids = Set(fyi.map(\.id))
+            stream = (fyi + stream.filter { !ids.contains($0.id) }).sorted { ($0.created ?? 0) > ($1.created ?? 0) }.prefix(15).map { $0 }
+            found.removeAll { ids.contains($0.id) }
         }
         // Object, don't confirm (Kody 2026-11-02): a card left alone takes its recommended option on its own.
         // FYI cards (one OK) fade after 30 seconds; cards with a real choice after 10. Door requests are not touched here.

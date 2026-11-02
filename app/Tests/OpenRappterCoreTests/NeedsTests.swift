@@ -15,16 +15,17 @@ final class NeedsTests: XCTestCase {
         let a = Need(id: "a", title: "Approve the thing?", opts: [NeedOption(label: "Yes", rec: true, action: "allow"), NeedOption(label: "No", action: "deny")], created: 1)
         let b = Need(id: "b", title: "Later one", opts: [NeedOption(label: "OK")], created: 2)
         q.add(b); q.add(a)
-        XCTAssertEqual(q.needs.map(\.id), ["a", "b"], "oldest first")
+        XCTAssertEqual(q.needs.map(\.id), ["a"], "only a real choice pops")
+        XCTAssertEqual(q.stream.map(\.id), ["b"], "the FYI flows into the stream")
         q.answer(a, a.opts[0])
-        XCTAssertEqual(q.top?.id, "b")
+        XCTAssertNil(q.top)
         let ans = try! JSONDecoder().decode(NeedAnswer.self, from: Data(contentsOf: q.dir.appendingPathComponent("a.answer.json")))
         XCTAssertEqual(ans.action, "allow"); XCTAssertEqual(ans.label, "Yes")
         q.later(b)
         XCTAssertNil(q.top)
         // A reload after an answer file appears from outside (the hook, a script) also clears the card.
         let c = Need(id: "c", title: "From a script", opts: [NeedOption(label: "OK")], created: 3)
-        q.add(c); XCTAssertEqual(q.top?.id, "c")
+        q.add(c); XCTAssertNil(q.top); XCTAssertEqual(q.stream.first?.id, "c")
         try! "{\"id\":\"c\",\"label\":\"OK\",\"answered\":1}".write(to: q.dir.appendingPathComponent("c.answer.json"), atomically: true, encoding: .utf8)
         q.reload(); XCTAssertNil(q.top)
     }
@@ -51,7 +52,8 @@ final class NeedsTests: XCTestCase {
         q.add(Need(id: "cc-s1-done-2", title: "new", opts: [NeedOption(label: "OK", rec: true)], source: "claude-code", created: now))
         q.add(Need(id: "fyi", title: "stale", opts: [NeedOption(label: "OK")], source: "x", created: now - 60))
         q.add(Need(id: "pick", title: "choice", opts: [NeedOption(label: "A", rec: true), NeedOption(label: "B")], source: "x", created: now - 60))
-        XCTAssertEqual(q.needs.map(\.id).sorted(), ["cc-s1-done-2", "pick"])
+        XCTAssertEqual(q.needs.map(\.id), ["pick"])
+        XCTAssertEqual(q.stream.map(\.id), ["cc-s1-done-2", "cc-s1-done-1", "fyi"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: d.appendingPathComponent("fyi.answer.json").path))
     }
 }

@@ -33,6 +33,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     var mode: Mode?
     var statusItem: NSStatusItem?
     var needsSub: Any?
+    var streamSub: Any?
     var runner: MindRunner!
     var kernelProcess: Process?
     var doors: DoorServer?
@@ -68,6 +69,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         askForFullDiskAccessIfMissing()
         installHotKeys()
         installMenu()
+        streamSub = needs.$stream.sink { [weak self] s in Task { @MainActor in self?.model.stream = s } }
         needsSub = needs.$needs.sink { [weak self] _ in Task { @MainActor in self?.showNextNeedOrRest() } }
 
         Task { @MainActor in

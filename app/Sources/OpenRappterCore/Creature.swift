@@ -39,6 +39,9 @@ public final class CreatureModel: ObservableObject {
     public var onAnswer: ((Need, NeedOption) -> Void)?
     public var onLater: ((Need) -> Void)?
     public var onSignIn: (() -> Void)?
+    /// Object to a twin or trust decision from the stream (one tap; the twin learns from it).
+    public var onObject: ((Need) -> Void)?
+    @Published public var objected: Set<String> = []
 }
 
 /// Placeholder silhouette until the 3D rappter (rappter-vui) is hosted in the expanded view.
@@ -103,6 +106,15 @@ public struct Expanded: View {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(StreamTime.ago(n.created)).font(.caption2).foregroundStyle(.white.opacity(0.45)).frame(width: 34, alignment: .leading)
                                 Text(n.title).font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                                if n.source == "twin" {
+                                    Spacer(minLength: 4)
+                                    if model.objected.contains(n.id) {
+                                        Text("objected").font(.caption2).foregroundStyle(.orange)
+                                    } else {
+                                        Button("Object") { model.objected.insert(n.id); model.onObject?(n) }
+                                            .buttonStyle(.borderless).font(.caption2).foregroundStyle(.orange)
+                                    }
+                                }
                             }
                         }
                     }

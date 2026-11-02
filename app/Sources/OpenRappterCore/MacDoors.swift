@@ -31,7 +31,7 @@ public enum MacDoors {
         return ""
     }
 
-    public static func install(on s: DoorServer, notesFolder: String = "Beam", remindersList: String = "Beam") {
+    public static func install(on s: DoorServer, notesFolder: String = "Beam", remindersList: String = "Beam", needsDir: URL? = nil) {
         s.handlers["reminders.open"] = { a in
             let list = (a["list"] as? String) ?? remindersList
             let l = osaString(list)
@@ -109,6 +109,23 @@ public enum MacDoors {
             return text.split(separator: "\n").compactMap { l -> [String: String]? in
                 let p = l.split(separator: "\t", maxSplits: 1).map(String.init); return p.count == 2 ? ["start": p[0], "title": p[1]] : nil
             }.sorted { $0["start"]! < $1["start"]! }
+        }
+        let allow = s.allow
+        s.handlers["twin.object"] = { a in
+            let code = try str(a, "code")
+            guard let o = Objections.object(code: code, allow: allow) else { throw DoorError("no twin decision with the code \(code)") }
+            return o
+        }
+        s.handlers["doors.trust"] = { _ in Trust.levels(allow: allow) }
+        s.handlers["doors.report"] = { _ in TwinReport.week() }
+        s.handlers["stream.post"] = { a in
+            // Any tool (Copilot, Codex, a script) adds one quiet line to the notch stream. Display only; it never pops.
+            let text = String(try str(a, "text").prefix(140)); let src = String(((a["source"] as? String) ?? "tool").prefix(24))
+            let dir = needsDir ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/needs")
+            let n = Need(id: "post-\(UUID().uuidString.prefix(8))", title: "\(src): \(text)", opts: [NeedOption(label: "OK")], source: src, created: Date().timeIntervalSince1970)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            if let d = try? JSONEncoder().encode(n) { try d.write(to: dir.appendingPathComponent("\(n.id).json"), options: .atomic) }
+            return ["posted": true]
         }
         s.handlers["doors.log"] = { a in
             DecisionLog.recent(min((a["limit"] as? NSNumber)?.intValue ?? 50, 500))

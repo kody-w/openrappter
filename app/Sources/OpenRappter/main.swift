@@ -64,6 +64,10 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         model.onAnswer = { [weak self] need, opt in self?.answer(need, opt) }
         model.onLater = { [weak self] need in self?.needs.later(need); self?.showNextNeedOrRest() }
         model.onSignIn = { [weak self] in self?.signIn() }
+        model.onObject = { [weak self] need in
+            let r = Objections.object(code: need.id, allow: self?.doors?.allow)
+            log("objected \(need.id): \(r.map { "\($0["caller"] ?? "") \($0["door"] ?? "")" } ?? "not found")")
+        }
 
         startDoors()
         askForFullDiskAccessIfMissing()
@@ -87,8 +91,12 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         let allowURL = URL(fileURLWithPath: env["OPENRAPPTER_DOORS_ALLOW"] ?? home.appendingPathComponent("doors-allow.json").path)
         let s = DoorServer(socketPath: sock, allow: DoorAllowList(url: allowURL))
         s.log = { m in DispatchQueue.main.async { log(m) } }
-        s.approve = doorApprovalViaNeeds(needsDir: needs.dir)
-        MacDoors.install(on: s)
+        // Twin decisions also reach Kody's phone (the "Beam · Twin" note) so he can object from anywhere.
+        let phone: @Sendable (String) -> Void = { [weak s] line in
+            DispatchQueue.global().async { _ = try? s?.handlers["notes.publish"]?(["topic": "Twin", "headline": line]) }
+        }
+        s.approve = doorApprovalViaNeeds(needsDir: needs.dir, phone: phone)
+        MacDoors.install(on: s, needsDir: needs.dir)
         do { try s.start(); doors = s } catch { log("doors failed to start: \(error)") }
     }
 

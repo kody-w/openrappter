@@ -7,7 +7,7 @@ import Darwin
 public enum DoorsSpec {
     public static let version = "doors/1"
     /// Doors that never touch private data and never ask: discovery only.
-    public static let open: Set<String> = ["doors.hello", "doors.log"]
+    public static let open: Set<String> = ["doors.hello", "doors.log", "doors.trust", "doors.report", "twin.object", "stream.post"]
 }
 
 public struct DoorError: Error, Equatable { public let message: String; public init(_ m: String) { message = m } }
@@ -31,6 +31,16 @@ public final class DoorAllowList: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let list = read().allow[caller] ?? []
         return list.contains(door) || list.contains("*")
+    }
+
+    public func forget(_ caller: String, _ door: String) {
+        lock.lock(); defer { lock.unlock() }
+        var f = read()
+        guard var list = f.allow[caller], list.contains(door) else { return }
+        list.removeAll { $0 == door }
+        f.allow[caller] = list
+        let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let d = try? enc.encode(f) { try? d.write(to: url, options: .atomic); chmod(url.path, 0o600) }
     }
 
     public func remember(_ caller: String, _ door: String) {
@@ -203,6 +213,77 @@ public enum DecisionLog {
     }
 }
 
+/// Kody's objections: each one is a lesson (Gmail's "Not spam"). A (caller, door) Kody objected to is never decided
+/// by the twin or by trust again; it waits for Kody, and if he stays quiet the answer is no.
+public enum Objections {
+    public static var url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/objections.jsonl")
+    public static func all() -> [[String: Any]] {
+        guard let t = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        return t.split(separator: "\n").compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+    }
+    public static func has(_ caller: String, _ door: String) -> Bool {
+        all().contains { $0["caller"] as? String == caller && $0["door"] as? String == door }
+    }
+    /// Object to a twin/trust decision by its short code (the FYI id, or its first letters). Returns what was objected to.
+    @discardableResult
+    public static func object(code: String, allow: DoorAllowList?) -> [String: Any]? {
+        let c = code.lowercased()
+        guard let row = DecisionLog.recent(2000).last(where: { (($0["fyi"] as? String) ?? "").lowercased().hasSuffix(c) || (($0["fyi"] as? String) ?? "").lowercased() == c }),
+              let caller = row["caller"] as? String, let door = row["door"] as? String else { return nil }
+        var o: [String: Any] = ["caller": caller, "door": door, "fyi": row["fyi"] ?? "", "was": row["by"] ?? "", "ts": Date().timeIntervalSince1970]
+        if let d = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) {
+            var line = d; line.append(0x0A)
+            if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line); try? h.close() } else { try? line.write(to: url) }
+        }
+        allow?.forget(caller, door)
+        DecisionLog.add(["caller": caller, "door": door, "by": "Kody", "decision": "objected"])
+        o["ok"] = true
+        return o
+    }
+}
+
+/// Trust per program, earned from the record: a program Kody (or his twin) let through a door 5+ times, with no
+/// objection, goes through that door without a card. Doors that speak for Kody or read private text never auto-trust.
+public enum Trust {
+    public static let neverAuto: Set<String> = ["messages.send", "messages.recent", "clipboard.read", "notes.read"]
+    public static let earnedAt = 5
+    public static func approvals(_ caller: String, _ door: String, rows: [[String: Any]]) -> Int {
+        rows.filter { $0["caller"] as? String == caller && $0["door"] as? String == door &&
+            ["Kody", "twin"].contains($0["by"] as? String ?? "") && ["once", "always"].contains($0["decision"] as? String ?? "") }.count
+    }
+    public static func trusted(_ caller: String, _ door: String) -> Bool {
+        if neverAuto.contains(door) || Objections.has(caller, door) { return false }
+        return approvals(caller, door, rows: DecisionLog.recent(5000)) >= earnedAt
+    }
+    /// Every (caller, door) seen in the record, with its level: trusted / learning (n of 5) / watched (objected) / private door.
+    public static func levels(allow: DoorAllowList? = nil) -> [[String: Any]] {
+        let rows = DecisionLog.recent(5000)
+        var seen: [String: (String, String)] = [:]
+        for r in rows { if let c = r["caller"] as? String, let d = r["door"] as? String, !DoorsSpec.open.contains(d) { seen["\(c)|\(d)"] = (c, d) } }
+        return seen.values.sorted { $0.0 + $0.1 < $1.0 + $1.1 }.map { c, d in
+            let n = approvals(c, d, rows: rows)
+            let level = Objections.has(c, d) ? "watched: you objected" : (allow?.allows(c, d) ?? false) ? "trusted: always allowed" : neverAuto.contains(d) ? "always asks: private door"
+                : n >= earnedAt ? "trusted" : "learning (\(n) of \(earnedAt))"
+            return ["caller": c, "door": d, "level": level, "uses": rows.filter { $0["caller"] as? String == c && $0["door"] as? String == d && $0["by"] as? String == "use" }.count]
+        }
+    }
+}
+
+/// The weekly report card, in plain words.
+public enum TwinReport {
+    public static func week(now: Date = Date()) -> [String: Any] {
+        let since = now.timeIntervalSince1970 - 7 * 86400
+        let rows = DecisionLog.recent(20000).filter { ($0["ts"] as? Double ?? 0) >= since }
+        let twin = rows.filter { $0["by"] as? String == "twin" }.count
+        let trust = rows.filter { $0["by"] as? String == "trust" }.count
+        let kody = rows.filter { $0["by"] as? String == "Kody" && $0["decision"] as? String != "objected" }.count
+        let objected = Objections.all().filter { ($0["ts"] as? Double ?? 0) >= since }
+        let learned = objected.map { "now asks you before \($0["caller"] ?? "?") uses \($0["door"] ?? "?")" }
+        let line = "This week your twin decided \(twin), trust let \(trust) through, you decided \(kody), and you objected \(objected.count) time\(objected.count == 1 ? "" : "s")."
+        return ["twin": twin, "trust": trust, "kody": kody, "objected": objected.count, "learned": learned, "summary": line]
+    }
+}
+
 /// Kody's twin answers when Kody does not (object, don't confirm). Returns (pick, confidence) or nil.
 public typealias TwinAsk = @Sendable (_ question: String, _ options: [String]) -> (String, Double)?
 public func twinViaHelper(path: String = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("bin/rappter-twin").path) -> TwinAsk {
@@ -220,8 +301,13 @@ public func twinViaHelper(path: String = FileManager.default.homeDirectoryForCur
 }
 
 /// Asks through the needs folder (the notch card), waiting for the answer file. Runs off the main thread.
-public func doorApprovalViaNeeds(needsDir: URL, timeout: TimeInterval = 120, twin: TwinAsk? = twinViaHelper(), sureEnough: Double = 0.8) -> @Sendable (DoorCaller, String) -> DoorDecision {
+public func doorApprovalViaNeeds(needsDir: URL, timeout: TimeInterval = 120, twin: TwinAsk? = twinViaHelper(), sureEnough: Double = 0.8,
+                                 phone: (@Sendable (String) -> Void)? = nil) -> @Sendable (DoorCaller, String) -> DoorDecision {
     return { caller, door in
+        if Trust.trusted(caller.name, door) {
+            DecisionLog.add(["caller": caller.name, "door": door, "by": "trust", "decision": "once"])
+            return .once
+        }
         let id = "door-\(UUID().uuidString.prefix(8))"
         let need = Need(id: id, title: "\(caller.name) wants to \(door)", ctx: (caller.why.isEmpty ? "" : "Why: \(caller.why)\n") + "Program: \(caller.program) (pid \(caller.pid))",
                         opts: [NeedOption(label: "Allow once", action: "door:once"), NeedOption(label: "Always", rec: true, action: "door:always"),
@@ -244,12 +330,18 @@ public func doorApprovalViaNeeds(needsDir: URL, timeout: TimeInterval = 120, twi
         try? FileManager.default.removeItem(at: url)   // unanswered: take the card down
         // Kody did not answer: his twin decides if it is sure enough. The twin can allow once, never "always".
         let q = "\(caller.name) wants to use \(door) on Kody's Mac." + (caller.why.isEmpty ? "" : " Why: \(caller.why).") + " Program: \(caller.program)."
+        if Objections.has(caller.name, door) {
+            DecisionLog.add(["caller": caller.name, "door": door, "by": "default", "decision": "no", "why": "you objected before; it waits for you"])
+            return .no
+        }
         if let twin, let (pick, c) = twin(q, ["Allow once", "No"]), c >= sureEnough {
             let dec: DoorDecision = pick == "Allow once" ? .once : .no
-            DecisionLog.add(["caller": caller.name, "door": door, "by": "twin", "decision": "\(dec)", "confidence": c])
-            let fyi = Need(id: "twin-\(UUID().uuidString.prefix(8))",
+            let fid = "twin-\(UUID().uuidString.prefix(4))"
+            DecisionLog.add(["caller": caller.name, "door": door, "by": "twin", "decision": "\(dec)", "confidence": c, "fyi": fid])
+            if dec == .once { phone?("Your twin let \(caller.name) use \(door) (\(Int(c * 100))% sure). To object, add a reminder in Beam: object \(fid.dropFirst(5))") }
+            let fyi = Need(id: fid,
                            title: "Your twin \(dec == .once ? "let" : "stopped") \(caller.name) use \(door) (\(Int(c * 100))% sure)",
-                           opts: [NeedOption(label: "OK")], source: "twin", created: Date().timeIntervalSince1970)
+                           ctx: "object \(fid.dropFirst(5))", opts: [NeedOption(label: "OK")], source: "twin", created: Date().timeIntervalSince1970)
             if let d = try? JSONEncoder().encode(fyi) { try? d.write(to: needsDir.appendingPathComponent("\(fyi.id).json"), options: .atomic) }
             return dec
         }

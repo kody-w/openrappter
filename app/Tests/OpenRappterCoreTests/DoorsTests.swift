@@ -3,7 +3,7 @@ import Darwin
 @testable import OpenRappterCore
 
 final class DoorsTests: XCTestCase {
-    override func setUp() { DecisionLog.url = URL(fileURLWithPath: "/tmp/dt-log-\(UUID().uuidString.prefix(6)).jsonl") }
+    override func setUp() { let u = UUID().uuidString.prefix(6); DecisionLog.url = URL(fileURLWithPath: "/tmp/dt-log-\(u).jsonl"); Objections.url = URL(fileURLWithPath: "/tmp/dt-obj-\(u).jsonl") }
     func tmp() -> URL {
         let u = URL(fileURLWithPath: "/tmp/dt-\(UUID().uuidString.prefix(6))")
         try! FileManager.default.createDirectory(at: u, withIntermediateDirectories: true); return u
@@ -176,5 +176,39 @@ final class DoorsTests: XCTestCase {
         XCTAssertEqual(rows.first?["confidence"] as? Double, 0.86)
         let fyi = (try? FileManager.default.contentsOfDirectory(atPath: d.path))?.filter { $0.hasPrefix("twin-") } ?? []
         XCTAssertEqual(fyi.count, 1, "one quiet FYI for the stream")
+    }
+
+    /// One tap to object: the permission goes, the twin never decides that pair again, the report card says so.
+    func testObjectionTeachesAndTrustIsEarned() {
+        let d = tmp(); let allow = DoorAllowList(url: d.appendingPathComponent("a.json"))
+        let caller = DoorCaller(name: "tool", pid: 1, program: "/bin/x", why: "w")
+        var phoned: [String] = []
+        let ask = doorApprovalViaNeeds(needsDir: d, timeout: 0.1, twin: { _, _ in ("Allow once", 0.9) }, phone: { phoned.append($0) })
+        XCTAssertEqual(ask(caller, "reminders.open"), .once)
+        XCTAssertEqual(phoned.count, 1); XCTAssertTrue(phoned[0].contains("object "))
+        let fid = DecisionLog.recent(5).last { $0["by"] as? String == "twin" }?["fyi"] as! String
+        allow.remember("tool", "reminders.open")
+        XCTAssertNotNil(Objections.object(code: String(fid.dropFirst(5)), allow: allow), "short code from the phone works")
+        XCTAssertFalse(allow.allows("tool", "reminders.open"))
+        XCTAssertEqual(ask(caller, "reminders.open"), .no, "after an objection the twin is not asked")
+        let r = TwinReport.week()
+        XCTAssertEqual(r["objected"] as? Int, 1); XCTAssertEqual((r["learned"] as? [String])?.count, 1)
+        // Trust: 5 approvals with no objection → no card at all; private doors never.
+        for _ in 0..<5 { DecisionLog.add(["caller": "beam", "door": "notes.publish", "by": "Kody", "decision": "once"]) }
+        for _ in 0..<5 { DecisionLog.add(["caller": "beam", "door": "messages.send", "by": "Kody", "decision": "once"]) }
+        XCTAssertTrue(Trust.trusted("beam", "notes.publish"))
+        XCTAssertFalse(Trust.trusted("beam", "messages.send"))
+        let never = doorApprovalViaNeeds(needsDir: d, timeout: 0.1, twin: { _, _ in XCTFail("trusted needs no twin"); return nil })
+        XCTAssertEqual(never(DoorCaller(name: "beam", pid: 1, program: "/bin/x"), "notes.publish"), .once)
+        XCTAssertTrue(Trust.levels().contains { $0["caller"] as? String == "tool" && ($0["level"] as? String ?? "").hasPrefix("watched") })
+    }
+
+    func testStreamPostIsQuietAndOpen() {
+        let d = tmp(); let s = DoorServer(socketPath: d.appendingPathComponent("s").path, allow: DoorAllowList(url: d.appendingPathComponent("a.json")))
+        MacDoors.install(on: s, needsDir: d)
+        let r = call(s, #"{"door":"stream.post","args":{"text":"refactor 3 of 5 done","source":"copilot"}}"#)
+        XCTAssertEqual(r["ok"] as? Bool, true, "\(r)")
+        let f = try! FileManager.default.contentsOfDirectory(atPath: d.path).filter { $0.hasPrefix("post-") }
+        XCTAssertEqual(f.count, 1)
     }
 }

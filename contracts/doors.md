@@ -41,6 +41,10 @@ No answer counts as No. `doors.hello` never asks.
 | `browser.open` | `url` (http/https only) | `{"opened"}` in the default browser |
 | `calendar.today` | — | `[{"start","title"}]` today's events, all calendars |
 | `doors.log` (open) | `limit` (≤500) | the newest rows of `~/.openrappter/decisions.jsonl`: every use and every decision, with `by` = Kody / twin / default / use |
+| `twin.object` (open) | `code` (the 4-letter code on a twin decision) | objects: drops any "always", logs it; the twin never decides that caller+door again |
+| `doors.trust` (open) | — | `[{"caller","door","level","uses"}]` level = trusted / learning (n of 5) / watched / always asks |
+| `doors.report` (open) | — | the week in one sentence: twin / trust / Kody decisions, objections, what was learned |
+| `stream.post` (open) | `text` (≤140), `source` | one quiet line in the notch stream (display only, never pops) |
 
 ## MCP door
 `rappter-doors-mcp` (stdio MCP server, app/doors) serves the same doors with the same approvals to any MCP client
@@ -50,6 +54,9 @@ a new door is a new tool, and an existing tool never changes meaning.
 
 ## When Kody does not answer
 A request card waits 120 s. Then Kody's twin (`~/bin/rappter-twin`) picks "Allow once" or "No"; its pick counts only at ≥80% confidence, and it can never grant "always". Otherwise the answer is no. Every twin decision drops a quiet FYI into the notch stream; Kody objects only if it was wrong.
+
+## Trust
+A caller earns trust per door after 5 approvals (Kody's or the twin's) with no objection; then it goes through without a card. Doors that speak for Kody or read private text (`messages.*`, `clipboard.read`, `notes.read`) never auto-trust. Objecting resets it.
 
 ## Errors
 `ok:false` with an `error` sentence a person can read: unknown door, missing argument, Kody said no, macOS

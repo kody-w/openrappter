@@ -36,12 +36,20 @@ No answer counts as No. `doors.hello` never asks.
 | `notes.read` | `title`, `folder` | `{"title","body"}` (HTML body) |
 | `messages.send` | `to`, `text` | `{"sent":true}` via this Mac's iMessage |
 | `messages.recent` | `since_rowid`, `limit` (≤1000), `newest` (true = the latest `limit` rows) | `[{"rowid","ts","text","from_me","handle"}]` from chat.db |
+| `clipboard.read` | — | `{"text"}` |
+| `clipboard.write` | `text` | `{"written":true}` |
+| `browser.open` | `url` (http/https only) | `{"opened"}` in the default browser |
+| `calendar.today` | — | `[{"start","title"}]` today's events, all calendars |
+| `doors.log` (open) | `limit` (≤500) | the newest rows of `~/.openrappter/decisions.jsonl`: every use and every decision, with `by` = Kody / twin / default / use |
 
 ## MCP door
 `rappter-doors-mcp` (stdio MCP server, app/doors) serves the same doors with the same approvals to any MCP client
 (Claude Code, Copilot CLI, Codex). Caller = the client's `clientInfo.name` from `initialize`, so the notch card names
 who asks. Each door is one tool (`.` becomes `_`, e.g. `reminders_open`), its input schema read from the table above;
 a new door is a new tool, and an existing tool never changes meaning.
+
+## When Kody does not answer
+A request card waits 120 s. Then Kody's twin (`~/bin/rappter-twin`) picks "Allow once" or "No"; its pick counts only at ≥80% confidence, and it can never grant "always". Otherwise the answer is no. Every twin decision drops a quiet FYI into the notch stream; Kody objects only if it was wrong.
 
 ## Errors
 `ok:false` with an `error` sentence a person can read: unknown door, missing argument, Kody said no, macOS

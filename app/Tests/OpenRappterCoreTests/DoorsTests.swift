@@ -3,6 +3,7 @@ import Darwin
 @testable import OpenRappterCore
 
 final class DoorsTests: XCTestCase {
+    override func setUp() { DecisionLog.url = URL(fileURLWithPath: "/tmp/dt-log-\(UUID().uuidString.prefix(6)).jsonl") }
     func tmp() -> URL {
         let u = URL(fileURLWithPath: "/tmp/dt-\(UUID().uuidString.prefix(6))")
         try! FileManager.default.createDirectory(at: u, withIntermediateDirectories: true); return u
@@ -159,4 +160,21 @@ final class DoorsTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(t1), 1)
     }
 
+
+    /// Object, don't confirm: unanswered → the twin decides when ≥80% sure (once, never always), else safe "no"; all logged.
+    func testTwinDecidesWhenKodyIsQuiet() {
+        let d = tmp(); DecisionLog.url = d.appendingPathComponent("decisions.jsonl")
+        let caller = DoorCaller(name: "beam", pid: 1, program: "/bin/x", why: "read errands")
+        let sure = doorApprovalViaNeeds(needsDir: d, timeout: 0.3, twin: { _, opts in XCTAssertFalse(opts.contains("Always")); return ("Allow once", 0.86) })
+        XCTAssertEqual("\(sure(caller, "reminders.open"))", "\(DoorDecision.once)")
+        let unsure = doorApprovalViaNeeds(needsDir: d, timeout: 0.3, twin: { _, _ in ("Allow once", 0.6) })
+        XCTAssertEqual("\(unsure(caller, "reminders.open"))", "\(DoorDecision.no)")
+        let gone = doorApprovalViaNeeds(needsDir: d, timeout: 0.3, twin: { _, _ in nil })
+        XCTAssertEqual("\(gone(caller, "reminders.open"))", "\(DoorDecision.no)")
+        let rows = DecisionLog.recent(10)
+        XCTAssertEqual(rows.map { $0["by"] as? String }, ["twin", "default", "default"])
+        XCTAssertEqual(rows.first?["confidence"] as? Double, 0.86)
+        let fyi = (try? FileManager.default.contentsOfDirectory(atPath: d.path))?.filter { $0.hasPrefix("twin-") } ?? []
+        XCTAssertEqual(fyi.count, 1, "one quiet FYI for the stream")
+    }
 }

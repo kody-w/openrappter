@@ -7,7 +7,7 @@ import Darwin
 public enum DoorsSpec {
     public static let version = "doors/1"
     /// Doors that never touch private data and never ask: discovery only.
-    public static let open: Set<String> = ["doors.hello"]
+    public static let open: Set<String> = ["doors.hello", "doors.log"]
 }
 
 public struct DoorError: Error, Equatable { public let message: String; public init(_ m: String) { message = m } }
@@ -176,6 +176,7 @@ public final class DoorServer: @unchecked Sendable {
             }
             let r = try res.get()
             log("door \(door) by \(name) ok" + (why.isEmpty ? "" : " why=\(why)"))
+            if door != "doors.hello" && door != "doors.log" { DecisionLog.add(["caller": name, "door": door, "by": "use", "why": why]) }
             return reply(["ok": true, "result": r])
         } catch let e as DoorError {
             log("door \(door) by \(name) error \(e.message)")
@@ -186,8 +187,40 @@ public final class DoorServer: @unchecked Sendable {
     }
 }
 
+/// The one record of every door decision (Kody's, the twin's, the safe default): ~/.openrappter/decisions.jsonl.
+public enum DecisionLog {
+    public static var url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/decisions.jsonl")
+    public static func add(_ row: [String: Any]) {
+        var r = row; r["ts"] = Date().timeIntervalSince1970
+        guard var d = try? JSONSerialization.data(withJSONObject: r, options: [.sortedKeys]) else { return }
+        d.append(0x0A)
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(d); try? h.close() }
+        else { try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true); try? d.write(to: url) }
+    }
+    public static func recent(_ n: Int) -> [[String: Any]] {
+        guard let t = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        return t.split(separator: "\n").suffix(n).compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+    }
+}
+
+/// Kody's twin answers when Kody does not (object, don't confirm). Returns (pick, confidence) or nil.
+public typealias TwinAsk = @Sendable (_ question: String, _ options: [String]) -> (String, Double)?
+public func twinViaHelper(path: String = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("bin/rappter-twin").path) -> TwinAsk {
+    return { q, opts in
+        let p = Process(); p.executableURL = URL(fileURLWithPath: path)
+        let i = Pipe(), o = Pipe(); p.standardInput = i; p.standardOutput = o; p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        i.fileHandleForWriting.write((try? JSONSerialization.data(withJSONObject: ["question": q, "options": opts])) ?? Data())
+        try? i.fileHandleForWriting.close()
+        let d = o.fileHandleForReading.readDataToEndOfFile(); p.waitUntilExit()
+        guard let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let pick = j["pick"] as? String,
+              let c = (j["confidence"] as? NSNumber)?.doubleValue else { return nil }
+        return (pick, c)
+    }
+}
+
 /// Asks through the needs folder (the notch card), waiting for the answer file. Runs off the main thread.
-public func doorApprovalViaNeeds(needsDir: URL, timeout: TimeInterval = 120) -> @Sendable (DoorCaller, String) -> DoorDecision {
+public func doorApprovalViaNeeds(needsDir: URL, timeout: TimeInterval = 120, twin: TwinAsk? = twinViaHelper(), sureEnough: Double = 0.8) -> @Sendable (DoorCaller, String) -> DoorDecision {
     return { caller, door in
         let id = "door-\(UUID().uuidString.prefix(8))"
         let need = Need(id: id, title: "\(caller.name) wants to \(door)", ctx: (caller.why.isEmpty ? "" : "Why: \(caller.why)\n") + "Program: \(caller.program) (pid \(caller.pid))",
@@ -202,11 +235,25 @@ public func doorApprovalViaNeeds(needsDir: URL, timeout: TimeInterval = 120) -> 
         while Date() < end {
             if let d = try? Data(contentsOf: ans), let a = try? JSONDecoder().decode(NeedAnswer.self, from: d) {
                 try? FileManager.default.removeItem(at: url); try? FileManager.default.removeItem(at: ans)
-                switch a.action { case "door:always": return .always; case "door:once": return .once; default: return .no }
+                let dec: DoorDecision = a.action == "door:always" ? .always : a.action == "door:once" ? .once : .no
+                DecisionLog.add(["caller": caller.name, "door": door, "by": "Kody", "decision": "\(dec)"])
+                return dec
             }
             Thread.sleep(forTimeInterval: 0.25)
         }
         try? FileManager.default.removeItem(at: url)   // unanswered: take the card down
+        // Kody did not answer: his twin decides if it is sure enough. The twin can allow once, never "always".
+        let q = "\(caller.name) wants to use \(door) on Kody's Mac." + (caller.why.isEmpty ? "" : " Why: \(caller.why).") + " Program: \(caller.program)."
+        if let twin, let (pick, c) = twin(q, ["Allow once", "No"]), c >= sureEnough {
+            let dec: DoorDecision = pick == "Allow once" ? .once : .no
+            DecisionLog.add(["caller": caller.name, "door": door, "by": "twin", "decision": "\(dec)", "confidence": c])
+            let fyi = Need(id: "twin-\(UUID().uuidString.prefix(8))",
+                           title: "Your twin \(dec == .once ? "let" : "stopped") \(caller.name) use \(door) (\(Int(c * 100))% sure)",
+                           opts: [NeedOption(label: "OK")], source: "twin", created: Date().timeIntervalSince1970)
+            if let d = try? JSONEncoder().encode(fyi) { try? d.write(to: needsDir.appendingPathComponent("\(fyi.id).json"), options: .atomic) }
+            return dec
+        }
+        DecisionLog.add(["caller": caller.name, "door": door, "by": "default", "decision": "no"])
         return .no
     }
 }

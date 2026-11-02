@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import SQLite3
 
 /// The real doors/1 handlers. The app does the work itself, so macOS asks about OpenRappter alone.
@@ -72,6 +73,45 @@ public enum MacDoors {
                 _ = try runScript("tell application \"Reminders\"\n set r to reminder id \(osaString(id))\n set completed of r to true\n set body of r to \(body)\nend tell")
             }
             return ["id": id, "done": true] as [String: Any]
+        }
+        s.handlers["clipboard.read"] = { _ in
+            var t = ""; DispatchQueue.main.sync { t = NSPasteboard.general.string(forType: .string) ?? "" }
+            return ["text": t]
+        }
+        s.handlers["clipboard.write"] = { a in
+            let t = try str(a, "text", required: false)
+            DispatchQueue.main.sync { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(t, forType: .string) }
+            return ["written": true]
+        }
+        s.handlers["browser.open"] = { a in
+            let u = try str(a, "url")
+            guard let url = URL(string: u), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { throw DoorError("only http and https links open") }
+            DispatchQueue.main.sync { _ = NSWorkspace.shared.open(url) }
+            return ["opened": u]
+        }
+        s.handlers["calendar.today"] = { _ in
+            let text = try runScript("""
+            set out to ""
+            set d0 to current date
+            set hours of d0 to 0
+            set minutes of d0 to 0
+            set seconds of d0 to 0
+            set d1 to d0 + 1 * days
+            tell application "Calendar"
+             repeat with c in calendars
+              repeat with e in (every event of c whose start date >= d0 and start date < d1)
+               set out to out & ((start date of e) as «class isot» as string) & tab & (summary of e) & linefeed
+              end repeat
+             end repeat
+            end tell
+            return out
+            """)
+            return text.split(separator: "\n").compactMap { l -> [String: String]? in
+                let p = l.split(separator: "\t", maxSplits: 1).map(String.init); return p.count == 2 ? ["start": p[0], "title": p[1]] : nil
+            }.sorted { $0["start"]! < $1["start"]! }
+        }
+        s.handlers["doors.log"] = { a in
+            DecisionLog.recent(min((a["limit"] as? NSNumber)?.intValue ?? 50, 500))
         }
         s.handlers["notes.read"] = { a in
             let title = try str(a, "title")

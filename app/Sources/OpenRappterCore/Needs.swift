@@ -16,6 +16,9 @@ public struct Need: Codable, Equatable, Identifiable, Sendable {
     public var opts: [NeedOption]
     public var source: String?
     public var created: Double?
+    public var isOptionalPermission: Bool {
+        source == "openrappter" && (id == "permission-texts" || id.hasPrefix("creature:permission-"))
+    }
     public init(id: String, title: String, ctx: String? = nil, opts: [NeedOption], source: String? = nil, created: Double? = nil) {
         self.id = id; self.title = title; self.ctx = ctx; self.opts = opts; self.source = source; self.created = created
     }
@@ -72,7 +75,8 @@ public final class NeedsQueue: ObservableObject {
                 }
                 continue
             }
-            if n.source != "doors", let at = (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate, at < stale { shelve(f); continue }
+            if n.source != "doors", !n.isOptionalPermission,
+               let at = (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate, at < stale { shelve(f); continue }
             if snoozed.contains(n.id) { continue }
             found.append(n)
         }
@@ -100,7 +104,8 @@ public final class NeedsQueue: ObservableObject {
             kept.append(n)
         }
         found = kept.filter { n in
-            guard n.source != "doors", let rec = n.opts.first(where: { $0.rec == true }) ?? (n.opts.count == 1 ? n.opts.first : nil),
+            guard n.source != "doors", !n.isOptionalPermission,
+                  let rec = n.opts.first(where: { $0.rec == true }) ?? (n.opts.count == 1 ? n.opts.first : nil),
                   let c = firstSeen[n.id] ?? min(n.created ?? .infinity, Date().timeIntervalSince1970) as Double? else { return true }
             let wait: TimeInterval = n.opts.count == 1 ? 30 : 600
             if Date().timeIntervalSince1970 - c > wait { write(n, rec, by: "default"); return false }

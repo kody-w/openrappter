@@ -68,12 +68,18 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         runner.log = { log($0) }
         effects = MacCreatureEffects(runner: runner, needs: needs)
         effects.log = { log($0) }
+        effects.willQuit = { [weak self] in
+            self?.examples?.cancel()
+            log("going to sleep")
+        }
         driver = CreatureDriver { [weak self] in await self?.effects.perform($0) }
         driver.onChange = { [weak self] in self?.render($0) }
         effects.send = { [weak self] in self?.driver.send($0) }
         model.onAnswer = { [weak self] in self?.driver.send(.answer($0, $1)) }
         model.onLater = { [weak self] in self?.driver.send(.later($0)) }
         model.onSignIn = { [weak self] in self?.driver.send(.signIn) }
+        model.onSubmit = { [weak self] in self?.driver.send(.submit(.ask, $0)) }
+        model.onDismissLine = { [weak self] in self?.driver.send(.dismissLine) }
         model.onObject = { [weak self] need in
             let result = Objections.object(code: need.id, allow: self?.doors?.allow)
             log("objected \(need.id): \(result != nil)")
@@ -90,11 +96,11 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     }
 
     func render(_ view: CreaturePresentation) {
-        model.posture = view.posture; model.line = view.line
-        model.need = view.need; model.hungry = view.hungry
+        model.apply(view)
         guard expanded != view.expanded else { return }
         expanded = view.expanded; layout?.cancel()
         layout = Task { @MainActor in
+            guard !Task.isCancelled else { return }
             if view.expanded { await notch.expand() } else { await notch.compact() }
         }
     }
@@ -156,6 +162,12 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     func menu(_ command: CreatureMenuCommand) {
         switch command {
         case .help: driver.send(.showHelp)
+        case .type:
+            model.inputFocusRequest += 1
+            driver.send(.showInput)
+            NSApp.activate(ignoringOtherApps: true)
+            notch.windowController?.window?.makeKey()
+        case .goToSleep: driver.send(.goToSleep)
         case .signIn: driver.send(.signIn)
         case .keepAtLogin: driver.send(.installAtLogin)
         case .stopAtLogin: driver.send(.stopAtLogin)

@@ -31,8 +31,10 @@ the real Mac adapters, and `main.swift` only wires the notch, keys, menu, and
 folder updates to the driver.
 
 Run `swift test` from this folder. The transition tests use fake minds, ears,
-speech output, clipboard contents, and a virtual clock: no window, recording,
-or live sign-in is needed. The original self-check and client tests remain.
+speech output, clipboard contents, and a virtual clock: no recording or live
+sign-in is needed. Rendered-view tests use temporary offscreen windows, on-device
+text recognition, and real button and text-field events. They do not capture the
+desktop or activate the app. The original self-check and client tests remain.
 `FIXES.md` maps all 47 confirmed defects to passing regression tests.
 
 The creature never replaces an already starting mind. Missing Apple tools get
@@ -56,3 +58,23 @@ on a permission or help card never cancels a separate sign-in. The owner's
 words, caller requests, stream updates, and mind answers (including speech)
 are preserved verbatim; plain-word replacements are only for the creature's
 own copy.
+
+## Talking, typing, and sleeping
+
+Choose **Type to me** to open the notch's text field without microphone access.
+Say **go to sleep** while holding Option and Space, type it in that field, or
+choose **Go to sleep (Quit OpenRappter)** from the menu to quit. This unloads only
+the current creature so it cannot immediately reopen itself; the saved choice
+for future Mac sign-ins and the running mind are left alone. Dictating the words
+"go to sleep" with Control added still types those words rather than quitting.
+
+Fresh owners see sign-in before optional permission cards, including access to
+texts. Those cards wait through sign-in and remain available afterward; they
+cannot silently accept themselves or expire while waiting. Optional automatic
+startup advice also waits behind sign-in.
+
+Replies, successful dictation, and instructions to press the shortcut again stay
+expanded until **Got it** or the next interaction. Full replies, card titles,
+caller explanations, and every card option are scrollable rather than truncated.
+A question typed while another one is being answered stays in its field; only
+the local sleep command can interrupt the current question.

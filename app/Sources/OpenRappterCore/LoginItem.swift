@@ -77,4 +77,12 @@ public struct LoginItem {
         guard status == 0 else { throw MindError.serviceFailed(status) }
         if stopRunning { _ = command(["bootout", job]) }
     }
+
+    public func quit() throws {
+        let job = "gui/\(getuid())/\(Self.label)"
+        guard command(["print", job]) == 0 else { return }
+        // Keep the saved setting for the next Mac sign-in, but prevent an immediate relaunch.
+        let status = command(["bootout", job])
+        guard status == 0 else { throw MindError.serviceFailed(status) }
+    }
 }

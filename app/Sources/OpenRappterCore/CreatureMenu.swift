@@ -1,7 +1,7 @@
 import Foundation
 
 public enum CreatureMenuCommand: CaseIterable {
-    case help, signIn, keepAtLogin, stopAtLogin, texts, folder, connectHelper, restart
+    case help, type, signIn, keepAtLogin, stopAtLogin, texts, folder, connectHelper, restart, goToSleep
 }
 
 public struct CreatureMenuEntry {
@@ -16,6 +16,7 @@ public struct CreatureMenuEntry {
 public enum CreatureMenu {
     public static let entries: [CreatureMenuEntry] = [
         .init("How to talk to me", .help),
+        .init("Type to me…", .type),
         .init("Sign in to my mind…", .signIn),
         .init("Let me see your texts…", .texts),
         .init("Keep my mind ready when I sign in", .keepAtLogin),
@@ -23,5 +24,6 @@ public enum CreatureMenu {
         .init("Open my folder", .folder),
         .init("More", children: [.init("Connect my coding helper", .connectHelper)]),
         .init("Restart OpenRappter", .restart),
+        .init("Go to sleep (Quit OpenRappter)", .goToSleep),
     ]
 }

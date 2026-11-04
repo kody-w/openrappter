@@ -12,6 +12,8 @@ public final class MacCreatureEffects {
     public var readScreen: () async throws -> (app: String, text: String) = Eyes.frontWindowText
     public var send: ((CreatureEvent) -> Void)?
     public var log: (String) -> Void = { _ in }
+    public var willQuit: () -> Void = {}
+    public var terminate: () -> Void = { NSApp.terminate(nil) }
     public var sleep: (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }
     private var mind: MindClient?
 
@@ -116,6 +118,17 @@ public final class MacCreatureEffects {
         case .installTools:
             let status = RuntimeTools.run("/usr/bin/xcode-select", ["--install"])
             log("requested Apple tools: \(status)")
+        case .quit:
+            clipboard.restore(); ears.cancel(); voice.stop()
+            do {
+                willQuit()
+                try loginItem.quit()
+                terminate()
+                return .shutdown
+            } catch {
+                log("go to sleep: \(error)")
+                return .sleepFailed
+            }
         }
         return nil
     }

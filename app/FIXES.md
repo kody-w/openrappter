@@ -315,3 +315,72 @@ Only an actual unstable copy gets the Move to Applications card.
 
 Failed dependency setup cleans its temporary environment, preserves the pip
 cache, and waits before exiting. New saved services also throttle runtime failures.
+
+## Current owner-experience work: numbered review mapping blocked
+
+The supplied `openrappter-judge4/review-round3.md` and the earlier external
+review files could not be read: file access was denied in this non-interactive
+session. The supplied proof log and executable read-only proof were available.
+This section records verified fixes for the requirements stated directly in the
+task, not an invented mapping to unread defects 48-65. Their exact attribution,
+"also seen as" cases, and the instructions for 60-65 remain unverified.
+
+The menu, spoken ask, and actual text field all reach a local quit action.
+Quitting cancels current work, restores the clipboard, stops listening and
+speaking, and unloads only the live creature's keep-alive job. It leaves future
+Mac sign-ins and the mind alone; failure has a visible retry card.
+
+- test: CreatureStateMachineTests.testMenuHasAPlainEnabledQuitAction
+- test: CreatureStateMachineTests.testSpokenSleepQuitsWithoutAskingTheMind
+- test: CreatureStateMachineTests.testSleepWorksBeforeSignInAndCancelsTheCode
+- test: CreatureStateMachineTests.testSleepCanInterruptAQuestionAlreadyInFlight
+- test: CreatureStateMachineTests.testFailedQuitShowsAReadableWorkingRetryCard
+- test: CreatureStateMachineTests.testTypedSleepDoesNotSwallowWordsBeingDictated
+- test: OwnerViewRegressionTests.testTypingGoToSleepInTheActualFieldUsesTheQuitRoute
+- test: LoginItemTests.testQuitUnloadsOnlyTheLiveCreatureAndPreservesFutureStarts
+- test: LoginItemTests.testQuitFailureDoesNotPretendTheKeepAliveCreatureHasStopped
+- test: StartupAdapterRegressionTests.testQuitAdapterCleansUpAndUsesTheRealTerminationBoundary
+- test: StartupAdapterRegressionTests.testQuitAdapterFailureReturnsAnExpandedRecoveryCard
+- test: CreatureStateMachineTests.testQuitFailureCannotBeCoveredByAnotherCallersCard
+- test: CreatureStateMachineTests.testFailedQuitDuringLookupDoesNotPretendTheCancelledLookupIsRunning
+
+Optional permissions and automatic startup advice cannot hide finding the mind,
+sign-in, the active sign-in code, or missing-tools recovery. Deferred permissions
+are shown immediately after successful sign-in and never take their own default
+or disappear through age while the owner is signing in.
+
+- test: CreatureStateMachineTests.testFreshOwnerSeesSignInInsteadOfTheTextsPermission
+- test: CreatureStateMachineTests.testEveryOptionalPermissionWaitsBehindSignIn
+- test: CreatureStateMachineTests.testOptionalPermissionsCannotCoverAnActiveSignInCode
+- test: CreatureStateMachineTests.testDeferredPermissionAppearsImmediatelyWhenSignInFinishes
+- test: CreatureStateMachineTests.testOptionalPermissionDoesNotHideMissingMindRecovery
+- test: CreatureStateMachineTests.testDeferredOptionalPermissionCannotStopAutomaticMindRecovery
+- test: CreatureStateMachineTests.testOptionalPermissionDoesNotHideMissingToolsRecovery
+- test: CreatureStateMachineTests.testAutomaticMoveAdviceWaitsBehindSignIn
+- test: CreatureStateMachineTests.testAutomaticStartupFailureCannotCoverTheSignInCode
+- test: CreatureStateMachineTests.testOptionalPermissionCannotCoverTheRequestedHelpCard
+- test: OwnerViewRegressionTests.testActualSignInCardIsRenderedBeforeAnOptionalPermission
+- test: NeedsTests.testDeferredOptionalPermissionNeverTakesItsOwnDefault
+- test: NeedsTests.testOldOptionalPermissionRemainsAnOwnerChoiceInsteadOfBeingArchived
+- test: NeedsTests.testOpeningAQueuedPermissionDoesNotMakeItsCardReappear
+- test: NeedsTests.testLaterOnAQueuedPermissionSurvivesItsNextFolderReload
+
+Expanded-only instructions and completed answers stay open until acknowledged
+or replaced by a new interaction. Empty hearing and successful typing have
+visible feedback. Full card text and every option are rendered in a scroll
+area. The rendered-view tests inspect actual pixels and layout, click the sixth
+choice and Got it, and type through the native text field.
+
+- test: CreatureStateMachineTests.testEarlyPermissionReleaseKeepsTheTryAgainLineExpanded
+- test: CreatureStateMachineTests.testEarlyPermissionReleaseMessageHasAnExplicitDismissal
+- test: CreatureStateMachineTests.testOptionalPermissionWaitsUntilTheNewInstructionIsRead
+- test: CreatureStateMachineTests.testEmptyTranscriptExplainsHowToTryAgainInAnExpandedNotch
+- test: CreatureStateMachineTests.testLongAnswerStaysReadableAfterSpeechAndTheOldRestDelay
+- test: CreatureStateMachineTests.testAnswerCanBeDismissedWithoutLosingConversationHistory
+- test: CreatureStateMachineTests.testSuccessfulDictationLeavesAVisibleConfirmation
+- test: CreatureStateMachineTests.testNewListeningReplacesThePreviousReadableMessage
+- test: OwnerViewRegressionTests.testLongAnswerHasFullScrollableRenderedHeight
+- test: OwnerViewRegressionTests.testLongCardTitleAndContextHaveFullRenderedHeight
+- test: OwnerViewRegressionTests.testEveryApprovalOptionHasARealRenderedButton
+- test: OwnerViewRegressionTests.testActualGotItButtonClosesTheReadableMessage
+- test: OwnerViewRegressionTests.testBusyTypingKeepsTheDraftInsteadOfSilentlyDroppingIt

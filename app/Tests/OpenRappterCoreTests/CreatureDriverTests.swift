@@ -194,4 +194,87 @@ final class CreatureDriverTests: XCTestCase {
         XCTAssertEqual(driver.machine.presentation.posture, .idle)
         XCTAssertEqual(driver.machine.history.first?["content"], "First")
     }
+
+    func testRealDriverCompactsAnAnswerAtEightSecondsAfterSettlingWithoutAClick() async {
+        let world = FakeCreatureWorld()
+        world.mind.health.status = "ok"
+        let driver = CreatureDriver(perform: world.perform)
+        defer { driver.cancelAll() }
+        driver.send(.findMind)
+        await driver.waitUntilSettled()
+        let resting = expectation(description: "Speech finished")
+        world.clock.onSleep = { resting.fulfill() }
+        driver.send(.submit(.ask, "A question"))
+        await fulfillment(of: [resting], timeout: 2)
+        let notice = expectation(description: "Eight-second readable notice")
+        world.clock.onSleep = { notice.fulfill() }
+        world.clock.advance(2)
+        await fulfillment(of: [notice], timeout: 2)
+        XCTAssertTrue(driver.machine.presentation.expanded)
+        XCTAssertEqual(driver.machine.presentation.line, world.mind.answer.text)
+        world.clock.advance(7.99)
+        await Task.yield()
+        XCTAssertTrue(driver.machine.presentation.expanded, "Leave the whole reading interval available")
+        world.clock.advance(0.01)
+        await reaches(driver) { !$0.expanded }
+        XCTAssertEqual(driver.machine.presentation.posture, .idle)
+        XCTAssertEqual(driver.machine.history.count, 2)
+    }
+
+    func testRealDriverCompactsBothPermissionTapAndEmptyTranscriptAtEightSeconds() async {
+        for delayedPermission in [true, false] {
+            let world = FakeCreatureWorld()
+            world.mind.health.status = "ok"
+            world.ears.holdPermission = delayedPermission
+            world.ears.text = ""
+            let driver = CreatureDriver(perform: world.perform)
+            driver.send(.findMind)
+            await driver.waitUntilSettled()
+            let pending = expectation(description: "Permission or listening")
+            if delayedPermission { world.ears.permissionRequested = { pending.fulfill() } }
+            else {
+                driver.onChange = { view in if view.posture == .listening { pending.fulfill() } }
+            }
+            driver.send(.keyDown(.ask))
+            await fulfillment(of: [pending], timeout: 2)
+            driver.onChange = nil
+            let notice = expectation(description: "Tap result has automatic dismissal")
+            world.clock.onSleep = { notice.fulfill() }
+            driver.send(.keyUp(.ask))
+            if delayedPermission {
+                world.ears.permission?.resume(returning: .allowed)
+                world.ears.permission = nil
+            }
+            await fulfillment(of: [notice], timeout: 2)
+            XCTAssertTrue(driver.machine.presentation.expanded)
+            XCTAssertEqual(world.ears.starts, delayedPermission ? 0 : 1)
+            world.clock.advance(7.99)
+            await Task.yield()
+            XCTAssertTrue(driver.machine.presentation.expanded)
+            world.clock.advance(0.01)
+            await reaches(driver) { !$0.expanded }
+            XCTAssertTrue(world.mind.questions.isEmpty)
+            driver.cancelAll()
+        }
+    }
+
+    func testCancelledNoticeTimerCannotCompactAnActiveMicrophone() async {
+        let world = FakeCreatureWorld()
+        world.mind.health.status = "ok"
+        let driver = CreatureDriver(perform: world.perform)
+        defer { driver.cancelAll() }
+        driver.send(.findMind)
+        await driver.waitUntilSettled()
+        let notice = expectation(description: "Help auto-dismissal")
+        world.clock.onSleep = { notice.fulfill() }
+        driver.send(.showHelp)
+        await fulfillment(of: [notice], timeout: 2)
+        driver.send(.keyDown(.ask))
+        await reaches(driver) { $0.posture == .listening }
+        world.clock.advance(10)
+        await Task.yield()
+        XCTAssertEqual(driver.machine.presentation.posture, .listening)
+        XCTAssertTrue(driver.machine.presentation.expanded)
+        XCTAssertEqual(world.ears.stops, 0)
+    }
 }

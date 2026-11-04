@@ -180,6 +180,7 @@ public struct MindRunner {
     public var toolsReady: () -> Bool = RuntimeTools.available
     public var startupPreference: StartupPreference
     public var automaticStartupDisabled: Bool
+    public var makeClient: (URL, TimeInterval) -> MindClient = { MindClient(baseURL: $0, timeout: $1) }
 
     public init(kernelDir: URL, kernelHome: URL? = nil, env: [String: String] = ProcessInfo.processInfo.environment) {
         self.kernelDir = kernelDir
@@ -199,10 +200,10 @@ public struct MindRunner {
     /// First candidate whose /health answers.
     public func attach() async -> (MindClient, MindHealth)? {
         for url in candidates {
-            let client = MindClient(baseURL: url, timeout: 4)
+            let client = makeClient(url, 4)
             if let h = try? await client.health() {
                 log("attached \(url) v\(h.version) \(h.model) agents=\(h.agentCount)")
-                return (MindClient(baseURL: url), h)
+                return (makeClient(url, 45), h)
             }
         }
         return nil
@@ -267,19 +268,22 @@ public struct MindRunner {
         try installService()
     }
 
-    public func findMind(attempts: Int = 120,
-                         sleep: (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }) async throws -> (MindClient, MindHealth) {
+    public func findMind(attempts: Int = 900,
+                         sleep: (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
+                         onWaiting: (() async -> Void)? = nil) async throws -> (MindClient, MindHealth) {
         if let attached = await attach() {
             if serviceInstalled || FileManager.default.fileExists(atPath: kernelHome.appendingPathComponent("launcher").path) {
-                try refreshLauncher()
+                do { try refreshLauncher() }
+                catch { log("attached mind is ready; launcher refresh failed: \(error)") }
             }
             return attached
         }
         try prepareService()
-        let own = MindClient(baseURL: URL(string: "http://127.0.0.1:\(ownPort)")!, timeout: 3)
-        for _ in 0..<attempts {
+        let own = makeClient(URL(string: "http://127.0.0.1:\(ownPort)")!, 3)
+        for attempt in 0..<attempts {
             try Task.checkCancellation()
-            if let health = try? await own.health() { return (MindClient(baseURL: own.baseURL), health) }
+            if let health = try? await own.health() { return (makeClient(own.baseURL, 45), health) }
+            if attempt >= 30 && attempt.isMultiple(of: 30) { await onWaiting?() }
             try await sleep(2)
         }
         throw MindError.unreachable("Mind did not become ready")

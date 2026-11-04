@@ -48,6 +48,11 @@ public final class NeedsQueue: ObservableObject {
     public init(dir: URL? = nil) {
         self.dir = dir ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/needs")
         try? FileManager.default.createDirectory(at: self.dir, withIntermediateDirectories: true)
+        let saved = self.dir.appendingPathComponent(".deferred-permissions.json")
+        if FileManager.default.fileExists(atPath: saved.path) {
+            do { snoozed = Set(try JSONDecoder().decode([String].self, from: Data(contentsOf: saved))) }
+            catch { NSLog("OpenRappter could not read deferred permissions: %@", error.localizedDescription) }
+        }
         reload()
         watch()
         tick = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in Task { @MainActor in self?.reload() } }
@@ -136,7 +141,16 @@ public final class NeedsQueue: ObservableObject {
         if let data = try? JSONEncoder().encode(a) { try? data.write(to: dir.appendingPathComponent("\(need.id).answer.json"), options: .atomic) }
     }
 
-    public func later(_ need: Need) { snoozed.insert(need.id); reload() }
+    public func later(_ need: Need) {
+        snoozed.insert(need.id)
+        if need.isOptionalPermission {
+            do {
+                let saved = snoozed.filter { $0 == "permission-texts" || $0.hasPrefix("creature:permission-") }.sorted()
+                try JSONEncoder().encode(saved).write(to: dir.appendingPathComponent(".deferred-permissions.json"), options: .atomic)
+            } catch { NSLog("OpenRappter could not defer a permission: %@", error.localizedDescription) }
+        }
+        reload()
+    }
 
     /// Drop a need from inside the app (or a test).
     @discardableResult

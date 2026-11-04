@@ -1,229 +1,182 @@
-# Confirmed defect regressions
+# Canonical defect regressions
 
-Each numbered block matches the read-only confirmed review. All listed tests run
-in `swift test`; none needs a window, microphone permission, or a live mind.
+Numbers and exact titles below follow `defects.tsv`, as printed by proof5.
+The external detailed review files were not readable in this session; the
+judge's complete canonical titles were available. Each entry names executable
+scenario regressions, not an independently numbered inventory of improvements.
+All tests run with `swift test`; no manual exceptions are used.
+
+Later defects supersede two earlier expectations: Later hides a sign-in code
+without cancelling it (61), and readable notices automatically compact after
+eight seconds (68). Existing test methods are retained, with assertions updated
+for those intentional changes. Real approval decisions are never auto-answered.
 
 ## 1
+- defect: Startup bounces the launchd kernel whenever it is not yet answering, killing it mid-setup
 - test: MindStartupTests.testExistingServiceWaitsWithoutReinstalling
 - test: LauncherTests.testInterruptedSetupNeverPublishesHalfBuiltEnvironment
 
-An already installed mind is allowed to finish starting. Its new environment is
-published only after setup succeeds; interrupted setup is discarded.
-
 ## 2
+- defect: 'Sign me in' button is dead when the mind was never found
 - test: CreatureStateMachineTests.testSignInWithoutMindFindsBeforeStarting
 
-The visible action finds a missing mind before starting sign-in.
-
 ## 3
+- defect: Fed detection uses /health, not the poll result, so an account without Copilot access is declared 'Fed' and every ask then says 'I couldn't reach my mind'
 - test: CreatureStateMachineTests.testOnlySuccessfulPollCanFeed
 - test: MindProtocolRegressionTests.testCopilotAccessRequiredByHealthAndChat
 
-Only a successful sign-in result followed by a ready mind ends hunger. Accounts
-without Copilot get the right explanation and next step.
-
 ## 4
+- defect: Every poll error is reported as 'That code expired'
 - test: CreatureStateMachineTests.testLoginFailuresHaveDistinctNextSteps
 - test: CreatureStateMachineTests.testLostLoginRestartsOnceInsteadOfCallingItExpired
 
-Cancelled, expired, missing, and unavailable-account sign-ins are distinct.
-A lost sign-in is restarted once rather than misreported as an expired code.
-
 ## 5
+- defect: While hungry or mind-less, every card is suppressed, so door callers and Claude Code hooks hang; after feeding, cards wait up to 30 s
 - test: CreatureStateMachineTests.testNeedsAppearWithoutMindAndImmediatelyAfterSignIn
 
-Local choices do not depend on a fed mind, and queued cards are projected
-immediately when sign-in finishes.
-
 ## 6
+- defect: No cancellation of a running sign-in; a second 'Sign me in' silently does nothing and the code line can be lost
 - test: CreatureStateMachineTests.testRepeatSignInRestoresCodeAndCanCancel
 - test: CreatureStateMachineTests.testShutdownCancelsSignInAndRestoresClipboard
 
-Repeat presses re-show the saved code. Sign-in can be cancelled, and its work is
-cancelled on exit.
-
 ## 7
+- defect: Sign-in overwrites the owner's clipboard and never restores it
 - test: ClipboardLeaseTests.testSignInRestoresAllClipboardKinds
 - test: ClipboardLeaseTests.testSignInDoesNotClobberSomethingCopiedMeanwhile
 
-Temporary sign-in copying preserves every clipboard item and does not overwrite
-something the owner copied meanwhile.
-
 ## 8
+- defect: Key released during Ears.authorize() leaves the creature listening forever
 - test: CreatureStateMachineTests.testReleaseDuringPermissionNeverStartsEars
 - test: CreatureDriverTests.testFakePermissionDelayCannotLeaveMicrophoneOpen
 
-The press is recorded before asking permission. An early release cannot leave
-the microphone open.
-
 ## 9
+- defect: No input device: installTap with a 0 Hz format throws an NSException and crash-loops under launchd
 - test: AudioCaptureTests.testInvalidFormatsNeverInstallTap
 
-Missing or invalid audio input is rejected before touching the microphone.
-
 ## 10
+- defect: engine.start() failure leaves the tap installed, so the next press crashes on a double tap
 - test: AudioCaptureTests.testFailedStartRemovesTapAndCanRetry
 
-An audio-start failure cleans up before another attempt.
-
 ## 11
+- defect: rest() scheduled after speaking fires 2 s later regardless of state, collapsing an in-progress listen
 - test: CreatureStateMachineTests.testOldRestCannotCollapseNewListenOrCard
 - test: CreatureDriverTests.testInterruptingSpeechCancelsItsOldRestClock
 
-Every turn has its own identity. Old waits are cancelled and cannot change a
-newer listen or cover a waiting card.
-
 ## 12
+- defect: Second question while the first is still thinking overlaps two asks and leaks a Voice continuation
 - test: CreatureStateMachineTests.testOnlyOneQuestionCanBeInFlight
 - test: VoiceTests.testOverlappingSpeechResumesOldWaiterAndIgnoresOldCallbacks
 
-Questions cannot overlap. Speech completion belongs to its own utterance, and
-interrupting speech releases the old waiter immediately.
-
 ## 13
+- defect: Denied-permission and ask-error branches park the notch expanded in needsYou with no way back
 - test: CreatureStateMachineTests.testBlockedStatesHaveDismissAndSettingActions
-
-Blocked permissions are actionable cards with a setting button and a way to
-return to rest.
+- test: CreatureStateMachineTests.testUnreachableMindOffersWorkingRetry
+- test: CreatureStateMachineTests.testEveryBriefTapOutcomeAutomaticallyCompacts
 
 ## 14
+- defect: Login item pins whatever path the app happened to launch from (DMG, Gatekeeper translocation, dev dist/)
 - test: LoginItemTests.testOnlyApplicationsCopiesAreInstalled
 - test: LoginItemTests.testMovedInstalledCopyRepairsMissingSavedPath
 
-Only a real Applications copy can arrange its return at sign-in. Disposable
-copies offer a move instead; an installed copy repairs an obsolete saved path.
-
 ## 15
+- defect: After a failed mind lookup the card says 'Sign me in' but the button does nothing
 - test: CreatureStateMachineTests.testFailedLookupRetriesWithClockAndStillHasWorkingButton
 
-A slow mind is retried using the injected clock, and the visible retry action
-works immediately.
-
 ## 16
+- defect: findMind reinstalls and boots out a kernel that is merely still starting
 - test: MindStartupTests.testLoadedServiceIsNotReinstalled
-
-A loaded mind is never removed or reinstalled just because it is still starting.
+- test: MindStartupTests.testExistingUnloadedServiceIsLoadedWithoutReplacingFiles
 
 ## 17
+- defect: KeepAlive.install boots out its own launchd job when the plist content changes, killing itself before bootstrap
 - test: LoginItemTests.testUpdatingOwnJobNeverUnloadsIt
 
-Updating our own saved sign-in setting never stops the app that is writing it.
-
 ## 18
+- defect: Kernel run.sh needs python3 and git; on a fresh Mac launchd loops the Xcode CLT dialog every 10 s
 - test: MindStartupTests.testApplePlaceholdersAreNeverExecutedWithoutTools
 - test: MindStartupTests.testMissingToolsNeverInstallsKeepAlive
 - test: LauncherTests.testMissingToolsPausesBeforeExitingInsteadOfRepeatingDialogs
 - test: CreatureStateMachineTests.testMissingAppleToolsHasInstallActionWithoutRetryLoop
 
-Prerequisites are checked before arranging automatic startup. The creature
-offers Install, while the launcher waits before exiting if tools are absent.
-
 ## 19
+- defect: Uninstall via Homebrew leaves the app KeepAlive job and the kernel service running
 - test: LoginItemTests.testUninstallStopsBothJobsAndRemovesSavedAppSetting
 
-Removal stops both automatic helpers and includes both saved settings. The
-menu also lets the owner stop automatic startup without removing the app.
-
 ## 20
+- defect: Door approval card shows raw door id, program path and PID to the owner
 - test: DoorWordsTests.testApprovalUsesPlainVerbWithoutProgramDetails
 
-Approval cards use one shared table of plain actions, a readable caller name,
-and its reason, without executable locations or internal numbers.
-
 ## 21
+- defect: Twin FYI line and phone note speak door ids and a code the owner must type back
 - test: DoorWordsTests.testTwinStreamAndPhoneUsePlainActionsNotCodes
 
-Twin updates use the same action words. The note points to the working Object
-button on the Mac; it does not invent a phone reply flow or ask for a short code.
-
 ## 22
+- defect: "I can't find my mind" and "I couldn't reach my mind" leave the owner with no action
 - test: CreatureStateMachineTests.testUnreachableMindOffersWorkingRetry
-
-An unreachable mind offers a working Find my mind action and a dismissal.
+- test: CreatureStateMachineTests.testFailedLookupRetriesWithClockAndStillHasWorkingButton
 
 ## 23
+- defect: Sign-in failure line asks the owner a machinery question ("Is it running?")
 - test: CreatureStateMachineTests.testFailedSignInReattachesBeforeRetry
 
-Sign-in failures explain what to do, and a repeat attempt finds the mind again.
-
 ## 24
-- test: MindStartupTests.testServiceFailureNeverReportsSuccess
+- defect: Menu item "Keep my mind running at login" leaks raw error text on failure
 - test: CreatureStateMachineTests.testLoginSetupFailureShowsPlainRecovery
-
-Startup failure is not reported as success. Details stay in the log while the
-owner receives fixed, actionable words.
+- test: MindStartupTests.testServiceFailureNeverReportsSuccess
 
 ## 25
+- defect: Menu titles and the Full Disk Access card use machinery words ("Full Disk Access", "Claude Code") and a blank-action menu header
 - test: CreatureMenuTests.testMenuActionsAreEnabledAndAdvancedHelperIsTuckedAway
+- test: CreatureStateMachineTests.testEveryPermissionHasCorrectSettingAndDismissal
 - test: CreatureStateMachineTests.testNeedsYouAlwaysHasActionAndNoMachineWords
 
-Shortcut help is enabled, advanced setup is under More, and external replies
-are preserved verbatim. Only the creature's own lines use plain machinery words.
-
 ## 26
+- defect: Permission-denied lines name System Settings panes but offer no button, unlike the Full Disk Access card
 - test: CreatureStateMachineTests.testEveryPermissionHasCorrectSettingAndDismissal
 
-Every permission card opens the matching setting and offers Not now.
-
 ## 27
+- defect: Existing installs never receive the new run.sh (atomic venv, tools check); prepareService never refreshes the launcher copy
 - test: MindStartupTests.testLoadedServiceReceivesBothNewLauncherFilesWithoutBeingStopped
 - test: MindStartupTests.testHealthyAttachedMindStillReceivesAnUpgradeWithoutToolsOrRestart
 
-Upgrades atomically refresh both launcher files, even when the mind is already
-healthy. Neither refresh unloads, kills, or reinstalls a running job.
-
 ## 28
+- defect: 30 s automatic mind retry wipes an in-progress dictation/listen and any permission card
 - test: CreatureStateMachineTests.testAutomaticRetryNeverCancelsListeningOrDictation
 - test: CreatureStateMachineTests.testAutomaticRetryPreservesUnansweredPermissionAndCallerCards
 - test: CreatureStateMachineTests.testOldAutomaticRetryCannotCancelSignIn
 
-Automatic lookup retries wait while a turn, sign-in, setup, or unanswered card
-is active. Only an explicit Find my mind action resets those lanes.
-
 ## 29
+- defect: Release during the first permission dialog hides a denied-permission card and gives no feedback on grant
 - test: CreatureStateMachineTests.testReleaseBeforeDeniedPermissionStillOffersTheCorrectSetting
 - test: CreatureStateMachineTests.testReleaseBeforeGrantedPermissionSaysHowToTryAgainWithoutOpeningEars
 
-A release during the permission dialog never opens the microphone. Denial still
-shows the correct setting; a grant explains how to press again.
-
 ## 30
+- defect: One failed /login/poll now aborts the sign-in with 'I lost the sign-in page' and marks the mind missing (old code tolerated it)
 - test: CreatureStateMachineTests.testTransientPollFailureKeepsTheCodeAndCanStillFinish
 - test: CreatureStateMachineTests.testPollFailureBudgetIsBoundedAndResetsAfterAnAnswer
 
-A transient poll failure keeps the code and sign-in alive. Ten consecutive
-failures end the attempt with recovery words; an answer resets that budget.
-
 ## 31
+- defect: Defect 18 fix never fires for an already-installed kernel service: tools check is skipped when the job is loaded or the plist exists
 - test: MindStartupTests.testLoadedOrInstalledServiceStillReportsMissingTools
 
-An unresponsive existing service gets the same tools check as a fresh setup,
-without being booted out or stuck in the long lookup wait.
-
 ## 32
+- defect: 'Later' on any creature card (mic/speech permission, help, move, retry) silently cancels an in-progress sign-in
 - test: CreatureStateMachineTests.testLaterOnPermissionOrHelpDoesNotCancelSignIn
-- test: CreatureStateMachineTests.testLaterOnSignInCardItselfStillCancelsAndRestoresClipboard
-
-Later cancels sign-in only on its own code card, never on a permission or help
-card that happens to be shown while signing in.
 
 ## 33
+- defect: One transient chat error demotes a fed, reachable mind to 'missing', so the next spoken question is answered with 'I can't find my mind'
 - test: CreatureStateMachineTests.testTransientChatFailureDoesNotMakeTheNextQuestionLoseItsMind
 
-A failed answer retains the attached mind. The next question can try it again;
-the existing explicit Find my mind action still works.
-
 ## 34
+- defect: OwnerWords.plain rewrites the mind's answers and the owner's own words; the defect-25 test asserts the corruption
 - test: CreatureStateMachineTests.testTranscriptMindTextVoiceAndHistoryAreVerbatim
 - test: CreatureStateMachineTests.testCallerCardAndSelectedOptionRemainVerbatim
 - test: VoiceTests.testActualUtterancePreservesTheMindsWords
 - test: DoorWordsTests.testCallerReasonAndNameAreNotRewrittenAsCreatureCopy
 - test: NeedsTests.testCreatureStreamBindingPreservesForeignUpdates
 
-Transcripts, answers, spoken utterances, history, caller reasons, hook cards,
-choices, and stream updates never pass through the creature's word replacer.
-
 ## 35
+- defect: "Stop starting at login" boots out the running mind and the app itself, and the next question silently reinstalls the service
 - test: StartupAdapterRegressionTests.testStopDisablesFutureStartsWithoutKillingEitherLiveJobAndConfirms
 - test: StartupAdapterRegressionTests.testStoppedChoiceSurvivesReopeningAndMindLookupWithoutBootstrap
 - test: StartupAdapterRegressionTests.testStoppedUnloadedMindStartsAsChildWithoutRestoringAutomaticStartup
@@ -231,232 +184,175 @@ choices, and stream updates never pass through the creature's word replacer.
 - test: StartupAdapterRegressionTests.testFailedExplicitKeepDoesNotUndoTheOwnersStoppedChoice
 - test: CreatureStateMachineTests.testStartupChangesDoNotInterruptAnActiveTurnOrSignIn
 
-Stop persists the owner's choice, disables and removes future starts, leaves
-both live jobs alone, and confirms in a card. Manual reopening and mind lookup
-honor the choice; a missing mind starts as a child instead of a saved service.
-
 ## 36
+- defect: While a question is in flight the hotkey is swallowed with no feedback for up to the 120 s chat timeout
 - test: CreatureStateMachineTests.testBusyHotkeyGivesFeedbackWithoutOverlappingOrChangingHistory
 - test: MindClientTests.testCreatureChatTimeoutIsShorterThanTwoMinutes
 
-A repeated hotkey explains that the previous question is still being answered.
-It cannot start an overlapping ask, and the creature's request limit is 45 seconds.
-
 ## 37
+- defect: failLogin marks a reachable, hungry mind as missing, so the next ask tells the owner "I can't find my mind"
 - test: CreatureStateMachineTests.testFailedLoginDismissalStillExplainsHungerNotMissingMind
 - test: CreatureStateMachineTests.testFailedSignInReattachesBeforeRetry
 
-Sign-in failures retain the correct hunger state. A separate flag makes the
-next Sign me in action reattach without falsely declaring the mind missing.
-
 ## 38
+- defect: Defect 24 success path shows nothing, and its working line describes the wrong thing
 - test: CreatureStateMachineTests.testLoginSetupSuccessConfirmsBothReturnsAndHasDismissal
 
-Startup setup has accurate working words and a visible Got it confirmation
-that explains both the mind's readiness and the creature's return.
-
 ## 39
+- defect: Every screen-read failure, including 'no front window', is reported as a missing Screen Recording permission
 - test: StartupAdapterRegressionTests.testNoWindowIsNotMisreportedAsScreenPermission
 - test: StartupAdapterRegressionTests.testScreenCaptureErrorStillOffersTheScreenPermissionSetting
 
-The real screen adapter distinguishes an absent window from a capture failure.
-Only the latter offers the Screen Recording permission setting.
-
 ## 40
+- defect: 'Keep my mind ready when I sign in' says 'Try again' forever when Apple's tools are missing, and gives no feedback at all on success
 - test: StartupAdapterRegressionTests.testMissingToolsDuringExplicitKeepOffersInstallInsteadOfTryAgain
 - test: CreatureStateMachineTests.testLoginSetupSuccessConfirmsBothReturnsAndHasDismissal
 
-Setup preserves the failure kind, so missing Apple tools offer Install instead
-of an endless Try again loop. Success has a dismissable confirmation.
-
 ## 41
+- defect: Doctor tells an owner who has not yet been asked for mic/speech permission to allow it in System Settings, where the app is not listed
 - test: DoctorGuidanceRegressionTests.testFirstPermissionRequestPointsToTheHotkeyNotAnEmptySettingsPane
 - test: DoctorGuidanceRegressionTests.testDeniedPermissionsPointToSettingsAndRestrictedPermissionsToTheMacManager
 
-The self-check distinguishes not-yet-requested permissions, denied permissions,
-and restrictions imposed by the Mac's manager.
-
 ## 42
+- defect: Doctor reports a signed-in account without Copilot as "hungry" and tells the owner to sign in again
 - test: DoctorGuidanceRegressionTests.testSignedInAccountWithoutCopilotGetsAnEnableCopilotStepNotAnotherFeeding
 
-A signed-in account without Copilot has its own diagnosis and an Enable Copilot
-next step, consistent with the creature's card.
-
 ## 43
+- defect: Fed doctor next step "so I can return when you sign in" reads as the GitHub sign-in and nags owners who chose "Stop starting at login"
 - test: DoctorGuidanceRegressionTests.testStoppedLoginChoiceIsObservedWithoutNaggingOrChangingIt
 - test: DoctorGuidanceRegressionTests.testEnvironmentOptOutIsAlsoAnIntentionalChoice
 - test: DoctorGuidanceRegressionTests.testOptionalStartupAdviceSaysThisMacStartsNotGitHubSignIn
 
-The self-check respects both the persisted startup choice and the environment
-opt-out. Optional startup advice explicitly means this Mac, not GitHub sign-in.
-
 ## 44
+- defect: Cask `uninstall launchctl:` runs on every `brew upgrade`: creature killed, both plists deleted, never reopened (defect 17's outcome reintroduced)
 - test: LoginItemTests.testCaskReopensTheUpdatedAppAfterRemovingItsJobs
 
-The cask reopens the updated Applications copy after installation or upgrade,
-so removing the old jobs cannot leave the creature permanently absent.
-
 ## 45
+- defect: 'Keep my mind ready when I sign in' never reinstalls the app's own login item; reports success while the creature will not return
 - test: StartupAdapterRegressionTests.testExplicitKeepAfterStopRestoresAndEnablesBothJobsIncludingOurOwn
 - test: StartupAdapterRegressionTests.testExplicitKeepFromUnstableCopyOffersMoveAndNeverClaimsSuccess
 
-Explicit Keep restores and enables both saved jobs, including our own live but
-disabled job. An unstable app copy offers Move, never a false success.
-
 ## 46
+- defect: Any LoginItem.install() error is shown as 'Move OpenRappter to your Applications folder' even when it is already there
 - test: StartupAdapterRegressionTests.testStartupInstallErrorOffersRetryNotMoveAndRetryInstallsBoth
 
-An automatic login-item installation error gets the working setup-retry card.
-Only an actual unstable copy gets the Move to Applications card.
-
 ## 47
+- defect: run.sh: a failed pip install exits immediately under KeepAlive, rebuilding a venv from scratch every ~10 s
 - test: LauncherTests.testFailedDependencyInstallBacksOffAndKeepsCacheAcrossRetries
 - test: MindStartupTests.testKernelServiceThrottlesAnyUnexpectedRuntimeExit
 
-Failed dependency setup cleans its temporary environment, preserves the pip
-cache, and waits before exiting. New saved services also throttle runtime failures.
-
-## Round-three owner-experience coverage
-
-The supplied `openrappter-judge4/review-round3.md` and the earlier external
-review files could not be read: file access was denied in this non-interactive
-session. The supplied proof log and executable read-only proof were available.
-Blocks 48-65 below account for tested owner-experience fixes already implemented
-in this app. They are a coverage inventory, not a verified attribution to the
-unread review's individual findings. That exact attribution, its "also seen as"
-cases, and its instructions for 60-65 remain unverified.
-
 ## 48
-- test: CreatureStateMachineTests.testMenuHasAPlainEnabledQuitAction
-- test: StartupAdapterRegressionTests.testQuitAdapterCleansUpAndUsesTheRealTerminationBoundary
-
-The menu has an enabled, plainly named quit action. Its real adapter cleans up
-and terminates the creature rather than merely hiding it.
+- defect: Defect 29 grant path still gives no visible feedback: the rest line only renders in the expanded notch, which this path compacts
+- test: CreatureStateMachineTests.testEarlyPermissionReleaseKeepsTheTryAgainLineExpanded
+- test: CreatureDriverTests.testRealDriverCompactsBothPermissionTapAndEmptyTranscriptAtEightSeconds
 
 ## 49
+- defect: Stop starting at login cancels the automatic mind retry and never re-arms it
+- test: CreatureStateMachineTests.testStopStartupRearmsAMissingMindsAutomaticRetry
+
+## 50
+- defect: Defect 27 refresh now runs on the healthy attach path and can turn an attached mind into 'I can't find my mind'
+- test: MindStartupTests.testFailedLauncherRefreshCannotBreakAHealthyAttachment
+- test: MindStartupTests.testHealthyAttachedMindStillReceivesAnUpgradeWithoutToolsOrRestart
+
+## 51
+- defect: After Keep hits missing tools, the Install card's 'then choose Find my mind' never completes the Keep request when startup was stopped
+- test: StartupAdapterRegressionTests.testFindActionAfterInstallingToolsFinishesTheOriginalKeepRequest
+
+## 52
+- defect: 'Keep my mind ready' failure demotes a reachable, answering mind to toolsMissing and refuses every question
+- test: CreatureStateMachineTests.testFailedKeepNeverDemotesAnAnsweringMindEvenAfterNoticeExpires
+
+## 53
+- defect: Busy-hotkey line says 'Still thinking about your last question.' during dictation typing and screen reading
+- test: CreatureStateMachineTests.testBusyDictationDescribesTypingAndPreservesTheActualWords
+- test: CreatureStateMachineTests.testBusyScreenReadingDescribesTheActualStageWithoutStartingAnotherAsk
+
+## 54
+- defect: First card a fresh owner ever sees is a Full Disk Access request; it outranks the sign-in code card and returns on every launch
+- test: CreatureStateMachineTests.testFreshOwnerSeesSignInInsteadOfTheTextsPermission
+- test: CreatureStateMachineTests.testOptionalPermissionsCannotCoverAnActiveSignInCode
+- test: OwnerViewRegressionTests.testActualSignInCardIsRenderedBeforeAnOptionalPermission
+- test: NeedsTests.testDeferredTextsPermissionDoesNotReturnOnTheNextLaunch
+- test: NeedsTests.testAutomaticPermissionDeferralPersistsWithoutAnsweringIt
+
+## 55
+- defect: There is no way to quit the creature
+- test: CreatureStateMachineTests.testMenuHasAPlainEnabledQuitAction
 - test: CreatureStateMachineTests.testSpokenSleepQuitsWithoutAskingTheMind
 - test: CreatureStateMachineTests.testTypedSleepQuitsWithoutAskingTheMind
 - test: OwnerViewRegressionTests.testTypingGoToSleepInTheActualFieldUsesTheQuitRoute
-- test: CreatureStateMachineTests.testSleepWorksBeforeSignInAndCancelsTheCode
-- test: CreatureStateMachineTests.testSleepCanInterruptAQuestionAlreadyInFlight
-- test: CreatureStateMachineTests.testTypedSleepDoesNotSwallowWordsBeingDictated
+- test: StartupAdapterRegressionTests.testQuitAdapterCleansUpAndUsesTheRealTerminationBoundary
 - test: LoginItemTests.testQuitUnloadsOnlyTheLiveCreatureAndPreservesFutureStarts
 
-Spoken and typed go to sleep take the local quit route, including before sign-in
-and during a question. The owner sees Going to sleep in an expanded notch.
-Ordinary dictation still types those words. Quitting preserves future starts.
-
-## 50
-- test: CreatureStateMachineTests.testFreshOwnerSeesSignInInsteadOfTheTextsPermission
-- test: OwnerViewRegressionTests.testActualSignInCardIsRenderedBeforeAnOptionalPermission
-- test: CreatureStateMachineTests.testEveryOptionalPermissionWaitsBehindSignIn
-
-The fresh owner's expanded sign-in card takes precedence over every optional
-permission. The rendered card shows Sign me in, not Full Disk Access advice.
-
-## 51
-- test: CreatureStateMachineTests.testOptionalPermissionsCannotCoverAnActiveSignInCode
-- test: CreatureStateMachineTests.testDeferredPermissionAppearsImmediatelyWhenSignInFinishes
-
-The code remains visible and expanded while optional permissions wait.
-Successful sign-in immediately presents the queued permission card.
-
-## 52
-- test: CreatureStateMachineTests.testOptionalPermissionDoesNotHideMissingMindRecovery
-- test: CreatureStateMachineTests.testDeferredOptionalPermissionCannotStopAutomaticMindRecovery
-- test: CreatureStateMachineTests.testOptionalPermissionDoesNotHideMissingToolsRecovery
-
-Optional cards cannot hide the expanded Find my mind or Install recovery card,
-or prevent the automatic recovery that makes sign-in possible.
-
-## 53
-- test: CreatureStateMachineTests.testAutomaticMoveAdviceWaitsBehindSignIn
-- test: CreatureStateMachineTests.testAutomaticStartupFailureCannotCoverTheSignInCode
-
-Automatic startup and move advice wait behind sign-in and its visible code.
-Deferred move advice appears after the mind is ready.
-
-## 54
-- test: NeedsTests.testDeferredOptionalPermissionNeverTakesItsOwnDefault
-
-A deferred permission cannot silently answer itself. After sign-in, its title
-and card remain an expanded, explicit owner choice.
-
-## 55
-- test: NeedsTests.testOldOptionalPermissionRemainsAnOwnerChoiceInsteadOfBeingArchived
-- test: NeedsTests.testOpeningAQueuedPermissionDoesNotMakeItsCardReappear
-- test: NeedsTests.testLaterOnAQueuedPermissionSurvivesItsNextFolderReload
-
-Waiting permissions do not disappear through age. Opening or dismissing one
-consumes the queued card, so a folder reload cannot make it reappear.
-
 ## 56
-- test: CreatureStateMachineTests.testEarlyPermissionReleaseKeepsTheTryAgainLineExpanded
-- test: CreatureStateMachineTests.testEarlyPermissionReleaseMessageHasAnExplicitDismissal
-- test: CreatureStateMachineTests.testOptionalPermissionWaitsUntilTheNewInstructionIsRead
-
-Releasing during permission setup leaves the try-again instruction expanded
-until acknowledged. An optional card cannot immediately cover that instruction.
+- defect: A speech-recognition failure is indistinguishable from silence, and a recognizer that is unavailable is reported as a missing microphone
+- test: SpeechRecognitionRegressionTests.testRecognitionFailureIsNotSilenceAndNextCaptureCanStillSucceed
+- test: SpeechRecognitionRegressionTests.testUnavailableRecognizerNeverTouchesTheMicrophoneOrClaimsItIsMissing
+- test: SpeechRecognitionRegressionTests.testMacAdapterReportsRecognitionFailureInsteadOfAnEmptyTranscript
 
 ## 57
-- test: CreatureStateMachineTests.testEmptyTranscriptExplainsHowToTryAgainInAnExpandedNotch
-
-An empty transcript leaves an expanded explanation and a dismissal, instead
-of silently returning to a compact notch.
+- defect: Dictation permission card opens a pane where OpenRappter is not listed, because the app never asks for Accessibility
+- test: StartupAdapterRegressionTests.testDictationActuallyRequestsAccessibilityBeforeShowingItsSetting
+- test: StartupAdapterRegressionTests.testAllowedDictationDoesNotLoseItsWordsOrRequestUnrelatedPermissions
 
 ## 58
-- test: CreatureStateMachineTests.testLongAnswerStaysReadableAfterSpeechAndTheOldRestDelay
-- test: CreatureStateMachineTests.testAnswerCanBeDismissedWithoutLosingConversationHistory
-- test: OwnerViewRegressionTests.testLongAnswerHasFullScrollableRenderedHeight
-
-Answers stay expanded after speech and old rest timers. Their complete text
-is scrollable, and acknowledging an answer preserves conversation history.
+- defect: An expired sign-in code is reported as 'GitHub couldn't finish signing you in' because the kernel reports expiry as status error
+- test: MindProtocolRegressionTests.testKernelErrorStatusWithExpiredTokenGetsFreshCodeGuidance
 
 ## 59
-- test: CreatureStateMachineTests.testSuccessfulDictationLeavesAVisibleConfirmation
-
-Successful dictation leaves its confirmation and words expanded for reading,
-rather than losing them when the old rest timer fires.
+- defect: A question asked while the mind is still being found is dropped with no acknowledgement
+- test: CreatureStateMachineTests.testTypedAndSpokenQuestionsDuringLookupExplainThatTheyWereNotSent
 
 ## 60
-- test: OwnerViewRegressionTests.testLongCardTitleAndContextHaveFullRenderedHeight
-
-Long card titles and caller explanations have full scrollable rendered height.
-The test checks actual rendered text and layout, not just stored strings.
+- defect: 'Move OpenRappter to your Applications folder, then open it there' cannot be completed: the Applications copy blocks forever behind the still-running DMG copy
+- test: CreatureHandoffTests.testApplicationsCopyRetiresDMGOrTranslocatedCopyInsteadOfWaitingForever
+- test: CreatureHandoffTests.testUnresponsiveDisposableCopyHasABoundedHandoff
+- test: CreatureHandoffTests.testHandoffNeverTerminatesAnInstalledOrUnidentifiedPeer
 
 ## 61
-- test: OwnerViewRegressionTests.testEveryApprovalOptionHasARealRenderedButton
-
-Every approval option renders as a reachable button. The rendered-view test
-reads all six choices and clicks the sixth to verify the selected action.
+- defect: 'Later' on the sign-in code card silently cancels the sign-in and puts the old clipboard back, so the owner pastes the wrong thing on GitHub
+- test: CreatureStateMachineTests.testLaterHidesCodeButKeepsPollingAndClipboardUntilExplicitCancellation
 
 ## 62
-- test: OwnerViewRegressionTests.testBusyTypingKeepsTheDraftInsteadOfSilentlyDroppingIt
-
-A question entered while busy stays in the actual native text field. Submitting
-after the turn ends sends that same draft instead of silently losing it.
+- defect: First-time install: after 4 minutes the creature says 'I can't find my mind' while the mind is still being built, and the automatic retry is starved by the Full Disk Access card
+- test: MindStartupTests.testFirstSetupCanTakeMoreThanFourMinutesWithoutClaimingTheMindIsMissing
+- test: CreatureStateMachineTests.testDeferredOptionalPermissionCannotStopAutomaticMindRecovery
 
 ## 63
-- test: CreatureStateMachineTests.testOptionalPermissionCannotCoverTheRequestedHelpCard
-- test: CreatureStateMachineTests.testTypingCanBeOpenedFromTheMenuWithoutMicrophonePermission
-
-Requested shortcut help stays expanded ahead of optional permissions. Type to
-me provides an expanded typing instruction without requiring microphone access.
+- defect: Successful sign-in gives the owner no confirmation: the card vanishes and the notch compacts with no words
+- test: CreatureStateMachineTests.testSuccessfulSignInConfirmsReadablyThenCompactsWithoutAClick
 
 ## 64
-- test: OwnerViewRegressionTests.testActualGotItButtonClosesTheReadableMessage
-- test: CreatureStateMachineTests.testNewListeningReplacesThePreviousReadableMessage
-
-The actual Got it button dismisses a readable message. A new listening turn
-replaces old text without inheriting a dismissal that could hide Listening.
+- defect: Screen Recording card loops: after the owner allows it, macOS still needs a relaunch, and the card never says so
+- test: CreatureStateMachineTests.testScreenPermissionExplainsTheRequiredRelaunchAndRetry
 
 ## 65
-- test: CreatureStateMachineTests.testFailedQuitShowsAReadableWorkingRetryCard
-- test: StartupAdapterRegressionTests.testQuitAdapterFailureReturnsAnExpandedRecoveryCard
-- test: CreatureStateMachineTests.testQuitFailureCannotBeCoveredByAnotherCallersCard
-- test: CreatureStateMachineTests.testFailedQuitDuringLookupDoesNotPretendTheCancelledLookupIsRunning
-- test: LoginItemTests.testQuitFailureDoesNotPretendTheKeepAliveCreatureHasStopped
+- defect: Card titles longer than two lines are truncated in the notch, cutting off the instruction the owner needs
+- test: OwnerViewRegressionTests.testLongCardTitleAndContextHaveFullRenderedHeight
 
-A failed quit leaves an expanded, actionable retry card instead of claiming
-success. Queued callers cannot cover it, and cancelled lookup results cannot
-make the creature pretend its mind is ready.
+## 66
+- defect: Defect 52 is unfixed: a failed 'Keep my mind ready' demotes a ready mind to toolsMissing and refuses every question
+- test: CreatureStateMachineTests.testFailedKeepNeverDemotesAnAnsweringMindEvenAfterNoticeExpires
+
+## 67
+- defect: Defects 53 and 57 are unfixed: wrong busy line during dictation, and the dictation permission is never requested
+- test: CreatureStateMachineTests.testBusyDictationDescribesTypingAndPreservesTheActualWords
+- test: StartupAdapterRegressionTests.testDictationActuallyRequestsAccessibilityBeforeShowingItsSetting
+
+## 68
+- defect: Every finished answer and every brief key tap now leaves the notch stuck open until the owner clicks Got it
+- test: CreatureDriverTests.testRealDriverCompactsAnAnswerAtEightSecondsAfterSettlingWithoutAClick
+- test: CreatureDriverTests.testRealDriverCompactsBothPermissionTapAndEmptyTranscriptAtEightSeconds
+- test: CreatureStateMachineTests.testEveryBriefTapOutcomeAutomaticallyCompacts
+- test: CreatureStateMachineTests.testDictationAndSetupNoticesAlsoExpireWithoutAClick
+- test: CreatureStateMachineTests.testOldNoticeTimeoutCannotCollapseANewListenOrANewerNotice
+- test: CreatureStateMachineTests.testAutomaticNoticeDismissalNeverAnswersOrHidesACallersDecision
+- test: CreatureStateMachineTests.testOptionalCardsCannotKeepAnExpiredAnswerExpanded
+- test: CreatureStateMachineTests.testUnsentDraftSuspendsAutomaticCompactingUntilItIsCleared
+- test: OwnerViewRegressionTests.testActualTypingPausesCompactingAndKeepsTheDraftAcrossViewReplacement
+
+## 69
+- defect: A question typed or spoken before the mind is ready disappears with no explanation
+- test: CreatureStateMachineTests.testTypedAndSpokenQuestionsDuringLookupExplainThatTheyWereNotSent
+- test: CreatureStateMachineTests.testQuestionsBeforeSignInOrWithAMissingMindHaveAnExplanationAndRecovery

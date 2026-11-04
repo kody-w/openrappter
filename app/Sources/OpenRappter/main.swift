@@ -80,6 +80,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         model.onSignIn = { [weak self] in self?.driver.send(.signIn) }
         model.onSubmit = { [weak self] in self?.driver.send(.submit(.ask, $0)) }
         model.onDismissLine = { [weak self] in self?.driver.send(.dismissLine) }
+        model.onDraftChanged = { [weak self] in self?.driver.send(.draftChanged($0)) }
         model.onObject = { [weak self] need in
             let result = Objections.object(code: need.id, allow: self?.doors?.allow)
             log("objected \(need.id): \(result != nil)")
@@ -87,7 +88,6 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         model.followStream(needs)
         needs.$needs.sink { [weak self] cards in self?.driver.send(.needsChanged(cards)) }.store(in: &subscriptions)
         installDoors()
-        requestTextsIfNeeded()
         installHotKeys()
         installMenu()
         driver.send(.findMind)
@@ -118,15 +118,6 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         })
         MacDoors.install(on: server, needsDir: needs.dir)
         do { try server.start(); doors = server } catch { log("doors: \(error)") }
-    }
-
-    func requestTextsIfNeeded() {
-        let chat = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Messages/chat.db").path
-        let fd = open(chat, O_RDONLY)
-        if fd >= 0 { close(fd); return }
-        var card = CreatureStateMachine.permissionCard(.texts)
-        card.id = "permission-texts"
-        needs.add(card)
     }
 
     func installHotKeys() {
@@ -172,8 +163,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         case .keepAtLogin: driver.send(.installAtLogin)
         case .stopAtLogin: driver.send(.stopAtLogin)
         case .texts:
-            let action = CreatureStateMachine.permissionCard(.texts).opts[0].action!
-            NSWorkspace.shared.open(URL(string: String(action.dropFirst(5)))!)
+            driver.send(.showPermission(.texts))
         case .folder: NSWorkspace.shared.open(home)
         case .connectHelper:
             do {
@@ -217,9 +207,18 @@ if CommandLine.arguments.contains("--doctor") {
 }
 
 let me = ProcessInfo.processInfo.processIdentifier
-while NSRunningApplication.runningApplications(withBundleIdentifier: LoginItem.label).contains(where: {
-    $0.processIdentifier != me && !$0.isTerminated
-}) { Thread.sleep(forTimeInterval: 2) }
+let claimed = CreatureHandoff.claim(bundle: Bundle.main.bundleURL,
+                                  home: FileManager.default.homeDirectoryForCurrentUser, id: me, running: {
+    NSRunningApplication.runningApplications(withBundleIdentifier: LoginItem.label)
+        .filter { !$0.isTerminated }.map { CreatureInstance(id: $0.processIdentifier, bundle: $0.bundleURL) }
+}, retire: { id, force in
+    guard let previous = NSRunningApplication(processIdentifier: id) else { return }
+    if force { previous.forceTerminate() } else { previous.terminate() }
+})
+if !claimed {
+    log("another creature is already here")
+    exit(0)
+}
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = Coordinator()

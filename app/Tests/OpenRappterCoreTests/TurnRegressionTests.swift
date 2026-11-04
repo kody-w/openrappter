@@ -56,7 +56,8 @@ extension CreatureStateMachineTests {
             var state = ready()
             let id = effectID(state.send(.keyDown(.ask)))
             state.send(.keyUp(.ask))
-            XCTAssertEqual(state.send(.authorized(id, permission)), [])
+            let denied = state.send(.authorized(id, permission))
+            XCTAssertEqual(denied, [.wait(8, noticeWake(denied))])
             XCTAssertEqual(state.presentation.need, CreatureStateMachine.permissionCard(
                 permission == .microphone ? .microphone : .speech))
             XCTAssertTrue(state.presentation.need!.opts[0].action!.contains(pane))
@@ -68,7 +69,8 @@ extension CreatureStateMachineTests {
         var state = ready()
         let id = effectID(state.send(.keyDown(.ask)))
         state.send(.keyUp(.ask))
-        XCTAssertEqual(state.send(.authorized(id, .allowed)), [])
+        let granted = state.send(.authorized(id, .allowed))
+        XCTAssertEqual(granted, [.wait(8, noticeWake(granted))])
         XCTAssertEqual(state.presentation.line, "Ready. Hold Option and Space again to talk.")
         XCTAssertEqual(state.presentation.posture, .idle)
     }
@@ -109,7 +111,7 @@ extension CreatureStateMachineTests {
             } else { state.send(.showHelp) }
             let card = state.presentation.need!
             XCTAssertNotEqual(card.id, "creature:signing-in")
-            XCTAssertEqual(state.send(.later(card)), [])
+            XCTAssertEqual(state.send(.later(card)), [.cancel(.notice)])
             XCTAssertEqual(state.send(.wake(.poll(login))), [.pollLogin(login)])
             XCTAssertTrue(state.presentation.line.contains(code.code))
         }
@@ -117,7 +119,12 @@ extension CreatureStateMachineTests {
 
     func testLaterOnSignInCardItselfStillCancelsAndRestoresClipboard() {
         var (state, login) = signingIn()
-        let effects = state.send(.later(state.presentation.need!))
+        // Later now only hides the card; cancellation is the explicitly named option.
+        XCTAssertEqual(state.send(.later(state.presentation.need!)), [])
+        XCTAssertEqual(state.send(.wake(.poll(login))), [.pollLogin(login)])
+        state.send(.signIn)
+        let card = state.presentation.need!
+        let effects = state.send(.answer(card, card.opts.last!))
         XCTAssertTrue(effects.contains(.cancel(.login)))
         XCTAssertTrue(effects.contains(.restoreClipboard))
         XCTAssertEqual(state.send(.wake(.poll(login))), [])

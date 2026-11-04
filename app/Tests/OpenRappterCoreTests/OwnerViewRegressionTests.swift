@@ -192,4 +192,29 @@ final class OwnerViewRegressionTests: XCTestCase {
         editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
         XCTAssertEqual(submitted, ["My next question"])
     }
+
+    func testActualTypingPausesCompactingAndKeepsTheDraftAcrossViewReplacement() throws {
+        var state = CreatureStateMachine()
+        let shown = state.send(.showInput)
+        guard let timeout = shown.compactMap({ effect -> CreatureWake? in
+            if case .wait(8, let wake) = effect { return wake }; return nil
+        }).first else { return XCTFail("Expected notice timer") }
+        let model = CreatureModel()
+        model.apply(state.presentation)
+        model.onDraftChanged = {
+            state.send(.draftChanged($0))
+            model.apply(state.presentation)
+        }
+        let (window, host) = render(model)
+        let editor = try type("My unfinished question", in: host, window: window)
+        state.send(.wake(timeout))
+        XCTAssertTrue(state.presentation.expanded, "A notice timer must not interrupt typing")
+        XCTAssertEqual(editor.string, "My unfinished question")
+        XCTAssertEqual(model.draft, "My unfinished question")
+        window.close()
+        let (replacement, replacementHost) = render(model)
+        defer { replacement.close() }
+        XCTAssertTrue(words(try text(replacementHost)).contains("My unfinished question"))
+        XCTAssertEqual(model.draft, "My unfinished question")
+    }
 }

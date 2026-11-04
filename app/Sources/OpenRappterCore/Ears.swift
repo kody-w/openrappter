@@ -4,18 +4,43 @@ import Speech
 /// On-device speech to text. Start on key down, stop on key up, get the transcript.
 @MainActor
 public final class Ears: NSObject {
-    private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-    private let capture = MicrophoneCapture()
+    private let capture: MicrophoneCapture
+    private let available: () -> Bool
+    private let supportsOnDevice: () -> Bool
+    private let recognize: (SFSpeechAudioBufferRecognitionRequest, @escaping (String?, Bool, Error?) -> Void) -> () -> Void
     private var request: SFSpeechAudioBufferRecognitionRequest?
-    private var task: SFSpeechRecognitionTask?
+    private var cancelRecognition: (() -> Void)?
     private var latest = ""
     private var finalWaiter: CheckedContinuation<Void, Never>?
     private var timeout: Task<Void, Never>?
     private var generation = 0
     private var finished = false
     private var stopping = false
+    private var recognitionFailed = false
     public var onPartial: ((String) -> Void)?
     public private(set) var listening = false
+
+    public init(capture: MicrophoneCapture, available: @escaping () -> Bool,
+                supportsOnDevice: @escaping () -> Bool = { true },
+                recognize: @escaping (SFSpeechAudioBufferRecognitionRequest,
+                                      @escaping (String?, Bool, Error?) -> Void) -> () -> Void) {
+        self.capture = capture; self.available = available
+        self.supportsOnDevice = supportsOnDevice; self.recognize = recognize
+        super.init()
+    }
+
+    public convenience override init() {
+        let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+        self.init(capture: MicrophoneCapture(), available: { recognizer?.isAvailable == true },
+                  supportsOnDevice: { recognizer?.supportsOnDeviceRecognition == true },
+                  recognize: { request, receive in
+            guard let recognizer else { return {} }
+            let task = recognizer.recognitionTask(with: request) { result, error in
+                receive(result?.bestTranscription.formattedString, result?.isFinal == true, error)
+            }
+            return { task.cancel() }
+        })
+    }
 
     public static func authorize() async -> Bool {
         await permission() == .allowed
@@ -37,38 +62,40 @@ public final class Ears: NSObject {
         return mic == .authorized ? .allowed : .microphone
     }
 
-    public var onDevice: Bool { recognizer?.supportsOnDeviceRecognition ?? false }
+    public var onDevice: Bool { supportsOnDevice() }
 
     public func start() throws {
-        guard !listening, !stopping, let recognizer, recognizer.isAvailable else { throw EarsError.unavailable }
+        guard !listening, !stopping else { throw EarsError.unavailable }
+        guard available() else { throw EarsError.recognizerUnavailable }
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
+        if supportsOnDevice() { req.requiresOnDeviceRecognition = true }
         do { try capture.start { req.append($0) } }
         catch { request = nil; throw error }
         latest = ""
         finished = false
+        recognitionFailed = false
         generation += 1
         let id = generation
         listening = true
-        task = recognizer.recognitionTask(with: req) { [weak self] res, err in
+        cancelRecognition = recognize(req) { [weak self] text, final, error in
             guard let self else { return }
             Task { @MainActor in
                 guard self.generation == id else { return }
-                if let res {
-                    self.latest = res.bestTranscription.formattedString
+                if let text {
+                    self.latest = text
                     self.onPartial?(self.latest)
-                    if res.isFinal { self.finishRecognition() }
+                    if final { self.finishRecognition() }
                 }
-                if err != nil { self.finishRecognition() }
+                if error != nil { self.recognitionFailed = true; self.finishRecognition() }
             }
         }
         request = req
     }
 
     /// Stops the microphone and returns the best transcript, waiting up to 1.5 s for the final pass.
-    public func stop() async -> String {
-        guard listening else { return "" }
+    public func stop() async -> Result<String, EarsError> {
+        guard listening else { return .success("") }
         listening = false
         stopping = true
         let id = generation
@@ -84,18 +111,21 @@ public final class Ears: NSObject {
                 }
             }
         }
-        guard generation == id else { return "" }
-        task?.cancel(); task = nil; request = nil
+        guard generation == id else { return .success("") }
+        // Invalidate callbacks before cancellation, which can itself report an error.
+        generation += 1
+        cancelRecognition?(); cancelRecognition = nil; request = nil
         stopping = false
-        return latest.trimmingCharacters(in: .whitespacesAndNewlines)
+        return recognitionFailed ? .failure(.recognitionFailed) :
+            .success(latest.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     public func cancel() {
         generation += 1
         capture.stop()
         finishRecognition()
-        task?.cancel(); task = nil; request = nil
-        listening = false; stopping = false; latest = ""
+        cancelRecognition?(); cancelRecognition = nil; request = nil
+        listening = false; stopping = false; latest = ""; recognitionFailed = false
     }
 
     private func finishRecognition() {
@@ -106,4 +136,4 @@ public final class Ears: NSObject {
     }
 }
 
-public enum EarsError: Error { case unavailable }
+public enum EarsError: Error, Equatable { case unavailable, recognizerUnavailable, recognitionFailed }

@@ -35,16 +35,19 @@ speech output, clipboard contents, and a virtual clock: no recording or live
 sign-in is needed. Rendered-view tests use temporary offscreen windows, on-device
 text recognition, and real button and text-field events. They do not capture the
 desktop or activate the app. The original self-check and client tests remain.
-`FIXES.md` maps the first 47 confirmed defects to passing regression tests and
-records tested owner-experience coverage in blocks 48-65. Attribution of those
-later blocks to the external review remains unverified because that review was
-not accessible to this session.
+`FIXES.md` maps all 69 canonical defect numbers and exact titles to regression
+tests for their scenarios, including virtual-clock and real adapter coverage.
+The canonical titles were supplied by proof5; the external detailed review
+files were not readable in this session.
 
 The creature never replaces an already starting mind. Missing Apple tools get
 an Install action instead of repeated prompts. Only a copy in `/Applications`
 or `~/Applications` arranges automatic startup; other copies offer to move.
 Upgrades refresh the launcher's files without stopping a healthy or starting
-mind. Failed dependency setup backs off and keeps its download cache.
+mind. An upgrade-copy failure is logged without losing a healthy attachment.
+First setup may take more than four minutes; the creature keeps waiting and
+explains that it is still getting ready. Failed dependency setup backs off and
+keeps its download cache.
 Choose **Stop starting at login** to turn off future starts while leaving the
 current creature and mind running. This choice survives reopening and upgrades;
 a mind needed later starts without restoring automatic startup. **Keep my mind
@@ -52,11 +55,15 @@ ready when I sign in** explicitly restores both the creature and mind at login.
 Homebrew removal stops both helpers, and upgrades reopen the new app.
 
 Temporary sign-in copying restores all saved clipboard items, unless something
-new was copied meanwhile. Approval cards work even before sign-in. Twin notes
-use plain action words and direct objections to the **Object** button in the
-Mac app; there is no phone reply shortcut.
+new was copied meanwhile. **Later** hides the code without cancelling sign-in
+or restoring the clipboard; **Sign me in** shows it again. Only **Cancel
+sign-in**, completion, failure, or quitting releases the temporary clipboard.
+Successful sign-in has a readable confirmation. Approval cards work even before
+sign-in. Twin notes use plain action words and direct objections to the
+**Object** button in the Mac app; there is no phone reply shortcut.
 
-Background retries wait for live turns, sign-ins, and unanswered cards. Later
+Background retries wait for live turns, sign-ins, and unanswered cards. Stopping
+automatic startup does not stop recovery of a missing mind. Later
 on a permission or help card never cancels a separate sign-in. The owner's
 words, caller requests, stream updates, and mind answers (including speech)
 are preserved verbatim; plain-word replacements are only for the creature's
@@ -72,12 +79,25 @@ for future Mac sign-ins and the running mind are left alone. Dictating the words
 "go to sleep" with Control added still types those words rather than quitting.
 
 Fresh owners see sign-in before optional permission cards, including access to
-texts. Those cards wait through sign-in and remain available afterward; they
-cannot silently accept themselves or expire while waiting. Optional automatic
-startup advice also waits behind sign-in.
+texts. Access to texts is requested only from the owner's menu action, not at
+startup. Older queued permissions wait through sign-in and can be deferred
+across launches; deferral never grants access. Optional automatic startup
+advice also waits behind sign-in. An Applications copy can take over from a
+still-running DMG or translocated copy, rather than waiting forever.
 
-Replies, successful dictation, and instructions to press the shortcut again stay
-expanded until **Got it** or the next interaction. Full replies, card titles,
-caller explanations, and every card option are scrollable rather than truncated.
-A question typed while another one is being answered stays in its field; only
-the local sleep command can interrupt the current question.
+After a turn settles, replies, successful dictation, shortcut instructions, and
+other creature notices clear after eight seconds and the notch compacts without
+a click. **Got it** can dismiss them sooner. An old timer cannot hide a new turn
+or another caller's unanswered decision. Conversation history remains intact.
+Full replies, card titles, caller explanations, and every card option are
+scrollable rather than truncated. An unsent typed draft pauses automatic
+compacting and survives view replacement. A question typed while another one
+is being answered stays in its field; only the local sleep command can
+interrupt the current question.
+
+Questions asked before the mind is ready are explicitly acknowledged, including
+spoken feedback, with instructions to ask again once ready. Dictation requests
+Accessibility before offering its setting; busy feedback distinguishes typing,
+reading, and thinking. Speech-recognition failures are distinct from silence or
+a missing microphone. Screen-access guidance explains the required restart.
+Failure to arrange future startup never disables an already answering mind.

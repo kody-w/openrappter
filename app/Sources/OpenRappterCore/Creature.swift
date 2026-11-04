@@ -38,6 +38,7 @@ public final class CreatureModel: ObservableObject {
     @Published public var canDismissLine = false
     @Published public var acceptsInput = true
     @Published public var inputFocusRequest = 0
+    @Published public var draft = ""
     /// The quiet stream: FYI notes that never pop the notch; seen only when Kody hovers over it.
     @Published public var stream: [Need] = []
     public var onAnswer: ((Need, NeedOption) -> Void)?
@@ -45,6 +46,7 @@ public final class CreatureModel: ObservableObject {
     public var onSignIn: (() -> Void)?
     public var onSubmit: ((String) -> Void)?
     public var onDismissLine: (() -> Void)?
+    public var onDraftChanged: ((Bool) -> Void)?
     /// Object to a twin or trust decision from the stream (one tap; the twin learns from it).
     public var onObject: ((Need) -> Void)?
     @Published public var objected: Set<String> = []
@@ -92,7 +94,6 @@ public struct CompactTrailing: View {
 
 public struct Expanded: View {
     @ObservedObject public var model: CreatureModel
-    @State private var draft = ""
     @FocusState private var typing: Bool
     public init(model: CreatureModel) { self.model = model }
     public var body: some View {
@@ -110,7 +111,7 @@ public struct Expanded: View {
                 Button("Got it") { model.onDismissLine?() }.buttonStyle(.bordered)
             }
             HStack {
-                TextField("Type a question, or go to sleep", text: $draft)
+                TextField("Type a question, or go to sleep", text: $model.draft)
                     .textFieldStyle(.roundedBorder)
                     .focused($typing)
                     .onSubmit(submit)
@@ -122,18 +123,21 @@ public struct Expanded: View {
         .frame(width: 440)
         .onAppear { if model.inputFocusRequest > 0 { typing = true } }
         .onChange(of: model.inputFocusRequest) { typing = true }
+        .onChange(of: model.draft) {
+            model.onDraftChanged?(!model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
     }
 
     private func submit() {
         guard canSubmit else { return }
-        let text = draft
-        draft = ""
+        let text = model.draft
+        model.draft = ""
         model.onSubmit?(text)
     }
 
     private var canSubmit: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            (model.acceptsInput || CreatureStateMachine.isSleepCommand(draft))
+        !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            (model.acceptsInput || CreatureStateMachine.isSleepCommand(model.draft))
     }
 
     private var content: some View {

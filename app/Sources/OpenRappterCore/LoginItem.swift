@@ -3,6 +3,36 @@ import Darwin
 
 public enum LoginItemResult: Equatable, Sendable { case installed, unchanged, moveRequired, skipped }
 
+public struct CreatureInstance: Equatable {
+    public let id: Int32
+    public let bundle: URL?
+    public init(id: Int32, bundle: URL?) { self.id = id; self.bundle = bundle }
+}
+
+public enum CreatureHandoff {
+    /// An installed copy may replace a disposable copy, but never another installed creature.
+    public static func claim(bundle: URL, home: URL, id: Int32,
+                             running: () -> [CreatureInstance],
+                             retire: (Int32, Bool) -> Void,
+                             pause: () -> Void = { Thread.sleep(forTimeInterval: 0.1) }) -> Bool {
+        let others = running().filter { $0.id != id }
+        guard !others.isEmpty else { return true }
+        guard LoginItem.isStable(bundle, home: home),
+              others.allSatisfy({ $0.bundle.map { !LoginItem.isStable($0, home: home) } == true }) else { return false }
+        for other in others { retire(other.id, false) }
+        for _ in 0..<20 {
+            if running().allSatisfy({ $0.id == id }) { return true }
+            pause()
+        }
+        for other in running() where others.contains(other) { retire(other.id, true) }
+        for _ in 0..<20 {
+            if running().allSatisfy({ $0.id == id }) { return true }
+            pause()
+        }
+        return false
+    }
+}
+
 public struct LoginItem {
     public static let label = Doctor.loginItemLabel
     public var home: URL

@@ -10,6 +10,8 @@ public final class MacCreatureEffects {
     public let needs: NeedsQueue
     public var loginItem: LoginItem
     public var readScreen: () async throws -> (app: String, text: String) = Eyes.frontWindowText
+    public var dictationTrusted: (Bool) -> Bool = { Dictation.trusted(prompt: $0) }
+    public var pasteText: (String) async -> String = Dictation.paste
     public var send: ((CreatureEvent) -> Void)?
     public var log: (String) -> Void = { _ in }
     public var willQuit: () -> Void = {}
@@ -29,7 +31,9 @@ public final class MacCreatureEffects {
         case .cancel: return nil
         case .findMind(let id):
             do {
-                let (client, health) = try await runner.findMind(sleep: sleep)
+                let (client, health) = try await runner.findMind(sleep: sleep, onWaiting: { [weak self] in
+                    self?.send?(.findingProgress(id))
+                })
                 try Task.checkCancellation()
                 mind = client
                 return .found(id, .success(health))
@@ -61,8 +65,18 @@ public final class MacCreatureEffects {
         case .startEars(let id):
             ears.onPartial = { [weak self] in self?.send?(.partial(id, $0)) }
             do { try ears.start(); return .earsStarted(id, true) }
+            catch EarsError.recognizerUnavailable {
+                log("speech recognition unavailable")
+                return .hearingFailed(id, .recognizerUnavailable)
+            }
             catch { log("start hearing: \(error)"); return .earsStarted(id, false) }
-        case .stopEars(let id): return .heard(id, await ears.stop())
+        case .stopEars(let id):
+            switch await ears.stop() {
+            case .success(let text): return .heard(id, text)
+            case .failure(let error):
+                log("recognize speech: \(error)")
+                return .hearingFailed(id, .recognitionFailed)
+            }
         case .cancelEars: ears.cancel()
         case .stopVoice: voice.stop()
         case .chat(let id, let message, let session, let history):
@@ -78,8 +92,8 @@ public final class MacCreatureEffects {
                 return .screenRead(id, .failure(.nothingToRead))
             } catch { log("read screen: \(error)"); return .screenRead(id, .failure(.unavailable)) }
         case .dictate(let id, let text):
-            guard Dictation.trusted(prompt: false) else { return .dictated(id, false) }
-            return .dictated(id, await Dictation.paste(text) != "denied")
+            guard dictationTrusted(true) else { return .dictated(id, false) }
+            return .dictated(id, await pasteText(text) != "denied")
         case .speak(let id, let text):
             await voice.speak(text)
             return .spoken(id)

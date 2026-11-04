@@ -44,6 +44,18 @@ final class CreatureStateMachineTests: XCTestCase {
         MindReply(text: text, senses: ["voice": "Hi."], sessionId: "conversation", raw: text)
     }
 
+    func noticeWake(_ effects: [CreatureEffect], file: StaticString = #filePath, line: UInt = #line) -> CreatureWake {
+        let timers = effects.compactMap { effect -> CreatureWake? in
+            if case .wait(let seconds, .notice(let id)) = effect {
+                XCTAssertEqual(seconds, 8, file: file, line: line)
+                return .notice(id)
+            }
+            return nil
+        }
+        XCTAssertEqual(timers.count, 1, "Exactly one eight-second notice timeout", file: file, line: line)
+        return timers.first ?? .notice(-1)
+    }
+
     func testSignInWithoutMindFindsBeforeStarting() {
         var state = CreatureStateMachine()
         let find = effectID(state.send(.signIn))
@@ -150,7 +162,8 @@ final class CreatureStateMachineTests: XCTestCase {
         var state = ready()
         let id = effectID(state.send(.keyDown(.ask)))
         state.send(.keyUp(.ask))
-        XCTAssertEqual(state.send(.authorized(id, .allowed)), [])
+        let granted = state.send(.authorized(id, .allowed))
+        XCTAssertEqual(granted, [.wait(8, noticeWake(granted))])
         XCTAssertEqual(state.presentation.posture, .idle)
         let next = startListening(&state)
         XCTAssertNotEqual(id, next)
@@ -225,7 +238,8 @@ final class CreatureStateMachineTests: XCTestCase {
     func testFailedLookupRetriesWithClockAndStillHasWorkingButton() {
         var state = CreatureStateMachine()
         let id = effectID(state.send(.findMind))
-        XCTAssertEqual(state.send(.found(id, .failure(.unavailable))), [.wait(30, .retry(id))])
+        let failed = state.send(.found(id, .failure(.unavailable)))
+        XCTAssertEqual(failed, [.wait(30, .retry(id)), .wait(8, noticeWake(failed))])
         XCTAssertEqual(state.presentation.need?.opts.first?.label, "Find my mind")
         let retry = effectID(state.send(.wake(.retry(id))))
         XCTAssertGreaterThan(retry, id)
@@ -291,7 +305,8 @@ final class CreatureStateMachineTests: XCTestCase {
     func testMissingAppleToolsHasInstallActionWithoutRetryLoop() {
         var state = CreatureStateMachine()
         let id = effectID(state.send(.findMind))
-        XCTAssertEqual(state.send(.found(id, .failure(.toolsMissing))), [])
+        let failed = state.send(.found(id, .failure(.toolsMissing)))
+        XCTAssertEqual(failed, [.wait(8, noticeWake(failed))])
         let need = state.presentation.need!
         XCTAssertEqual(need.opts.first?.label, "Install")
         XCTAssertEqual(state.send(.answer(need, need.opts[0])), [.installTools])

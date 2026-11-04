@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""rappter-doors-mcp: the doors/1 doors as MCP tools over stdio. One file, stdlib only.
+
+Each door is one tool; the input schema comes from the doors table in contracts/doors.md, and any door the
+running app lists in doors.hello but the table lacks still shows up (open args). Every call goes through
+rappter_doors with caller = the MCP client's clientInfo.name, so the notch card says who is asking.
+"""
+import json, os, re, sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, HERE)
+import rappter_doors as doors  # noqa: E402
+
+PROTOCOL = "2025-06-18"
+APPROVAL = ("The user approves each new caller on the OpenRappter notch (Allow once / Always / No); "
+            "the first call may wait up to 2 minutes for that click.")
+TYPES = {"limit": "integer", "since_rowid": "integer", "newest": "boolean"}
+OPTIONAL = {"note", "body", "folder"}  # contract args the SDK always defaults
+
+
+def contract_path():
+    for p in [os.environ.get("OPENRAPPTER_DOORS_CONTRACT"),
+              os.path.join(HERE, "..", "..", "contracts", "doors.md"),
+              os.path.join(HERE, "doors.md")]:
+        if p and os.path.exists(p):
+            return p
+
+
+def parse_contract(text):
+    """{door: {"args": {name: {"type", "description"}}, "required": [...], "result": str}} from the doors table."""
+    out = {}
+    for line in text.splitlines():
+        m = re.match(r"^\|\s*`([a-z]+\.[a-z_.]+)`\s*\|(.*)\|(.*)\|\s*$", line)
+        if not m:
+            continue
+        door, argcell, result = m.group(1), m.group(2).strip(), m.group(3).strip()
+        args, req = {}, []
+        for part in re.split(r",\s*(?=`)", argcell):
+            names = re.findall(r"`([a-z_]+)`", part)
+            if not names:
+                continue
+            name, note = names[0], part.split("`", 2)[-1].strip(" ()")
+            args[name] = {"type": TYPES.get(name, "string")}
+            if note:
+                args[name]["description"] = note
+            if not re.search(r"default|optional|≤", note) and name not in TYPES and name not in OPTIONAL:
+                req.append(name)
+        out[door] = {"args": args, "required": req, "result": result.replace("`", "")}
+    return out
+
+
+def tool_name(door):
+    return door.replace(".", "_")
+
+
+class Server:
+    def __init__(self, contract=None, sock=None):
+        self.sock, self.caller = sock, "mcp-client"
+        p = contract_path() if contract is None else contract
+        self.table = parse_contract(open(p, encoding="utf-8").read()) if p else {}
+
+    def doors(self):
+        names = list(self.table)
+        try:
+            for d in doors.raw("doors.hello", caller=self.caller, path=self.sock, timeout=5).get("result", {}).get("doors", []):
+                if d not in names:
+                    names.append(d)
+        except Exception:
+            pass  # app not running: still list the contract's doors; calls then say so plainly
+        return names
+
+    def tools(self):
+        out = []
+        for d in self.doors():
+            spec = self.table.get(d, {"args": {}, "required": [], "result": ""})
+            schema = {"type": "object", "properties": spec["args"], "required": spec["required"]}
+            if d not in self.table:
+                schema["additionalProperties"] = True
+            desc = "OpenRappter door `{}` (doors/1){}. {}".format(
+                d, (" → " + spec["result"]) if spec["result"] else "", APPROVAL)
+            out.append({"name": tool_name(d), "description": desc, "inputSchema": schema})
+        return out
+
+    def call(self, name, args):
+        door = next((d for d in self.doors() if tool_name(d) == name), name.replace("_", ".", 1))
+        why = "{} asks through MCP".format(self.caller)
+        try:
+            r = doors.raw(door, args or {}, caller=self.caller, path=self.sock, why=why)
+        except doors.DoorUnavailable:
+            return self.err("OpenRappter is not running, so the door {} is closed. Open the OpenRappter app and try again.".format(door))
+        except doors.DoorError as e:
+            return self.err(str(e))
+        if not r.get("ok"):
+            msg = r.get("error") or "the door said no"
+            return self.err("OpenRappter refused {} for {}: {}".format(door, self.caller, msg))
+        return {"content": [{"type": "text", "text": json.dumps(r.get("result"), ensure_ascii=False)}],
+                "structuredContent": {"result": r.get("result")}}
+
+    @staticmethod
+    def err(text):
+        return {"content": [{"type": "text", "text": text}], "isError": True}
+
+    def handle(self, msg):
+        method, mid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
+        if method == "initialize":
+            self.caller = ((params.get("clientInfo") or {}).get("name") or "mcp-client")[:64]
+            res = {"protocolVersion": params.get("protocolVersion") or PROTOCOL,
+                   "capabilities": {"tools": {"listChanged": False}},
+                   "serverInfo": {"name": "openrappter-doors", "version": "1.0.0"},
+                   "instructions": "OpenRappter doors (doors/1). " + APPROVAL}
+        elif method == "tools/list":
+            res = {"tools": self.tools()}
+        elif method == "tools/call":
+            res = self.call(params.get("name", ""), params.get("arguments") or {})
+        elif method == "ping":
+            res = {}
+        elif mid is None:
+            return None  # notifications
+        else:
+            return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "unknown method " + str(method)}}
+        return None if mid is None else {"jsonrpc": "2.0", "id": mid, "result": res}
+
+
+def main():
+    srv = Server()
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        try:
+            reply = srv.handle(json.loads(line))
+        except Exception as e:
+            reply = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(e)}}
+        if reply is not None:
+            sys.stdout.write(json.dumps(reply) + "\n"); sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

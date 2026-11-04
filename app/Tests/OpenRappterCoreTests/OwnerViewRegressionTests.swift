@@ -217,4 +217,55 @@ final class OwnerViewRegressionTests: XCTestCase {
         XCTAssertTrue(words(try text(replacementHost)).contains("My unfinished question"))
         XCTAssertEqual(model.draft, "My unfinished question")
     }
+
+    func testRequiredRecoveryButtonsRemainRenderedAndResumeKeepAfterNoticeDelivery() throws {
+        for failure in [CreatureFailure.toolsMissing, .unavailable] {
+            var state = CreatureStateMachine()
+            guard case .findMind(let found) = state.send(.findMind).last else { return XCTFail("Lookup") }
+            state.send(.found(found, .success(MindHealth(status: "ok", version: "", model: "", agentCount: 0))))
+            let shown = state.send(.showHelp)
+            let timeout = try XCTUnwrap(shown.compactMap { effect -> CreatureWake? in
+                if case .wait(8, let wake) = effect { return wake }; return nil
+            }.first)
+            guard case .installAtLogin(let setup) = state.send(.installAtLogin).first else {
+                return XCTFail("Keep request")
+            }
+            state.send(.installedAtLogin(setup, .failure(failure)))
+            state.send(.wake(timeout))
+            XCTAssertTrue(state.presentation.expanded)
+            XCTAssertEqual(state.presentation.posture, .needsYou)
+            let model = CreatureModel()
+            model.apply(state.presentation)
+            var work: [CreatureEffect] = []
+            model.onAnswer = { need, option in
+                work = state.send(.answer(need, option))
+                model.apply(state.presentation)
+            }
+            let (window, host) = render(model)
+            defer { window.close() }
+            let label = failure == .toolsMissing ? "Install" : "Try again"
+            let button = try XCTUnwrap(try text(host).first { $0.topCandidates(1).first?.string == label })
+            try click(button, in: host, window: window)
+            if failure == .toolsMissing {
+                XCTAssertEqual(work, [.installTools])
+                state.send(.wake(timeout))
+                model.apply(state.presentation)
+                XCTAssertTrue(state.presentation.expanded)
+                let find = try XCTUnwrap(try text(host).first { $0.topCandidates(1).first?.string == "Find my mind" })
+                try click(find, in: host, window: window)
+            }
+            guard case .installAtLogin(let resumed) = work.first else {
+                return XCTFail("The visible recovery button must finish Keep, not only find the mind")
+            }
+            let confirmation = state.send(.installedAtLogin(resumed, .success(.installed)))
+            model.apply(state.presentation)
+            XCTAssertTrue(state.presentation.line.contains("I'll come back"))
+            XCTAssertTrue(words(try text(host)).contains("I'll come back"))
+            let finished = try XCTUnwrap(confirmation.compactMap { effect -> CreatureWake? in
+                if case .wait(8, let wake) = effect { return wake }; return nil
+            }.first)
+            state.send(.wake(finished))
+            XCTAssertFalse(state.presentation.expanded)
+        }
+    }
 }

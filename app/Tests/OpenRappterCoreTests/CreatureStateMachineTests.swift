@@ -239,7 +239,7 @@ final class CreatureStateMachineTests: XCTestCase {
         var state = CreatureStateMachine()
         let id = effectID(state.send(.findMind))
         let failed = state.send(.found(id, .failure(.unavailable)))
-        XCTAssertEqual(failed, [.wait(30, .retry(id)), .wait(8, noticeWake(failed))])
+        XCTAssertEqual(failed, [.wait(30, .retry(id))])
         XCTAssertEqual(state.presentation.need?.opts.first?.label, "Find my mind")
         let retry = effectID(state.send(.wake(.retry(id))))
         XCTAssertGreaterThan(retry, id)
@@ -306,7 +306,7 @@ final class CreatureStateMachineTests: XCTestCase {
         var state = CreatureStateMachine()
         let id = effectID(state.send(.findMind))
         let failed = state.send(.found(id, .failure(.toolsMissing)))
-        XCTAssertEqual(failed, [.wait(8, noticeWake(failed))])
+        XCTAssertEqual(failed, [])
         let need = state.presentation.need!
         XCTAssertEqual(need.opts.first?.label, "Install")
         XCTAssertEqual(state.send(.answer(need, need.opts[0])), [.installTools])

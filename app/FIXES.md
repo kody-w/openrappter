@@ -356,3 +356,29 @@ for those intentional changes. Real approval decisions are never auto-answered.
 - defect: A question typed or spoken before the mind is ready disappears with no explanation
 - test: CreatureStateMachineTests.testTypedAndSpokenQuestionsDuringLookupExplainThatTheyWereNotSent
 - test: CreatureStateMachineTests.testQuestionsBeforeSignInOrWithAMissingMindHaveAnExplanationAndRecovery
+
+## 70
+- defect: The 8-second auto-hide (fix for defect 68) removes the 'Install Apple's tools' card for good, so the steps for defects 51 and 18 can't be finished
+- test: CreatureStateMachineTests.testRequiredMindCardsSurviveNoticeDeliveryAndKeepTheirActions
+- test: CreatureStateMachineTests.testPendingKeepCardsSurviveNoticeDeliveryAndStillFinishTheRequest
+- test: CreatureStateMachineTests.testDeferredActionableStartupCardIsNotLostWhenALineExpires
+- test: CreatureStateMachineTests.testExpiringHelpCannotDismissTheUnderlyingSignInOrMissingMind
+- test: OwnerViewRegressionTests.testRequiredRecoveryButtonsRemainRenderedAndResumeKeepAfterNoticeDelivery
+- test: StartupAdapterRegressionTests.testFindActionAfterInstallingToolsFinishesTheOriginalKeepRequest
+
+Only informational lines, creature cards whose sole action is dismissal, and
+optional permission cards expire after eight seconds. Required setup, sign-in,
+and recovery cards retain their actions, including after an older notice timer
+arrives. Expiring help or a confirmation cannot discard an underlying required
+card. Completing the tools card still resumes the original Keep request.
+
+## 71
+- defect: Any recognizer error now throws away words already heard
+- test: SpeechRecognitionRegressionTests.testRecognitionErrorKeepsPreviouslyHeardWordsThroughTheRealAdapter
+- test: SpeechRecognitionRegressionTests.testRecognitionResultAccompanyingAnErrorIsStillUsable
+- test: SpeechRecognitionRegressionTests.testEmptyErrorResultCannotEraseAnEarlierTranscriptOrLeakIntoNextCapture
+
+Recognition returns the best nonempty transcript even when the recognizer
+subsequently fails. An empty update cannot erase previously heard words; a
+failure with no words still reports the recognition error rather than silence.
+Each capture starts fresh, and callbacks from an older capture are ignored.

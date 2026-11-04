@@ -82,11 +82,11 @@ public final class Ears: NSObject {
             guard let self else { return }
             Task { @MainActor in
                 guard self.generation == id else { return }
-                if let text {
+                if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     self.latest = text
                     self.onPartial?(self.latest)
-                    if final { self.finishRecognition() }
                 }
+                if final { self.finishRecognition() }
                 if error != nil { self.recognitionFailed = true; self.finishRecognition() }
             }
         }
@@ -116,8 +116,9 @@ public final class Ears: NSObject {
         generation += 1
         cancelRecognition?(); cancelRecognition = nil; request = nil
         stopping = false
-        return recognitionFailed ? .failure(.recognitionFailed) :
-            .success(latest.trimmingCharacters(in: .whitespacesAndNewlines))
+        let transcript = latest.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !transcript.isEmpty { return .success(transcript) }
+        return recognitionFailed ? .failure(.recognitionFailed) : .success("")
     }
 
     public func cancel() {

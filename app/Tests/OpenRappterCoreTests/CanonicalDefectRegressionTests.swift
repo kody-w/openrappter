@@ -7,13 +7,16 @@ extension CreatureStateMachineTests {
     func testFailedKeepNeverDemotesAnAnsweringMindEvenAfterNoticeExpires() {
         for failure in [CreatureFailure.toolsMissing, .unavailable] {
             var state = ready()
+            let timeout = noticeWake(state.send(.showHelp))
             let setup = effectID(state.send(.installAtLogin))
-            let timeout = noticeWake(state.send(.installedAtLogin(setup, .failure(failure))))
+            state.send(.installedAtLogin(setup, .failure(failure)))
             XCTAssertTrue(state.presentation.expanded)
             XCTAssertEqual(state.presentation.need?.opts.first?.action,
                            failure == .toolsMissing ? "creature:install-tools" : "creature:install-login")
             state.send(.wake(timeout))
-            XCTAssertFalse(state.presentation.expanded)
+            XCTAssertTrue(state.presentation.expanded)
+            XCTAssertEqual(state.presentation.need?.opts.first?.action,
+                           failure == .toolsMissing ? "creature:install-tools" : "creature:install-login")
             let ask = state.send(.submit(.ask, "Does my working mind still answer?"))
             guard case .chat(let id, _, _, _) = ask.last else {
                 return XCTFail("Startup setup must not change the live mind's readiness")
@@ -207,7 +210,6 @@ extension CreatureStateMachineTests {
 
     func testSuccessfulSignInConfirmsReadablyThenCompactsWithoutAClick() {
         var (state, id) = signingIn()
-        state.send(.checkedLoginItem(.success(.moveRequired)))
         state.send(.needsChanged([CreatureStateMachine.permissionCard(.texts)]))
         state.send(.loginPolled(id, .success(LoginProgress(status: "success"))))
         let done = state.send(.loginConfirmed(id, .success(fed)))
@@ -337,11 +339,20 @@ extension StartupAdapterRegressionTests {
         XCTAssertTrue(StartupPreference(home: home).isStopped)
         effects.runner.toolsReady = { false }
         var state = CreatureStateMachine()
+        let shown = state.send(.showHelp)
+        let timeout = try XCTUnwrap(shown.compactMap { effect -> CreatureWake? in
+            if case .wait(8, let wake) = effect { return wake }; return nil
+        }.first)
         let keep = state.send(.installAtLogin).first!
         if let failed = await effects.perform(keep) { state.send(failed) }
+        state.send(.wake(timeout))
+        XCTAssertTrue(state.presentation.expanded)
         let tools = try XCTUnwrap(state.presentation.need)
         XCTAssertTrue(tools.title.contains("then choose Find my mind"))
         XCTAssertEqual(state.send(.answer(tools, tools.opts[0])), [.installTools])
+        state.send(.wake(timeout))
+        XCTAssertTrue(state.presentation.expanded)
+        XCTAssertEqual(state.presentation.need, tools)
         effects.runner.toolsReady = { true }
         let find = try XCTUnwrap(tools.opts.first { $0.action == "creature:find" })
         let recovery = state.send(.answer(tools, find))
@@ -520,7 +531,7 @@ final class SpeechRecognitionRegressionTests: XCTestCase {
             return {}
         })
         try ears.start()
-        receive?("unfinished words", false, NSError(domain: "Speech", code: 1))
+        receive?(nil, false, NSError(domain: "Speech", code: 1))
         let failure = await ears.stop()
         XCTAssertEqual(failure, .failure(.recognitionFailed))
         XCTAssertEqual(removed, 1)

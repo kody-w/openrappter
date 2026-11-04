@@ -152,9 +152,10 @@ public struct CreatureStateMachine {
         render()
         let target: NoticeTarget?
         if turn == nil, !hasDraft, !sleeping, !stopped {
-            if let need = presentation.need, need.id != "creature:signing-in",
-               need.source == "openrappter", need.id.hasPrefix("creature:") || need.isOptionalPermission {
-                target = .card(need)
+            if let need = presentation.need {
+                let informational = need.source == "openrappter" && need.id.hasPrefix("creature:") &&
+                    !need.opts.isEmpty && need.opts.allSatisfy { $0.action == "creature:dismiss" }
+                target = need.isOptionalPermission || informational ? .card(need) : nil
             } else if presentation.need == nil, let notice {
                 target = .line(notice)
             } else { target = nil }
@@ -410,15 +411,14 @@ public struct CreatureStateMachine {
         case .wake(.notice(let id)):
             guard id == noticeID, noticeTarget != nil else { return [] }
             notice = nil
-            deferredStartup = nil
             if case .card(let card) = noticeTarget {
                 if blocked?.id == card.id { blocked = nil }
+                if deferredStartup?.id == card.id { deferredStartup = nil }
                 if card.isOptionalPermission { hiddenPermissions.insert(card.id) }
             }
             let permissions = needs.filter(\.isOptionalPermission)
             hiddenPermissions.formUnion(permissions.map(\.id))
             needs.removeAll(where: \.isOptionalPermission)
-            quiet = true
             return permissions.map { .later($0) }
         case .needsChanged(let cards):
             needs = cards

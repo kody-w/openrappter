@@ -149,13 +149,26 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         Task { await notch.expand() }
     }
 
+    var signingIn = false
     func signIn() {
-        guard let mind else { return }
-        NSWorkspace.shared.open(mind.baseURL.appendingPathComponent("login"))
-        model.line = "Finish the GitHub sign-in in your browser. I'll notice."
+        guard let mind, !signingIn else { return }
+        signingIn = true
+        model.posture = .needsYou
+        model.line = "Getting your sign-in code…"
         Task { @MainActor in
-            for _ in 0..<60 {   // poll two minutes
+            defer { signingIn = false }
+            await notch.expand()
+            let code: String, url: URL
+            do { (code, url) = try await mind.startLogin() }
+            catch { model.line = "My mind couldn't start the sign-in. Is it running?"; log("signIn start failed: \(error)"); return }
+            let pb = NSPasteboard.general; pb.clearContents(); pb.setString(code, forType: .string)
+            NSWorkspace.shared.open(url)
+            model.line = "Your code \(code) is on the clipboard. Paste it on the GitHub page I opened; I'll notice."
+            log("signIn: device code issued, opened \(url)")
+            for _ in 0..<450 {   // the GitHub code lives about 15 minutes
                 try? await Task.sleep(for: .seconds(2))
+                let status = (try? await mind.loginPoll()) ?? "pending"
+                if status == "expired" || status == "error" { model.line = "That code expired. Press Sign me in for a fresh one."; log("signIn: \(status)"); return }
                 if let h = try? await mind.health(), !h.isHungry {
                     model.hungry = false; log("fed: signed in")
                     model.line = "Fed. Hold ⌥ Space and talk to me."
@@ -163,6 +176,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
                     rest(); return
                 }
             }
+            model.line = "I stopped waiting. Press Sign me in to try again."
         }
     }
 
@@ -193,7 +207,14 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         model.posture = .listening
         model.line = m == .dictate ? "Listening… I'll type it where your cursor is." : "Listening…"
         ears.onPartial = { [weak self] t in self?.model.line = t }
-        do { try ears.start() } catch { model.line = "Microphone not available."; mode = nil }
+        do { try ears.start() } catch {
+            mode = nil; model.posture = .needsYou
+            model.line = "Microphone not available. Check Sound input in System Settings, then try again."
+            log("ears.start failed: \(error)")
+            await notch.expand()
+            try? await Task.sleep(for: .seconds(6)); if mode == nil { rest() }
+            return
+        }
         await notch.expand()
         log("listening mode=\(m) onDevice=\(ears.onDevice)")
     }

@@ -53,6 +53,36 @@ public struct MindClient: Sendable {
         )
     }
 
+    /// Start the kernel's GitHub device-code sign-in. The kernel's /login is POST-only (a browser visit answers 405),
+    /// so the app starts it and hands the person the code. Returns (user_code, verification_uri).
+    public func startLogin() async throws -> (code: String, url: URL) {
+        let obj = try await postJSON("/login")
+        guard let code = obj["user_code"] as? String, let u = obj["verification_uri"] as? String, let url = URL(string: u) else {
+            throw MindError.badBody(String(describing: obj["error"] ?? obj))
+        }
+        return (code, url)
+    }
+
+    /// Ask the kernel whether the device-code sign-in finished: "pending", "success"/"ok", or "expired"/"error".
+    public func loginPoll() async throws -> String {
+        let obj = try await postJSON("/login/poll")
+        return obj["status"] as? String ?? (obj["error"] != nil ? "error" : "pending")
+    }
+
+    private func postJSON(_ path: String) async throws -> [String: Any] {
+        var req = URLRequest(url: baseURL.appendingPathComponent(path))
+        req.httpMethod = "POST"; req.httpBody = Data("{}".utf8)
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, resp): (Data, URLResponse)
+        do { (data, resp) = try await session.data(for: req) } catch { throw MindError.unreachable(error.localizedDescription) }
+        guard let http = resp as? HTTPURLResponse else { throw MindError.unreachable(baseURL.absoluteString) }
+        guard http.statusCode == 200 else { throw MindError.badStatus(http.statusCode) }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw MindError.badBody(String(decoding: data.prefix(200), as: UTF8.self))
+        }
+        return obj
+    }
+
     /// One turn. Sends both `message` (rapp-chat/1.0) and the legacy alias `user_input` so any kernel answers.
     public func chat(_ message: String, sessionId: String? = nil, history: [[String: String]] = []) async throws -> MindReply {
         var body: [String: Any] = [

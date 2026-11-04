@@ -35,7 +35,10 @@ speech output, clipboard contents, and a virtual clock: no recording or live
 sign-in is needed. Rendered-view tests use temporary offscreen windows, on-device
 text recognition, and real button and text-field events. They do not capture the
 desktop or activate the app. The original self-check and client tests remain.
-`FIXES.md` maps all 47 confirmed defects to passing regression tests.
+`FIXES.md` maps the first 47 confirmed defects to passing regression tests and
+records tested owner-experience coverage in blocks 48-65. Attribution of those
+later blocks to the external review remains unverified because that review was
+not accessible to this session.
 
 The creature never replaces an already starting mind. Missing Apple tools get
 an Install action instead of repeated prompts. Only a copy in `/Applications`

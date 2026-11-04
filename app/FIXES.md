@@ -316,71 +316,147 @@ Only an actual unstable copy gets the Move to Applications card.
 Failed dependency setup cleans its temporary environment, preserves the pip
 cache, and waits before exiting. New saved services also throttle runtime failures.
 
-## Current owner-experience work: numbered review mapping blocked
+## Round-three owner-experience coverage
 
 The supplied `openrappter-judge4/review-round3.md` and the earlier external
 review files could not be read: file access was denied in this non-interactive
 session. The supplied proof log and executable read-only proof were available.
-This section records verified fixes for the requirements stated directly in the
-task, not an invented mapping to unread defects 48-65. Their exact attribution,
-"also seen as" cases, and the instructions for 60-65 remain unverified.
+Blocks 48-65 below account for tested owner-experience fixes already implemented
+in this app. They are a coverage inventory, not a verified attribution to the
+unread review's individual findings. That exact attribution, its "also seen as"
+cases, and its instructions for 60-65 remain unverified.
 
-The menu, spoken ask, and actual text field all reach a local quit action.
-Quitting cancels current work, restores the clipboard, stops listening and
-speaking, and unloads only the live creature's keep-alive job. It leaves future
-Mac sign-ins and the mind alone; failure has a visible retry card.
-
+## 48
 - test: CreatureStateMachineTests.testMenuHasAPlainEnabledQuitAction
+- test: StartupAdapterRegressionTests.testQuitAdapterCleansUpAndUsesTheRealTerminationBoundary
+
+The menu has an enabled, plainly named quit action. Its real adapter cleans up
+and terminates the creature rather than merely hiding it.
+
+## 49
 - test: CreatureStateMachineTests.testSpokenSleepQuitsWithoutAskingTheMind
+- test: CreatureStateMachineTests.testTypedSleepQuitsWithoutAskingTheMind
+- test: OwnerViewRegressionTests.testTypingGoToSleepInTheActualFieldUsesTheQuitRoute
 - test: CreatureStateMachineTests.testSleepWorksBeforeSignInAndCancelsTheCode
 - test: CreatureStateMachineTests.testSleepCanInterruptAQuestionAlreadyInFlight
-- test: CreatureStateMachineTests.testFailedQuitShowsAReadableWorkingRetryCard
 - test: CreatureStateMachineTests.testTypedSleepDoesNotSwallowWordsBeingDictated
-- test: OwnerViewRegressionTests.testTypingGoToSleepInTheActualFieldUsesTheQuitRoute
 - test: LoginItemTests.testQuitUnloadsOnlyTheLiveCreatureAndPreservesFutureStarts
-- test: LoginItemTests.testQuitFailureDoesNotPretendTheKeepAliveCreatureHasStopped
-- test: StartupAdapterRegressionTests.testQuitAdapterCleansUpAndUsesTheRealTerminationBoundary
-- test: StartupAdapterRegressionTests.testQuitAdapterFailureReturnsAnExpandedRecoveryCard
-- test: CreatureStateMachineTests.testQuitFailureCannotBeCoveredByAnotherCallersCard
-- test: CreatureStateMachineTests.testFailedQuitDuringLookupDoesNotPretendTheCancelledLookupIsRunning
 
-Optional permissions and automatic startup advice cannot hide finding the mind,
-sign-in, the active sign-in code, or missing-tools recovery. Deferred permissions
-are shown immediately after successful sign-in and never take their own default
-or disappear through age while the owner is signing in.
+Spoken and typed go to sleep take the local quit route, including before sign-in
+and during a question. The owner sees Going to sleep in an expanded notch.
+Ordinary dictation still types those words. Quitting preserves future starts.
 
+## 50
 - test: CreatureStateMachineTests.testFreshOwnerSeesSignInInsteadOfTheTextsPermission
+- test: OwnerViewRegressionTests.testActualSignInCardIsRenderedBeforeAnOptionalPermission
 - test: CreatureStateMachineTests.testEveryOptionalPermissionWaitsBehindSignIn
+
+The fresh owner's expanded sign-in card takes precedence over every optional
+permission. The rendered card shows Sign me in, not Full Disk Access advice.
+
+## 51
 - test: CreatureStateMachineTests.testOptionalPermissionsCannotCoverAnActiveSignInCode
 - test: CreatureStateMachineTests.testDeferredPermissionAppearsImmediatelyWhenSignInFinishes
+
+The code remains visible and expanded while optional permissions wait.
+Successful sign-in immediately presents the queued permission card.
+
+## 52
 - test: CreatureStateMachineTests.testOptionalPermissionDoesNotHideMissingMindRecovery
 - test: CreatureStateMachineTests.testDeferredOptionalPermissionCannotStopAutomaticMindRecovery
 - test: CreatureStateMachineTests.testOptionalPermissionDoesNotHideMissingToolsRecovery
+
+Optional cards cannot hide the expanded Find my mind or Install recovery card,
+or prevent the automatic recovery that makes sign-in possible.
+
+## 53
 - test: CreatureStateMachineTests.testAutomaticMoveAdviceWaitsBehindSignIn
 - test: CreatureStateMachineTests.testAutomaticStartupFailureCannotCoverTheSignInCode
-- test: CreatureStateMachineTests.testOptionalPermissionCannotCoverTheRequestedHelpCard
-- test: OwnerViewRegressionTests.testActualSignInCardIsRenderedBeforeAnOptionalPermission
+
+Automatic startup and move advice wait behind sign-in and its visible code.
+Deferred move advice appears after the mind is ready.
+
+## 54
 - test: NeedsTests.testDeferredOptionalPermissionNeverTakesItsOwnDefault
+
+A deferred permission cannot silently answer itself. After sign-in, its title
+and card remain an expanded, explicit owner choice.
+
+## 55
 - test: NeedsTests.testOldOptionalPermissionRemainsAnOwnerChoiceInsteadOfBeingArchived
 - test: NeedsTests.testOpeningAQueuedPermissionDoesNotMakeItsCardReappear
 - test: NeedsTests.testLaterOnAQueuedPermissionSurvivesItsNextFolderReload
 
-Expanded-only instructions and completed answers stay open until acknowledged
-or replaced by a new interaction. Empty hearing and successful typing have
-visible feedback. Full card text and every option are rendered in a scroll
-area. The rendered-view tests inspect actual pixels and layout, click the sixth
-choice and Got it, and type through the native text field.
+Waiting permissions do not disappear through age. Opening or dismissing one
+consumes the queued card, so a folder reload cannot make it reappear.
 
+## 56
 - test: CreatureStateMachineTests.testEarlyPermissionReleaseKeepsTheTryAgainLineExpanded
 - test: CreatureStateMachineTests.testEarlyPermissionReleaseMessageHasAnExplicitDismissal
 - test: CreatureStateMachineTests.testOptionalPermissionWaitsUntilTheNewInstructionIsRead
+
+Releasing during permission setup leaves the try-again instruction expanded
+until acknowledged. An optional card cannot immediately cover that instruction.
+
+## 57
 - test: CreatureStateMachineTests.testEmptyTranscriptExplainsHowToTryAgainInAnExpandedNotch
+
+An empty transcript leaves an expanded explanation and a dismissal, instead
+of silently returning to a compact notch.
+
+## 58
 - test: CreatureStateMachineTests.testLongAnswerStaysReadableAfterSpeechAndTheOldRestDelay
 - test: CreatureStateMachineTests.testAnswerCanBeDismissedWithoutLosingConversationHistory
-- test: CreatureStateMachineTests.testSuccessfulDictationLeavesAVisibleConfirmation
-- test: CreatureStateMachineTests.testNewListeningReplacesThePreviousReadableMessage
 - test: OwnerViewRegressionTests.testLongAnswerHasFullScrollableRenderedHeight
+
+Answers stay expanded after speech and old rest timers. Their complete text
+is scrollable, and acknowledging an answer preserves conversation history.
+
+## 59
+- test: CreatureStateMachineTests.testSuccessfulDictationLeavesAVisibleConfirmation
+
+Successful dictation leaves its confirmation and words expanded for reading,
+rather than losing them when the old rest timer fires.
+
+## 60
 - test: OwnerViewRegressionTests.testLongCardTitleAndContextHaveFullRenderedHeight
+
+Long card titles and caller explanations have full scrollable rendered height.
+The test checks actual rendered text and layout, not just stored strings.
+
+## 61
 - test: OwnerViewRegressionTests.testEveryApprovalOptionHasARealRenderedButton
-- test: OwnerViewRegressionTests.testActualGotItButtonClosesTheReadableMessage
+
+Every approval option renders as a reachable button. The rendered-view test
+reads all six choices and clicks the sixth to verify the selected action.
+
+## 62
 - test: OwnerViewRegressionTests.testBusyTypingKeepsTheDraftInsteadOfSilentlyDroppingIt
+
+A question entered while busy stays in the actual native text field. Submitting
+after the turn ends sends that same draft instead of silently losing it.
+
+## 63
+- test: CreatureStateMachineTests.testOptionalPermissionCannotCoverTheRequestedHelpCard
+- test: CreatureStateMachineTests.testTypingCanBeOpenedFromTheMenuWithoutMicrophonePermission
+
+Requested shortcut help stays expanded ahead of optional permissions. Type to
+me provides an expanded typing instruction without requiring microphone access.
+
+## 64
+- test: OwnerViewRegressionTests.testActualGotItButtonClosesTheReadableMessage
+- test: CreatureStateMachineTests.testNewListeningReplacesThePreviousReadableMessage
+
+The actual Got it button dismisses a readable message. A new listening turn
+replaces old text without inheriting a dismissal that could hide Listening.
+
+## 65
+- test: CreatureStateMachineTests.testFailedQuitShowsAReadableWorkingRetryCard
+- test: StartupAdapterRegressionTests.testQuitAdapterFailureReturnsAnExpandedRecoveryCard
+- test: CreatureStateMachineTests.testQuitFailureCannotBeCoveredByAnotherCallersCard
+- test: CreatureStateMachineTests.testFailedQuitDuringLookupDoesNotPretendTheCancelledLookupIsRunning
+- test: LoginItemTests.testQuitFailureDoesNotPretendTheKeepAliveCreatureHasStopped
+
+A failed quit leaves an expanded, actionable retry card instead of claiming
+success. Queued callers cannot cover it, and cancelled lookup results cannot
+make the creature pretend its mind is ready.

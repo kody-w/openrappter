@@ -348,8 +348,8 @@ final class Coordinator: NSObject, NSApplicationDelegate {
 /// The login item that brings the broker back after a quit, a crash or a reboot:
 /// ~/Library/LaunchAgents/com.openrappter.app.plist (RunAtLoad + KeepAlive), pointing at this copy of the app.
 enum KeepAlive {
-    static let label = "com.openrappter.app"
-    static var plist: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist") }
+    static let label = Doctor.loginItemLabel
+    static var plist: URL { Doctor.loginItemURL(home: FileManager.default.homeDirectoryForCurrentUser) }
 
     static func install(log: (String) -> Void) {
         guard ProcessInfo.processInfo.environment["OPENRAPPTER_NO_LOGIN_ITEM"] == nil, let exe = Bundle.main.executablePath,
@@ -381,6 +381,20 @@ enum KeepAlive {
             Thread.sleep(forTimeInterval: 2)
         }
     }
+}
+
+if CommandLine.arguments.contains("--doctor") {
+    Task.detached {
+        let report = await Doctor.check()
+        do {
+            print(try report.output(json: CommandLine.arguments.contains("--json")))
+            exit(0)
+        } catch {
+            FileHandle.standardError.write(Data("I couldn't write my self-check.\n".utf8))
+            exit(1)
+        }
+    }
+    dispatchMain()
 }
 
 KeepAlive.waitForOtherCopy()

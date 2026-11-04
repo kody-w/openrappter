@@ -3,24 +3,58 @@ import AVFoundation
 /// Spoken replies. No permission needed.
 @MainActor
 public final class Voice: NSObject, AVSpeechSynthesizerDelegate {
-    private let synth = AVSpeechSynthesizer()
-    private var waiter: CheckedContinuation<Void, Never>?
+    private var synth: AVSpeechSynthesizer?
+    private let output: (AVSpeechUtterance) -> Void
+    private let stopOutput: () -> Void
+    private var waiters: [ObjectIdentifier: CheckedContinuation<Void, Never>] = [:]
+    private var current: ObjectIdentifier?
     public var muted = false
 
-    public override init() { super.init(); synth.delegate = self }
+    public init(output: ((AVSpeechUtterance) -> Void)? = nil, stop: (() -> Void)? = nil) {
+        if let output, let stop {
+            self.output = output; stopOutput = stop
+        } else {
+            let synth = AVSpeechSynthesizer()
+            self.synth = synth
+            self.output = { synth.speak($0) }
+            stopOutput = { synth.stopSpeaking(at: .immediate) }
+        }
+        super.init()
+        synth?.delegate = self
+    }
 
     public func speak(_ text: String) async {
         guard !muted, !text.isEmpty else { return }
-        let u = AVSpeechUtterance(string: text)
-        u.voice = Self.bestEnglishVoice()
+        stop()
+        let u = AVSpeechUtterance(string: OwnerWords.plain(text))
+        if synth != nil { u.voice = Self.bestEnglishVoice() }
         u.rate = AVSpeechUtteranceDefaultSpeechRate
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            waiter = c
-            synth.speak(u)
+        let id = ObjectIdentifier(u)
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                guard !Task.isCancelled else { c.resume(); return }
+                waiters[id] = c; current = id
+                output(u)
+            }
+        } onCancel: {
+            Task { @MainActor in
+                if self.current == id { self.stop() } else { self.complete(id) }
+            }
         }
     }
 
-    public func stop() { synth.stopSpeaking(at: .immediate) }
+    public func stop() {
+        stopOutput()
+        current = nil
+        let pending = waiters.values
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
+    }
+
+    func complete(_ id: ObjectIdentifier) {
+        if current == id { current = nil }
+        waiters.removeValue(forKey: id)?.resume()
+    }
 
     static func bestEnglishVoice() -> AVSpeechSynthesisVoice? {
         let en = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
@@ -28,9 +62,9 @@ public final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     nonisolated public func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
-        Task { @MainActor in self.waiter?.resume(); self.waiter = nil }
+        Task { @MainActor in self.complete(ObjectIdentifier(u)) }
     }
     nonisolated public func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel u: AVSpeechUtterance) {
-        Task { @MainActor in self.waiter?.resume(); self.waiter = nil }
+        Task { @MainActor in self.complete(ObjectIdentifier(u)) }
     }
 }

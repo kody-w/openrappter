@@ -13,7 +13,11 @@ cask "openrappter" do
 
   app "OpenRappter.app"
 
+  uninstall quit: "com.openrappter.app",
+            launchctl: ["com.openrappter.app", "com.openrappter.kernel"]
+
   zap trash: [
+    "~/Library/LaunchAgents/com.openrappter.app.plist",
     "~/Library/LaunchAgents/com.openrappter.kernel.plist",
     "~/.openrappter",
   ]

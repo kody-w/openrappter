@@ -1,384 +1,198 @@
 import AppKit
+import Combine
 import SwiftUI
 import DynamicNotchKit
 import OpenRappterCore
 
-func log(_ s: String) {
-    let line = "\(ISO8601DateFormatter().string(from: Date())) \(s)\n"
-    FileHandle.standardError.write(line.data(using: .utf8)!)
-    // Always keep our own log, so a quit is never a mystery again (~/.openrappter/app.log).
-    let own = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/app.log").path
-    if let h = FileHandle(forWritingAtPath: own) ?? (FileManager.default.createFile(atPath: own, contents: nil) ? FileHandle(forWritingAtPath: own) : nil) {
-        h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile()
-    }
-    if let path = ProcessInfo.processInfo.environment["OPENRAPPTER_EVIDENCE"],
-       let h = FileHandle(forWritingAtPath: path) ?? (FileManager.default.createFile(atPath: path, contents: nil) ? FileHandle(forWritingAtPath: path) : nil) {
-        h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile()
+func log(_ message: String) {
+    let data = Data("\(ISO8601DateFormatter().string(from: Date())) \(message)\n".utf8)
+    FileHandle.standardError.write(data)
+    let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter")
+    try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    let paths = [home.appendingPathComponent("app.log").path,
+                 ProcessInfo.processInfo.environment["OPENRAPPTER_EVIDENCE"]].compactMap { $0 }
+    for path in paths {
+        if !FileManager.default.fileExists(atPath: path) { FileManager.default.createFile(atPath: path, contents: nil) }
+        if let handle = FileHandle(forWritingAtPath: path) {
+            handle.seekToEndOfFile(); handle.write(data); handle.closeFile()
+        }
     }
 }
 
-enum Mode { case ask, dictate, screen }
+@MainActor
+final class MenuTarget: NSObject {
+    let run: () -> Void
+    init(_ run: @escaping () -> Void) { self.run = run }
+    @objc func invoke() { run() }
+}
 
-/// The whole app: one creature, one mind, three hold-keys, a needs queue, and a thin menu for the rest.
+/// Only Mac wiring lives here. The core owns every creature transition and its visible words.
 @MainActor
 final class Coordinator: NSObject, NSApplicationDelegate {
     let model = CreatureModel()
-    let ears = Ears()
-    let voice = Voice()
     let needs = NeedsQueue()
-    var notch: DynamicNotch<Expanded, CompactLeading, CompactTrailing>!
-    var mind: MindClient?
-    var sessionId: String?
-    var history: [[String: String]] = []
-    var mode: Mode?
-    var statusItem: NSStatusItem?
-    var needsSub: Any?
-    var streamSub: Any?
-    var runner: MindRunner!
-    var kernelProcess: Process?
-    var doors: DoorServer?
     let env = ProcessInfo.processInfo.environment
+    var effects: MacCreatureEffects!
+    var driver: CreatureDriver!
+    var notch: DynamicNotch<Expanded, CompactLeading, CompactTrailing>!
+    var doors: DoorServer?
+    var statusItem: NSStatusItem?
+    var subscriptions: Set<AnyCancellable> = []
+    var menuTargets: [MenuTarget] = []
+    var layout: Task<Void, Never>?
+    var examples: Task<Void, Never>?
+    var expanded: Bool?
     var home: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter") }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-    func applicationWillTerminate(_ notification: Notification) { log("quitting (normal quit); the login item brings me back"); doors?.stop() }
+    func applicationWillTerminate(_ notification: Notification) {
+        examples?.cancel()
+        driver?.send(.shutdown); driver?.cancelAll()
+        effects?.clipboard.restore(); effects?.ears.cancel(); effects?.voice.stop()
+        doors?.stop(); log("quitting")
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        // The broker must stay up with no windows: never let macOS end us as an idle app.
         ProcessInfo.processInfo.disableSuddenTermination()
-        ProcessInfo.processInfo.disableAutomaticTermination("doors/1 broker")
-        log("started pid \(ProcessInfo.processInfo.processIdentifier) launchd=\(env["XPC_SERVICE_NAME"] ?? "-")")
-        KeepAlive.install(log: { log($0) })
+        ProcessInfo.processInfo.disableAutomaticTermination("OpenRappter is here to help")
         let model = self.model
         notch = DynamicNotch(hoverBehavior: .all, style: .auto,
                              expanded: { Expanded(model: model) },
                              compactLeading: { CompactLeading(model: model) },
                              compactTrailing: { CompactTrailing(model: model) })
         notch.transitionConfiguration.skipIntermediateHides = true
-
-        let kernelDir = URL(fileURLWithPath: env["OPENRAPPTER_KERNEL_DIR"] ?? (Bundle.main.resourcePath.map { $0 + "/kernel" } ?? FileManager.default.currentDirectoryPath + "/kernel"))
-        runner = MindRunner(kernelDir: kernelDir)
+        let resources = Bundle.main.resourceURL ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        var runner = MindRunner(kernelDir: env["OPENRAPPTER_KERNEL_DIR"].map { URL(fileURLWithPath: $0) }
+                                ?? resources.appendingPathComponent("kernel"))
         runner.log = { log($0) }
-
-        model.onAnswer = { [weak self] need, opt in self?.answer(need, opt) }
-        model.onLater = { [weak self] need in self?.needs.later(need); self?.showNextNeedOrRest() }
-        model.onSignIn = { [weak self] in self?.signIn() }
+        effects = MacCreatureEffects(runner: runner, needs: needs)
+        effects.log = { log($0) }
+        driver = CreatureDriver { [weak self] in await self?.effects.perform($0) }
+        driver.onChange = { [weak self] in self?.render($0) }
+        effects.send = { [weak self] in self?.driver.send($0) }
+        model.onAnswer = { [weak self] in self?.driver.send(.answer($0, $1)) }
+        model.onLater = { [weak self] in self?.driver.send(.later($0)) }
+        model.onSignIn = { [weak self] in self?.driver.send(.signIn) }
         model.onObject = { [weak self] need in
-            let r = Objections.object(code: need.id, allow: self?.doors?.allow)
-            log("objected \(need.id): \(r.map { "\($0["caller"] ?? "") \($0["door"] ?? "")" } ?? "not found")")
+            let result = Objections.object(code: need.id, allow: self?.doors?.allow)
+            log("objected \(need.id): \(result != nil)")
         }
-
-        startDoors()
-        askForFullDiskAccessIfMissing()
+        needs.$stream.sink { [weak self] stream in self?.model.stream = stream.map(OwnerWords.plain) }.store(in: &subscriptions)
+        needs.$needs.sink { [weak self] cards in self?.driver.send(.needsChanged(cards)) }.store(in: &subscriptions)
+        installDoors()
+        requestTextsIfNeeded()
         installHotKeys()
         installMenu()
-        streamSub = needs.$stream.sink { [weak self] s in Task { @MainActor in self?.model.stream = s } }
-        needsSub = needs.$needs.sink { [weak self] _ in Task { @MainActor in self?.showNextNeedOrRest() } }
+        driver.send(.findMind)
+        do {
+            if try LoginItem().install() == .moveRequired { driver.send(.moveToApplications) }
+        } catch { log("return at sign-in: \(error)"); driver.send(.moveToApplications) }
+        runExamples()
+    }
 
-        Task { @MainActor in
-            await notch.compact()
-            log("compact shown")
-            await findMind()
-            await runEnvDrivenProofs()
+    func render(_ view: CreaturePresentation) {
+        model.posture = view.posture; model.line = view.line
+        model.need = view.need; model.hungry = view.hungry
+        guard expanded != view.expanded else { return }
+        expanded = view.expanded; layout?.cancel()
+        layout = Task { @MainActor in
+            if view.expanded { await notch.expand() } else { await notch.compact() }
         }
     }
 
-    // MARK: doors/1 (contracts/doors.md): other programs ask us; we hold the macOS approvals once
-
-    func startDoors() {
-        let sock = env["OPENRAPPTER_DOORS_SOCK"] ?? DoorServer.defaultSocket
-        let allowURL = URL(fileURLWithPath: env["OPENRAPPTER_DOORS_ALLOW"] ?? home.appendingPathComponent("doors-allow.json").path)
-        let s = DoorServer(socketPath: sock, allow: DoorAllowList(url: allowURL))
-        s.log = { m in DispatchQueue.main.async { log(m) } }
-        // Twin decisions also reach Kody's phone (the "Beam · Twin" note) so he can object from anywhere.
-        let phone: @Sendable (String) -> Void = { [weak s] line in
-            DispatchQueue.global().async { _ = try? s?.handlers["notes.publish"]?(["topic": "Twin", "headline": line]) }
-        }
-        s.approve = doorApprovalViaNeeds(needsDir: needs.dir, phone: phone)
-        MacDoors.install(on: s, needsDir: needs.dir)
-        do { try s.start(); doors = s } catch { log("doors failed to start: \(error)") }
+    func installDoors() {
+        let server = DoorServer(socketPath: env["OPENRAPPTER_DOORS_SOCK"] ?? DoorServer.defaultSocket,
+                                allow: DoorAllowList(url: URL(fileURLWithPath: env["OPENRAPPTER_DOORS_ALLOW"]
+                                    ?? home.appendingPathComponent("doors-allow.json").path)))
+        server.log = { log($0) }
+        server.approve = doorApprovalViaNeeds(needsDir: needs.dir, phone: { [weak server] line in
+            DispatchQueue.global().async {
+                do { _ = try server?.handlers["notes.publish"]?(["topic": "Twin", "headline": line]) }
+                catch { log("phone note: \(error)") }
+            }
+        })
+        MacDoors.install(on: server, needsDir: needs.dir)
+        do { try server.start(); doors = server } catch { log("doors: \(error)") }
     }
 
-    /// Texts (chat.db) and Notes links (NoteStore) need Full Disk Access; say so once, in plain words, with the button.
-    func askForFullDiskAccessIfMissing() {
+    func requestTextsIfNeeded() {
         let chat = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Messages/chat.db").path
         let fd = open(chat, O_RDONLY)
-        if fd >= 0 { close(fd); try? FileManager.default.removeItem(at: needs.dir.appendingPathComponent("full-disk-access.json")); return }
-        log("no Full Disk Access yet (chat.db unreadable)")
-        needs.add(Need(id: "full-disk-access", title: "To read your texts and make Notes links, add OpenRappter to Full Disk Access",
-                       ctx: "Open the settings, switch on OpenRappter, and I'll do the rest.",
-                       opts: [NeedOption(label: "Open Full Disk Access", rec: true, action: "open:" + Self.fullDiskAccessPane),
-                              NeedOption(label: "Not now")],
-                       source: "openrappter", created: Date().timeIntervalSince1970))
+        if fd >= 0 { close(fd); return }
+        var card = CreatureStateMachine.permissionCard(.texts)
+        card.id = "permission-texts"
+        needs.add(card)
     }
-    static let fullDiskAccessPane = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
-    @objc func menuFullDiskAccess() { NSWorkspace.shared.open(URL(string: Self.fullDiskAccessPane)!) }
-
-    // MARK: mind
-
-    func findMind() async {
-        model.posture = .thinking; model.line = "Finding my mind…"
-        do {
-            let (client, health): (MindClient, MindHealth)
-            if let a = await runner.attach() { (client, health) = a }
-            else {
-                model.line = "Setting up my mind (first time, about a minute)…"
-                try runner.installService()
-                let own = MindClient(baseURL: URL(string: "http://127.0.0.1:\(runner.ownPort)")!, timeout: 3)
-                var got: MindHealth?
-                for _ in 0..<120 { if let h = try? await own.health() { got = h; break }; try? await Task.sleep(for: .seconds(2)) }
-                guard let h = got else { throw MindError.unreachable("own kernel did not start") }
-                (client, health) = (MindClient(baseURL: own.baseURL), h)
-            }
-            mind = client
-            model.hungry = health.isHungry
-            log("mind \(client.baseURL) v\(health.version) model=\(health.model) agents=\(health.agentCount) hungry=\(health.isHungry)")
-            if health.isHungry { showHungry() } else { rest() }
-        } catch {
-            log("mind error \(error)")
-            model.hungry = true
-            model.posture = .needsYou; model.line = "I can't find my mind."
-        }
-    }
-
-    func showHungry() {
-        model.hungry = true
-        model.posture = .needsYou
-        model.line = "I can't think yet. Sign me in and I'm fed."
-        Task { await notch.expand() }
-    }
-
-    var signingIn = false
-    func signIn() {
-        guard let mind, !signingIn else { return }
-        signingIn = true
-        model.posture = .needsYou
-        model.line = "Getting your sign-in code…"
-        Task { @MainActor in
-            defer { signingIn = false }
-            await notch.expand()
-            let code: String, url: URL
-            do { (code, url) = try await mind.startLogin() }
-            catch { model.line = "My mind couldn't start the sign-in. Is it running?"; log("signIn start failed: \(error)"); return }
-            let pb = NSPasteboard.general; pb.clearContents(); pb.setString(code, forType: .string)
-            NSWorkspace.shared.open(url)
-            model.line = "Your code \(code) is on the clipboard. Paste it on the GitHub page I opened; I'll notice."
-            log("signIn: device code issued, opened \(url)")
-            for _ in 0..<450 {   // the GitHub code lives about 15 minutes
-                try? await Task.sleep(for: .seconds(2))
-                let status = (try? await mind.loginPoll()) ?? "pending"
-                if status == "expired" || status == "error" { model.line = "That code expired. Press Sign me in for a fresh one."; log("signIn: \(status)"); return }
-                if let h = try? await mind.health(), !h.isHungry {
-                    model.hungry = false; log("fed: signed in")
-                    model.line = "Fed. Hold ⌥ Space and talk to me."
-                    model.posture = .speaking; await voice.speak("Thanks. I'm fed.")
-                    rest(); return
-                }
-            }
-            model.line = "I stopped waiting. Press Sign me in to try again."
-        }
-    }
-
-    func rest() {
-        model.posture = .idle
-        model.line = "Hold ⌥ Space and talk to me."
-        Task { await notch.compact() }
-    }
-
-    // MARK: hold-to-talk
 
     func installHotKeys() {
-        let hk = HotKeys.shared
-        hk.register(id: 1, keyCode: HotKeys.space, modifiers: HotKeys.option) { [weak self] down in self?.key(.ask, down) }
-        hk.register(id: 2, keyCode: HotKeys.space, modifiers: HotKeys.option | HotKeys.control) { [weak self] down in self?.key(.dictate, down) }
-        hk.register(id: 3, keyCode: HotKeys.space, modifiers: HotKeys.option | HotKeys.shift) { [weak self] down in self?.key(.screen, down) }
-    }
-
-    func key(_ m: Mode, _ down: Bool) {
-        if down { Task { await beginListening(m) } } else { Task { await endListening() } }
-    }
-
-    func beginListening(_ m: Mode) async {
-        guard mode == nil else { return }
-        guard await Ears.authorize() else { model.posture = .needsYou; model.line = "Allow the microphone and speech recognition in System Settings."; await notch.expand(); return }
-        mode = m
-        voice.stop()
-        model.posture = .listening
-        model.line = m == .dictate ? "Listening… I'll type it where your cursor is." : "Listening…"
-        ears.onPartial = { [weak self] t in self?.model.line = t }
-        do { try ears.start() } catch {
-            mode = nil; model.posture = .needsYou
-            model.line = "Microphone not available. Check Sound input in System Settings, then try again."
-            log("ears.start failed: \(error)")
-            await notch.expand()
-            try? await Task.sleep(for: .seconds(6)); if mode == nil { rest() }
-            return
-        }
-        await notch.expand()
-        log("listening mode=\(m) onDevice=\(ears.onDevice)")
-    }
-
-    func endListening() async {
-        guard let m = mode else { return }
-        let heard = await ears.stop()
-        mode = nil
-        log("heard \(heard.debugDescription)")
-        await act(m, heard)
-    }
-
-    func act(_ m: Mode, _ heard: String) async {
-        guard !heard.isEmpty else { rest(); return }
-        switch m {
-        case .ask:
-            await ask(heard, screen: nil)
-        case .dictate:
-            guard Dictation.trusted(prompt: true) else {
-                model.posture = .needsYou; model.line = "Allow OpenRappter in Accessibility so I can type for you."; return
-            }
-            model.posture = .speaking; model.line = heard
-            let how = await Dictation.paste(heard)
-            log("typed \(heard.count) chars via \(how) trusted=\(AXIsProcessTrusted()) canPost=\(CGPreflightPostEventAccess())")
-            try? await Task.sleep(for: .seconds(1))
-            rest()
-        case .screen:
-            model.posture = .thinking; model.line = "Reading your screen…"
-            do {
-                let (app, text) = try await Eyes.frontWindowText()
-                log("screen app=\(app) chars=\(text.count)")
-                await ask(heard, screen: "The user is looking at \(app). Text on that window:\n\(text.prefix(6000))")
-            } catch {
-                model.posture = .needsYou; model.line = "Allow Screen Recording so I can read your screen."; log("screen error \(error)")
+        for (id, mode, modifiers) in [
+            (UInt32(1), TalkMode.ask, HotKeys.option),
+            (UInt32(2), TalkMode.dictate, HotKeys.option | HotKeys.control),
+            (UInt32(3), TalkMode.screen, HotKeys.option | HotKeys.shift),
+        ] {
+            HotKeys.shared.register(id: id, keyCode: HotKeys.space, modifiers: modifiers) { [weak self] down in
+                self?.driver.send(down ? .keyDown(mode) : .keyUp(mode))
             }
         }
     }
-
-    func ask(_ question: String, screen: String?) async {
-        guard let mind else { showHungry(); return }
-        model.posture = .thinking; model.line = question
-        await notch.expand()
-        let msg = screen.map { "\(question)\n\n\($0)\n\nAnswer in under 60 words." } ?? "\(question)\n\nAnswer in under 60 words, then end with |||VOICE||| and a one or two sentence spoken version."
-        do {
-            let reply = try await mind.chat(msg, sessionId: sessionId, history: history)
-            sessionId = reply.sessionId ?? sessionId
-            history.append(["role": "user", "content": question]); history.append(["role": "assistant", "content": reply.text])
-            if history.count > 20 { history.removeFirst(2) }
-            model.posture = .speaking; model.line = reply.text
-            log("reply \(reply.text.debugDescription) voice=\(reply.voice.debugDescription)")
-            await voice.speak(reply.voice.isEmpty ? reply.text : reply.voice)
-            try? await Task.sleep(for: .seconds(2))
-            rest()
-        } catch MindError.hungry(let why) {
-            log("hungry \(why)"); showHungry()
-        } catch {
-            log("ask error \(error)"); model.posture = .needsYou; model.line = "I couldn't reach my mind."
-        }
-    }
-
-    // MARK: needs
-
-    func showNextNeedOrRest() {
-        if model.hungry { return }
-        if let top = needs.top {
-            if model.need?.id != top.id { log("need \(top.id) \(top.title.debugDescription)") }
-            model.need = top
-            model.posture = .needsYou
-            model.line = top.title
-            Task { await notch.expand() }
-        } else if model.posture == .needsYou {
-            model.need = nil
-            rest()
-        }
-    }
-
-    func answer(_ need: Need, _ opt: NeedOption) {
-        needs.answer(need, opt)
-        log("answered \(need.id) \(opt.label.debugDescription) action=\(opt.action ?? "-")")
-        if let a = opt.action, a.hasPrefix("open:"), let u = URL(string: String(a.dropFirst(5))) { NSWorkspace.shared.open(u) }
-        model.need = nil
-        showNextNeedOrRest()
-    }
-
-    // MARK: menu (the thin frame)
 
     func installMenu() {
+        func make(_ entries: [CreatureMenuEntry]) -> NSMenu {
+            let menu = NSMenu()
+            for entry in entries {
+                let item = NSMenuItem(title: entry.title, action: nil, keyEquivalent: "")
+                if let command = entry.command {
+                    let target = MenuTarget { [weak self] in self?.menu(command) }
+                    menuTargets.append(target); item.target = target; item.action = #selector(MenuTarget.invoke)
+                } else { item.submenu = make(entry.children) }
+                menu.addItem(item)
+            }
+            return menu
+        }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = NSImage(systemSymbolName: "lizard.fill", accessibilityDescription: "OpenRappter")
-        let menu = NSMenu()
-        menu.addItem(withTitle: "Talk: hold ⌥ Space", action: nil, keyEquivalent: "")
-        menu.addItem(withTitle: "Type for me: hold ⌃⌥ Space", action: nil, keyEquivalent: "")
-        menu.addItem(withTitle: "Ask about my screen: hold ⇧⌥ Space", action: nil, keyEquivalent: "")
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Sign in to my mind…", action: #selector(menuSignIn), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Connect Claude Code (answer its prompts here)", action: #selector(menuConnectClaude), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Keep my mind running at login", action: #selector(menuInstallService), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Let me read your texts (Full Disk Access)…", action: #selector(menuFullDiskAccess), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Open my folder", action: #selector(menuOpenFolder), keyEquivalent: "").target = self
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Restart OpenRappter", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        item.menu = menu
-        statusItem = item
+        item.menu = make(CreatureMenu.entries); statusItem = item
     }
 
-    @objc func menuSignIn() { if mind == nil { Task { await findMind() } } else { signIn() } }
-    @objc func menuOpenFolder() { NSWorkspace.shared.open(home) }
-    @objc func menuInstallService() {
-        do { try runner.installService(); model.line = "My mind now starts at login and keeps running." }
-        catch { model.line = "Couldn't set that up: \(error.localizedDescription)" }
-        model.posture = .speaking
-        Task { await notch.expand(); try? await Task.sleep(for: .seconds(4)); rest() }
-    }
-    @objc func menuConnectClaude() {
-        let result = ClaudeCodeHook.install(from: Bundle.main.resourceURL ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
-        model.posture = .speaking; model.line = result
-        log("connect claude: \(result)")
-        Task { await notch.expand(); try? await Task.sleep(for: .seconds(5)); rest() }
-    }
-
-    // MARK: proofs driven from outside (no microphone needed)
-
-    func runEnvDrivenProofs() async {
-        if let q = env["OPENRAPPTER_SAY"] { await act(.ask, q) }
-        if let t = env["OPENRAPPTER_DICTATE"] { await act(.dictate, t) }
-        if let q = env["OPENRAPPTER_SCREEN_ASK"] { await act(.screen, q) }
-        if env["OPENRAPPTER_DEMO_EXIT"] == "1" { log("done"); NSApp.terminate(nil) }
-    }
-}
-
-/// The login item that brings the broker back after a quit, a crash or a reboot:
-/// ~/Library/LaunchAgents/com.openrappter.app.plist (RunAtLoad + KeepAlive), pointing at this copy of the app.
-enum KeepAlive {
-    static let label = Doctor.loginItemLabel
-    static var plist: URL { Doctor.loginItemURL(home: FileManager.default.homeDirectoryForCurrentUser) }
-
-    static func install(log: (String) -> Void) {
-        guard ProcessInfo.processInfo.environment["OPENRAPPTER_NO_LOGIN_ITEM"] == nil, let exe = Bundle.main.executablePath,
-              Bundle.main.bundlePath.hasSuffix(".app") else { return }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let want: [String: Any] = ["Label": label, "ProgramArguments": [exe], "RunAtLoad": true, "KeepAlive": true,
-                                   "ThrottleInterval": 5, "ProcessType": "Interactive",
-                                   "StandardErrorPath": home + "/.openrappter/app.stderr.log"]
-        if let have = NSDictionary(contentsOf: plist), have.isEqual(to: want) { return }
-        let fresh = !FileManager.default.fileExists(atPath: plist.path)
-        try? FileManager.default.createDirectory(at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
-        guard (want as NSDictionary).write(to: plist, atomically: true) else { log("could not write \(plist.path)"); return }
-        let dom = "gui/\(getuid())"
-        if !fresh { run(["bootout", "\(dom)/\(label)"]) }
-        run(["bootstrap", dom, plist.path])
-        log("login item installed: \(plist.path) -> \(exe)")
+    func menu(_ command: CreatureMenuCommand) {
+        switch command {
+        case .help: driver.send(.showHelp)
+        case .signIn: driver.send(.signIn)
+        case .keepAtLogin: driver.send(.installAtLogin)
+        case .stopAtLogin: driver.send(.stopAtLogin)
+        case .texts:
+            let action = CreatureStateMachine.permissionCard(.texts).opts[0].action!
+            NSWorkspace.shared.open(URL(string: String(action.dropFirst(5)))!)
+        case .folder: NSWorkspace.shared.open(home)
+        case .connectHelper:
+            do {
+                try ClaudeCodeHook.install(from: Bundle.main.resourceURL ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
+                driver.send(.connectedHelper(true))
+            } catch { log("connect helper: \(error)"); driver.send(.connectedHelper(false)) }
+        case .restart:
+            if env["XPC_SERVICE_NAME"] == LoginItem.label {
+                _ = RuntimeTools.run("/bin/launchctl", ["kickstart", "-k", "gui/\(getuid())/\(LoginItem.label)"])
+            } else {
+                let task = Process(); task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                task.arguments = ["-n", Bundle.main.bundlePath]
+                do { try task.run(); NSApp.terminate(nil) } catch { log("restart: \(error)") }
+            }
+        }
     }
 
-    @discardableResult static func run(_ args: [String]) -> Int32 {
-        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/launchctl"); p.arguments = args
-        p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
-        try? p.run(); p.waitUntilExit(); return p.terminationStatus
-    }
-
-    /// One broker at a time. A second copy (e.g. `open` while launchd's is up) waits quietly until the first is gone.
-    static func waitForOtherCopy() {
-        let me = ProcessInfo.processInfo.processIdentifier
-        while NSRunningApplication.runningApplications(withBundleIdentifier: label).contains(where: { $0.processIdentifier != me && !$0.isTerminated }) {
-            Thread.sleep(forTimeInterval: 2)
+    func runExamples() {
+        let requests = [("OPENRAPPTER_SAY", TalkMode.ask), ("OPENRAPPTER_DICTATE", .dictate), ("OPENRAPPTER_SCREEN_ASK", .screen)]
+            .compactMap { key, mode in env[key].map { (mode, $0) } }
+        guard !requests.isEmpty || env["OPENRAPPTER_DEMO_EXIT"] == "1" else { return }
+        examples = Task { @MainActor in
+            await driver.waitUntilSettled()
+            for (mode, text) in requests {
+                guard !Task.isCancelled else { return }
+                driver.send(.submit(mode, text))
+                await driver.waitUntilSettled()
+            }
+            if !Task.isCancelled, env["OPENRAPPTER_DEMO_EXIT"] == "1" { log("done"); NSApp.terminate(nil) }
         }
     }
 }
@@ -386,18 +200,16 @@ enum KeepAlive {
 if CommandLine.arguments.contains("--doctor") {
     Task.detached {
         let report = await Doctor.check()
-        do {
-            print(try report.output(json: CommandLine.arguments.contains("--json")))
-            exit(0)
-        } catch {
-            FileHandle.standardError.write(Data("I couldn't write my self-check.\n".utf8))
-            exit(1)
-        }
+        do { print(try report.output(json: CommandLine.arguments.contains("--json"))); exit(0) }
+        catch { FileHandle.standardError.write(Data("I couldn't write my self-check.\n".utf8)); exit(1) }
     }
     dispatchMain()
 }
 
-KeepAlive.waitForOtherCopy()
+let me = ProcessInfo.processInfo.processIdentifier
+while NSRunningApplication.runningApplications(withBundleIdentifier: LoginItem.label).contains(where: {
+    $0.processIdentifier != me && !$0.isTerminated
+}) { Thread.sleep(forTimeInterval: 2) }
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = Coordinator()

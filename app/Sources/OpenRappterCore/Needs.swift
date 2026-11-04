@@ -118,11 +118,8 @@ public final class NeedsQueue: ObservableObject {
     public func answer(_ need: Need, _ opt: NeedOption) {
         let a = NeedAnswer(id: need.id, label: opt.label, action: opt.action, answered: Date().timeIntervalSince1970)
         let url = dir.appendingPathComponent("\(need.id).answer.json")
-        let tmp = dir.appendingPathComponent(".\(need.id).answer.json.tmp")
-        if let data = try? JSONEncoder().encode(a) {
-            try? data.write(to: tmp)
-            _ = try? FileManager.default.replaceItemAt(url, withItemAt: tmp)   // atomic: a waiting hook never sees a half file
-        }
+        do { try JSONEncoder().encode(a).write(to: url, options: .atomic) }
+        catch { NSLog("OpenRappter could not save a choice: %@", error.localizedDescription) }
         reload()
     }
 

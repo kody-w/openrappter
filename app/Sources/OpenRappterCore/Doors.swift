@@ -278,7 +278,7 @@ public enum TwinReport {
         let trust = rows.filter { $0["by"] as? String == "trust" }.count
         let kody = rows.filter { $0["by"] as? String == "Kody" && $0["decision"] as? String != "objected" }.count
         let objected = Objections.all().filter { ($0["ts"] as? Double ?? 0) >= since }
-        let learned = objected.map { "now asks you before \($0["caller"] ?? "?") uses \($0["door"] ?? "?")" }
+        let learned = objected.map { "Now asks you before \(DoorWords.name($0["caller"] as? String ?? "your helper")) can \(DoorWords.verb($0["door"] as? String ?? ""))." }
         let line = "This week your twin decided \(twin), trust let \(trust) through, you decided \(kody), and you objected \(objected.count) time\(objected.count == 1 ? "" : "s")."
         return ["twin": twin, "trust": trust, "kody": kody, "objected": objected.count, "learned": learned, "summary": line]
     }
@@ -309,10 +309,7 @@ public func doorApprovalViaNeeds(needsDir: URL, timeout: TimeInterval = 120, twi
             return .once
         }
         let id = "door-\(UUID().uuidString.prefix(8))"
-        let need = Need(id: id, title: "\(caller.name) wants to \(door)", ctx: (caller.why.isEmpty ? "" : "Why: \(caller.why)\n") + "Program: \(caller.program) (pid \(caller.pid))",
-                        opts: [NeedOption(label: "Allow once", action: "door:once"), NeedOption(label: "Always", rec: true, action: "door:always"),
-                               NeedOption(label: "No", action: "door:no")],
-                        source: "doors", created: Date().timeIntervalSince1970)
+        let need = DoorWords.approval(caller, door: door, id: id, now: Date().timeIntervalSince1970)
         let url = needsDir.appendingPathComponent("\(id).json")
         try? FileManager.default.createDirectory(at: needsDir, withIntermediateDirectories: true)
         if let d = try? JSONEncoder().encode(need) { try? d.write(to: url, options: .atomic) }
@@ -338,10 +335,11 @@ public func doorApprovalViaNeeds(needsDir: URL, timeout: TimeInterval = 120, twi
             let dec: DoorDecision = pick == "Allow once" ? .once : .no
             let fid = "twin-\(UUID().uuidString.prefix(4))"
             DecisionLog.add(["caller": caller.name, "door": door, "by": "twin", "decision": "\(dec)", "confidence": c, "fyi": fid])
-            if dec == .once { phone?("Your twin let \(caller.name) use \(door) (\(Int(c * 100))% sure). To object, add a reminder in Beam: object \(fid.dropFirst(5))") }
+            let line = DoorWords.twinLine(caller.name, door: door, allowed: dec == .once, confidence: c)
+            if dec == .once { phone?(line + " " + DoorWords.objectionStep) }
             let fyi = Need(id: fid,
-                           title: "Your twin \(dec == .once ? "let" : "stopped") \(caller.name) use \(door) (\(Int(c * 100))% sure)",
-                           ctx: "object \(fid.dropFirst(5))", opts: [NeedOption(label: "OK")], source: "twin", created: Date().timeIntervalSince1970)
+                           title: line,
+                           ctx: "Tap Object if that was wrong.", opts: [NeedOption(label: "OK")], source: "twin", created: Date().timeIntervalSince1970)
             if let d = try? JSONEncoder().encode(fyi) { try? d.write(to: needsDir.appendingPathComponent("\(fyi.id).json"), options: .atomic) }
             return dec
         }

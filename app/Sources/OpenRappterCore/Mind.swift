@@ -7,8 +7,9 @@ public struct MindHealth: Sendable, Equatable {
     public var version: String
     public var model: String
     public var agentCount: Int
+    public var copilot: String = ""
     /// The kernel is up but has no Copilot sign-in. The creature shows this as hungry before it even asks.
-    public var isHungry: Bool { status == "unauthenticated" }
+    public var isHungry: Bool { status == "unauthenticated" || copilot == "no_access" }
 }
 
 public struct MindReply: Sendable, Equatable {
@@ -25,6 +26,9 @@ public enum MindError: Error, Equatable {
     case badBody(String)
     /// The kernel is up but cannot think: no Copilot sign-in. The creature shows this as "hungry".
     case hungry(String)
+    case noCopilot
+    case toolsMissing
+    case serviceFailed(Int32)
 }
 
 public struct MindClient: Sendable {
@@ -35,6 +39,7 @@ public struct MindClient: Sendable {
         self.baseURL = baseURL
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = timeout
+        cfg.timeoutIntervalForResource = timeout
         self.session = URLSession(configuration: cfg)
     }
 
@@ -45,11 +50,15 @@ public struct MindClient: Sendable {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw MindError.badBody(String(decoding: data.prefix(200), as: UTF8.self))
         }
+        guard let status = obj["status"] as? String, ["ok", "unauthenticated"].contains(status) else {
+            throw MindError.badBody("Mind is not ready")
+        }
         return MindHealth(
-            status: obj["status"] as? String ?? "",
+            status: status,
             version: obj["version"] as? String ?? "",
             model: obj["model"] as? String ?? "",
-            agentCount: (obj["agents"] as? [Any])?.count ?? 0
+            agentCount: (obj["agents"] as? [Any])?.count ?? 0,
+            copilot: obj["copilot"] as? String ?? ""
         )
     }
 
@@ -57,7 +66,10 @@ public struct MindClient: Sendable {
     /// so the app starts it and hands the person the code. Returns (user_code, verification_uri).
     public func startLogin() async throws -> (code: String, url: URL) {
         let obj = try await postJSON("/login")
-        guard let code = obj["user_code"] as? String, let u = obj["verification_uri"] as? String, let url = URL(string: u) else {
+        if Self.hasNoCopilot(obj) { throw MindError.noCopilot }
+        guard let code = obj["user_code"] as? String, !code.isEmpty,
+              let u = obj["verification_uri"] as? String, let url = URL(string: u),
+              url.scheme?.lowercased() == "https", url.host != nil else {
             throw MindError.badBody(String(describing: obj["error"] ?? obj))
         }
         return (code, url)
@@ -65,8 +77,18 @@ public struct MindClient: Sendable {
 
     /// Ask the kernel whether the device-code sign-in finished: "pending", "success"/"ok", or "expired"/"error".
     public func loginPoll() async throws -> String {
+        try await loginProgress().status
+    }
+
+    public func loginProgress() async throws -> LoginProgress {
         let obj = try await postJSON("/login/poll")
-        return obj["status"] as? String ?? (obj["error"] != nil ? "error" : "pending")
+        let error = obj["error"] as? String
+        let noCopilot = Self.hasNoCopilot(obj)
+        guard let status = obj["status"] as? String ?? ((error != nil || noCopilot) ? "error" : nil),
+              ["pending", "ok", "success", "expired", "error"].contains(status.lowercased()) else {
+            throw MindError.badBody("Missing sign-in result")
+        }
+        return LoginProgress(status: status, error: noCopilot ? (error ?? "NO_COPILOT_ACCESS") : error)
     }
 
     private func postJSON(_ path: String) async throws -> [String: Any] {
@@ -101,6 +123,7 @@ public struct MindClient: Sendable {
         guard let http = resp as? HTTPURLResponse else { throw MindError.unreachable(baseURL.absoluteString) }
         let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         let err = (obj["error"] as? String) ?? ""
+        if Self.hasNoCopilot(obj) { throw MindError.noCopilot }
         let e = err.lowercased()
         if http.statusCode == 401 || e.contains("sign in") || e.contains("not authenticated") || e.contains("token") {
             throw MindError.hungry(err.isEmpty ? "HTTP \(http.statusCode)" : err)
@@ -118,6 +141,11 @@ public struct MindClient: Sendable {
         do { return try await session.data(from: baseURL.appendingPathComponent(path)) }
         catch { throw MindError.unreachable(error.localizedDescription) }
     }
+
+    private static func hasNoCopilot(_ obj: [String: Any]) -> Bool {
+        obj["no_copilot_access"] as? Bool == true ||
+            (obj["error"] as? String)?.uppercased().hasPrefix("NO_COPILOT_ACCESS") == true
+    }
 }
 
 /// Attach-or-launch. Candidates in order: `OPENRAPPTER_MIND`, the app's own kernel on :18790, the grail default :7071.
@@ -128,6 +156,9 @@ public struct MindRunner {
     public var kernelHome: URL          // ~/.openrappter/kernel (GODD)
     public var ownPort: Int = 18790
     public var log: @Sendable (String) -> Void = { _ in }
+    public var serviceURL: URL?
+    public var command: ([String]) -> Int32 = MindRunner.launchctl
+    public var toolsReady: () -> Bool = RuntimeTools.available
 
     public init(kernelDir: URL, kernelHome: URL? = nil, env: [String: String] = ProcessInfo.processInfo.environment) {
         self.kernelDir = kernelDir
@@ -179,9 +210,37 @@ public struct MindRunner {
                 log("own kernel healthy v\(h.version)")
                 return (MindClient(baseURL: own.baseURL), h)
             }
+
             try? await Task.sleep(for: .seconds(2))
         }
         throw MindError.unreachable("own kernel did not answer /health within \(Int(wait))s")
+    }
+
+    /// An installed or already loaded mind may simply be starting. Never bounce it to discover it.
+    public func prepareService() throws {
+        let domain = "gui/\(getuid())"
+        let loaded = command(["print", "\(domain)/\(Self.serviceLabel)"]) == 0
+        if loaded { return }
+        if serviceInstalled {
+            let status = command(["bootstrap", domain, launchAgentURL.path])
+            guard status == 0 else { throw MindError.serviceFailed(status) }
+            return
+        }
+        guard toolsReady() else { throw MindError.toolsMissing }
+        try installService()
+    }
+
+    public func findMind(attempts: Int = 120,
+                         sleep: (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }) async throws -> (MindClient, MindHealth) {
+        if let attached = await attach() { return attached }
+        try prepareService()
+        let own = MindClient(baseURL: URL(string: "http://127.0.0.1:\(ownPort)")!, timeout: 3)
+        for _ in 0..<attempts {
+            try Task.checkCancellation()
+            if let health = try? await own.health() { return (MindClient(baseURL: own.baseURL), health) }
+            try await sleep(2)
+        }
+        throw MindError.unreachable("Mind did not become ready")
     }
 }
 
@@ -190,12 +249,13 @@ public struct MindRunner {
 extension MindRunner {
     public static let serviceLabel = "com.openrappter.kernel"
     public var launchAgentURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(Self.serviceLabel).plist")
+        serviceURL ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(Self.serviceLabel).plist")
     }
 
     /// Copies kernel.json + run.sh into the kernel home (so the service does not depend on where the app lives),
     /// writes the LaunchAgent, and loads it. KeepAlive restarts it; RunAtLoad starts it at login. Never touches :7071.
     public func installService() throws {
+        guard toolsReady() else { throw MindError.toolsMissing }
         let fm = FileManager.default
         let dst = kernelHome.appendingPathComponent("launcher")
         try fm.createDirectory(at: dst, withIntermediateDirectories: true)
@@ -218,19 +278,20 @@ extension MindRunner {
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try fm.createDirectory(at: launchAgentURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: launchAgentURL, options: .atomic)
-        _ = Self.launchctl(["bootout", "gui/\(getuid())/\(Self.serviceLabel)"])   // reload if present; harmless otherwise
-        let r = Self.launchctl(["bootstrap", "gui/\(getuid())", launchAgentURL.path])
+        _ = command(["bootout", "gui/\(getuid())/\(Self.serviceLabel)"])
+        let r = command(["bootstrap", "gui/\(getuid())", launchAgentURL.path])
         log("service \(Self.serviceLabel) bootstrap exit \(r)")
+        guard r == 0 else { throw MindError.serviceFailed(r) }
     }
 
     public func removeService() {
-        _ = Self.launchctl(["bootout", "gui/\(getuid())/\(Self.serviceLabel)"])
+        _ = command(["bootout", "gui/\(getuid())/\(Self.serviceLabel)"])
         try? FileManager.default.removeItem(at: launchAgentURL)
     }
 
     public var serviceInstalled: Bool { FileManager.default.fileExists(atPath: launchAgentURL.path) }
 
-    static func launchctl(_ args: [String]) -> Int32 {
+    public static func launchctl(_ args: [String]) -> Int32 {
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/launchctl"); p.arguments = args
         p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
         do { try p.run(); p.waitUntilExit(); return p.terminationStatus } catch { return -1 }

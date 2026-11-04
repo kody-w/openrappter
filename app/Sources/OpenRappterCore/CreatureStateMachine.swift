@@ -1,0 +1,531 @@
+import Foundation
+
+public enum TalkMode: Equatable, Sendable { case ask, dictate, screen }
+public enum CreatureFailure: Error, Equatable, Sendable { case unavailable, hungry, noCopilot, toolsMissing }
+public enum CreatureLane: Hashable { case lookup, retry, login, turn, other }
+public enum CreatureWake: Equatable {
+    case rest(Int), poll(Int), retry(Int)
+}
+
+public enum CreatureEvent: Equatable {
+    case findMind
+    case found(Int, Result<MindHealth, CreatureFailure>)
+    case signIn
+    case loginStarted(Int, Result<LoginCode, CreatureFailure>)
+    case loginPolled(Int, Result<LoginProgress, CreatureFailure>)
+    case loginConfirmed(Int, Result<MindHealth, CreatureFailure>)
+    case keyDown(TalkMode), keyUp(TalkMode)
+    case authorized(Int, HearingPermission)
+    case earsStarted(Int, Bool)
+    case partial(Int, String), heard(Int, String)
+    case submit(TalkMode, String)
+    case screenRead(Int, Result<String, CreatureFailure>)
+    case dictated(Int, Bool)
+    case replied(Int, Result<MindReply, CreatureFailure>)
+    case spoken(Int), wake(CreatureWake)
+    case needsChanged([Need])
+    case answer(Need, NeedOption), later(Need)
+    case installAtLogin, installedAtLogin(Int, Bool)
+    case stopAtLogin, showHelp, connectedHelper(Bool), moveToApplications
+    case shutdown
+}
+
+public enum HearingPermission: Equatable { case allowed, microphone, speech }
+
+public struct LoginCode: Equatable, Sendable {
+    public let code: String
+    public let url: URL
+    public init(code: String, url: URL) { self.code = code; self.url = url }
+}
+
+public struct LoginProgress: Equatable, Sendable {
+    public let status: String
+    public let error: String?
+    public init(status: String, error: String? = nil) { self.status = status; self.error = error }
+    public var noCopilot: Bool { error?.uppercased().contains("NO_COPILOT_ACCESS") == true }
+    public var denied: Bool { error?.lowercased().contains("access_denied") == true }
+    public var lost: Bool { error?.lowercased().contains("no login in progress") == true }
+}
+
+public enum CreatureEffect: Equatable {
+    case cancel(CreatureLane)
+    case findMind(Int), startLogin(Int), pollLogin(Int), confirmLogin(Int)
+    case showCode(LoginCode), restoreClipboard
+    case authorize(Int), startEars(Int), stopEars(Int), cancelEars, stopVoice
+    case chat(Int, String, String?, [[String: String]])
+    case readScreen(Int, String), dictate(Int, String), speak(Int, String)
+    case wait(TimeInterval, CreatureWake)
+    case open(URL), answer(Need, NeedOption), later(Need)
+    case installAtLogin(Int), stopAtLogin, installTools
+
+    public var lane: CreatureLane {
+        switch self {
+        case .findMind: return .lookup
+        case .startLogin, .pollLogin, .confirmLogin: return .login
+        case .authorize, .startEars, .stopEars, .chat, .readScreen, .dictate, .speak: return .turn
+        case .wait(_, .rest): return .turn
+        case .wait(_, .poll): return .login
+        case .wait(_, .retry): return .retry
+        default: return .other
+        }
+    }
+}
+
+public struct CreaturePresentation: Equatable {
+    public var posture: Posture = .idle
+    public var line = "Hold Option and Space and talk to me."
+    public var need: Need?
+    public var hungry = false
+    public var expanded = false
+}
+
+/// A value-only reducer. All waiting and Mac work is returned as effects, never performed here.
+public struct CreatureStateMachine {
+    private enum MindState { case missing, finding, hungry, noCopilot, ready, toolsMissing }
+    private enum TurnStage { case authorizing, starting, listening, transcribing, asking, speaking, settling }
+    private struct Turn {
+        var id: Int
+        var mode: TalkMode
+        var stage: TurnStage
+        var line: String
+        var released = false
+        var question = ""
+    }
+    private struct Login {
+        var id: Int
+        var code: LoginCode?
+        var polls = 0
+        var restarts = 0
+        var confirming = false
+    }
+    public private(set) var presentation = CreaturePresentation()
+    public private(set) var history: [[String: String]] = []
+    public private(set) var sessionId: String?
+    public var isWorking: Bool { !stopped && (mind == .finding || turn != nil) }
+    private var mind: MindState = .missing
+    private var lookupID = 0
+    private var serial = 0
+    private var turn: Turn?
+    private var login: Login?
+    private var needs: [Need] = []
+    private var blocked: Need?
+    private var quiet = true
+    private var signInAfterFinding = false
+    private var stopped = false
+    public init() {}
+
+    private mutating func nextID() -> Int { serial += 1; return serial }
+
+    @discardableResult
+    public mutating func send(_ event: CreatureEvent) -> [CreatureEffect] {
+        guard !stopped else { return [] }
+        let effects = reduce(event)
+        render()
+        return effects
+    }
+
+    private mutating func reduce(_ event: CreatureEvent) -> [CreatureEffect] {
+        switch event {
+        case .findMind:
+            return beginFinding()
+        case .found(let id, let result):
+            guard id == lookupID, mind == .finding else { return [] }
+            switch result {
+            case .success(let health):
+                mind = health.copilot == "no_access" ? .noCopilot : health.isHungry ? .hungry : .ready
+                if signInAfterFinding {
+                    signInAfterFinding = false
+                    if mind != .ready { return beginLogin() }
+                }
+                return []
+            case .failure(let failure):
+                mind = failure == .toolsMissing ? .toolsMissing : .missing
+                signInAfterFinding = false
+                return failure == .toolsMissing ? [] : [.wait(30, .retry(id))]
+            }
+        case .signIn:
+            quiet = false
+            blocked = nil
+            if let code = login?.code { return [.showCode(code)] }
+            if login != nil { return [] }
+            if mind == .missing || mind == .finding || mind == .toolsMissing {
+                signInAfterFinding = true
+                return mind == .finding ? [] : beginFinding()
+            }
+            return beginLogin()
+        case .loginStarted(let id, let result):
+            guard login?.id == id else { return [] }
+            switch result {
+            case .success(let code):
+                login?.code = code
+                return [.showCode(code), .wait(2, .poll(id))]
+            case .failure(let error):
+                if error == .noCopilot { mind = .noCopilot }
+                return failLogin(error == .noCopilot ? Self.copilotWords :
+                    "I couldn't start the sign-in. Choose Sign me in to try again; if it keeps happening, choose Restart OpenRappter.")
+            }
+        case .loginPolled(let id, let result):
+            guard login?.id == id else { return [] }
+            guard case .success(let progress) = result else {
+                return failLogin("I lost the sign-in page. Choose Sign me in to try again.")
+            }
+            if progress.noCopilot { mind = .noCopilot; return failLogin(Self.copilotWords) }
+            if progress.denied { return failLogin("You cancelled on GitHub. Choose Sign me in to try again.") }
+            if progress.lost, login?.restarts == 0 {
+                login?.restarts = 1
+                login?.code = nil
+                return [.restoreClipboard, .startLogin(id)]
+            }
+            switch progress.status.lowercased() {
+            case "ok", "success": login?.confirming = true; return [.confirmLogin(id)]
+            case "expired": return failLogin("That code expired. Choose Sign me in for a fresh one.")
+            case "error": return failLogin("GitHub couldn't finish signing you in. Choose Sign me in to try again.")
+            case "pending":
+                login?.polls += 1
+                if (login?.polls ?? 0) >= 450 { return failLogin("I stopped waiting. Choose Sign me in to try again.") }
+                return [.wait(2, .poll(id))]
+            default:
+                return failLogin("I couldn't read the sign-in answer. Choose Sign me in to try again.")
+            }
+        case .loginConfirmed(let id, let result):
+            guard login?.id == id, login?.confirming == true else { return [] }
+            login?.confirming = false
+            guard case .success(let health) = result else {
+                return failLogin("I couldn't check your sign-in. Choose Sign me in to try again.")
+            }
+            if health.copilot == "no_access" { mind = .noCopilot; return failLogin(Self.copilotWords) }
+            guard !health.isHungry else { return [.wait(2, .poll(id))] }
+            login = nil; blocked = nil; mind = .ready
+            // Queued cards are projected immediately, not at the next folder tick.
+            return [.cancel(.login), .restoreClipboard]
+        case .keyDown(let mode):
+            if let turn, turn.stage != .speaking && turn.stage != .settling { return [] }
+            let id = nextID()
+            turn = Turn(id: id, mode: mode, stage: .authorizing, line: "Getting ready to listen.")
+            blocked = nil
+            return [.cancel(.turn), .stopVoice, .authorize(id)]
+        case .keyUp(let mode):
+            guard var current = turn, current.mode == mode else { return [] }
+            switch current.stage {
+            case .authorizing, .starting:
+                current.released = true; turn = current
+                return []
+            case .listening:
+                current.stage = .transcribing; current.line = "Finishing your words."; turn = current
+                return [.stopEars(current.id)]
+            default: return []
+            }
+        case .authorized(let id, let permission):
+            guard let current = turn, current.id == id, current.stage == .authorizing else { return [] }
+            if current.released { turn = nil; return [] }
+            guard permission == .allowed else {
+                turn = nil
+                blocked = Self.permissionCard(permission == .microphone ? .microphone : .speech)
+                return []
+            }
+            turn?.stage = .starting
+            return [.startEars(id)]
+        case .earsStarted(let id, let success):
+            guard let current = turn, current.id == id, current.stage == .starting else { return [] }
+            guard success else {
+                turn = nil
+                blocked = Self.card("microphone-unavailable", "I can't hear a microphone. Choose Open Sound, pick an input, then try again.",
+                                    "Open Sound", "open:x-apple.systempreferences:com.apple.Sound-Settings.extension")
+                return []
+            }
+            if current.released { turn?.stage = .transcribing; return [.stopEars(id)] }
+            turn?.stage = .listening
+            turn?.line = current.mode == .dictate ? "Listening. I'll type it where your cursor is." : "Listening."
+            return []
+        case .partial(let id, let text):
+            guard turn?.id == id, turn?.stage == .listening else { return [] }
+            turn?.line = text
+            return []
+        case .heard(let id, let text):
+            guard let current = turn, current.id == id, current.stage == .transcribing else { return [] }
+            return act(id: id, mode: current.mode, text: text)
+        case .submit(let mode, let text):
+            if let turn, turn.stage != .speaking && turn.stage != .settling { return [] }
+            let id = nextID()
+            turn = Turn(id: id, mode: mode, stage: .asking, line: text)
+            return [.cancel(.turn), .stopVoice] + act(id: id, mode: mode, text: text)
+        case .screenRead(let id, let result):
+            guard turn?.id == id else { return [] }
+            switch result {
+            case .success(let text):
+                return ask(id: id, question: turn?.question ?? "", screen: text)
+            case .failure:
+                turn = nil; blocked = Self.permissionCard(.screen)
+                return []
+            }
+        case .dictated(let id, let success):
+            guard turn?.id == id else { return [] }
+            guard success else { turn = nil; blocked = Self.permissionCard(.typing); return [] }
+            turn?.stage = .settling
+            return [.wait(1, .rest(id))]
+        case .replied(let id, let result):
+            guard let current = turn, current.id == id, current.stage == .asking else { return [] }
+            switch result {
+            case .success(let reply):
+                sessionId = reply.sessionId ?? sessionId
+                history += [["role": "user", "content": current.question], ["role": "assistant", "content": reply.text]]
+                if history.count > 20 { history.removeFirst(history.count - 20) }
+                turn?.stage = .speaking; turn?.line = reply.text
+                return [.speak(id, OwnerWords.plain(reply.voice.isEmpty ? reply.text : reply.voice))]
+            case .failure(let error):
+                turn = nil; quiet = false
+                if error == .noCopilot { mind = .noCopilot; blocked = nil }
+                else if error == .hungry { mind = .hungry; blocked = nil }
+                else {
+                    mind = .missing
+                    blocked = Self.card("retry-mind", "I couldn't reach my mind. Choose Find my mind to try again.",
+                                        "Find my mind", "creature:find")
+                }
+                return []
+            }
+        case .spoken(let id):
+            guard turn?.id == id, turn?.stage == .speaking else { return [] }
+            turn?.stage = .settling
+            return [.wait(2, .rest(id))]
+        case .wake(.rest(let id)):
+            guard turn?.id == id, turn?.stage == .settling else { return [] }
+            turn = nil
+            return []
+        case .wake(.poll(let id)):
+            return login?.id == id ? [.pollLogin(id)] : []
+        case .wake(.retry(let id)):
+            guard lookupID == id, mind == .missing else { return [] }
+            let wasQuiet = quiet
+            let effects = beginFinding()
+            quiet = wasQuiet
+            return effects
+        case .needsChanged(let cards):
+            needs = cards
+            return []
+        case .answer(let need, let option):
+            needs.removeAll { $0.id == need.id }
+            if need.id.hasPrefix("creature:") {
+                switch option.action {
+                case "creature:find": return beginFinding()
+                case "creature:sign-in": return reduce(.signIn)
+                case "creature:install-login": return reduce(.installAtLogin)
+                case "creature:show-code": return login?.code.map { [.showCode($0)] } ?? []
+                case "creature:cancel-login":
+                    login = nil; quiet = true; blocked = nil
+                    return [.cancel(.login), .restoreClipboard]
+                case "creature:install-tools": return [.installTools]
+                default:
+                    blocked = nil; quiet = true
+                    if let action = option.action, action.hasPrefix("open:"),
+                       let url = URL(string: String(action.dropFirst(5))) { return [.open(url)] }
+                    return []
+                }
+            }
+            var effects: [CreatureEffect] = [.answer(need, option)]
+            if let action = option.action, action.hasPrefix("open:"),
+               let url = URL(string: String(action.dropFirst(5))) { effects.append(.open(url)) }
+            return effects
+        case .later(let need):
+            needs.removeAll { $0.id == need.id }
+            if need.id.hasPrefix("creature:") {
+                blocked = nil; quiet = true
+                if login != nil { login = nil; return [.cancel(.login), .restoreClipboard] }
+                return []
+            }
+            return [.later(need)]
+        case .installAtLogin:
+            let id = nextID()
+            turn = Turn(id: id, mode: .ask, stage: .asking, line: "Setting up my return when you sign in.")
+            return [.cancel(.turn), .stopVoice, .installAtLogin(id)]
+        case .installedAtLogin(let id, let success):
+            guard turn?.id == id else { return [] }
+            turn = nil
+            if !success {
+                blocked = Self.card("login-setting", "I couldn't set that up. Choose Try again; if it keeps happening, choose Restart OpenRappter.",
+                                    "Try again", "creature:install-login")
+            } else { quiet = true }
+            return []
+        case .stopAtLogin:
+            quiet = true; login = nil; turn = nil
+            return [.cancel(.retry), .cancel(.lookup), .cancel(.login), .cancel(.turn),
+                    .restoreClipboard, .stopVoice, .cancelEars, .stopAtLogin]
+        case .showHelp:
+            blocked = Self.card("help", "Hold Option and Space to talk. Add Control to type for you, or Shift to ask about your screen.",
+                                "Got it", "creature:dismiss", dismiss: false)
+            return []
+        case .connectedHelper(let success):
+            blocked = Self.card("helper", success ? "Your coding helper's questions will appear here. Choose Got it to return." :
+                "I couldn't connect your coding helper. Choose Restart OpenRappter, then try again.",
+                                "Got it", "creature:dismiss", dismiss: false)
+            return []
+        case .moveToApplications:
+            blocked = Self.card("move", "Move OpenRappter to your Applications folder, then open it there so I can return when you sign in.",
+                                "Open Applications", "open:file:///Applications", dismiss: true)
+            return []
+        case .shutdown:
+            stopped = true; login = nil; turn = nil
+            return [.cancel(.retry), .cancel(.lookup), .cancel(.login), .cancel(.turn),
+                    .restoreClipboard, .cancelEars, .stopVoice]
+        }
+    }
+
+    private mutating func beginFinding() -> [CreatureEffect] {
+        let id = nextID()
+        lookupID = id; mind = .finding; blocked = nil; quiet = false
+        turn = nil; login = nil
+        return [.cancel(.lookup), .cancel(.retry), .cancel(.turn), .cancel(.login),
+                .restoreClipboard, .cancelEars, .stopVoice, .findMind(id)]
+    }
+
+    private mutating func beginLogin() -> [CreatureEffect] {
+        let id = nextID()
+        login = Login(id: id); blocked = nil
+        return [.cancel(.login), .restoreClipboard, .startLogin(id)]
+    }
+
+    private mutating func failLogin(_ words: String) -> [CreatureEffect] {
+        login = nil
+        blocked = Self.card("sign-in", words, "Sign me in", "creature:sign-in")
+        // Starting again must re-find a mind whose sign-in route failed.
+        if mind != .noCopilot { mind = .missing }
+        return [.cancel(.login), .restoreClipboard]
+    }
+
+    private mutating func act(id: Int, mode: TalkMode, text: String) -> [CreatureEffect] {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { turn = nil; return [] }
+        turn?.question = text; turn?.line = text; turn?.stage = .asking
+        switch mode {
+        case .ask: return ask(id: id, question: text, screen: nil)
+        case .screen: turn?.line = "Reading your screen."; return [.readScreen(id, text)]
+        case .dictate: turn?.line = text; return [.dictate(id, text)]
+        }
+    }
+
+    private mutating func ask(id: Int, question: String, screen: String?) -> [CreatureEffect] {
+        guard mind == .ready else { turn = nil; quiet = false; return [] }
+        let message = screen.map { "\(question)\n\n\($0)\n\nAnswer in under 60 words." } ??
+            "\(question)\n\nAnswer in under 60 words, then end with |||VOICE||| and a one or two sentence spoken version."
+        return [.chat(id, message, sessionId, history)]
+    }
+
+    private mutating func render() {
+        var view = CreaturePresentation()
+        view.hungry = mind == .hungry || mind == .noCopilot
+        if let turn {
+            view.posture = turn.stage == .listening ? .listening :
+                (turn.stage == .speaking || turn.stage == .settling) ? .speaking : .thinking
+            view.line = OwnerWords.plain(turn.line); view.expanded = true
+        } else {
+            let attention: Need?
+            if let top = needs.first { attention = top }
+            else if let blocked { attention = blocked }
+            else if let login {
+                attention = login.code.map {
+                    Self.card("signing-in", "Your code \($0.code) is on the clipboard. Paste it on the GitHub page I opened.",
+                              "Open GitHub", "creature:show-code", dismiss: false,
+                              extra: NeedOption(label: "Cancel sign-in", action: "creature:cancel-login"))
+                } ?? Self.card("signing-in", "Getting your sign-in code. Choose Cancel sign-in to stop waiting.",
+                               "Cancel sign-in", "creature:cancel-login", dismiss: false)
+            } else if !quiet {
+                switch mind {
+                case .missing:
+                    attention = Self.card("mind", "I can't find my mind. Choose Find my mind to try again.",
+                                          "Find my mind", "creature:find")
+                case .hungry, .noCopilot:
+                    attention = Self.card("mind", mind == .noCopilot ? Self.copilotWords :
+                        "I can't think yet. Choose Sign me in to feed me.", "Sign me in", "creature:sign-in")
+                case .toolsMissing:
+                    attention = Self.card("tools", "I need Apple's tools to get ready. Choose Install, finish Apple's steps, then choose Find my mind.",
+                                          "Install", "creature:install-tools",
+                                          extra: NeedOption(label: "Find my mind", action: "creature:find"))
+                default: attention = nil
+                }
+            } else { attention = nil }
+            if let attention {
+                view.need = OwnerWords.plain(attention)
+                view.line = view.need?.title ?? ""
+                view.posture = .needsYou; view.expanded = true
+            } else if mind == .finding && !quiet {
+                view.posture = .thinking; view.line = "Finding my mind."; view.expanded = true
+            }
+        }
+        presentation = view
+    }
+
+    public enum Permission: CaseIterable { case microphone, speech, typing, screen, texts }
+    public static func permissionCard(_ permission: Permission) -> Need {
+        let pane: String, words: String
+        switch permission {
+        case .microphone: pane = "Microphone"; words = "To hear you, I need permission to use your microphone."
+        case .speech: pane = "SpeechRecognition"; words = "To understand you, I need permission to turn speech into words."
+        case .typing: pane = "Accessibility"; words = "To type for you, I need permission to use your keyboard."
+        case .screen: pane = "ScreenCapture"; words = "To read your screen, I need permission to see it."
+        case .texts: pane = "AllFiles"; words = "To read your texts and link your notes, I need your permission."
+        }
+        return card("permission-\(pane)", words + " Choose Open the setting, then allow OpenRappter.",
+                    "Open the setting", "open:x-apple.systempreferences:com.apple.preference.security?Privacy_\(pane)")
+    }
+
+    private static let copilotWords = "This GitHub account has no Copilot. Enable Copilot for it, then choose Sign me in."
+    private static func card(_ id: String, _ words: String, _ label: String, _ action: String,
+                             dismiss: Bool = true, extra: NeedOption? = nil) -> Need {
+        var options = [NeedOption(label: label, rec: true, action: action)]
+        if let extra { options.append(extra) }
+        if dismiss { options.append(NeedOption(label: "Not now", action: "creature:dismiss")) }
+        return Need(id: "creature:\(id)", title: words, opts: options, source: "openrappter")
+    }
+}
+
+/// Effects have one injectable boundary, so tests can supply a mind, ears, voice, and a virtual clock.
+@MainActor
+public final class CreatureDriver {
+    public private(set) var machine: CreatureStateMachine
+    public var onChange: ((CreaturePresentation) -> Void)?
+    private let perform: (CreatureEffect) async -> CreatureEvent?
+    private var tasks: [UUID: (CreatureLane, Task<Void, Never>)] = [:]
+    private var settled: [UUID: CheckedContinuation<Void, Never>] = [:]
+    public init(machine: CreatureStateMachine = CreatureStateMachine(),
+                perform: @escaping (CreatureEffect) async -> CreatureEvent?) {
+        self.machine = machine; self.perform = perform
+    }
+    public func send(_ event: CreatureEvent) {
+        let effects = machine.send(event)
+        onChange?(machine.presentation)
+        for effect in effects {
+            if case .cancel(let lane) = effect {
+                for (id, (kind, task)) in tasks where kind == lane { task.cancel(); tasks.removeValue(forKey: id) }
+                continue
+            }
+            let id = UUID()
+            let task = Task { [weak self, perform] in
+                guard !Task.isCancelled else { return }
+                let event = await perform(effect)
+                guard !Task.isCancelled, let self else { return }
+                self.tasks.removeValue(forKey: id)
+                if let event { self.send(event) }
+            }
+            tasks[id] = (effect.lane, task)
+        }
+        if !machine.isWorking { finishWaiting() }
+    }
+    public func waitUntilSettled() async {
+        guard machine.isWorking, !Task.isCancelled else { return }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { settled[id] = $0 }
+        } onCancel: {
+            Task { @MainActor in self.settled.removeValue(forKey: id)?.resume() }
+        }
+    }
+    public func cancelAll() {
+        tasks.values.forEach { $0.1.cancel() }
+        tasks.removeAll()
+        finishWaiting()
+    }
+    private func finishWaiting() {
+        let pending = settled.values
+        settled.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}

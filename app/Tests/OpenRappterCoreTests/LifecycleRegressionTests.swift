@@ -10,30 +10,34 @@ func testDirectory(_ test: XCTestCase) throws -> URL {
 }
 
 final class MindStartupTests: XCTestCase {
-    func runner(_ dir: URL) -> MindRunner {
-        var runner = MindRunner(kernelDir: dir.appendingPathComponent("bundle"), kernelHome: dir.appendingPathComponent("mind"), env: [:])
+    func runner(_ dir: URL) throws -> MindRunner {
+        let bundle = dir.appendingPathComponent("bundle")
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        for file in ["kernel.json", "run.sh"] { try Data("fixture-\(file)".utf8).write(to: bundle.appendingPathComponent(file)) }
+        var runner = MindRunner(kernelDir: bundle, kernelHome: dir.appendingPathComponent("mind"), env: ["HOME": dir.path])
         runner.serviceURL = dir.appendingPathComponent("com.openrappter.kernel.plist")
         return runner
     }
 
     func testExistingServiceWaitsWithoutReinstalling() throws {
         let dir = try testDirectory(self)
-        var runner = runner(dir)
+        var runner = try runner(dir)
         let saved = Data("Already starting".utf8)
         try saved.write(to: runner.launchAgentURL)
         runner.command = { args in XCTAssertEqual(args.first, "print", "An existing service must not be changed"); return 0 }
-        runner.toolsReady = { XCTFail("Do not probe or reinstall while starting"); return false }
+        runner.toolsReady = { true }
         try runner.prepareService()
         XCTAssertEqual(try Data(contentsOf: runner.launchAgentURL), saved)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: runner.kernelHome.path))
+        XCTAssertEqual(try Data(contentsOf: runner.kernelHome.appendingPathComponent("launcher/run.sh")),
+                       Data("fixture-run.sh".utf8))
     }
 
     func testLoadedServiceIsNotReinstalled() throws {
         let dir = try testDirectory(self)
-        var runner = runner(dir)
+        var runner = try runner(dir)
         var calls: [[String]] = []
         runner.command = { calls.append($0); return 0 }
-        runner.toolsReady = { XCTFail("A loaded job is already preparing its mind"); return false }
+        runner.toolsReady = { true }
         try runner.prepareService()
         XCTAssertEqual(calls.count, 1)
         XCTAssertEqual(calls.first?.first, "print")
@@ -42,12 +46,12 @@ final class MindStartupTests: XCTestCase {
 
     func testExistingUnloadedServiceIsLoadedWithoutReplacingFiles() throws {
         let dir = try testDirectory(self)
-        var runner = runner(dir)
+        var runner = try runner(dir)
         let saved = Data("Already installed".utf8)
         try saved.write(to: runner.launchAgentURL)
         var calls: [[String]] = []
         runner.command = { calls.append($0); return $0.first == "print" ? 1 : 0 }
-        runner.toolsReady = { XCTFail("Loading the saved job is not a new setup"); return false }
+        runner.toolsReady = { true }
         try runner.prepareService()
         XCTAssertEqual(calls.map { $0[0] }, ["print", "bootstrap"])
         XCTAssertEqual(try Data(contentsOf: runner.launchAgentURL), saved)
@@ -55,21 +59,21 @@ final class MindStartupTests: XCTestCase {
 
     func testServiceFailureNeverReportsSuccess() throws {
         let dir = try testDirectory(self)
-        var runner = runner(dir)
+        var runner = try runner(dir)
         try FileManager.default.createDirectory(at: runner.kernelDir, withIntermediateDirectories: true)
         for file in ["kernel.json", "run.sh"] { try Data("fixture".utf8).write(to: runner.kernelDir.appendingPathComponent(file)) }
         var calls: [[String]] = []
         runner.toolsReady = { true }
-        runner.command = { calls.append($0); return $0.first == "bootstrap" ? 9 : 0 }
+        runner.command = { calls.append($0); return $0.first == "print" ? 1 : 9 }
         XCTAssertThrowsError(try runner.installService()) { error in
             XCTAssertEqual(error as? MindError, .serviceFailed(9))
         }
-        XCTAssertEqual(calls.map { $0[0] }, ["bootout", "bootstrap"])
+        XCTAssertEqual(calls.map { $0[0] }, ["print", "bootstrap"])
     }
 
     func testMissingToolsNeverInstallsKeepAlive() throws {
         let dir = try testDirectory(self)
-        var runner = runner(dir)
+        var runner = try runner(dir)
         runner.command = { args in XCTAssertEqual(args.first, "print"); return 1 }
         runner.toolsReady = { false }
         XCTAssertThrowsError(try runner.prepareService()) { error in XCTAssertEqual(error as? MindError, .toolsMissing) }

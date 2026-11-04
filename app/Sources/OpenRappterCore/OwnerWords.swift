@@ -1,6 +1,6 @@
 import Foundation
 
-/// External answers and caller descriptions get the same plain-language boundary as our own copy.
+/// Only for the creature's own machinery-derived copy, never another speaker's words.
 public enum OwnerWords {
     private static let replacements = [
         "kernel": "mind", "launchd": "sign-in helper", "plist": "saved setting",
@@ -14,12 +14,5 @@ public enum OwnerWords {
             result.replacingOccurrences(of: "\\b\(NSRegularExpression.escapedPattern(for: pair.key))\\b",
                                         with: pair.value, options: [.regularExpression, .caseInsensitive])
         }
-    }
-    public static func plain(_ need: Need) -> Need {
-        var value = need
-        value.title = plain(value.title)
-        value.ctx = value.ctx.map(plain)
-        value.opts = value.opts.map { var option = $0; option.label = plain(option.label); return option }
-        return value
     }
 }

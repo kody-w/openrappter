@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-public enum LoginItemResult: Equatable { case installed, unchanged, moveRequired, skipped }
+public enum LoginItemResult: Equatable, Sendable { case installed, unchanged, moveRequired, skipped }
 
 public struct LoginItem {
     public static let label = Doctor.loginItemLabel
@@ -10,6 +10,7 @@ public struct LoginItem {
     public var executable: String
     public var env: [String: String]
     public var command: ([String]) -> Int32
+    public var startupPreference: StartupPreference { StartupPreference(home: home) }
 
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser,
                 bundle: URL = Bundle.main.bundleURL, executable: String = Bundle.main.executablePath ?? "",
@@ -26,11 +27,15 @@ public struct LoginItem {
             path.hasPrefix(home.resolvingSymlinksInPath().appendingPathComponent("Applications").path + "/")
     }
 
+    func installationBlock(allowStartup: Bool) -> LoginItemResult? {
+        if env["OPENRAPPTER_NO_LOGIN_ITEM"] != nil || (!allowStartup && startupPreference.isStopped) { return .skipped }
+        if !Self.isStable(bundle, home: home) || !executable.hasPrefix(bundle.path + "/Contents/MacOS/") { return .moveRequired }
+        return nil
+    }
+
     @discardableResult
-    public func install() throws -> LoginItemResult {
-        guard env["OPENRAPPTER_NO_LOGIN_ITEM"] == nil else { return .skipped }
-        guard Self.isStable(bundle, home: home),
-              executable.hasPrefix(bundle.path + "/Contents/MacOS/") else { return .moveRequired }
+    public func install(allowStartup: Bool = false) throws -> LoginItemResult {
+        if let result = installationBlock(allowStartup: allowStartup) { return result }
         let url = Doctor.loginItemURL(home: home)
         let logDir = home.appendingPathComponent(".openrappter")
         try FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
@@ -46,24 +51,30 @@ public struct LoginItem {
             try PropertyListSerialization.data(fromPropertyList: want, format: .xml, options: 0).write(to: url, options: .atomic)
         }
         // Updating our own saved setting must not terminate the job that is writing it.
-        if env["XPC_SERVICE_NAME"] == Self.label { return unchanged ? .unchanged : .installed }
         let domain = "gui/\(getuid())"
         let job = "\(domain)/\(Self.label)"
+        if env["XPC_SERVICE_NAME"] == Self.label {
+            if allowStartup {
+                let status = command(["enable", job])
+                guard status == 0 else { throw MindError.serviceFailed(status) }
+            }
+            return unchanged ? .unchanged : .installed
+        }
         guard command(["enable", job]) == 0 else { throw MindError.serviceFailed(-1) }
         let loaded = command(["print", job]) == 0
-        if unchanged && loaded { return .unchanged }
-        if loaded { _ = command(["bootout", job]) }
+        if loaded { return unchanged ? .unchanged : .installed }
         let status = command(["bootstrap", domain, url.path])
         guard status == 0 else { throw MindError.serviceFailed(status) }
         return .installed
     }
 
     /// Delete the saved setting before stopping the job (which may be this very app).
-    public func remove() throws {
+    public func remove(stopRunning: Bool = true) throws {
         let url = Doctor.loginItemURL(home: home)
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
         let job = "gui/\(getuid())/\(Self.label)"
-        _ = command(["disable", job])
-        _ = command(["bootout", job])
+        let status = command(["disable", job])
+        guard status == 0 else { throw MindError.serviceFailed(status) }
+        if stopRunning { _ = command(["bootout", job]) }
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// The five honest postures. A posture is a state; reactions are one-shot events that release.
 public enum Posture: String, CaseIterable {
@@ -42,6 +43,11 @@ public final class CreatureModel: ObservableObject {
     /// Object to a twin or trust decision from the stream (one tap; the twin learns from it).
     public var onObject: ((Need) -> Void)?
     @Published public var objected: Set<String> = []
+    private var streamSubscription: AnyCancellable?
+
+    public func followStream(_ queue: NeedsQueue) {
+        streamSubscription = queue.$stream.sink { [weak self] in self?.stream = $0 }
+    }
 }
 
 /// Placeholder silhouette until the 3D rappter (rappter-vui) is hosted in the expanded view.

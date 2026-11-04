@@ -278,7 +278,7 @@ final class CreatureStateMachineTests: XCTestCase {
     func testLoginSetupFailureShowsPlainRecovery() {
         var state = ready()
         let id = effectID(state.send(.installAtLogin))
-        state.send(.installedAtLogin(id, false))
+        state.send(.installedAtLogin(id, .failure(.unavailable)))
         let need = state.presentation.need!
         XCTAssertEqual(state.presentation.posture, .needsYou)
         XCTAssertTrue(need.title.contains("Choose Try again"))
@@ -363,13 +363,13 @@ final class CreatureStateMachineTests: XCTestCase {
         }
         var state = ready()
         let id = effectID(state.send(.submit(.ask, "What is a kernel HTTP port?")))
-        assertPlain(state.presentation.line)
+        XCTAssertEqual(state.presentation.line, "What is a kernel HTTP port?")
         let effects = state.send(.replied(id, .success(MindReply(
             text: "The kernel process uses a socket, token and JSON.",
             senses: ["voice": "HTTP port 405"], sessionId: nil, raw: ""))))
-        assertPlain(state.presentation.line)
+        XCTAssertEqual(state.presentation.line, "The kernel process uses a socket, token and JSON.")
         guard case .speak(_, let spoken) = effects.first else { return XCTFail("Expected speech") }
-        assertPlain(spoken)
+        XCTAssertEqual(spoken, "HTTP port 405")
     }
 
     func assertPlain(_ words: String, file: StaticString = #filePath, line: UInt = #line) {

@@ -28,25 +28,42 @@ public enum Doctor {
         home.appendingPathComponent("Library/LaunchAgents/\(loginItemLabel).plist")
     }
 
-    public static func check(env: [String: String] = ProcessInfo.processInfo.environment) async -> DoctorReport {
+    public static func check(env: [String: String] = ProcessInfo.processInfo.environment,
+                             microphone: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .audio),
+                             speech: SFSpeechRecognizerAuthorizationStatus = SFSpeechRecognizer.authorizationStatus()) async -> DoctorReport {
         let mind = await checkMind(address: env["OPENRAPPTER_MIND"] ?? "http://127.0.0.1:18790")
         let home = env["HOME"].map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? FileManager.default.homeDirectoryForCurrentUser
         let checks = [
             mind,
-            microphoneCheck(AVCaptureDevice.authorizationStatus(for: .audio)),
-            speechCheck(SFSpeechRecognizer.authorizationStatus()),
-            loginItemCheck(at: loginItemURL(home: home)),
+            microphoneCheck(microphone),
+            speechCheck(speech),
+            loginItemCheck(at: loginItemURL(home: home), stopped:
+                StartupPreference(home: home).isStopped || env["OPENRAPPTER_NO_LOGIN_ITEM"] != nil),
         ]
+        return report(checks)
+    }
+
+    static func report(_ checks: [DoctorCheck]) -> DoctorReport {
+        let mind = checks[0]
+        let permissions = checks[1...2].map(\.status)
         let next: String
         if mind.status == "unreachable" {
             next = "Open OpenRappter to help me find my mind."
         } else if mind.status == "hungry" {
             next = "Choose Sign in to my mind in OpenRappter to feed me."
-        } else if checks[1].status != "ok" || checks[2].status != "ok" {
+        } else if mind.status == "no-copilot" {
+            next = "Enable Copilot for that GitHub account, or use one that has it, then choose Sign in to my mind."
+        } else if permissions.contains("restricted") {
+            next = "This Mac's rules block permission to hear you; ask whoever manages it."
+        } else if permissions.contains("blocked") {
             next = "Allow OpenRappter to use the microphone and speech recognition in System Settings."
-        } else if checks[3].status != "ok" {
-            next = "Open OpenRappter from your Applications folder so I can return when you sign in."
+        } else if permissions.contains("needed") {
+            next = "Hold Option and Space once in OpenRappter and allow the permission prompts."
+        } else if permissions.contains("unknown") {
+            next = "Open OpenRappter and hold Option and Space to check permission to hear you."
+        } else if !["ok", "off-by-choice"].contains(checks[3].status) {
+            next = "Everything works. To have me return each time this Mac starts, open OpenRappter from your Applications folder once."
         } else {
             next = "Everything is ready; hold Option and Space to talk to me."
         }
@@ -69,6 +86,9 @@ public enum Doctor {
         defer { session.invalidateAndCancel() }
         do {
             let health = try await boundedClient.health()
+            if health.copilot == "no_access" {
+                return DoctorCheck(name: "mind", status: "no-copilot", words: "You're signed in, but that GitHub account has no Copilot.")
+            }
             if health.isHungry {
                 return DoctorCheck(name: "mind", status: "hungry", words: "My mind is here, but I need you to sign in before I can think.")
             }
@@ -111,7 +131,10 @@ public enum Doctor {
         }
     }
 
-    static func loginItemCheck(at url: URL) -> DoctorCheck {
+    static func loginItemCheck(at url: URL, stopped: Bool = false) -> DoctorCheck {
+        if stopped {
+            return DoctorCheck(name: "login-item", status: "off-by-choice", words: "You've told me not to start on my own.")
+        }
         guard FileManager.default.fileExists(atPath: url.path) else {
             return DoctorCheck(name: "login-item", status: "missing", words: "I'm not set to open when you sign in to this Mac.")
         }

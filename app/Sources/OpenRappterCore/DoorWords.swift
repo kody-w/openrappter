@@ -16,10 +16,10 @@ public enum DoorWords {
     public static func name(_ name: String) -> String {
         let value = (name as NSString).lastPathComponent.replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
-        return OwnerWords.plain(value.isEmpty ? "Your helper" : value)
+        return value.isEmpty ? "Your helper" : value
     }
     public static func approval(_ caller: DoorCaller, door: String, id: String, now: Double) -> Need {
-        let why = caller.why.isEmpty ? "" : OwnerWords.plain(caller.why) + "\n"
+        let why = caller.why.isEmpty ? "" : caller.why + "\n"
         return Need(id: id, title: "\(name(caller.name)) wants to \(verb(door)).",
                     ctx: why + "Choose Allow once to let it, or No to stop it.",
                     opts: [NeedOption(label: "Allow once", rec: true, action: "door:once"),

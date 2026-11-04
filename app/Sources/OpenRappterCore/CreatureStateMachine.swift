@@ -1,7 +1,7 @@
 import Foundation
 
 public enum TalkMode: Equatable, Sendable { case ask, dictate, screen }
-public enum CreatureFailure: Error, Equatable, Sendable { case unavailable, hungry, noCopilot, toolsMissing }
+public enum CreatureFailure: Error, Equatable, Sendable { case unavailable, hungry, noCopilot, toolsMissing, nothingToRead }
 public enum CreatureLane: Hashable { case lookup, retry, login, turn, other }
 public enum CreatureWake: Equatable {
     case rest(Int), poll(Int), retry(Int)
@@ -25,7 +25,8 @@ public enum CreatureEvent: Equatable {
     case spoken(Int), wake(CreatureWake)
     case needsChanged([Need])
     case answer(Need, NeedOption), later(Need)
-    case installAtLogin, installedAtLogin(Int, Bool)
+    case installAtLogin, installedAtLogin(Int, Result<LoginItemResult, CreatureFailure>)
+    case checkedLoginItem(Result<LoginItemResult, CreatureFailure>), stoppedAtLogin(Bool)
     case stopAtLogin, showHelp, connectedHelper(Bool), moveToApplications
     case shutdown
 }
@@ -95,13 +96,14 @@ public struct CreatureStateMachine {
         var id: Int
         var code: LoginCode?
         var polls = 0
+        var failures = 0
         var restarts = 0
         var confirming = false
     }
     public private(set) var presentation = CreaturePresentation()
     public private(set) var history: [[String: String]] = []
     public private(set) var sessionId: String?
-    public var isWorking: Bool { !stopped && (mind == .finding || turn != nil) }
+    public var isWorking: Bool { !stopped && (mind == .finding || turn != nil || loginSetupID != nil) }
     private var mind: MindState = .missing
     private var lookupID = 0
     private var serial = 0
@@ -111,6 +113,9 @@ public struct CreatureStateMachine {
     private var blocked: Need?
     private var quiet = true
     private var signInAfterFinding = false
+    private var reattachBeforeLogin = false
+    private var loginSetupID: Int?
+    private var restLine = "Hold Option and Space and talk to me."
     private var stopped = false
     public init() {}
 
@@ -148,7 +153,8 @@ public struct CreatureStateMachine {
             blocked = nil
             if let code = login?.code { return [.showCode(code)] }
             if login != nil { return [] }
-            if mind == .missing || mind == .finding || mind == .toolsMissing {
+            if reattachBeforeLogin || mind == .missing || mind == .finding || mind == .toolsMissing {
+                reattachBeforeLogin = false
                 signInAfterFinding = true
                 return mind == .finding ? [] : beginFinding()
             }
@@ -166,9 +172,18 @@ public struct CreatureStateMachine {
             }
         case .loginPolled(let id, let result):
             guard login?.id == id else { return [] }
+            login?.polls += 1
+            if (login?.polls ?? 0) >= 450 { return failLogin("I stopped waiting. Choose Sign me in to try again.") }
             guard case .success(let progress) = result else {
-                return failLogin("I lost the sign-in page. Choose Sign me in to try again.")
+                if case .failure(.noCopilot) = result {
+                    mind = .noCopilot
+                    return failLogin(Self.copilotWords)
+                }
+                login?.failures += 1
+                if (login?.failures ?? 0) < 10 { return [.wait(2, .poll(id))] }
+                return failLogin("I couldn't check your sign-in. Choose Sign me in to try again.")
             }
+            login?.failures = 0
             if progress.noCopilot { mind = .noCopilot; return failLogin(Self.copilotWords) }
             if progress.denied { return failLogin("You cancelled on GitHub. Choose Sign me in to try again.") }
             if progress.lost, login?.restarts == 0 {
@@ -181,8 +196,6 @@ public struct CreatureStateMachine {
             case "expired": return failLogin("That code expired. Choose Sign me in for a fresh one.")
             case "error": return failLogin("GitHub couldn't finish signing you in. Choose Sign me in to try again.")
             case "pending":
-                login?.polls += 1
-                if (login?.polls ?? 0) >= 450 { return failLogin("I stopped waiting. Choose Sign me in to try again.") }
                 return [.wait(2, .poll(id))]
             default:
                 return failLogin("I couldn't read the sign-in answer. Choose Sign me in to try again.")
@@ -199,7 +212,10 @@ public struct CreatureStateMachine {
             // Queued cards are projected immediately, not at the next folder tick.
             return [.cancel(.login), .restoreClipboard]
         case .keyDown(let mode):
-            if let turn, turn.stage != .speaking && turn.stage != .settling { return [] }
+            if let turn, turn.stage != .speaking && turn.stage != .settling {
+                if turn.stage == .asking { self.turn?.line = "Still thinking about your last question." }
+                return []
+            }
             let id = nextID()
             turn = Turn(id: id, mode: mode, stage: .authorizing, line: "Getting ready to listen.")
             blocked = nil
@@ -217,10 +233,14 @@ public struct CreatureStateMachine {
             }
         case .authorized(let id, let permission):
             guard let current = turn, current.id == id, current.stage == .authorizing else { return [] }
-            if current.released { turn = nil; return [] }
             guard permission == .allowed else {
                 turn = nil
                 blocked = Self.permissionCard(permission == .microphone ? .microphone : .speech)
+                return []
+            }
+            if current.released {
+                turn = nil
+                restLine = "Ready. Hold Option and Space again to talk."
                 return []
             }
             turn?.stage = .starting
@@ -254,6 +274,11 @@ public struct CreatureStateMachine {
             switch result {
             case .success(let text):
                 return ask(id: id, question: turn?.question ?? "", screen: text)
+            case .failure(.nothingToRead):
+                turn = nil
+                blocked = Self.card("no-window", "I don't see a window to read. Bring one to the front and try again.",
+                                    "Got it", "creature:dismiss")
+                return []
             case .failure:
                 turn = nil; blocked = Self.permissionCard(.screen)
                 return []
@@ -271,13 +296,12 @@ public struct CreatureStateMachine {
                 history += [["role": "user", "content": current.question], ["role": "assistant", "content": reply.text]]
                 if history.count > 20 { history.removeFirst(history.count - 20) }
                 turn?.stage = .speaking; turn?.line = reply.text
-                return [.speak(id, OwnerWords.plain(reply.voice.isEmpty ? reply.text : reply.voice))]
+                return [.speak(id, reply.voice.isEmpty ? reply.text : reply.voice)]
             case .failure(let error):
                 turn = nil; quiet = false
                 if error == .noCopilot { mind = .noCopilot; blocked = nil }
                 else if error == .hungry { mind = .hungry; blocked = nil }
                 else {
-                    mind = .missing
                     blocked = Self.card("retry-mind", "I couldn't reach my mind. Choose Find my mind to try again.",
                                         "Find my mind", "creature:find")
                 }
@@ -295,6 +319,9 @@ public struct CreatureStateMachine {
             return login?.id == id ? [.pollLogin(id)] : []
         case .wake(.retry(let id)):
             guard lookupID == id, mind == .missing else { return [] }
+            guard turn == nil, login == nil, blocked == nil, needs.isEmpty, loginSetupID == nil else {
+                return [.wait(30, .retry(id))]
+            }
             let wasQuiet = quiet
             let effects = beginFinding()
             quiet = wasQuiet
@@ -329,26 +356,34 @@ public struct CreatureStateMachine {
             needs.removeAll { $0.id == need.id }
             if need.id.hasPrefix("creature:") {
                 blocked = nil; quiet = true
-                if login != nil { login = nil; return [.cancel(.login), .restoreClipboard] }
+                if need.id == "creature:signing-in", login != nil {
+                    login = nil
+                    return [.cancel(.login), .restoreClipboard]
+                }
                 return []
             }
             return [.later(need)]
         case .installAtLogin:
             let id = nextID()
-            turn = Turn(id: id, mode: .ask, stage: .asking, line: "Setting up my return when you sign in.")
-            return [.cancel(.turn), .stopVoice, .installAtLogin(id)]
-        case .installedAtLogin(let id, let success):
-            guard turn?.id == id else { return [] }
-            turn = nil
-            if !success {
-                blocked = Self.card("login-setting", "I couldn't set that up. Choose Try again; if it keeps happening, choose Restart OpenRappter.",
-                                    "Try again", "creature:install-login")
-            } else { quiet = true }
+            loginSetupID = id
+            if blocked?.id == "creature:login-setting" { blocked = nil }
+            return [.installAtLogin(id)]
+        case .installedAtLogin(let id, let result):
+            guard loginSetupID == id else { return [] }
+            loginSetupID = nil
+            showLoginSetting(result, confirm: true)
+            return []
+        case .checkedLoginItem(let result):
+            showLoginSetting(result, confirm: false)
             return []
         case .stopAtLogin:
-            quiet = true; login = nil; turn = nil
-            return [.cancel(.retry), .cancel(.lookup), .cancel(.login), .cancel(.turn),
-                    .restoreClipboard, .stopVoice, .cancelEars, .stopAtLogin]
+            return [.cancel(.retry), .stopAtLogin]
+        case .stoppedAtLogin(let success):
+            blocked = Self.card("login-setting", success ?
+                "I'll stay for now and won't come back on my own when you sign in to this Mac." :
+                "I couldn't turn off automatic starts. Choose Stop starting at login to try again.",
+                "Got it", "creature:dismiss", dismiss: false)
+            return []
         case .showHelp:
             blocked = Self.card("help", "Hold Option and Space to talk. Add Control to type for you, or Shift to ask about your screen.",
                                 "Got it", "creature:dismiss", dismiss: false)
@@ -363,7 +398,7 @@ public struct CreatureStateMachine {
                                 "Open Applications", "open:file:///Applications", dismiss: true)
             return []
         case .shutdown:
-            stopped = true; login = nil; turn = nil
+            stopped = true; login = nil; turn = nil; loginSetupID = nil
             return [.cancel(.retry), .cancel(.lookup), .cancel(.login), .cancel(.turn),
                     .restoreClipboard, .cancelEars, .stopVoice]
         }
@@ -386,9 +421,31 @@ public struct CreatureStateMachine {
     private mutating func failLogin(_ words: String) -> [CreatureEffect] {
         login = nil
         blocked = Self.card("sign-in", words, "Sign me in", "creature:sign-in")
-        // Starting again must re-find a mind whose sign-in route failed.
-        if mind != .noCopilot { mind = .missing }
+        reattachBeforeLogin = true
         return [.cancel(.login), .restoreClipboard]
+    }
+
+    private mutating func showLoginSetting(_ result: Result<LoginItemResult, CreatureFailure>, confirm: Bool) {
+        switch result {
+        case .failure(.toolsMissing):
+            mind = .toolsMissing; quiet = false
+            blocked = Self.toolsCard
+        case .failure:
+            blocked = Self.card("login-setting", "I couldn't set that up. Choose Try again; if it keeps happening, choose Restart OpenRappter.",
+                                "Try again", "creature:install-login")
+        case .success(.moveRequired):
+            _ = reduce(.moveToApplications)
+        case .success(.skipped):
+            if confirm {
+                blocked = Self.card("login-setting", "Automatic starts are turned off for this copy of OpenRappter.",
+                                    "Got it", "creature:dismiss", dismiss: false)
+            }
+        case .success:
+            if confirm {
+                blocked = Self.card("login-setting", "My mind will be ready, and I'll come back when you sign in to this Mac.",
+                                    "Got it", "creature:dismiss", dismiss: false)
+            }
+        }
     }
 
     private mutating func act(id: Int, mode: TalkMode, text: String) -> [CreatureEffect] {
@@ -411,11 +468,12 @@ public struct CreatureStateMachine {
 
     private mutating func render() {
         var view = CreaturePresentation()
+        view.line = restLine
         view.hungry = mind == .hungry || mind == .noCopilot
         if let turn {
             view.posture = turn.stage == .listening ? .listening :
                 (turn.stage == .speaking || turn.stage == .settling) ? .speaking : .thinking
-            view.line = OwnerWords.plain(turn.line); view.expanded = true
+            view.line = turn.line; view.expanded = true
         } else {
             let attention: Need?
             if let top = needs.first { attention = top }
@@ -436,16 +494,18 @@ public struct CreatureStateMachine {
                     attention = Self.card("mind", mind == .noCopilot ? Self.copilotWords :
                         "I can't think yet. Choose Sign me in to feed me.", "Sign me in", "creature:sign-in")
                 case .toolsMissing:
-                    attention = Self.card("tools", "I need Apple's tools to get ready. Choose Install, finish Apple's steps, then choose Find my mind.",
-                                          "Install", "creature:install-tools",
-                                          extra: NeedOption(label: "Find my mind", action: "creature:find"))
+                    attention = Self.toolsCard
                 default: attention = nil
                 }
             } else { attention = nil }
             if let attention {
-                view.need = OwnerWords.plain(attention)
+                view.need = attention
                 view.line = view.need?.title ?? ""
                 view.posture = .needsYou; view.expanded = true
+            } else if loginSetupID != nil {
+                view.posture = .thinking
+                view.line = "Getting my mind ready for when you sign in to this Mac."
+                view.expanded = true
             } else if mind == .finding && !quiet {
                 view.posture = .thinking; view.line = "Finding my mind."; view.expanded = true
             }
@@ -468,6 +528,11 @@ public struct CreatureStateMachine {
     }
 
     private static let copilotWords = "This GitHub account has no Copilot. Enable Copilot for it, then choose Sign me in."
+    private static var toolsCard: Need {
+        card("tools", "I need Apple's tools to get ready. Choose Install, finish Apple's steps, then choose Find my mind.",
+             "Install", "creature:install-tools",
+             extra: NeedOption(label: "Find my mind", action: "creature:find"))
+    }
     private static func card(_ id: String, _ words: String, _ label: String, _ action: String,
                              dismiss: Bool = true, extra: NeedOption? = nil) -> Need {
         var options = [NeedOption(label: label, rec: true, action: action)]

@@ -26,7 +26,7 @@ public final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     public func speak(_ text: String) async {
         guard !muted, !text.isEmpty else { return }
         stop()
-        let u = AVSpeechUtterance(string: OwnerWords.plain(text))
+        let u = AVSpeechUtterance(string: text)
         if synth != nil { u.voice = Self.bestEnglishVoice() }
         u.rate = AVSpeechUtteranceDefaultSpeechRate
         let id = ObjectIdentifier(u)

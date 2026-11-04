@@ -23,7 +23,7 @@ final class LauncherTests: XCTestCase {
         return task.terminationStatus
     }
 
-    func testInterruptedSetupNeverPublishesHalfBuiltEnvironment() throws {
+    func installationFixture() throws -> (home: URL, env: [String: String], destination: URL) {
         let dir = try testDirectory(self)
         let home = dir.appendingPathComponent("mind"), bin = dir.appendingPathComponent("bin")
         let source = home.appendingPathComponent("src/rapp_brainstem")
@@ -40,6 +40,8 @@ final class LauncherTests: XCTestCase {
         if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then
             if [ "$3" = "install" ]; then
                 printf 'install\n' >> "$OPENRAPPTER_KERNEL_HOME/install-count"
+                mkdir -p "$PIP_CACHE_DIR"
+                printf cached > "$PIP_CACHE_DIR/download"
                 [ "${FAIL_INSTALL:-0}" != 1 ] || exit 19
             fi
             exit 0
@@ -74,12 +76,20 @@ final class LauncherTests: XCTestCase {
         if [ "${3:-}" = "rev-parse" ]; then printf '%s\n' "$FIXTURE_SHA"; fi
         exit 0
         """#, at: bin.appendingPathComponent("git"))
-        var env = [
+        try script("#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$OPENRAPPTER_KERNEL_HOME/paused\"\n",
+                   at: bin.appendingPathComponent("sleep"))
+        let env = [
             "PATH": bin.path + ":/usr/bin:/bin", "HOME": dir.path,
             "OPENRAPPTER_KERNEL_HOME": home.path, "FIXTURE_SHA": sha,
             "FIXTURE_PYTHON": interpreter.path, "FAIL_INSTALL": "1",
         ]
         let destination = home.appendingPathComponent("env-\(sha)")
+        return (home, env, destination)
+    }
+
+    func testInterruptedSetupNeverPublishesHalfBuiltEnvironment() throws {
+        let (home, initialEnv, destination) = try installationFixture()
+        var env = initialEnv
         XCTAssertEqual(try run(env: env), 19)
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent("started").path))
@@ -102,6 +112,16 @@ final class LauncherTests: XCTestCase {
         let count = try Data(contentsOf: home.appendingPathComponent("install-count"))
         XCTAssertEqual(try run(env: env), 0)
         XCTAssertEqual(try Data(contentsOf: home.appendingPathComponent("install-count")), count, "Do not repeat setup at every login")
+    }
+
+    func testFailedDependencyInstallBacksOffAndKeepsCacheAcrossRetries() throws {
+        let (home, env, destination) = try installationFixture()
+        for _ in 0..<2 { XCTAssertEqual(try run(env: env), 19) }
+        XCTAssertEqual(try String(contentsOf: home.appendingPathComponent("paused"), encoding: .utf8), "60\n60\n")
+        XCTAssertEqual(try String(contentsOf: home.appendingPathComponent("pip-cache/download"), encoding: .utf8), "cached")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent("environments").path), [])
+        XCTAssertEqual(try String(contentsOf: home.appendingPathComponent("install-count"), encoding: .utf8), "install\ninstall\n")
     }
 
     func testMissingToolsPausesBeforeExitingInsteadOfRepeatingDialogs() throws {

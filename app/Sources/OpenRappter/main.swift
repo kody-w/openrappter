@@ -78,16 +78,14 @@ final class Coordinator: NSObject, NSApplicationDelegate {
             let result = Objections.object(code: need.id, allow: self?.doors?.allow)
             log("objected \(need.id): \(result != nil)")
         }
-        needs.$stream.sink { [weak self] stream in self?.model.stream = stream.map(OwnerWords.plain) }.store(in: &subscriptions)
+        model.followStream(needs)
         needs.$needs.sink { [weak self] cards in self?.driver.send(.needsChanged(cards)) }.store(in: &subscriptions)
         installDoors()
         requestTextsIfNeeded()
         installHotKeys()
         installMenu()
         driver.send(.findMind)
-        do {
-            if try LoginItem().install() == .moveRequired { driver.send(.moveToApplications) }
-        } catch { log("return at sign-in: \(error)"); driver.send(.moveToApplications) }
+        driver.send(effects.checkLoginItem())
         runExamples()
     }
 

@@ -158,9 +158,160 @@ owner receives fixed, actionable words.
 - test: CreatureStateMachineTests.testNeedsYouAlwaysHasActionAndNoMachineWords
 
 Shortcut help is enabled, advanced setup is under More, and external replies
-cross the same plain-word boundary as the creature's own lines.
+are preserved verbatim. Only the creature's own lines use plain machinery words.
 
 ## 26
 - test: CreatureStateMachineTests.testEveryPermissionHasCorrectSettingAndDismissal
 
 Every permission card opens the matching setting and offers Not now.
+
+## 27
+- test: MindStartupTests.testLoadedServiceReceivesBothNewLauncherFilesWithoutBeingStopped
+- test: MindStartupTests.testHealthyAttachedMindStillReceivesAnUpgradeWithoutToolsOrRestart
+
+Upgrades atomically refresh both launcher files, even when the mind is already
+healthy. Neither refresh unloads, kills, or reinstalls a running job.
+
+## 28
+- test: CreatureStateMachineTests.testAutomaticRetryNeverCancelsListeningOrDictation
+- test: CreatureStateMachineTests.testAutomaticRetryPreservesUnansweredPermissionAndCallerCards
+- test: CreatureStateMachineTests.testOldAutomaticRetryCannotCancelSignIn
+
+Automatic lookup retries wait while a turn, sign-in, setup, or unanswered card
+is active. Only an explicit Find my mind action resets those lanes.
+
+## 29
+- test: CreatureStateMachineTests.testReleaseBeforeDeniedPermissionStillOffersTheCorrectSetting
+- test: CreatureStateMachineTests.testReleaseBeforeGrantedPermissionSaysHowToTryAgainWithoutOpeningEars
+
+A release during the permission dialog never opens the microphone. Denial still
+shows the correct setting; a grant explains how to press again.
+
+## 30
+- test: CreatureStateMachineTests.testTransientPollFailureKeepsTheCodeAndCanStillFinish
+- test: CreatureStateMachineTests.testPollFailureBudgetIsBoundedAndResetsAfterAnAnswer
+
+A transient poll failure keeps the code and sign-in alive. Ten consecutive
+failures end the attempt with recovery words; an answer resets that budget.
+
+## 31
+- test: MindStartupTests.testLoadedOrInstalledServiceStillReportsMissingTools
+
+An unresponsive existing service gets the same tools check as a fresh setup,
+without being booted out or stuck in the long lookup wait.
+
+## 32
+- test: CreatureStateMachineTests.testLaterOnPermissionOrHelpDoesNotCancelSignIn
+- test: CreatureStateMachineTests.testLaterOnSignInCardItselfStillCancelsAndRestoresClipboard
+
+Later cancels sign-in only on its own code card, never on a permission or help
+card that happens to be shown while signing in.
+
+## 33
+- test: CreatureStateMachineTests.testTransientChatFailureDoesNotMakeTheNextQuestionLoseItsMind
+
+A failed answer retains the attached mind. The next question can try it again;
+the existing explicit Find my mind action still works.
+
+## 34
+- test: CreatureStateMachineTests.testTranscriptMindTextVoiceAndHistoryAreVerbatim
+- test: CreatureStateMachineTests.testCallerCardAndSelectedOptionRemainVerbatim
+- test: VoiceTests.testActualUtterancePreservesTheMindsWords
+- test: DoorWordsTests.testCallerReasonAndNameAreNotRewrittenAsCreatureCopy
+- test: NeedsTests.testCreatureStreamBindingPreservesForeignUpdates
+
+Transcripts, answers, spoken utterances, history, caller reasons, hook cards,
+choices, and stream updates never pass through the creature's word replacer.
+
+## 35
+- test: StartupAdapterRegressionTests.testStopDisablesFutureStartsWithoutKillingEitherLiveJobAndConfirms
+- test: StartupAdapterRegressionTests.testStoppedChoiceSurvivesReopeningAndMindLookupWithoutBootstrap
+- test: StartupAdapterRegressionTests.testStoppedUnloadedMindStartsAsChildWithoutRestoringAutomaticStartup
+- test: StartupAdapterRegressionTests.testStoppedChildIsNotDuplicatedByRetriesOrAnExplicitKeep
+- test: StartupAdapterRegressionTests.testFailedExplicitKeepDoesNotUndoTheOwnersStoppedChoice
+- test: CreatureStateMachineTests.testStartupChangesDoNotInterruptAnActiveTurnOrSignIn
+
+Stop persists the owner's choice, disables and removes future starts, leaves
+both live jobs alone, and confirms in a card. Manual reopening and mind lookup
+honor the choice; a missing mind starts as a child instead of a saved service.
+
+## 36
+- test: CreatureStateMachineTests.testBusyHotkeyGivesFeedbackWithoutOverlappingOrChangingHistory
+- test: MindClientTests.testCreatureChatTimeoutIsShorterThanTwoMinutes
+
+A repeated hotkey explains that the previous question is still being answered.
+It cannot start an overlapping ask, and the creature's request limit is 45 seconds.
+
+## 37
+- test: CreatureStateMachineTests.testFailedLoginDismissalStillExplainsHungerNotMissingMind
+- test: CreatureStateMachineTests.testFailedSignInReattachesBeforeRetry
+
+Sign-in failures retain the correct hunger state. A separate flag makes the
+next Sign me in action reattach without falsely declaring the mind missing.
+
+## 38
+- test: CreatureStateMachineTests.testLoginSetupSuccessConfirmsBothReturnsAndHasDismissal
+
+Startup setup has accurate working words and a visible Got it confirmation
+that explains both the mind's readiness and the creature's return.
+
+## 39
+- test: StartupAdapterRegressionTests.testNoWindowIsNotMisreportedAsScreenPermission
+- test: StartupAdapterRegressionTests.testScreenCaptureErrorStillOffersTheScreenPermissionSetting
+
+The real screen adapter distinguishes an absent window from a capture failure.
+Only the latter offers the Screen Recording permission setting.
+
+## 40
+- test: StartupAdapterRegressionTests.testMissingToolsDuringExplicitKeepOffersInstallInsteadOfTryAgain
+- test: CreatureStateMachineTests.testLoginSetupSuccessConfirmsBothReturnsAndHasDismissal
+
+Setup preserves the failure kind, so missing Apple tools offer Install instead
+of an endless Try again loop. Success has a dismissable confirmation.
+
+## 41
+- test: DoctorGuidanceRegressionTests.testFirstPermissionRequestPointsToTheHotkeyNotAnEmptySettingsPane
+- test: DoctorGuidanceRegressionTests.testDeniedPermissionsPointToSettingsAndRestrictedPermissionsToTheMacManager
+
+The self-check distinguishes not-yet-requested permissions, denied permissions,
+and restrictions imposed by the Mac's manager.
+
+## 42
+- test: DoctorGuidanceRegressionTests.testSignedInAccountWithoutCopilotGetsAnEnableCopilotStepNotAnotherFeeding
+
+A signed-in account without Copilot has its own diagnosis and an Enable Copilot
+next step, consistent with the creature's card.
+
+## 43
+- test: DoctorGuidanceRegressionTests.testStoppedLoginChoiceIsObservedWithoutNaggingOrChangingIt
+- test: DoctorGuidanceRegressionTests.testEnvironmentOptOutIsAlsoAnIntentionalChoice
+- test: DoctorGuidanceRegressionTests.testOptionalStartupAdviceSaysThisMacStartsNotGitHubSignIn
+
+The self-check respects both the persisted startup choice and the environment
+opt-out. Optional startup advice explicitly means this Mac, not GitHub sign-in.
+
+## 44
+- test: LoginItemTests.testCaskReopensTheUpdatedAppAfterRemovingItsJobs
+
+The cask reopens the updated Applications copy after installation or upgrade,
+so removing the old jobs cannot leave the creature permanently absent.
+
+## 45
+- test: StartupAdapterRegressionTests.testExplicitKeepAfterStopRestoresAndEnablesBothJobsIncludingOurOwn
+- test: StartupAdapterRegressionTests.testExplicitKeepFromUnstableCopyOffersMoveAndNeverClaimsSuccess
+
+Explicit Keep restores and enables both saved jobs, including our own live but
+disabled job. An unstable app copy offers Move, never a false success.
+
+## 46
+- test: StartupAdapterRegressionTests.testStartupInstallErrorOffersRetryNotMoveAndRetryInstallsBoth
+
+An automatic login-item installation error gets the working setup-retry card.
+Only an actual unstable copy gets the Move to Applications card.
+
+## 47
+- test: LauncherTests.testFailedDependencyInstallBacksOffAndKeepsCacheAcrossRetries
+- test: MindStartupTests.testKernelServiceThrottlesAnyUnexpectedRuntimeExit
+
+Failed dependency setup cleans its temporary environment, preserves the pip
+cache, and waits before exiting. New saved services also throttle runtime failures.

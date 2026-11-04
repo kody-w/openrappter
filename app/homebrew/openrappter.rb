@@ -16,6 +16,10 @@ cask "openrappter" do
   uninstall quit: "com.openrappter.app",
             launchctl: ["com.openrappter.app", "com.openrappter.kernel"]
 
+  postflight do
+    system_command "/usr/bin/open", args: ["-g", "-a", "#{appdir}/OpenRappter.app"]
+  end
+
   zap trash: [
     "~/Library/LaunchAgents/com.openrappter.app.plist",
     "~/Library/LaunchAgents/com.openrappter.kernel.plist",

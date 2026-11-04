@@ -8,15 +8,18 @@ public final class MacCreatureEffects {
     public let voice: Voice
     public let clipboard: ClipboardLease
     public let needs: NeedsQueue
+    public var loginItem: LoginItem
+    public var readScreen: () async throws -> (app: String, text: String) = Eyes.frontWindowText
     public var send: ((CreatureEvent) -> Void)?
     public var log: (String) -> Void = { _ in }
     public var sleep: (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }
     private var mind: MindClient?
 
     public init(runner: MindRunner, needs: NeedsQueue, ears: Ears? = nil, voice: Voice? = nil,
-                clipboard: ClipboardLease? = nil) {
+                clipboard: ClipboardLease? = nil, loginItem: LoginItem = LoginItem()) {
         self.runner = runner; self.needs = needs; self.ears = ears ?? Ears()
         self.voice = voice ?? Voice(); self.clipboard = clipboard ?? ClipboardLease()
+        self.loginItem = loginItem
     }
 
     public func perform(_ effect: CreatureEffect) async -> CreatureEvent? {
@@ -67,8 +70,10 @@ public final class MacCreatureEffects {
             } catch { log("ask: \(error)"); return .replied(id, .failure(failure(error))) }
         case .readScreen(let id, _):
             do {
-                let (app, text) = try await Eyes.frontWindowText()
+                let (app, text) = try await readScreen()
                 return .screenRead(id, .success("The user is looking at \(app). Text on that window:\n\(text.prefix(6000))"))
+            } catch EyesError.noWindow {
+                return .screenRead(id, .failure(.nothingToRead))
             } catch { log("read screen: \(error)"); return .screenRead(id, .failure(.unavailable)) }
         case .dictate(let id, let text):
             guard Dictation.trusted(prompt: false) else { return .dictated(id, false) }
@@ -84,17 +89,43 @@ public final class MacCreatureEffects {
         case .answer(let need, let option): needs.answer(need, option)
         case .later(let need): needs.later(need)
         case .installAtLogin(let id):
-            do { try runner.prepareService(); return .installedAtLogin(id, true) }
-            catch { log("set up return: \(error)"); return .installedAtLogin(id, false) }
+            if let result = loginItem.installationBlock(allowStartup: true) {
+                return .installedAtLogin(id, .success(result))
+            }
+            let wasStopped = loginItem.startupPreference.isStopped
+            do {
+                try runner.prepareService(allowStartup: true)
+                let result = try loginItem.install(allowStartup: true)
+                try loginItem.startupPreference.allow()
+                return .installedAtLogin(id, .success(result))
+            } catch {
+                log("set up return: \(error)")
+                if wasStopped {
+                    do { try runner.stopStartingAtLogin(); try loginItem.remove(stopRunning: false) }
+                    catch { log("restore stopped startup setting: \(error)") }
+                }
+                return .installedAtLogin(id, .failure(failure(error)))
+            }
         case .stopAtLogin:
-            // Remove the mind first: stopping our own login item may terminate this app.
-            runner.removeService()
-            do { try LoginItem().remove() } catch { log("stop returning: \(error)") }
+            do {
+                try loginItem.startupPreference.stop()
+                try runner.stopStartingAtLogin()
+                try loginItem.remove(stopRunning: false)
+                return .stoppedAtLogin(true)
+            } catch { log("stop returning: \(error)"); return .stoppedAtLogin(false) }
         case .installTools:
             let status = RuntimeTools.run("/usr/bin/xcode-select", ["--install"])
             log("requested Apple tools: \(status)")
         }
         return nil
+    }
+
+    public func checkLoginItem() -> CreatureEvent {
+        do { return .checkedLoginItem(.success(try loginItem.install())) }
+        catch {
+            log("return at sign-in: \(error)")
+            return .checkedLoginItem(.failure(failure(error)))
+        }
     }
 
     private func failure(_ error: Error) -> CreatureFailure {

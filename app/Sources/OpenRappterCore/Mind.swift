@@ -35,7 +35,7 @@ public struct MindClient: Sendable {
     public let baseURL: URL
     public var session: URLSession
 
-    public init(baseURL: URL, timeout: TimeInterval = 120) {
+    public init(baseURL: URL, timeout: TimeInterval = 45) {
         self.baseURL = baseURL
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = timeout
@@ -151,6 +151,25 @@ public struct MindClient: Sendable {
 /// Attach-or-launch. Candidates in order: `OPENRAPPTER_MIND`, the app's own kernel on :18790, the grail default :7071.
 /// Launch = the pinned grail kernel (kernel/kernel.json) in its own home on :18790. It never touches another kernel.
 public struct MindRunner {
+    private final class ChildMind {
+        private let lock = NSLock()
+        private var process: Process?
+
+        var isRunning: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return process?.isRunning == true
+        }
+
+        func start(_ make: () throws -> Process) throws -> Process {
+            lock.lock(); defer { lock.unlock() }
+            if let process, process.isRunning { return process }
+            let next = try make()
+            process = next
+            return next
+        }
+    }
+
+    private let child = ChildMind()
     public var candidates: [URL]
     public var kernelDir: URL           // folder holding kernel.json + run.sh
     public var kernelHome: URL          // ~/.openrappter/kernel (GODD)
@@ -159,9 +178,14 @@ public struct MindRunner {
     public var serviceURL: URL?
     public var command: ([String]) -> Int32 = MindRunner.launchctl
     public var toolsReady: () -> Bool = RuntimeTools.available
+    public var startupPreference: StartupPreference
+    public var automaticStartupDisabled: Bool
 
     public init(kernelDir: URL, kernelHome: URL? = nil, env: [String: String] = ProcessInfo.processInfo.environment) {
         self.kernelDir = kernelDir
+        self.startupPreference = StartupPreference(home: env["HOME"].map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser)
+        self.automaticStartupDisabled = env["OPENRAPPTER_NO_LOGIN_ITEM"] != nil
         self.kernelHome = kernelHome ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".openrappter/kernel")
         var c: [URL] = []
@@ -187,16 +211,18 @@ public struct MindRunner {
     /// Launch the pinned kernel as a child (phase 1). Phase 4 moves this under launchd so it outlives the app.
     @discardableResult
     public func launch() throws -> Process {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = [kernelDir.appendingPathComponent("run.sh").path]
-        var env = ProcessInfo.processInfo.environment
-        env["OPENRAPPTER_KERNEL_HOME"] = kernelHome.path
-        env["OPENRAPPTER_KERNEL_PORT"] = String(ownPort)
-        p.environment = env
-        try p.run()
-        log("launched kernel pid \(p.processIdentifier) home \(kernelHome.path) port \(ownPort)")
-        return p
+        try child.start {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = [kernelDir.appendingPathComponent("run.sh").path]
+            var env = ProcessInfo.processInfo.environment
+            env["OPENRAPPTER_KERNEL_HOME"] = kernelHome.path
+            env["OPENRAPPTER_KERNEL_PORT"] = String(ownPort)
+            p.environment = env
+            try p.run()
+            log("launched kernel pid \(p.processIdentifier) home \(kernelHome.path) port \(ownPort)")
+            return p
+        }
     }
 
     /// Attach, or launch and wait up to `wait` seconds for /health.
@@ -217,22 +243,38 @@ public struct MindRunner {
     }
 
     /// An installed or already loaded mind may simply be starting. Never bounce it to discover it.
-    public func prepareService() throws {
+    public func prepareService(allowStartup: Bool = false) throws {
+        guard toolsReady() else { throw MindError.toolsMissing }
         let domain = "gui/\(getuid())"
         let loaded = command(["print", "\(domain)/\(Self.serviceLabel)"]) == 0
-        if loaded { return }
+        if automaticStartupDisabled || (startupPreference.isStopped && !allowStartup) {
+            if loaded { try refreshLauncher() }
+            else { _ = try launch() }
+            return
+        }
+        if allowStartup {
+            try installService(allowStartup: true)
+            return
+        }
+        if loaded { try refreshLauncher(); return }
         if serviceInstalled {
+            try refreshLauncher()
+            if child.isRunning { return }
             let status = command(["bootstrap", domain, launchAgentURL.path])
             guard status == 0 else { throw MindError.serviceFailed(status) }
             return
         }
-        guard toolsReady() else { throw MindError.toolsMissing }
         try installService()
     }
 
     public func findMind(attempts: Int = 120,
                          sleep: (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }) async throws -> (MindClient, MindHealth) {
-        if let attached = await attach() { return attached }
+        if let attached = await attach() {
+            if serviceInstalled || FileManager.default.fileExists(atPath: kernelHome.appendingPathComponent("launcher").path) {
+                try refreshLauncher()
+            }
+            return attached
+        }
         try prepareService()
         let own = MindClient(baseURL: URL(string: "http://127.0.0.1:\(ownPort)")!, timeout: 3)
         for _ in 0..<attempts {
@@ -254,34 +296,58 @@ extension MindRunner {
 
     /// Copies kernel.json + run.sh into the kernel home (so the service does not depend on where the app lives),
     /// writes the LaunchAgent, and loads it. KeepAlive restarts it; RunAtLoad starts it at login. Never touches :7071.
-    public func installService() throws {
+    public func installService(allowStartup: Bool = false) throws {
         guard toolsReady() else { throw MindError.toolsMissing }
+        if automaticStartupDisabled || (startupPreference.isStopped && !allowStartup) {
+            _ = try launch()
+            return
+        }
         let fm = FileManager.default
         let dst = kernelHome.appendingPathComponent("launcher")
-        try fm.createDirectory(at: dst, withIntermediateDirectories: true)
-        for f in ["kernel.json", "run.sh"] {
-            let to = dst.appendingPathComponent(f)
-            if fm.fileExists(atPath: to.path) { try fm.removeItem(at: to) }
-            try fm.copyItem(at: kernelDir.appendingPathComponent(f), to: to)
-        }
-        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dst.appendingPathComponent("run.sh").path)
+        try refreshLauncher()
         let logDir = kernelHome.appendingPathComponent("logs"); try fm.createDirectory(at: logDir, withIntermediateDirectories: true)
         let plist: [String: Any] = [
             "Label": Self.serviceLabel,
             "ProgramArguments": ["/bin/sh", dst.appendingPathComponent("run.sh").path],
             "EnvironmentVariables": ["OPENRAPPTER_KERNEL_HOME": kernelHome.path, "OPENRAPPTER_KERNEL_PORT": String(ownPort),
                                      "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"],
-            "RunAtLoad": true, "KeepAlive": true,
+            "RunAtLoad": true, "KeepAlive": true, "ThrottleInterval": 60,
             "StandardOutPath": logDir.appendingPathComponent("kernel.log").path,
             "StandardErrorPath": logDir.appendingPathComponent("kernel.err.log").path,
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try fm.createDirectory(at: launchAgentURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: launchAgentURL, options: .atomic)
-        _ = command(["bootout", "gui/\(getuid())/\(Self.serviceLabel)"])
+        if allowStartup {
+            let status = command(["enable", "gui/\(getuid())/\(Self.serviceLabel)"])
+            guard status == 0 else { throw MindError.serviceFailed(status) }
+        }
+        if command(["print", "gui/\(getuid())/\(Self.serviceLabel)"]) == 0 || child.isRunning { return }
         let r = command(["bootstrap", "gui/\(getuid())", launchAgentURL.path])
         log("service \(Self.serviceLabel) bootstrap exit \(r)")
         guard r == 0 else { throw MindError.serviceFailed(r) }
+    }
+
+    /// Atomic replacement refreshes future starts without interrupting an already running mind.
+    public func refreshLauncher() throws {
+        let files = try ["kernel.json", "run.sh"].map { ($0, try Data(contentsOf: kernelDir.appendingPathComponent($0))) }
+        let fm = FileManager.default
+        let dst = kernelHome.appendingPathComponent("launcher")
+        try fm.createDirectory(at: dst, withIntermediateDirectories: true)
+        for (name, data) in files {
+            let url = dst.appendingPathComponent(name)
+            if fm.fileExists(atPath: url.path) {
+                if try Data(contentsOf: url) == data { continue }
+            }
+            try data.write(to: url, options: .atomic)
+        }
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dst.appendingPathComponent("run.sh").path)
+    }
+
+    public func stopStartingAtLogin() throws {
+        if serviceInstalled { try FileManager.default.removeItem(at: launchAgentURL) }
+        let status = command(["disable", "gui/\(getuid())/\(Self.serviceLabel)"])
+        guard status == 0 else { throw MindError.serviceFailed(status) }
     }
 
     public func removeService() {

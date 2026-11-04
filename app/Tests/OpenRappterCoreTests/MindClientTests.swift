@@ -15,10 +15,12 @@ final class FakeKernel: @unchecked Sendable {
     private var loginPollCount = 0
     let healthStatus: String
     let respondToHealth: Bool
+    let copilot: String
 
-    init(healthStatus: String = "ok", respondToHealth: Bool = true) throws {
+    init(healthStatus: String = "ok", respondToHealth: Bool = true, copilot: String = "") throws {
         self.healthStatus = healthStatus
         self.respondToHealth = respondToHealth
+        self.copilot = copilot
         listener = try NWListener(using: .tcp, on: .any)
         let ready = DispatchSemaphore(value: 0)
         listener.stateUpdateHandler = { [weak self] st in
@@ -80,7 +82,7 @@ final class FakeKernel: @unchecked Sendable {
                 c.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, _, _ in c.cancel() }
                 return
             }
-            body = #"{"status":"\#(healthStatus)","version":"0.6.16","model":"fake","agents":["A","B"],"quarantined":[]}"#
+            body = #"{"status":"\#(healthStatus)","copilot":"\#(copilot)","version":"0.6.16","model":"fake","agents":["A","B"],"quarantined":[]}"#
         } else if path.hasPrefix("/chat") {
             if let obj = try? JSONSerialization.jsonObject(with: Data(reqBody.utf8)) as? [String: Any] { self.lastBody = obj }
             if self.hungry {

@@ -3,6 +3,7 @@ import Speech
 import ApplicationServices
 import CoreGraphics
 import AppKit
+import ScreenCaptureKit
 
 /// The four things the creature needs to be allowed to do. Plain words, in the order we ask.
 public enum Power: String, CaseIterable, Identifiable, Sendable {
@@ -123,7 +124,12 @@ public enum Powers {
             _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
             NSWorkspace.shared.open(p.settingsURL)
         case (.screen, _):
-            if !CGRequestScreenCaptureAccess() { NSWorkspace.shared.open(p.settingsURL) }
+            if !CGRequestScreenCaptureAccess() {
+                // The ask alone does not always add the app's row to the Screen Recording list.
+                // One real look at the screen does; it fails without the permission, and that is fine.
+                _ = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+                NSWorkspace.shared.open(p.settingsURL)
+            }
         default:
             NSWorkspace.shared.open(p.settingsURL)
         }

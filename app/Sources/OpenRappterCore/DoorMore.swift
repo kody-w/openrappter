@@ -190,6 +190,10 @@ extension Door {
         guard !busy else { return }
         let boxes = Screen.boxes()
         noticeBoxes(boxes, now: now)
+        // The page keeps itself fresh, so it is there in the morning with no one asking.
+        let page = dir.appendingPathComponent("page.html")
+        let age = (try? FileManager.default.attributesOfItem(atPath: page.path)[.modificationDate] as? Date).map { now.timeIntervalSince($0) } ?? .infinity
+        if age > 3600 { _ = writePage(hours: 24, now: now) }
         let all = watches()
         guard !all.isEmpty, !held else { return }
         var fired = (try? JSONDecoder().decode([String: Double].self, from: Data(contentsOf: firedURL))) ?? [:]

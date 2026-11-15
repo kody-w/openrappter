@@ -71,6 +71,7 @@ public final class Door {
         guard await Screen.picture(to: tmp), let d = try? Data(contentsOf: tmp), let j = Door.small(d, side: 1400) else { return false }
         return (try? j.write(to: url, options: .atomic)) != nil
     }
+    var updatesBusy = false
     var boxCause: [String: String] = [:]      // why each waiting box came up, worked out once
     var alwaysFired: [String: [Date]] = [:]   // when each standing answer last pressed, so a box that keeps coming back cannot loop
     var showMonitor: Any?

@@ -362,4 +362,44 @@ final class DoorTests: XCTestCase {
         XCTAssertEqual(DoorWeb.proofKind("k4.html"), "text/html; charset=utf-8"); XCTAssertEqual(DoorWeb.proofKind("k4-after.jpg"), "image/jpeg")
         XCTAssertNil(DoorWeb.proofKind("../log.jsonl")); XCTAssertNil(DoorWeb.proofKind("k4.png")); XCTAssertNil(DoorWeb.proofKind("a.b.html")); XCTAssertNil(DoorWeb.proofKind(".html"))
     }
+
+    func testARestartKeepsYourPlaceAndSaysWhatChanged() async throws {
+        let door = tempDoor()
+        let fm = FileManager.default
+        let mail = door.dir.appendingPathComponent("Mail.app").path, notes = door.dir.appendingPathComponent("Notes.app").path
+        try fm.createDirectory(atPath: mail, withIntermediateDirectories: true); try fm.createDirectory(atPath: notes, withIntermediateDirectories: true)
+        let boot1 = Date(timeIntervalSince1970: 2_000_000), t = boot1.addingTimeInterval(5000)
+        var opened: [String] = []
+        let both = [(name: "Mail", path: mail), (name: "Notes", path: notes), (name: "Gone", path: "/nowhere/Gone.app")]
+        door.keepPlace(now: t, bootedAt: boot1, running: both, os: "27.0.1") { opened.append($0); return true }
+        XCTAssertEqual(try JSONDecoder().decode(DoorPlace.self, from: Data(contentsOf: door.dir.appendingPathComponent("place.json"))).names, ["Mail", "Notes", "Gone"])
+        // The Mac restarts and is updated. Mail came back by itself; Notes did not; Gone is no longer installed.
+        let boot2 = t.addingTimeInterval(600)
+        door.keepPlace(now: boot2.addingTimeInterval(30), bootedAt: boot2, running: [], os: "27.2.1") { opened.append($0); return true }
+        XCTAssertEqual(opened, [], "it waits for the Mac to bring its own things back first")
+        door.hold(); door.keepPlace(now: boot2.addingTimeInterval(100), bootedAt: boot2, running: [], os: "27.2.1") { opened.append($0); return true }; door.release()
+        XCTAssertEqual(opened, [], "hands off")
+        door.keepPlace(now: boot2.addingTimeInterval(120), bootedAt: boot2, running: [(name: "Mail", path: mail)], os: "27.2.1") { opened.append($0); return true }
+        XCTAssertEqual(opened, [notes])
+        let log = try String(contentsOf: door.dir.appendingPathComponent("log.jsonl"), encoding: .utf8)
+        XCTAssertTrue(log.contains("this Mac restarted. I reopened Notes. I could not reopen Gone. It was updated from 27.0.1 to 27.2.1"))
+        // Only once per restart.
+        door.keepPlace(now: boot2.addingTimeInterval(200), bootedAt: boot2, running: [(name: "Mail", path: mail)], os: "27.2.1") { opened.append($0); return true }
+        XCTAssertEqual(opened, [notes])
+        // Waiting updates are named once, and again only when the list changes.
+        XCTAssertEqual(Door.updateNames("Software Update Tool\n\n* Label: macOS 27.2.1-26B131\n\tTitle: macOS\n* Label: Command Line Tools for Xcode 27.2-27.2\n"), ["macOS 27.2.1-26B131", "Command Line Tools for Xcode 27.2-27.2"])
+        XCTAssertEqual(Door.updateNames("No new software available."), [])
+        func waitLog(_ n: Int) async throws -> Int {
+            for _ in 0..<40 { try await Task.sleep(for: .milliseconds(50)); let c = ((try? String(contentsOf: door.dir.appendingPathComponent("log.jsonl"), encoding: .utf8)) ?? "").components(separatedBy: "waiting for this Mac").count - 1; if c >= n { return c } }
+            return ((try? String(contentsOf: door.dir.appendingPathComponent("log.jsonl"), encoding: .utf8)) ?? "").components(separatedBy: "waiting for this Mac").count - 1
+        }
+        door.checkUpdates(now: t) { "* Label: macOS 27.2.1-26B131\n" }
+        let first = try await waitLog(1)
+        XCTAssertEqual(first, 1)
+        door.checkUpdates(now: t.addingTimeInterval(3600)) { "* Label: other\n" }           // too soon
+        door.checkUpdates(now: t.addingTimeInterval(90000)) { "* Label: macOS 27.2.1-26B131\n" } // same list
+        try await Task.sleep(for: .milliseconds(300))
+        let second = try await waitLog(1)
+        XCTAssertEqual(second, 1)
+    }
 }

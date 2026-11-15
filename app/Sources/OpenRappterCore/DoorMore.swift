@@ -263,6 +263,11 @@ extension Door {
         guard !busy else { return }
         let boxes = Screen.boxes()
         noticeBoxes(boxes, now: now)
+        let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+        keepPlace(now: now, bootedAt: Date(timeIntervalSinceNow: -ProcessInfo.processInfo.systemUptime),
+                  running: apps.compactMap { a in a.bundleURL.map { (a.localizedName ?? $0.lastPathComponent, $0.path) } },
+                  os: ProcessInfo.processInfo.operatingSystemVersionString) { NSWorkspace.shared.open(URL(fileURLWithPath: $0)) }
+        checkUpdates(now: now)
         // The page keeps itself fresh, so it is there in the morning with no one asking.
         let page = dir.appendingPathComponent("page.html")
         let age = (try? FileManager.default.attributesOfItem(atPath: page.path)[.modificationDate] as? Date).map { now.timeIntervalSince($0) } ?? .infinity
@@ -630,6 +635,11 @@ extension Screen {
     }
 }
 
+/// Which apps were open, and on which system, the last time the door looked.
+public struct DoorPlace: Codable, Equatable {
+    public var at: Double, apps: [String], names: [String], os: String
+}
+
 /// A standing answer: when this app asks exactly this, press this.
 public struct DoorAlways: Codable, Equatable {
     public var app: String, says: String, buttons: [String], press: String, since: Double
@@ -644,6 +654,74 @@ extension Door {
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         return (try? enc.encode(r).write(to: alwaysURL, options: .atomic)) != nil
     }
+    // MARK: restarts and updates
+
+    var placeURL: URL { dir.appendingPathComponent("place.json") }
+    /// Remembers which apps are open. After a restart it reopens the ones that did not come back, and says if the Mac was updated.
+    func keepPlace(now: Date, bootedAt: Date, running: [(name: String, path: String)], os: String, open: (String) -> Bool) {
+        guard !held else { return }
+        let old = try? JSONDecoder().decode(DoorPlace.self, from: Data(contentsOf: placeURL))
+        func save() {
+            let mine = Bundle.main.bundlePath
+            let keep = running.filter { $0.path != mine && !$0.path.hasPrefix("/private/") && !$0.path.hasPrefix("/tmp/") }
+            let p = DoorPlace(at: now.timeIntervalSince1970, apps: keep.map(\.path), names: keep.map(\.name), os: os)
+            let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try? enc.encode(p).write(to: placeURL, options: .atomic)
+        }
+        guard let p = old else { save(); return }
+        if p.at < bootedAt.timeIntervalSince1970 - 1 {
+            // Saved before this restart. Give the Mac a minute and a half to bring its own things back first.
+            guard now.timeIntervalSince(bootedAt) >= 90 else { return }
+            var back: [String] = [], lost: [String] = []
+            if now.timeIntervalSince1970 - p.at < 7 * 86400 {
+                let here = Set(running.map(\.path))
+                for (path, name) in zip(p.apps, p.names) where !here.contains(path) {
+                    if FileManager.default.fileExists(atPath: path), open(path) { back.append(name) } else { lost.append(name) }
+                }
+            }
+            var said = "this Mac restarted. " + (back.isEmpty ? "Everything that was open came back by itself" : "I reopened \(back.joined(separator: ", "))")
+            if !lost.isEmpty { said += ". I could not reopen \(lost.joined(separator: ", "))" }
+            if p.os != os { said += ". It was updated from \(p.os) to \(os)" }
+            var ask = DoorAsk(id: "notice-\(Int(now.timeIntervalSince1970))-place", do: "notice"); ask.app = "this Mac"
+            record(ask, DoorAnswer(id: ask.id, ok: true, said: said, front: nil, words: nil, picture: nil, at: now.timeIntervalSince1970))
+            save()
+        } else if now.timeIntervalSince1970 - p.at >= 300 { save() }
+    }
+
+    var updatesURL: URL { dir.appendingPathComponent("updates.json") }
+    /// The names of the updates Apple's own tool lists as waiting.
+    public nonisolated static func updateNames(_ listing: String) -> [String] {
+        listing.split(separator: "\n").compactMap { l in
+            let t = l.trimmingCharacters(in: .whitespaces)
+            return t.hasPrefix("* Label: ") ? String(t.dropFirst(9)) : nil
+        }
+    }
+    /// Once a day, asks Apple's own tool what updates are waiting and says so when the list changes. It never installs: that needs this Mac's password.
+    func checkUpdates(now: Date, list: (@Sendable () -> String)? = nil) {
+        let last = (try? JSONSerialization.jsonObject(with: Data(contentsOf: updatesURL))) as? [String: Any]
+        guard !updatesBusy, now.timeIntervalSince1970 - (last?["at"] as? Double ?? 0) >= 86400 else { return }
+        updatesBusy = true
+        let run: @Sendable () -> String = list ?? {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/sbin/softwareupdate"); p.arguments = ["-l"]
+            let pipe = Pipe(); p.standardOutput = pipe; p.standardError = Pipe()
+            guard (try? p.run()) != nil else { return "" }
+            let d = pipe.fileHandleForReading.readDataToEndOfFile(); p.waitUntilExit()
+            return String(data: d, encoding: .utf8) ?? ""
+        }
+        Task.detached {
+            let names = Door.updateNames(run())
+            await MainActor.run {
+                self.updatesBusy = false
+                let before = (last?["names"] as? [String]) ?? []
+                if let d = try? JSONSerialization.data(withJSONObject: ["at": now.timeIntervalSince1970, "names": names], options: [.sortedKeys]) { try? d.write(to: self.updatesURL, options: .atomic) }
+                guard !names.isEmpty, names != before else { return }
+                var ask = DoorAsk(id: "notice-\(Int(now.timeIntervalSince1970))-updates", do: "notice"); ask.app = "this Mac"
+                let said = "\(names.count) update\(names.count == 1 ? " is" : "s are") waiting for this Mac: \(names.joined(separator: ", ")). Installing needs this Mac's password, so that part is yours"
+                self.record(ask, DoorAnswer(id: ask.id, ok: true, said: said, front: nil, words: nil, picture: nil, at: now.timeIntervalSince1970))
+            }
+        }
+    }
+
     // MARK: before and after
 
     var proofDir: URL { dir.appendingPathComponent("proof") }

@@ -253,4 +253,53 @@ final class DoorTests: XCTestCase {
         XCTAssertLessThan(sizes[3], sizes[0] + 2000, "the page grew on refresh: \(sizes)")
         XCTAssertNil(Door.small(Data("not a picture".utf8)))
     }
+
+    func testAnAnswerMadeToStickIsPressedNextTimeAndCanBeStopped() async throws {
+        let door = tempDoor()
+        door.boxPatience = 60
+        let t0 = Date()
+        let words = ["StaticText: Reopen windows?", "Button: Reopen", "Button: Cancel"]
+        let box = [(app: "Mail", words: words)]
+        door.noticeBoxes(box, now: t0); door.noticeBoxes(box, now: t0.addingTimeInterval(61))
+        _ = door.writePage(hours: 24)
+        var page = try String(contentsOf: door.dir.appendingPathComponent("page.html"), encoding: .utf8)
+        XCTAssertTrue(page.contains(">Always Cancel</a>"))
+        // Make it stick.
+        var a = DoorAsk(id: "s1", do: "always"); a.app = "Mail"; a.title = "Cancel"; a.text = Door.boxSays(words)
+        a.steps = Door.boxButtons(words).map { var s = DoorAsk(id: "", do: "press"); s.title = $0; return s }
+        try drop(a, in: door); await door.drain()
+        XCTAssertEqual(door.alwaysRules().map(\.press), ["Cancel"])
+        func presses() -> Int { ((try? FileManager.default.contentsOfDirectory(atPath: door.dir.path)) ?? []).filter { $0.hasPrefix("always-") }.count }
+        // The box goes away and comes back later: pressed on its own after a beat, never at first sight.
+        door.noticeBoxes([], now: t0.addingTimeInterval(100))
+        let before = presses()
+        door.noticeBoxes(box, now: t0.addingTimeInterval(200))
+        XCTAssertEqual(presses(), before)
+        door.noticeBoxes(box, now: t0.addingTimeInterval(215))
+        XCTAssertEqual(presses(), before + 1)
+        XCTAssertTrue(try String(contentsOf: door.dir.appendingPathComponent("log.jsonl"), encoding: .utf8).contains("I pressed Cancel, as you always do"))
+        // A different question from the same app is left alone.
+        door.noticeBoxes([(app: "Mail", words: ["StaticText: Delete all mail?", "Button: Reopen", "Button: Cancel"])], now: t0.addingTimeInterval(300))
+        door.noticeBoxes([(app: "Mail", words: ["StaticText: Delete all mail?", "Button: Reopen", "Button: Cancel"])], now: t0.addingTimeInterval(315))
+        XCTAssertEqual(presses(), before + 1)
+        // A box that keeps coming back is pressed three times in ten minutes, then handed to the owner.
+        for i in 0..<12 { door.noticeBoxes(box, now: t0.addingTimeInterval(400 + Double(i) * 15)) }
+        XCTAssertEqual(presses(), before + 3)
+        // Hands off: nothing is pressed.
+        door.noticeBoxes([], now: t0.addingTimeInterval(2000)); door.hold()
+        door.noticeBoxes(box, now: t0.addingTimeInterval(2100)); door.noticeBoxes(box, now: t0.addingTimeInterval(2115))
+        XCTAssertEqual(presses(), before + 3)
+        door.release()
+        // Boxes that guard the Mac never stick.
+        var g = DoorAsk(id: "s2", do: "always"); g.app = "SecurityAgent"; g.title = "Allow"; g.text = "x"
+        try drop(g, in: door); await door.drain()
+        XCTAssertEqual(door.alwaysRules().count, 1)
+        // The page lists it with a way out, and stopping it works.
+        _ = door.writePage(hours: 24)
+        page = try String(contentsOf: door.dir.appendingPathComponent("page.html"), encoding: .utf8)
+        XCTAssertTrue(page.contains("Answers you made stick") && page.contains(">Ask me again instead</a>"))
+        var off = a; off.id = "s3"; off.key = "off"
+        try drop(off, in: door); await door.drain()
+        XCTAssertEqual(door.alwaysRules().count, 0)
+    }
 }

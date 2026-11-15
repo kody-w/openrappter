@@ -64,6 +64,7 @@ public final class Door {
     var lit: Set<String> = []              // sight watches already fired for what is on screen now
     var boxSince: [String: Date] = [:]     // boxes on screen and when each was first seen
     var boxTold: Set<String> = []
+    var alwaysFired: [String: [Date]] = [:]   // when each standing answer last pressed, so a box that keeps coming back cannot loop
     var showMonitor: Any?
     var shownSteps: [DoorAsk] = []
     var shownTyped = ""

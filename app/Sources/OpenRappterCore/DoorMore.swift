@@ -109,6 +109,21 @@ extension Door {
             var list = (try? JSONDecoder().decode([String].self, from: Data(contentsOf: u))) ?? []
             list.append(id); ans.ok = (try? JSONEncoder().encode(Array(list.suffix(200))).write(to: u, options: .atomic)) != nil
             ans.said = "left it"
+        case "always":
+            guard let app = a.app, let name = a.title else { ans.said = "always needs the app and the button"; return true }
+            var rules = alwaysRules()
+            let says = a.text ?? ""
+            rules.removeAll { $0.app == app && $0.says == says }
+            if a.key == "off" {
+                ans.ok = saveAlways(rules); ans.said = "I will ask you again when \(app) asks that"
+            } else if Door.gates.contains(app) {
+                ans.said = "that box guards this Mac, so I always ask you"
+            } else {
+                rules.append(DoorAlways(app: app, says: says, buttons: (a.steps ?? []).compactMap { $0.title }.sorted(), press: name, since: Date().timeIntervalSince1970))
+                ans.ok = saveAlways(rules); ans.said = "from now on I press \(name) when \(app) asks that"
+                var p = DoorAsk(id: "always-\(Int(Date().timeIntervalSince1970))-now", do: "press"); p.title = name; p.app = app
+                if let d = try? JSONEncoder().encode(p) { try? d.write(to: dir.appendingPathComponent("\(p.id).json"), options: .atomic) }
+            }
         case "hold":
             ans.ok = fm.createFile(atPath: holdURL.path, contents: Data())
             ans.said = "hands off. I will look but not touch until you ask resume."
@@ -287,6 +302,20 @@ extension Door {
             live.insert(key)
             let since = boxSince[key] ?? now
             boxSince[key] = since
+            // A standing answer: the owner said "always answer it this way" for exactly this box.
+            if !held, now.timeIntervalSince(since) >= 10, !boxTold.contains(key),
+               let rule = alwaysRules().first(where: { $0.app == b.app && $0.says == Door.boxSays(b.words) && $0.buttons == Door.boxButtons(b.words).sorted() }) {
+                let recent = (alwaysFired[key] ?? []).filter { now.timeIntervalSince($0) < 600 }
+                if recent.count < 3 {
+                    alwaysFired[key] = recent + [now]
+                    var p = DoorAsk(id: "always-\(Int(now.timeIntervalSince1970))-\(live.count)", do: "press"); p.title = rule.press; p.app = b.app
+                    if let d = try? JSONEncoder().encode(p) { try? d.write(to: dir.appendingPathComponent("\(p.id).json"), options: .atomic) }
+                    var note = DoorAsk(id: "notice-\(Int(now.timeIntervalSince1970))-always\(live.count)", do: "notice"); note.app = b.app
+                    record(note, DoorAnswer(id: note.id, ok: true, said: "\(b.app) asked \"\(rule.says)\" and I pressed \(rule.press), as you always do", front: nil, words: b.words, picture: nil, at: now.timeIntervalSince1970))
+                    boxSince[key] = nil
+                    continue
+                }
+            }
             guard now.timeIntervalSince(since) >= boxPatience else { continue }
             waitingNow.append(["app": b.app, "since": since.timeIntervalSince1970, "words": b.words])
             if !boxTold.contains(key) {
@@ -358,10 +387,19 @@ extension Door {
         var left: [String] = []
         for b in waiting {
             let app = b["app"] as? String ?? "", words = (b["words"] as? [String]) ?? []
-            let text = words.filter { !$0.hasPrefix("Button") }.map { String($0.drop(while: { $0 != ":" }).dropFirst(2)) }.prefix(2).joined(separator: " ")
-            let buttons = words.filter { $0.hasPrefix("Button: ") }.map { String($0.dropFirst(8)) }.prefix(4)
+            let text = Door.boxSays(words)
+            let all = Door.boxButtons(words), buttons = all.prefix(4)
             var row = "<li class=\"ask\"><b>\(esc(app)) is asking: \(esc(text.isEmpty ? "a question with no words I could read" : text))</b><div>"
             for name in buttons { var a = DoorAsk(id: "", do: "press"); a.title = name; a.app = app; row += button("Press \(name)", a) }
+            // The same answers, made to stick. Not offered for boxes that guard the Mac, or ones I cannot read.
+            if !text.isEmpty, !Door.gates.contains(app) {
+                row += "</div><div><span style=\"opacity:.6;align-self:center\">Every time:</span>"
+                for name in buttons {
+                    var a = DoorAsk(id: "", do: "always"); a.title = name; a.app = app; a.text = text
+                    a.steps = all.map { var s = DoorAsk(id: "", do: "press"); s.title = $0; return s }
+                    row += button("Always \(name)", a, quiet: true)
+                }
+            }
             left.append(row + "</div></li>")
             closeRow("\(app) is asking: \(text)")
         }
@@ -384,6 +422,14 @@ extension Door {
             left.append("<li class=\"ask\"><b>\(esc(l["said"] as? String ?? ""))</b><div>\(button("Try it again", again))\(button("Leave it", forget, quiet: true))</div></li>")
             closeRow(l["said"] as? String ?? "")
         }
+        var standing: [String] = [], sticks: [[String: Any]] = []
+        for r in alwaysRules() {
+            var off = DoorAsk(id: "", do: "always"); off.app = r.app; off.title = r.press; off.text = r.says; off.key = "off"
+            let b = button("Ask me again instead", off, quiet: true)
+            sticks.append(["app": r.app, "says": r.says, "press": r.press, "choices": choices])
+            standing.append("<li class=\"ask\"><b>When \(esc(r.app)) asks \"\(esc(r.says))\" I press \(esc(r.press)).</b><div>\(b)</div></li>")
+            choices = []
+        }
         if held {
             left.append("<li class=\"ask\"><b>Hands off is on, so I am only looking.</b><div>\(button("Let me work again", DoorAsk(id: "", do: "resume")))</div></li>")
             closeRow("Hands off is on, so I am only looking.")
@@ -396,7 +442,7 @@ extension Door {
         let host = Host.current().localizedName ?? "this Mac"
         // The same thing as data, for a phone app later: what is left, and the choices for each.
         let leftDoc: [String: Any] = ["schema": "openrappter-door/1", "mac": host, "at": now.timeIntervalSince1970, "held": held,
-                                      "token": token, "left": asks]
+                                      "token": token, "left": asks, "always": sticks]
         if let d = try? JSONSerialization.data(withJSONObject: leftDoc, options: [.prettyPrinted, .sortedKeys]) {
             try? d.write(to: dir.appendingPathComponent("left.json"), options: .atomic)
         }
@@ -413,6 +459,7 @@ extension Door {
         .btn.quiet{background:#2c2622;color:#f3ece4}</style>
         <h1>While you were away</h1><p class="sub">\(esc(host)), the last \(Int(hours)) hours\(held ? ". Hands off is on." : "")</p>
         \(section("Left for you", left, empty: "Nothing. You do not need to do anything."))
+        \(standing.isEmpty ? "" : section("Answers you made stick", standing, empty: ""))
         \(section("What I did", did.map(row), empty: "Nothing needed doing."))
         \(singles + refused > 0 ? "<p>Also \(singles) single presses and looks asked for by hand\(refused > 0 ? ", and \(refused) asks I turned down" : "").</p>" : "")
         \(section("What I skipped because it was already done", skipped.map(row), empty: "Nothing."))
@@ -567,6 +614,29 @@ extension Screen {
             }
         }
         return out.map { (app: $0.0, words: $0.1) }
+    }
+}
+
+/// A standing answer: when this app asks exactly this, press this.
+public struct DoorAlways: Codable, Equatable {
+    public var app: String, says: String, buttons: [String], press: String, since: Double
+}
+
+extension Door {
+    /// Boxes that guard the Mac itself. They never get a standing answer.
+    public static let gates: Set<String> = ["UserNotificationCenter", "SecurityAgent", "CoreServicesUIAgent", "NetAuthAgent"]
+    var alwaysURL: URL { dir.appendingPathComponent("always.json") }
+    public func alwaysRules() -> [DoorAlways] { (try? JSONDecoder().decode([DoorAlways].self, from: Data(contentsOf: alwaysURL))) ?? [] }
+    func saveAlways(_ r: [DoorAlways]) -> Bool {
+        let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return (try? enc.encode(r).write(to: alwaysURL, options: .atomic)) != nil
+    }
+    /// The words a box is asking, without its buttons.
+    public static func boxSays(_ words: [String]) -> String {
+        words.filter { !$0.hasPrefix("Button") }.map { String($0.drop(while: { $0 != ":" }).dropFirst(2)) }.prefix(2).joined(separator: " ")
+    }
+    public static func boxButtons(_ words: [String]) -> [String] {
+        words.filter { $0.hasPrefix("Button: ") }.map { String($0.dropFirst(8)) }
     }
 }
 

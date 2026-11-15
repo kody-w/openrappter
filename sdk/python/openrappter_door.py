@@ -60,6 +60,22 @@ class Door:
                     return self._call("/pick", {"token": doc["token"], "offer": c["offer"]})
         return {"ok": False, "said": "nothing waiting offers %r" % label}
 
+    def always(self, label, says=None):
+        """Answer a waiting box and make that answer stick: the same box gets the same press from now on."""
+        return self.pick("Always " + label, says)
+
+    def sticking(self):
+        """The answers the owner made stick: [{app, says, press}]."""
+        return [{k: r[k] for k in ("app", "says", "press")} for r in self.left().get("always", [])]
+
+    def ask_again(self, says):
+        """Stop a standing answer, so the owner is asked next time."""
+        doc = self.left()
+        for r in doc.get("always", []):
+            if says.lower() in r["says"].lower() and r["choices"]:
+                return self._call("/pick", {"token": doc["token"], "offer": r["choices"][0]["offer"]})
+        return {"ok": False, "said": "no standing answer for %r" % says}
+
     def ask(self, title, choices, text="", wait=0, every=3):
         """Put a question to the owner. With wait > 0, returns what they picked, or None if they did not answer in time.
         With wait == 0, returns the question's id; read it later with answer(id)."""

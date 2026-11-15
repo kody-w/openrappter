@@ -23,6 +23,7 @@ public struct DoorAsk: Codable, Equatable {
     public var see: String?      // watch: run the job when the screen says this
     public var at: String?       // watch: run the job each day at this time, like 07:30
     public var every: Double?    // watch: run the job every this many minutes
+    public var choices: [String]? // question: the answers the owner can pick from
     public init(id: String, do what: String) { self.id = id; self.do = what }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -35,6 +36,7 @@ public struct DoorAsk: Codable, Equatable {
         unless = try c.decodeIfPresent(String.self, forKey: .unless); wait = try c.decodeIfPresent(Double.self, forKey: .wait)
         job = try c.decodeIfPresent(String.self, forKey: .job); see = try c.decodeIfPresent(String.self, forKey: .see)
         at = try c.decodeIfPresent(String.self, forKey: .at); every = try c.decodeIfPresent(Double.self, forKey: .every)
+        choices = try c.decodeIfPresent([String].self, forKey: .choices)
     }
 }
 
@@ -134,6 +136,8 @@ public final class Door {
         case "hear": return "rehearsing a spoken line"
         case "forget": return "leaving one alone, as told"
         case "notice": return "noticed a box waiting"
+        case "question": return "asking you: \(a.title ?? "")"
+        case "answer": return "took your answer: \(a.title ?? "")"
         case "page": return "writing the page of what happened"
         case "pack": return "packing my jobs for another Mac"
         case "show": return "watching you do \(a.title ?? "a job")"

@@ -218,4 +218,24 @@ final class DoorTests: XCTestCase {
         XCTAssertEqual(DoorWeb.choice(r)?.token, "TOK"); XCTAssertEqual(DoorWeb.choice(r)?.offer, "o2")
         XCTAssertNil(DoorWeb.parse(Data("POST /pick HTTP/1.1\r\nContent-Length: 10\r\n\r\nt=TO".utf8)))
     }
+
+    func testAQuestionShowsWithAButtonPerChoiceAndThePickComesBack() async throws {
+        let door = tempDoor()
+        var q = DoorAsk(id: "q-1", do: "question"); q.title = "Restart tonight?"; q.choices = ["Yes", "Not now"]
+        try drop(q, in: door)
+        try drop(DoorAsk(id: "p9", do: "page"), in: door)
+        await door.drain()
+        XCTAssertNil(door.answered("q-1"))
+        let left = try JSONSerialization.jsonObject(with: Data(contentsOf: door.dir.appendingPathComponent("left.json"))) as! [String: Any]
+        XCTAssertEqual(left["schema"] as? String, "openrappter-door/1")
+        let row = (left["left"] as! [[String: Any]])[0]
+        XCTAssertEqual(row["says"] as? String, "Restart tonight?")
+        let choices = row["choices"] as! [[String: String]]
+        XCTAssertEqual(choices.map { $0["label"] }, ["Yes", "Not now"])
+        let ok = await door.pick(token: left["token"] as! String, key: choices[1]["offer"]!)
+        XCTAssertTrue(ok)
+        XCTAssertEqual(door.answered("q-1")?["picked"] as? String, "Not now")
+        let again = await door.pick(token: left["token"] as! String, key: choices[0]["offer"]!)
+        XCTAssertFalse(again)
+    }
 }

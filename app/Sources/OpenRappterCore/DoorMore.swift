@@ -64,6 +64,13 @@ extension Door {
         return true
     }
 
+    var questionsDir: URL { dir.appendingPathComponent("questions") }
+    /// The answer to a question, once the owner has picked. Nil while it is still open.
+    public func answered(_ id: String) -> [String: Any]? {
+        guard let d = try? Data(contentsOf: questionsDir.appendingPathComponent("\(id).answer.json")) else { return nil }
+        return try? JSONSerialization.jsonObject(with: d) as? [String: Any]
+    }
+
     var watchesDir: URL { dir.appendingPathComponent("watches") }
     var firedURL: URL { watchesDir.appendingPathComponent(".fired.json") }
     var waitingURL: URL { dir.appendingPathComponent("waiting.json") }
@@ -83,6 +90,19 @@ extension Door {
         let fm = FileManager.default
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         switch a.do {
+        case "question":
+            // Anything on this Mac can put a question to the owner. It shows on the page with a button per choice.
+            guard let title = a.title, let ch = a.choices, !ch.isEmpty, !a.id.isEmpty else { ans.said = "a question needs words and choices"; return true }
+            try? fm.createDirectory(at: questionsDir, withIntermediateDirectories: true)
+            let q: [String: Any] = ["id": a.id, "title": title, "text": a.text ?? "", "choices": ch, "at": Date().timeIntervalSince1970]
+            ans.ok = (try? JSONSerialization.data(withJSONObject: q, options: [.sortedKeys]).write(to: questionsDir.appendingPathComponent("\(a.id).json"), options: .atomic)) != nil
+            ans.said = ans.ok ? "asked you: \(title)" : "could not keep the question"
+        case "answer":
+            guard let qid = a.text, let picked = a.title, fm.fileExists(atPath: questionsDir.appendingPathComponent("\(qid).json").path) else { ans.said = "that question is not open"; return true }
+            let r: [String: Any] = ["id": qid, "picked": picked, "at": Date().timeIntervalSince1970]
+            ans.ok = (try? JSONSerialization.data(withJSONObject: r, options: [.sortedKeys]).write(to: questionsDir.appendingPathComponent("\(qid).answer.json"), options: .atomic)) != nil
+            try? fm.removeItem(at: questionsDir.appendingPathComponent("\(qid).json"))
+            ans.said = "you picked \(picked)"
         case "forget":
             guard let id = a.text else { ans.said = "forget needs what to leave"; return true }
             let u = dir.appendingPathComponent("forgotten.json")
@@ -342,6 +362,18 @@ extension Door {
             for name in buttons { var a = DoorAsk(id: "", do: "press"); a.title = name; a.app = app; row += button("Press \(name)", a) }
             left.append(row + "</div></li>")
             closeRow("\(app) is asking: \(text)")
+        }
+        for f in ((try? FileManager.default.contentsOfDirectory(at: questionsDir, includingPropertiesForKeys: nil)) ?? []).sorted(by: { $0.path < $1.path })
+        where f.pathExtension == "json" && !f.lastPathComponent.hasSuffix(".answer.json") {
+            guard let q = try? JSONSerialization.jsonObject(with: Data(contentsOf: f)) as? [String: Any], let qid = q["id"] as? String else { continue }
+            let title = q["title"] as? String ?? "", text = q["text"] as? String ?? ""
+            var row = "<li class=\"ask\"><b>\(esc(title))</b>\(text.isEmpty ? "" : "<br><span style=\"opacity:.7;white-space:normal\">\(esc(text))</span>")<div>"
+            for (i, c) in ((q["choices"] as? [String]) ?? []).enumerated() {
+                var a = DoorAsk(id: "", do: "answer"); a.text = qid; a.title = c
+                row += button(c, a, quiet: i > 0)
+            }
+            left.append(row + "</div></li>")
+            closeRow(text.isEmpty ? title : "\(title) \(text)")
         }
         for l in stopped {
             let name = jobName(l)

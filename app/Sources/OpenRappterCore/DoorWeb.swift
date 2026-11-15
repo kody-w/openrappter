@@ -6,6 +6,8 @@ import Network
 ///   GET  /           the page, with a button for every choice
 ///   GET  /left.json  the same as data: {schema, mac, at, held, token, left: [{says, choices: [{offer, label}]}]}
 ///   POST /pick       t=<token>&k=<offer> (a form) or {"token": "...", "offer": "..."}; takes that one choice
+///   POST /ask        {"title": "...", "text": "...", "choices": ["...", "..."]} puts a question to the owner; gives {ok, id}
+///   GET  /answer/<id> {id, picked}; picked is null until the owner has chosen
 /// A choice is only ever taken by POST, so a link preview or a page preload can never press a button.
 /// Anything not from this Mac or the private network is hung up on.
 @MainActor
@@ -101,6 +103,20 @@ public final class DoorWeb {
             if let ch = DoorWeb.choice(r) { ok = await door.pick(token: ch.token, key: ch.offer) }
             if json { send(c, ok ? "200 OK" : "409 Conflict", "application/json", Data("{\"ok\":\(ok),\"said\":\"\(ok ? "done" : "that choice is no longer on offer; read /left.json again")\"}".utf8)) }
             else { send(c, "303 See Other", "text/plain", Data(), extra: "Location: /\r\n") }
+        case ("POST", "/ask"):
+            guard let o = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any], let title = o["title"] as? String,
+                  let ch = o["choices"] as? [String], !ch.isEmpty, ch.count <= 6 else { send(c, "400 Bad Request", "application/json", Data("{\"ok\":false,\"said\":\"a question needs a title and up to six choices\"}".utf8)); return }
+            var a = DoorAsk(id: "q-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(6).lowercased())", do: "question")
+            a.title = String(title.prefix(200)); a.text = (o["text"] as? String).map { String($0.prefix(600)) }; a.choices = ch.map { String($0.prefix(60)) }
+            if let d = try? JSONEncoder().encode(a) { try? d.write(to: door.dir.appendingPathComponent("\(a.id).json"), options: .atomic) }
+            await door.drain(); _ = door.writePage(hours: 24)
+            send(c, "200 OK", "application/json", Data("{\"ok\":true,\"id\":\"\(a.id)\"}".utf8))
+        case ("GET", _) where path.hasPrefix("/answer/"):
+            let id = String(path.dropFirst(8))
+            guard !id.isEmpty, id.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { send(c, "400 Bad Request", "text/plain", Data()); return }
+            let picked = door.answered(id)?["picked"] as? String
+            let body: [String: Any] = ["id": id, "picked": picked ?? NSNull()]
+            send(c, "200 OK", "application/json", (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8))
         default:
             send(c, "404 Not Found", "text/plain", Data("not here".utf8))
         }

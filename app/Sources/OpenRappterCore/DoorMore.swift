@@ -268,6 +268,10 @@ extension Door {
                   running: apps.compactMap { a in a.bundleURL.map { (a.localizedName ?? $0.lastPathComponent, $0.path) } },
                   os: ProcessInfo.processInfo.operatingSystemVersionString) { NSWorkspace.shared.open(URL(fileURLWithPath: $0)) }
         checkUpdates(now: now)
+        if now.timeIntervalSince(signLooked) >= 300 {
+            signLooked = now
+            noticeSignOuts(apps.compactMap(\.localizedName).filter { !Door.browsers.contains($0) }.map { ($0, Screen.words(app: $0)) }, now: now)
+        }
         // The page keeps itself fresh, so it is there in the morning with no one asking.
         let page = dir.appendingPathComponent("page.html")
         let age = (try? FileManager.default.attributesOfItem(atPath: page.path)[.modificationDate] as? Date).map { now.timeIntervalSince($0) } ?? .infinity
@@ -720,6 +724,36 @@ extension Door {
                 self.record(ask, DoorAnswer(id: ask.id, ok: true, said: said, front: nil, words: nil, picture: nil, at: now.timeIntervalSince1970))
             }
         }
+    }
+
+    // MARK: signed out
+
+    /// Browsers show sign-in pages all day; that is not an app signing the owner out.
+    public static let browsers: Set<String> = ["Safari", "Google Chrome", "Microsoft Edge", "Firefox", "Arc", "Brave Browser"]
+    /// The words on an app's window that mean it wants the owner to sign in again. Nil when it does not.
+    public nonisolated static func signedOut(_ words: [String]) -> String? {
+        let tells = ["signed out", "sign in again", "log in again", "session expired", "session has expired", "please sign in", "please log in",
+                     "sign in to continue", "log in to continue", "sign me in", "you need to sign in", "reauthenticate", "re-authenticate", "verify your account"]
+        for w in words {
+            let text = w.drop(while: { $0 != ":" }).dropFirst(2).lowercased()
+            if text.count <= 160, tells.contains(where: { text.contains($0) }) { return String(w.drop(while: { $0 != ":" }).dropFirst(2)) }
+        }
+        return nil
+    }
+    /// An app that sits on a sign-in screen for two looks in a row is told to the owner, once a day, before a job fails on it.
+    func noticeSignOuts(_ apps: [(app: String, words: [String])], now: Date) {
+        var seenNow: Set<String> = []
+        for a in apps {
+            guard let phrase = Door.signedOut(a.words) else { continue }
+            seenNow.insert(a.app)
+            guard signSeen.contains(a.app), now.timeIntervalSince(signTold[a.app] ?? .distantPast) >= 86400 else { continue }
+            signTold[a.app] = now
+            var ask = DoorAsk(id: "notice-\(Int(now.timeIntervalSince1970))-signin-\(slug(a.app))", do: "notice"); ask.app = a.app
+            record(ask, DoorAnswer(id: ask.id, ok: true, said: "\(a.app) wants you to sign in again (it says \"\(phrase)\"). Jobs that use it will not work until you do", front: nil, words: nil, picture: nil, at: now.timeIntervalSince1970))
+            onAct?("\(a.app) wants you to sign in again"); onDone?()
+        }
+        signTold = signTold.filter { seenNow.contains($0.key) || now.timeIntervalSince($0.value) < 86400 }
+        signSeen = seenNow
     }
 
     // MARK: before and after

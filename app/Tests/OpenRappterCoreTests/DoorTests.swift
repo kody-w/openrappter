@@ -402,4 +402,24 @@ final class DoorTests: XCTestCase {
         let second = try await waitLog(1)
         XCTAssertEqual(second, 1)
     }
+
+    func testAnAppThatSignedYouOutIsToldOnceBeforeAJobFails() throws {
+        XCTAssertEqual(Door.signedOut(["StaticText: Your session has expired", "Button: Sign In"]), "Your session has expired")
+        XCTAssertEqual(Door.signedOut(["StaticText: I can't think until you sign me in with GitHub."]), "I can't think until you sign me in with GitHub.")
+        XCTAssertNil(Door.signedOut(["StaticText: Inbox", "Button: Sign In to iCloud Photos sharing options"]))
+        XCTAssertNil(Door.signedOut(["StaticText: " + String(repeating: "a long article that mentions being signed out somewhere ", count: 5)]))
+        let door = tempDoor()
+        let t = Date(timeIntervalSince1970: 3_000_000)
+        let out = [(app: "Orders", words: ["StaticText: Please sign in to continue", "Button: Sign In"]), (app: "Notes", words: ["StaticText: Shopping"])]
+        func told() -> Int { ((try? String(contentsOf: door.dir.appendingPathComponent("log.jsonl"), encoding: .utf8)) ?? "").components(separatedBy: "wants you to sign in again").count - 1 }
+        door.noticeSignOuts(out, now: t)
+        XCTAssertEqual(told(), 0, "one look is not enough: it may be a passing screen")
+        door.noticeSignOuts(out, now: t.addingTimeInterval(300))
+        XCTAssertEqual(told(), 1)
+        for i in 2..<10 { door.noticeSignOuts(out, now: t.addingTimeInterval(Double(i) * 300)) }
+        XCTAssertEqual(told(), 1, "once a day, not every look")
+        door.noticeSignOuts(out, now: t.addingTimeInterval(90000))
+        XCTAssertEqual(told(), 2)
+        XCTAssertTrue(try String(contentsOf: door.dir.appendingPathComponent("log.jsonl"), encoding: .utf8).contains("Orders wants you to sign in again (it says \\\"Please sign in to continue\\\")"))
+    }
 }

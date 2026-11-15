@@ -156,6 +156,7 @@ public final class Door {
         case "show": return "watching you do \(a.title ?? "a job")"
         case "shown": return "reading back what you showed me"
         case "yes": return "keeping the job \(a.title ?? "")"
+        case "week": return "writing your weekly note"
         default: return "asked for something I do not know: \(a.do)"
         }
     }

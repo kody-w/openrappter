@@ -11,6 +11,7 @@ import Network
 ///   GET  /proof/<name> a before-and-after page for one thing the door did, and its two pictures
 ///   POST /beat       {"mac": "..."} another of the owner's Macs reporting that it is alive
 ///   GET  /beat       {mac, at, held, left: <count>, cover: [...]}; the only thing a Mac on the home network (not Tailscale) may ask
+///   GET  /week       the weekly note of what the door saved the owner (also at /weekly.html, where the page links)
 ///   GET  /answer/<id> {id, picked}; picked is null until the owner has chosen
 /// A choice is only ever taken by POST, so a link preview or a page preload can never press a button.
 /// Anything not from this Mac or the private network is hung up on.
@@ -117,6 +118,9 @@ public final class DoorWeb {
                 send(c, "200 OK", "application/json", (try? Data(contentsOf: door.dir.appendingPathComponent("left.json"))) ?? Data("{}".utf8),
                      extra: from.map { "Access-Control-Allow-Origin: \($0)\r\nVary: Origin\r\n" } ?? "")
             }
+        case ("GET", "/week"), ("GET", "/weekly.html"):
+            door.writeWeek()
+            send(c, "200 OK", "text/html; charset=utf-8", (try? Data(contentsOf: door.dir.appendingPathComponent("weekly.html"))) ?? Data())
         case ("POST", "/pick"):
             let json = (r.headers["content-type"] ?? "").contains("json")
             var ok = false

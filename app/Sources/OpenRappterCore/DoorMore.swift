@@ -297,9 +297,10 @@ extension Door {
                     for host in [p.at, p.lan].compactMap({ $0 }) where heard == nil {
                         guard let u = URL(string: "http://\(host):\(DoorWeb.port)/beat") else { continue }
                         var req = URLRequest(url: u); req.timeoutInterval = 3
-                        if let (d, _) = try? await URLSession.shared.data(for: req), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], o["mac"] != nil {
-                            heard = (o["cover"] as? [[String: Any]]) ?? []
-                        }
+                        do {
+                            let (d, _) = try await URLSession.shared.data(for: req)
+                            if let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], o["mac"] != nil { heard = (o["cover"] as? [[String: Any]]) ?? [] }
+                        } catch { try? Data("\(Date()) \(host): \(error.localizedDescription) \((error as NSError).code)\n".utf8).write(to: self.dir.appendingPathComponent("peer-error.txt")) }
                     }
                     // Report in as well: a Mac that cannot be reached may still be able to reach out.
                     let me = try? JSONSerialization.data(withJSONObject: ["mac": Host.current().localizedName ?? "this Mac"])

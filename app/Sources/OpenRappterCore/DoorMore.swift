@@ -92,15 +92,16 @@ extension Door {
         case "show":
             guard let title = a.title, !slug(title).isEmpty else { ans.said = "show needs a name for the job"; return true }
             guard AXIsProcessTrusted() else { ans.said = "not allowed to watch yet"; return true }
-            startShowing(title); ans.ok = true; ans.said = "watching. Do the job once, then ask shown."
+            startShowing(title); ans.ok = showMonitor != nil
+            ans.said = ans.ok ? "watching. Do the job once, then ask shown." : "this Mac would not let me watch"
         case "shown":
             guard showMonitor != nil else { ans.said = "I was not watching"; return true }
             stopShowing()
-            guard !shownSteps.isEmpty, let url = learnedURL(shownName) else { ans.said = "I did not see any steps"; return true }
+            guard !shownSteps.isEmpty, let url = learnedURL(shownName) else { ans.said = "I did not see any steps (\(shownMice) presses, \(shownKeys) keys)"; return true }
             let draft = url.deletingLastPathComponent().appendingPathComponent(".draft-" + url.lastPathComponent)
             ans.ok = (try? enc.encode(shownSteps).write(to: draft, options: .atomic)) != nil
             ans.words = shownSteps.enumerated().map { "\($0.offset + 1). \(Door.line($0.element))" }
-            ans.said = "I watched \(shownSteps.count) steps for \(shownName). Ask yes to keep it."
+            ans.said = "I watched \(shownSteps.count) steps for \(shownName) (\(shownMice) presses, \(shownKeys) keys). Ask yes to keep it."
         case "yes":
             guard let title = a.title ?? (shownName.isEmpty ? nil : shownName), let url = learnedURL(title) else { ans.said = "yes needs the job name"; return true }
             let draft = url.deletingLastPathComponent().appendingPathComponent(".draft-" + url.lastPathComponent)
@@ -220,9 +221,14 @@ extension Door {
         let quiet = ["looking at the screen", "listing the jobs I know", "listing what I watch for", "writing the page of what happened"]
         let noticed = lines.filter { ($0["id"] as? String ?? "").hasPrefix("notice-") }
         let rest = lines.filter { !($0["id"] as? String ?? "").hasPrefix("notice-") && !quiet.contains($0["did"] as? String ?? "") }
-        let stopped = rest.filter { !($0["ok"] as? Bool ?? false) }
+        func isJob(_ l: [String: Any]) -> Bool { (l["did"] as? String ?? "").hasPrefix("doing the job") }
+        let hand = ["pressing", "typing", "clicking", "opening", "checking for anything waiting", "hands", "reading back", "watching you"]
+        func byHand(_ l: [String: Any]) -> Bool { let d = l["did"] as? String ?? ""; return hand.contains { d.hasPrefix($0) } }
+        let stopped = rest.filter { !($0["ok"] as? Bool ?? false) && isJob($0) }
+        let refused = rest.filter { !($0["ok"] as? Bool ?? false) && !isJob($0) }.count
+        let singles = rest.filter { ($0["ok"] as? Bool ?? false) && byHand($0) }.count
         let skipped = rest.filter { ($0["ok"] as? Bool ?? false) && ($0["said"] as? String ?? "").contains("not needed") }
-        let did = rest.filter { ($0["ok"] as? Bool ?? false) && !($0["said"] as? String ?? "").contains("not needed") }
+        let did = rest.filter { ($0["ok"] as? Bool ?? false) && !byHand($0) && !($0["said"] as? String ?? "").contains("not needed") }
         let waiting = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: waitingURL))) as? [[String: Any]]) ?? []
         var pics = ""
         for name in lines.compactMap({ $0["picture"] as? String }).suffix(2) {
@@ -247,6 +253,7 @@ extension Door {
         <h1>While you were away</h1><p class="sub">\(esc(host)), the last \(Int(hours)) hours\(held ? ". Hands off is on." : "")</p>
         \(section("Left for you", left, empty: "Nothing is waiting on you."))
         \(section("What I did", did.map(row), empty: "Nothing needed doing."))
+        \(singles + refused > 0 ? "<p>Also \(singles) single presses and looks asked for by hand\(refused > 0 ? ", and \(refused) asks I turned down" : "").</p>" : "")
         \(section("What I skipped because it was already done", skipped.map(row), empty: "Nothing."))
         \(section("What I noticed", noticed.map(row), empty: "No box sat waiting."))
         \(pics.isEmpty ? "" : "<h2>The screen, last seen</h2>" + pics)
@@ -259,17 +266,32 @@ extension Door {
 
     func startShowing(_ name: String) {
         stopShowing()
-        shownName = name; shownSteps = []; shownTyped = ""
-        showMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .keyDown]) { [weak self] e in
-            let type = e.type, code = e.keyCode, flags = e.modifierFlags
-            let chars = e.type == .keyDown ? e.characters : nil, bare = e.type == .keyDown ? e.charactersIgnoringModifiers : nil
-            let spot = NSEvent.mouseLocation
-            Task { @MainActor in self?.sawOwner(type: type, code: code, flags: flags, chars: chars, bare: bare, spot: spot) }
-        }
+        shownName = name; shownSteps = []; shownTyped = ""; shownMice = 0; shownKeys = 0
+        let mask = (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.keyDown.rawValue)
+        let me = Unmanaged.passUnretained(self).toOpaque()
+        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .listenOnly,
+                                          eventsOfInterest: CGEventMask(mask), callback: { _, type, event, info in
+            guard let info else { return Unmanaged.passUnretained(event) }
+            let door = Unmanaged<Door>.fromOpaque(info).takeUnretainedValue()
+            let spot = event.location, flags = NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue))
+            let code = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
+            var chars: String?, bare: String?
+            if type == .keyDown {
+                var n = 0; var buf = [UniChar](repeating: 0, count: 8)
+                event.keyboardGetUnicodeString(maxStringLength: 8, actualStringLength: &n, unicodeString: &buf)
+                if n > 0 { chars = String(utf16CodeUnits: buf, count: n); bare = chars?.lowercased() }
+            }
+            Task { @MainActor in door.sawOwner(mouse: type == .leftMouseDown, code: code, flags: flags, chars: chars, bare: bare, spot: spot) }
+            return Unmanaged.passUnretained(event)
+        }, userInfo: me) else { return }
+        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        showMonitor = tap
     }
 
     func stopShowing() {
-        if let m = showMonitor { NSEvent.removeMonitor(m) }
+        if let m = showMonitor { CGEvent.tapEnable(tap: m as! CFMachPort, enable: false); CFMachPortInvalidate((m as! CFMachPort)) }
         showMonitor = nil
         flushTyped()
     }
@@ -279,13 +301,13 @@ extension Door {
         var s = DoorAsk(id: "", do: "type"); s.text = shownTyped; shownSteps.append(s); shownTyped = ""
     }
 
-    func sawOwner(type: NSEvent.EventType, code: UInt16, flags: NSEvent.ModifierFlags, chars: String?, bare: String?, spot: CGPoint) {
+    func sawOwner(mouse: Bool, code: UInt16, flags: NSEvent.ModifierFlags, chars: String?, bare: String?, spot: CGPoint) {
         guard showMonitor != nil, shownSteps.count < 200 else { return }
+        if mouse { shownMice += 1 } else { shownKeys += 1 }
         let front = NSWorkspace.shared.frontmostApplication?.localizedName
-        if type == .leftMouseDown {
+        if mouse {
             flushTyped()
-            let top = (NSScreen.screens.first?.frame.height ?? 0) - spot.y
-            if let step = Door.step(forPressAt: CGPoint(x: spot.x, y: top), app: front) { shownSteps.append(step) }
+            if let step = Door.step(forPressAt: spot, app: front) { shownSteps.append(step) }
             return
         }
         let named: [UInt16: String] = [36: "return", 48: "tab", 51: "delete", 53: "escape", 123: "left", 124: "right", 125: "down", 126: "up"]

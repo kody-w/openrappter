@@ -66,6 +66,8 @@ public final class Door {
     var shownSteps: [DoorAsk] = []
     var shownTyped = ""
     var shownName = ""
+    var shownMice = 0
+    var shownKeys = 0
     /// How long a box may sit before the creature says something is waiting.
     public var boxPatience: TimeInterval = 90
 

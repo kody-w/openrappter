@@ -241,6 +241,8 @@ extension Door {
             }
         case "fits":
             fitsAsk(&ans)
+        case "setup", "settings":
+            setup(a, &ans)
         default:
             return false
         }
@@ -514,6 +516,7 @@ extension Door {
             left.append("<li class=\"ask\"><b>Hands off is on, so I am only looking.</b><div>\(button("Let me work again", DoorAsk(id: "", do: "resume")))</div></li>")
             closeRow("Hands off is on, so I am only looking.")
         }
+        let setupNote = writeSetup(token: token, offers: &offers, now: now)
         let enc = JSONEncoder()
         if let d = try? enc.encode(["token": [DoorAsk(id: token, do: "token")], "offers": Array(offers.keys.sorted().map { k in var a = offers[k]!; a.id = k; return a })]) {
             let u = dir.appendingPathComponent("offers.json"); try? d.write(to: u, options: .atomic)
@@ -537,7 +540,7 @@ extension Door {
         li.ask{display:block}li.ask div{margin-top:10px;display:flex;gap:10px;flex-wrap:wrap}
         .btn{background:#f0a04b;color:#14110f;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:10px}
         .btn.quiet{background:#2c2622;color:#f3ece4}</style>
-        <h1>While you were away</h1><p class="sub">\(esc(host)), the last \(Int(hours)) hours\(held ? ". Hands off is on." : "")</p>
+        <h1>While you were away</h1><p class="sub">\(esc(host)), the last \(Int(hours)) hours\(held ? ". Hands off is on." : "")</p>\(setupNote)
         \(politeLine())
         \(section("Left for you", left, empty: "Nothing. You do not need to do anything."))
         \(standing.isEmpty ? "" : section("Answers you made stick", standing, empty: ""))

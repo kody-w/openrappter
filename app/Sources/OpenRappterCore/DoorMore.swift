@@ -631,6 +631,11 @@ extension Door {
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         return (try? enc.encode(r).write(to: alwaysURL, options: .atomic)) != nil
     }
+    /// The owner's other Macs that run a door, for the one page: peers.json = [{"name": "...", "at": "100.x.y.z"}].
+    public func peers() -> [(name: String, at: String)] {
+        let list = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("peers.json")))) as? [[String: String]]) ?? []
+        return list.compactMap { p in p["at"].map { (p["name"] ?? $0, $0) } }
+    }
     /// The words a box is asking, without its buttons.
     public static func boxSays(_ words: [String]) -> String {
         words.filter { !$0.hasPrefix("Button") }.map { String($0.drop(while: { $0 != ":" }).dropFirst(2)) }.prefix(2).joined(separator: " ")

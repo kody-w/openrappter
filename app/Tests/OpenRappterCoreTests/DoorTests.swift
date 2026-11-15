@@ -302,4 +302,22 @@ final class DoorTests: XCTestCase {
         try drop(off, in: door); await door.drain()
         XCTAssertEqual(door.alwaysRules().count, 0)
     }
+
+    func testOnePageForAllMacs() throws {
+        let one: [String: Any] = ["mac": "One", "token": "T1", "left": [["says": "Mail is asking: Reopen?", "choices": [["offer": "o1", "label": "Press Reopen"], ["offer": "o2", "label": "Always Reopen"]]]]]
+        let page = DoorWeb.allPage([(name: "Two", base: "", doc: ["mac": "Two", "token": "T2", "left": [[String: Any]]()]),
+                                    (name: "One", base: "http://100.77.124.111:7466", doc: one),
+                                    (name: "Gone <b>", base: "http://100.70.1.1:7466", doc: nil)], back: "http://100.70.213.17:7466/all")
+        XCTAssertTrue(page.contains("1 waiting on you."))
+        XCTAssertTrue(page.contains("action=\"http://100.77.124.111:7466/pick\"") && page.contains("value=\"T1\"") && page.contains(">Press Reopen</button>"))
+        XCTAssertTrue(page.contains("name=\"back\" value=\"http://100.70.213.17:7466/all\""))
+        XCTAssertTrue(page.contains("Gone &lt;b>") && page.contains("data-base=\"http://100.70.1.1:7466\"") && page.contains("fetch(base + \"/left.json\")"))
+        XCTAssertFalse(page.contains("href=\"openrappter://"))
+        // Coming back is only ever to another door page on the private network.
+        XCTAssertTrue(DoorWeb.safeBack("http://100.70.213.17:7466/all")); XCTAssertTrue(DoorWeb.safeBack("http://rapptertwo.tail99115f.ts.net:7466/all"))
+        XCTAssertFalse(DoorWeb.safeBack("http://evil.example/all")); XCTAssertFalse(DoorWeb.safeBack("https://100.70.213.17/all?x=1"))
+        XCTAssertFalse(DoorWeb.safeBack("http://100.70.213.17:7466/pick")); XCTAssertFalse(DoorWeb.safeBack("javascript:alert(1)"))
+        let raw = Data("POST /pick HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 53\r\n\r\nt=T&k=o1&back=http%3A%2F%2F100.70.213.17%3A7466%2Fall".utf8)
+        XCTAssertEqual(DoorWeb.form(DoorWeb.parse(raw)!)["back"], "http://100.70.213.17:7466/all")
+    }
 }

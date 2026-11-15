@@ -7,7 +7,7 @@ import ScreenCaptureKit
 /// The door is a local folder only the owner can write to. Nothing here listens on the network.
 public struct DoorAsk: Codable, Equatable {
     public var id: String
-    /// look | press | click | type | key | open
+    /// look | press | click | type | key | open | learn | job | jobs
     public var `do`: String
     public var app: String?      // press / look: which app (default: the one in front)
     public var title: String?    // press: the words on the thing to press
@@ -16,7 +16,20 @@ public struct DoorAsk: Codable, Equatable {
     public var text: String?     // type: the text; open: an app name or a link
     public var key: String?      // key: return, tab, space, escape, delete, up, down, left, right, or one letter
     public var with: [String]?   // key: command, shift, option, control
+    public var steps: [DoorAsk]? // learn: the asks to keep under the name in `title`
+    public var unless: String?   // a step inside a job: skip it when the screen already says this
+    public var wait: Double?     // a step inside a job: seconds to wait after it
     public init(id: String, do what: String) { self.id = id; self.do = what }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        `do` = try c.decode(String.self, forKey: .do)
+        app = try c.decodeIfPresent(String.self, forKey: .app); title = try c.decodeIfPresent(String.self, forKey: .title)
+        x = try c.decodeIfPresent(Double.self, forKey: .x); y = try c.decodeIfPresent(Double.self, forKey: .y)
+        text = try c.decodeIfPresent(String.self, forKey: .text); key = try c.decodeIfPresent(String.self, forKey: .key)
+        with = try c.decodeIfPresent([String].self, forKey: .with); steps = try c.decodeIfPresent([DoorAsk].self, forKey: .steps)
+        unless = try c.decodeIfPresent(String.self, forKey: .unless); wait = try c.decodeIfPresent(Double.self, forKey: .wait)
+    }
 }
 
 public struct DoorAnswer: Codable, Equatable {
@@ -88,6 +101,9 @@ public final class Door {
         case "type": return "typing \((a.text ?? "").count) characters"
         case "key": return "pressing the \(a.key ?? "") key"
         case "open": return "opening \(a.text ?? "")"
+        case "learn": return "learning the job \(a.title ?? "")"
+        case "job": return "doing the job \(a.title ?? "")"
+        case "jobs": return "listing the jobs I know"
         default: return "asked for something I do not know: \(a.do)"
         }
     }
@@ -124,12 +140,46 @@ public final class Door {
         case "open":
             guard let t = a.text, !t.isEmpty else { ans.said = "open needs an app name or a link"; break }
             ans.ok = Screen.open(t); ans.said = ans.ok ? "opened \(t)" : "could not find \(t)"
+        case "learn":
+            guard let name = a.title, let steps = a.steps, !steps.isEmpty, let url = learnedURL(name) else { ans.said = "learn needs a name and steps"; break }
+            if steps.contains(where: { ["learn", "job", "jobs"].contains($0.do) }) { ans.said = "a job cannot hold another job"; break }
+            let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+            ans.ok = (try? enc.encode(steps).write(to: url, options: .atomic)) != nil
+            ans.said = ans.ok ? "learned \(name), \(steps.count) steps" : "could not keep \(name)"
+        case "jobs":
+            let names = ((try? FileManager.default.contentsOfDirectory(at: learned, includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.pathExtension == "json" }.map { $0.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "-", with: " ") }.sorted()
+            ans.ok = true; ans.words = names; ans.said = "I know \(names.count) jobs"
+        case "job":
+            guard let name = a.title, let url = learnedURL(name), let data = try? Data(contentsOf: url),
+                  let steps = try? JSONDecoder().decode([DoorAsk].self, from: data) else { ans.said = "I have not learned \(a.title ?? "that")"; break }
+            var done = 0, skipped = 0
+            ans.ok = true
+            for (i, step) in steps.enumerated() {
+                if let u = step.unless, Screen.words(app: step.app).contains(where: { $0.localizedCaseInsensitiveContains(u) }) { skipped += 1; continue }
+                var s = step; s.id = "\(a.id)-\(i + 1)"
+                let r = await carryOut(s)
+                if let w = step.wait { try? await Task.sleep(for: .milliseconds(Int(w * 1000))) }
+                if !r.ok { ans.ok = false; ans.said = "\(name) stopped at step \(i + 1): \(r.said)"; break }
+                done += 1
+            }
+            if ans.ok { ans.said = "\(name): \(done) steps done" + (skipped > 0 ? ", \(skipped) not needed" : "") }
         default:
             ans.said = "I do not know how to \(a.do)"
         }
-        if a.do != "look" { try? await Task.sleep(for: .milliseconds(400)) }
+        if a.do != "look" && a.do != "job" { try? await Task.sleep(for: .milliseconds(400)) }
         ans.front = NSWorkspace.shared.frontmostApplication?.localizedName
         return ans
+    }
+
+    /// Jobs worked out once and kept by name: ~/.openrappter/door/learned/<name>.json, a plain list of asks.
+    public var learned: URL { dir.appendingPathComponent("learned") }
+    func learnedURL(_ name: String) -> URL? {
+        let slug = name.lowercased().map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
+            .split(separator: "-").joined(separator: "-")
+        guard !slug.isEmpty else { return nil }
+        try? FileManager.default.createDirectory(at: learned, withIntermediateDirectories: true)
+        return learned.appendingPathComponent("\(slug).json")
     }
 
     private func write(_ answer: DoorAnswer) {
@@ -229,8 +279,12 @@ public enum Screen {
         return parts(of: a).compactMap { p in
             guard !p.label.isEmpty else { return nil }
             let role = p.role.replacingOccurrences(of: "AX", with: "")
+            var state = ""
+            if ["AXCheckBox", "AXSwitch", "AXRadioButton"].contains(p.role), let v = attr(p.el, kAXValueAttribute as String) as? NSNumber {
+                state = v.intValue == 0 ? " (off)" : " (on)"
+            }
             let place = p.frame.map { " @\(Int($0.midX)),\(Int($0.midY))" } ?? ""
-            return "\(role): \(p.label.prefix(120))\(place)"
+            return "\(role): \(p.label.prefix(120))\(state)\(place)"
         }
     }
 

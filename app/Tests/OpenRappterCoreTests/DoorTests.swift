@@ -59,4 +59,32 @@ final class DoorTests: XCTestCase {
         XCTAssertEqual(Screen.keyCode("Escape"), 53)
         XCTAssertNil(Screen.keyCode("banana"))
     }
+
+    func testAJobIsLearnedOnceAndThenDoneByName() async throws {
+        let door = tempDoor()
+        var learn = DoorAsk(id: "l1", do: "learn"); learn.title = "Open the notes"
+        var step = DoorAsk(id: "", do: "open"); step.text = "TextEdit-that-does-not-exist"
+        learn.steps = [step]
+        try drop(learn, in: door)
+        try drop(DoorAsk(id: "j0", do: "jobs"), in: door)
+        var job = DoorAsk(id: "j1", do: "job"); job.title = "open the NOTES"
+        try drop(job, in: door)
+        var missing = DoorAsk(id: "j2", do: "job"); missing.title = "fly"
+        try drop(missing, in: door)
+        await door.drain()
+        XCTAssertEqual(try answer("l1", in: door).said, "learned Open the notes, 1 steps")
+        XCTAssertEqual(try answer("j0", in: door).words, ["open the notes"])
+        XCTAssertTrue(try answer("j1", in: door).said.hasPrefix("open the NOTES stopped at step 1"))
+        XCTAssertEqual(try answer("j2", in: door).said, "I have not learned fly")
+    }
+
+    func testAJobCannotHoldAnotherJob() async throws {
+        let door = tempDoor()
+        var learn = DoorAsk(id: "l2", do: "learn"); learn.title = "loop"
+        var inner = DoorAsk(id: "", do: "job"); inner.title = "loop"
+        learn.steps = [inner]
+        try drop(learn, in: door)
+        await door.drain()
+        XCTAssertEqual(try answer("l2", in: door).said, "a job cannot hold another job")
+    }
 }

@@ -42,7 +42,12 @@ extension Door {
         try? FileManager.default.removeItem(at: dir.appendingPathComponent("offers.json"))
         ask.id = "pick-\(Int(Date().timeIntervalSince1970))-\(parts[1])"
         if let d = try? JSONEncoder().encode(ask) { try? d.write(to: dir.appendingPathComponent("\(ask.id).json"), options: .atomic) }
-        Task { await self.drain(); _ = self.writePage(hours: 24) }
+        Task {
+            await self.drain()
+            try? await Task.sleep(for: .seconds(1))
+            self.noticeBoxes(Screen.boxes(), now: Date())
+            _ = self.writePage(hours: 24)
+        }
     }
 
     var watchesDir: URL { dir.appendingPathComponent("watches") }

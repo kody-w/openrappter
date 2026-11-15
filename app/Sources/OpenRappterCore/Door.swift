@@ -133,6 +133,7 @@ public final class Door {
         case "boxes": return "checking for anything waiting"
         case "hear": return "rehearsing a spoken line"
         case "forget": return "leaving one alone, as told"
+        case "notice": return "noticed a box waiting"
         case "page": return "writing the page of what happened"
         case "pack": return "packing my jobs for another Mac"
         case "show": return "watching you do \(a.title ?? "a job")"

@@ -230,6 +230,7 @@ extension Door {
             try? fm.removeItem(at: url)
             ans.ok = (try? fm.moveItem(at: draft, to: url)) != nil
             ans.said = ans.ok ? "learned \(title)" : "could not keep \(title)"
+            if ans.ok { fitClear(title) }
             let pending = dir.appendingPathComponent(".chore.json")
             if ans.ok, let w = try? JSONDecoder().decode(DoorWatch.self, from: Data(contentsOf: pending)), slug(w.job) == slug(title) {
                 try? fm.createDirectory(at: watchesDir, withIntermediateDirectories: true)
@@ -238,6 +239,8 @@ extension Door {
                 }
                 try? fm.removeItem(at: pending)
             }
+        case "fits":
+            fitsAsk(&ans)
         default:
             return false
         }
@@ -311,7 +314,7 @@ extension Door {
                         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
                         if let (_, r) = try? await URLSession.shared.data(for: req), (r as? HTTPURLResponse)?.statusCode == 200 { break }
                     }
-                    for w in self.peerBeat(name: p.name, heard: heard, now: Date()) {
+                    for w in self.fitRunnable(self.peerBeat(name: p.name, heard: heard, now: Date())) {
                         var ask = DoorAsk(id: "cover-\(Int(Date().timeIntervalSince1970))-\(self.slug(w.title))", do: "job"); ask.title = w.job
                         if let d = try? JSONEncoder().encode(ask) { try? d.write(to: self.dir.appendingPathComponent("\(ask.id).json"), options: .atomic) }
                     }
@@ -341,7 +344,7 @@ extension Door {
         }
         busy = true; defer { busy = false }
         for w in all {
-            guard !Door.due([w], now: now, fired: fired, onScreen: screen(w.app), lit: lit).isEmpty else { continue }
+            guard !Door.due([w], now: now, fired: fired, onScreen: screen(w.app), lit: lit).isEmpty, !fitSkips(w.job) else { continue }
             if w.see != nil { lit.insert(w.title) }
             fired[w.title] = now.timeIntervalSince1970
             try? JSONEncoder().encode(fired).write(to: firedURL, options: .atomic)
@@ -487,7 +490,11 @@ extension Door {
             left.append(row + "</div></li>")
             closeRow(text.isEmpty ? title : "\(title) \(text)")
         }
-        for l in stopped {
+        for r in fitRows() {
+            left.append("<li class=\"ask\"><b>\(esc(r.says))</b><div>" + r.buttons.enumerated().map { button($0.element.label, $0.element.ask, quiet: $0.offset > 0) }.joined() + "</div></li>")
+            closeRow(r.says)
+        }
+        for l in stopped where !fitSkips(jobName(l)) {
             let name = jobName(l)
             var again = DoorAsk(id: "", do: "job"); again.title = name
             var forget = DoorAsk(id: "", do: "forget"); forget.text = l["id"] as? String

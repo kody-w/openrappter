@@ -128,6 +128,7 @@ public final class Door {
         case "watch": return "keeping watch: \(a.title ?? "")"
         case "unwatch": return "no longer watching: \(a.title ?? "")"
         case "watches": return "listing what I watch for"
+        case "boxes": return "checking for anything waiting"
         case "page": return "writing the page of what happened"
         case "pack": return "packing my jobs for another Mac"
         case "show": return "watching you do \(a.title ?? "a job")"
@@ -143,6 +144,16 @@ public final class Door {
         if held, ["press", "click", "type", "key", "open", "job"].contains(a.do) {
             ans.said = "hands off is on, so I did not do that. Ask resume to let me work again."
             return ans
+        }
+        // Keys, typing and clicks land on whatever is in front. When an app is named, it must be the one in front, or nothing is sent.
+        if ["key", "type", "click"].contains(a.do) {
+            if let name = a.app, !name.isEmpty {
+                guard let t = Screen.target(name) else { ans.said = "\(name) is not open, so I did not touch anything"; return ans }
+                if NSWorkspace.shared.frontmostApplication != t { t.activate(); try? await Task.sleep(for: .milliseconds(500)) }
+                guard NSWorkspace.shared.frontmostApplication == t else { ans.said = "could not bring \(name) to the front, so I did not touch anything"; return ans }
+            } else if a.do == "key", a.key?.lowercased() == "q", (a.with ?? []).contains(where: { ["command", "cmd"].contains($0.lowercased()) }) {
+                ans.said = "quitting needs the app named, so I did not press it"; return ans
+            }
         }
         switch a.do {
         case "look":

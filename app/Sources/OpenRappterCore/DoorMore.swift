@@ -58,6 +58,11 @@ extension Door {
             let url = watchesDir.appendingPathComponent("\(slug(title)).json")
             ans.ok = fm.fileExists(atPath: url.path); try? fm.removeItem(at: url)
             ans.said = ans.ok ? "no longer watching \(title)" : "I was not watching \(title)"
+        case "boxes":
+            if a.text == "windows" { ans.ok = true; ans.words = Screen.windowFacts(); ans.said = "windows listed"; return true }
+            let b = Screen.boxes(); ans.ok = true
+            ans.words = b.map { "\($0.app): " + $0.words.prefix(6).joined(separator: "; ") }
+            ans.said = b.isEmpty ? "nothing is waiting for an answer" : "\(b.count) waiting for an answer"
         case "watches":
             let all = watches(); ans.ok = true; ans.words = all.map { Door.plain($0) }; ans.said = "I keep \(all.count) watches"
         case "page":
@@ -179,7 +184,7 @@ extension Door {
         var live: Set<String> = []
         var waitingNow: [[String: Any]] = []
         for b in boxes {
-            let key = b.app + "|" + b.words.joined(separator: "|")
+            let key = b.app + "|" + b.words.filter { $0.hasPrefix("Button") }.sorted().joined(separator: "|")
             live.insert(key)
             let since = boxSince[key] ?? now
             boxSince[key] = since
@@ -321,34 +326,53 @@ extension Door {
 }
 
 extension Screen {
+    static func windowFacts() -> [String] {
+        NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.flatMap { app -> [String] in
+            let root = AXUIElementCreateApplication(app.processIdentifier)
+            return ((attr(root, kAXWindowsAttribute as String) as? [AXUIElement]) ?? []).map { w in
+                let kids = ((attr(w, kAXChildrenAttribute as String) as? [AXUIElement]) ?? []).map { (attr($0, kAXRoleAttribute as String) as? String) ?? "?" }
+                return "\(app.localizedName ?? "?") | \(label(w).prefix(30)) | role \((attr(w, kAXRoleAttribute as String) as? String) ?? "") | sub \((attr(w, kAXSubroleAttribute as String) as? String) ?? "") | modal \(String(describing: attr(w, kAXModalAttribute as String))) | kids \(Set(kids).sorted().joined(separator: ","))"
+            }
+        }
+    }
+
     /// Boxes that are waiting for an answer: system alerts, and sheets or dialogs in the app in front.
     public static func boxes() -> [(app: String, words: [String])] {
         guard AXIsProcessTrusted() else { return [] }
-        var apps: [NSRunningApplication] = []
-        if let f = NSWorkspace.shared.frontmostApplication { apps.append(f) }
         let always = ["UserNotificationCenter", "CoreServicesUIAgent", "SecurityAgent"]
-        apps += NSWorkspace.shared.runningApplications.filter { always.contains($0.localizedName ?? "") && $0 != apps.first }
+        let apps = NSWorkspace.shared.runningApplications.filter {
+            ($0.activationPolicy == .regular || always.contains($0.localizedName ?? "")) && $0.processIdentifier != getpid()
+        }
         var out: [(String, [String])] = []
         for app in apps {
             let name = app.localizedName ?? "an app"
             let root = AXUIElementCreateApplication(app.processIdentifier)
             for win in (attr(root, kAXWindowsAttribute as String) as? [AXUIElement]) ?? [] {
-                let sub = (attr(win, kAXSubroleAttribute as String) as? String) ?? ""
-                var box: AXUIElement? = (["AXDialog", "AXSystemDialog"].contains(sub) || always.contains(name)) ? win : nil
+                                // A box is a window that offers a default or a cancel button. What a window calls itself is not reliable.
+                let asks = attr(win, kAXDefaultButtonAttribute as String) != nil || attr(win, kAXCancelButtonAttribute as String) != nil
+                var box: AXUIElement? = (asks || always.contains(name)) ? win : nil
                 if box == nil {
                     box = ((attr(win, kAXChildrenAttribute as String) as? [AXUIElement]) ?? [])
                         .first { (attr($0, kAXRoleAttribute as String) as? String) == "AXSheet" }
                 }
+                // A panel with no close button counts only if it offers Cancel.
+                var needCancel = false
+                if box == nil, attr(win, kAXCloseButtonAttribute as String) == nil,
+                   (attr(win, kAXRoleAttribute as String) as? String) == "AXWindow" { box = win; needCancel = true }
                 guard let b = box else { continue }
                 var words: [String] = [], queue = [b], n = 0
-                while !queue.isEmpty, n < 120 {
+                while !queue.isEmpty, n < 400 {
                     let el = queue.removeFirst(); n += 1
                     let role = (attr(el, kAXRoleAttribute as String) as? String) ?? ""
                     let l = label(el)
                     if !l.isEmpty, role == "AXButton" || role == "AXStaticText" { words.append("\(role.dropFirst(2)): \(l.prefix(100))") }
                     queue += (attr(el, kAXChildrenAttribute as String) as? [AXUIElement]) ?? []
                 }
-                if words.contains(where: { $0.hasPrefix("Button") }) { out.append((name, Array(words.prefix(12)))) }
+                if needCancel, !words.contains("Button: Cancel") { continue }
+                if words.contains(where: { $0.hasPrefix("Button") }) {
+                    let buttons = words.filter { $0.hasPrefix("Button") }, text = words.filter { !$0.hasPrefix("Button") }
+                    out.append((name, Array(text.prefix(4)) + Array(buttons.prefix(8))))
+                }
             }
         }
         return out.map { (app: $0.0, words: $0.1) }

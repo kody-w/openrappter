@@ -137,6 +137,8 @@ final class DoorTests: XCTestCase {
         let box = [(app: "Installer", words: ["StaticText: Allow this?", "Button: Allow", "Button: Later"])]
         door.noticeBoxes(box, now: t0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: door.dir.appendingPathComponent("waiting.json").path))
+        let moved = [(app: "Installer", words: ["StaticText: Allow this now?", "Button: Allow", "Button: Later"])]
+        door.noticeBoxes(moved, now: t0.addingTimeInterval(30))
         door.noticeBoxes(box, now: t0.addingTimeInterval(61))
         door.noticeBoxes(box, now: t0.addingTimeInterval(90))
         let log = try String(contentsOf: door.dir.appendingPathComponent("log.jsonl"), encoding: .utf8)
@@ -174,5 +176,16 @@ final class DoorTests: XCTestCase {
         XCTAssertEqual(Door.step(forKey: "return", bare: nil, mods: [], shift: false)?.key, "return")
         let q = Door.step(forKey: nil, bare: "q", mods: ["command"], shift: false)
         XCTAssertEqual(q?.key, "q"); XCTAssertEqual(q?.with, ["command"])
+    }
+
+    func testAKeyMeantForAnAppIsNeverSentToWhateverIsInFront() async throws {
+        let door = tempDoor()
+        var q = DoorAsk(id: "q1", do: "key"); q.key = "q"; q.with = ["command"]; q.app = "No Such App 123"
+        try drop(q, in: door)
+        var bare = DoorAsk(id: "q2", do: "key"); bare.key = "q"; bare.with = ["command"]
+        try drop(bare, in: door)
+        await door.drain()
+        XCTAssertEqual(try answer("q1", in: door).said, "No Such App 123 is not open, so I did not touch anything")
+        XCTAssertEqual(try answer("q2", in: door).said, "quitting needs the app named, so I did not press it")
     }
 }

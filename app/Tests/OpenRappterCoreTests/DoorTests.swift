@@ -206,4 +206,16 @@ final class DoorTests: XCTestCase {
         XCTAssertNil(Door.spoken("take my hands off the wheel"))
         let door = tempDoor(); door.hold(); XCTAssertTrue(door.held); door.release(); XCTAssertFalse(door.held)
     }
+
+    func testThePageOverThePrivateNetworkOnlyTakesAPostFromAnAllowedPlace() {
+        XCTAssertTrue(DoorWeb.allowed("100.77.124.111")); XCTAssertTrue(DoorWeb.allowed("127.0.0.1")); XCTAssertTrue(DoorWeb.allowed("::ffff:100.64.0.9"))
+        XCTAssertFalse(DoorWeb.allowed("192.168.86.191")); XCTAssertFalse(DoorWeb.allowed("100.128.0.1")); XCTAssertFalse(DoorWeb.allowed("8.8.8.8"))
+        let web = DoorWeb.forWeb("<style>a{}</style><a class=\"btn quiet\" href=\"openrappter://pick/TOK/o2\">Press Later</a>")
+        XCTAssertTrue(web.contains("<form method=\"post\" action=\"/pick\">") && web.contains("value=\"TOK\"") && web.contains(">Press Later</button>"))
+        XCTAssertFalse(web.contains("openrappter://"))
+        let raw = Data("POST /pick HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 10\r\n\r\nt=TOK&k=o2".utf8)
+        let r = DoorWeb.parse(raw)!
+        XCTAssertEqual(DoorWeb.choice(r)?.token, "TOK"); XCTAssertEqual(DoorWeb.choice(r)?.offer, "o2")
+        XCTAssertNil(DoorWeb.parse(Data("POST /pick HTTP/1.1\r\nContent-Length: 10\r\n\r\nt=TO".utf8)))
+    }
 }

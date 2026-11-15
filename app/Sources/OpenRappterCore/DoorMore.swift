@@ -35,19 +35,33 @@ extension Door {
     /// A button on the page was clicked. Only an offer the current page made, with its one-time token, is taken.
     public func clicked(_ url: URL) {
         let parts = url.pathComponents.filter { $0 != "/" }
-        guard url.scheme == "openrappter", url.host == "pick", parts.count == 2,
-              let data = try? Data(contentsOf: dir.appendingPathComponent("offers.json")),
+        guard url.scheme == "openrappter", url.host == "pick", parts.count == 2, take(token: parts[0], key: parts[1]) else { return }
+        Task { await self.settle() }
+    }
+
+    /// Takes one offer the current page made. The token is used up, so the same click cannot land twice.
+    func take(token: String, key: String) -> Bool {
+        guard let data = try? Data(contentsOf: dir.appendingPathComponent("offers.json")),
               let all = try? JSONDecoder().decode([String: [DoorAsk]].self, from: data),
-              all["token"]?.first?.id == parts[0], var ask = all["offers"]?.first(where: { $0.id == parts[1] }) else { return }
+              all["token"]?.first?.id == token, var ask = all["offers"]?.first(where: { $0.id == key }) else { return false }
         try? FileManager.default.removeItem(at: dir.appendingPathComponent("offers.json"))
-        ask.id = "pick-\(Int(Date().timeIntervalSince1970))-\(parts[1])"
-        if let d = try? JSONEncoder().encode(ask) { try? d.write(to: dir.appendingPathComponent("\(ask.id).json"), options: .atomic) }
-        Task {
-            await self.drain()
-            try? await Task.sleep(for: .seconds(1))
-            self.noticeBoxes(Screen.boxes(), now: Date())
-            _ = self.writePage(hours: 24)
-        }
+        ask.id = "pick-\(Int(Date().timeIntervalSince1970))-\(key)"
+        guard let d = try? JSONEncoder().encode(ask) else { return false }
+        return (try? d.write(to: dir.appendingPathComponent("\(ask.id).json"), options: .atomic)) != nil
+    }
+
+    func settle() async {
+        await drain()
+        try? await Task.sleep(for: .seconds(1))
+        noticeBoxes(Screen.boxes(), now: Date())
+        _ = writePage(hours: 24)
+    }
+
+    /// An answer picked from anywhere: the page on this Mac, or the owner's phone over the private network.
+    public func pick(token: String, key: String) async -> Bool {
+        guard take(token: token, key: key) else { return false }
+        await settle()
+        return true
     }
 
     var watchesDir: URL { dir.appendingPathComponent("watches") }
@@ -313,8 +327,10 @@ extension Door {
         // Everything left for the owner comes with buttons. A button is a one-time offer this page made; nothing else can be clicked into action.
         let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         var offers: [String: DoorAsk] = [:]
+        var choices: [[String: String]] = [], asks: [[String: Any]] = []
+        func closeRow(_ says: String) { asks.append(["says": says, "choices": choices]); choices = [] }
         func button(_ label: String, _ ask: DoorAsk, quiet: Bool = false) -> String {
-            let k = "o\(offers.count + 1)"; offers[k] = ask
+            let k = "o\(offers.count + 1)"; offers[k] = ask; choices.append(["offer": k, "label": label])
             return "<a class=\"btn\(quiet ? " quiet" : "")\" href=\"openrappter://pick/\(token)/\(k)\">\(esc(label))</a>"
         }
         var left: [String] = []
@@ -325,15 +341,18 @@ extension Door {
             var row = "<li class=\"ask\"><b>\(esc(app)) is asking: \(esc(text.isEmpty ? "a question with no words I could read" : text))</b><div>"
             for name in buttons { var a = DoorAsk(id: "", do: "press"); a.title = name; a.app = app; row += button("Press \(name)", a) }
             left.append(row + "</div></li>")
+            closeRow("\(app) is asking: \(text)")
         }
         for l in stopped {
             let name = jobName(l)
             var again = DoorAsk(id: "", do: "job"); again.title = name
             var forget = DoorAsk(id: "", do: "forget"); forget.text = l["id"] as? String
             left.append("<li class=\"ask\"><b>\(esc(l["said"] as? String ?? ""))</b><div>\(button("Try it again", again))\(button("Leave it", forget, quiet: true))</div></li>")
+            closeRow(l["said"] as? String ?? "")
         }
         if held {
             left.append("<li class=\"ask\"><b>Hands off is on, so I am only looking.</b><div>\(button("Let me work again", DoorAsk(id: "", do: "resume")))</div></li>")
+            closeRow("Hands off is on, so I am only looking.")
         }
         let enc = JSONEncoder()
         if let d = try? enc.encode(["token": [DoorAsk(id: token, do: "token")], "offers": Array(offers.keys.sorted().map { k in var a = offers[k]!; a.id = k; return a })]) {
@@ -341,6 +360,12 @@ extension Door {
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: u.path)
         }
         let host = Host.current().localizedName ?? "this Mac"
+        // The same thing as data, for a phone app later: what is left, and the choices for each.
+        let leftDoc: [String: Any] = ["schema": "openrappter-door/1", "mac": host, "at": now.timeIntervalSince1970, "held": held,
+                                      "token": token, "left": asks]
+        if let d = try? JSONSerialization.data(withJSONObject: leftDoc, options: [.prettyPrinted, .sortedKeys]) {
+            try? d.write(to: dir.appendingPathComponent("left.json"), options: .atomic)
+        }
         let html = """
         <!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <meta http-equiv="refresh" content="30"><title>While you were away</title>

@@ -22,6 +22,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     let voice = Voice()
     let needs = NeedsQueue()
     var door: Door?
+    var web: DoorWeb?
     var notch: DynamicNotch<Expanded, CompactLeading, CompactTrailing>!
     var mind: MindClient?
     var sessionId: String?
@@ -64,6 +65,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         door.onAct = { [weak self] line in log("door: \(line)"); self?.model.posture = .thinking }
         door.onDone = { [weak self] in if self?.model.posture == .thinking { self?.model.posture = .idle } }
         self.door = door
+        let web = DoorWeb(door: door); web.start(); self.web = web
         model.onSignInAgain = { [weak self] in self?.signInAgain() }
         model.onTryAgain = { [weak self] in Task { await self?.findMind() } }
         model.onInstallTools = { [weak self] in self?.installTools() }

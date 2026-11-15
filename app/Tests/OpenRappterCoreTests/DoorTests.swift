@@ -259,13 +259,13 @@ final class DoorTests: XCTestCase {
         door.boxPatience = 60
         let t0 = Date()
         let words = ["StaticText: Reopen windows?", "Button: Reopen", "Button: Cancel"]
-        let box = [(app: "Mail", words: words)]
+        let box = [(app: "NoSuchAppForTests", words: words)]
         door.noticeBoxes(box, now: t0); door.noticeBoxes(box, now: t0.addingTimeInterval(61))
         _ = door.writePage(hours: 24)
         var page = try String(contentsOf: door.dir.appendingPathComponent("page.html"), encoding: .utf8)
         XCTAssertTrue(page.contains(">Always Cancel</a>"))
         // Make it stick.
-        var a = DoorAsk(id: "s1", do: "always"); a.app = "Mail"; a.title = "Cancel"; a.text = Door.boxSays(words)
+        var a = DoorAsk(id: "s1", do: "always"); a.app = "NoSuchAppForTests"; a.title = "Cancel"; a.text = Door.boxSays(words)
         a.steps = Door.boxButtons(words).map { var s = DoorAsk(id: "", do: "press"); s.title = $0; return s }
         try drop(a, in: door); await door.drain()
         XCTAssertEqual(door.alwaysRules().map(\.press), ["Cancel"])
@@ -279,8 +279,8 @@ final class DoorTests: XCTestCase {
         XCTAssertEqual(presses(), before + 1)
         XCTAssertTrue(try String(contentsOf: door.dir.appendingPathComponent("log.jsonl"), encoding: .utf8).contains("I pressed Cancel, as you always do"))
         // A different question from the same app is left alone.
-        door.noticeBoxes([(app: "Mail", words: ["StaticText: Delete all mail?", "Button: Reopen", "Button: Cancel"])], now: t0.addingTimeInterval(300))
-        door.noticeBoxes([(app: "Mail", words: ["StaticText: Delete all mail?", "Button: Reopen", "Button: Cancel"])], now: t0.addingTimeInterval(315))
+        door.noticeBoxes([(app: "NoSuchAppForTests", words: ["StaticText: Delete all mail?", "Button: Reopen", "Button: Cancel"])], now: t0.addingTimeInterval(300))
+        door.noticeBoxes([(app: "NoSuchAppForTests", words: ["StaticText: Delete all mail?", "Button: Reopen", "Button: Cancel"])], now: t0.addingTimeInterval(315))
         XCTAssertEqual(presses(), before + 1)
         // A box that keeps coming back is pressed three times in ten minutes, then handed to the owner.
         for i in 0..<12 { door.noticeBoxes(box, now: t0.addingTimeInterval(400 + Double(i) * 15)) }
@@ -328,5 +328,38 @@ final class DoorTests: XCTestCase {
         XCTAssertEqual(Door.cause(since: t, bootedAt: t.addingTimeInterval(-120), appOpened: t.addingTimeInterval(-10), app: "Mail", last: nil), "when Mail opened after this Mac restarted")
         XCTAssertEqual(Door.cause(since: t, bootedAt: t.addingTimeInterval(-120), appOpened: nil, app: "Mail", last: nil), "right after this Mac restarted")
         XCTAssertNil(Door.cause(since: t, bootedAt: longAgo, appOpened: longAgo, app: "Mail", last: (t.addingTimeInterval(-600), "pressing OK")))
+    }
+
+    func testBeforeAndAfterIsKeptForWhatTheDoorDoes() async throws {
+        let door = tempDoor()
+        var shots = 0
+        door.snap = { url in shots += 1; return (try? Data("picture \(shots)".utf8).write(to: url)) != nil }
+        func answer(_ id: String, ok: Bool) -> DoorAnswer { DoorAnswer(id: id, ok: ok, said: ok ? "pressed OK" : "no such button", front: nil, words: nil, picture: nil, at: Date().timeIntervalSince1970) }
+        var press = DoorAsk(id: "p/../1", do: "press"); press.title = "OK"
+        // Something done: two pictures and a page, under a plain name.
+        let (a1, proof) = await door.withProof(press) { answer("p1", ok: true) }
+        XCTAssertTrue(a1.ok); XCTAssertEqual(proof, "p----1")
+        let dir = door.dir.appendingPathComponent("proof")
+        XCTAssertEqual(try String(contentsOf: dir.appendingPathComponent("p----1-before.jpg"), encoding: .utf8), "picture 1")
+        XCTAssertEqual(try String(contentsOf: dir.appendingPathComponent("p----1-after.jpg"), encoding: .utf8), "picture 2")
+        XCTAssertTrue(try String(contentsOf: dir.appendingPathComponent("p----1.html"), encoding: .utf8).contains("pressed OK"))
+        // Something that did not happen leaves nothing behind; looking takes no pictures; hands off takes none.
+        press.id = "p2"
+        let (_, none) = await door.withProof(press) { answer("p2", ok: false) }
+        XCTAssertNil(none); XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("p2-before.jpg").path))
+        let before = shots
+        _ = await door.withProof(DoorAsk(id: "l1", do: "look")) { answer("l1", ok: true) }
+        door.hold(); press.id = "p3"; _ = await door.withProof(press) { answer("p3", ok: true) }; door.release()
+        XCTAssertEqual(shots, before)
+        // Only the newest are kept.
+        for i in 0..<5 { press.id = "k\(i)"; _ = await door.withProof(press, keep: 3) { answer("k", ok: true) }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".html") }.count, 3)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("p----1-before.jpg").path))
+        // The page links to it, and only plain names can be fetched.
+        door.record(press, answer("k4", ok: true), proof: "k4")
+        _ = door.writePage(hours: 24)
+        XCTAssertTrue(try String(contentsOf: door.dir.appendingPathComponent("page.html"), encoding: .utf8).contains("href=\"proof/k4.html\">before and after</a>"))
+        XCTAssertEqual(DoorWeb.proofKind("k4.html"), "text/html; charset=utf-8"); XCTAssertEqual(DoorWeb.proofKind("k4-after.jpg"), "image/jpeg")
+        XCTAssertNil(DoorWeb.proofKind("../log.jsonl")); XCTAssertNil(DoorWeb.proofKind("k4.png")); XCTAssertNil(DoorWeb.proofKind("a.b.html")); XCTAssertNil(DoorWeb.proofKind(".html"))
     }
 }

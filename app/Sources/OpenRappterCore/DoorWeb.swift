@@ -8,6 +8,7 @@ import Network
 ///   POST /pick       t=<token>&k=<offer> (a form) or {"token": "...", "offer": "..."}; takes that one choice
 ///   POST /ask        {"title": "...", "text": "...", "choices": ["...", "..."]} puts a question to the owner; gives {ok, id}
 ///   GET  /all        one page for every Mac named in peers.json ([{"name": "...", "at": "100.x.y.z"}]); each button posts to its own Mac
+///   GET  /proof/<name> a before-and-after page for one thing the door did, and its two pictures
 ///   GET  /answer/<id> {id, picked}; picked is null until the owner has chosen
 /// A choice is only ever taken by POST, so a link preview or a page preload can never press a button.
 /// Anything not from this Mac or the private network is hung up on.
@@ -124,6 +125,10 @@ public final class DoorWeb {
             if let d = try? JSONEncoder().encode(a) { try? d.write(to: door.dir.appendingPathComponent("\(a.id).json"), options: .atomic) }
             await door.drain(); _ = door.writePage(hours: 24)
             send(c, "200 OK", "application/json", Data("{\"ok\":true,\"id\":\"\(a.id)\"}".utf8))
+        case ("GET", _) where path.hasPrefix("/proof/"):
+            let name = String(path.dropFirst(7))
+            guard let kind = DoorWeb.proofKind(name), let d = try? Data(contentsOf: door.dir.appendingPathComponent("proof/\(name)")) else { send(c, "404 Not Found", "text/plain", Data("not here".utf8)); return }
+            send(c, "200 OK", kind, d)
         case ("GET", _) where path.hasPrefix("/answer/"):
             let id = String(path.dropFirst(8))
             guard !id.isEmpty, id.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { send(c, "400 Bad Request", "text/plain", Data()); return }
@@ -133,6 +138,13 @@ public final class DoorWeb {
         default:
             send(c, "404 Not Found", "text/plain", Data("not here".utf8))
         }
+    }
+
+    /// A proof file may be asked for only by a plain name: letters, numbers and dashes, ending .html or .jpg.
+    public static func proofKind(_ name: String) -> String? {
+        let parts = name.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, parts[0].allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { return nil }
+        return parts[1] == "html" ? "text/html; charset=utf-8" : (parts[1] == "jpg" ? "image/jpeg" : nil)
     }
 
     /// The fields of a posted form.

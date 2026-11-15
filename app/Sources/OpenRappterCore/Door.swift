@@ -64,6 +64,13 @@ public final class Door {
     var lit: Set<String> = []              // sight watches already fired for what is on screen now
     var boxSince: [String: Date] = [:]     // boxes on screen and when each was first seen
     var boxTold: Set<String> = []
+    /// Takes a phone-sized picture of the screen to a file. Swapped out in tests.
+    public var snap: (URL) async -> Bool = { url in
+        let tmp = url.deletingPathExtension().appendingPathExtension("png")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        guard await Screen.picture(to: tmp), let d = try? Data(contentsOf: tmp), let j = Door.small(d, side: 1400) else { return false }
+        return (try? j.write(to: url, options: .atomic)) != nil
+    }
     var boxCause: [String: String] = [:]      // why each waiting box came up, worked out once
     var alwaysFired: [String: [Date]] = [:]   // when each standing answer last pressed, so a box that keeps coming back cannot loop
     var showMonitor: Any?
@@ -110,9 +117,9 @@ public final class Door {
         while let ask = waiting().first {
             seen.insert(ask.id)
             onAct?(Door.line(ask))
-            let answer = await carryOut(ask)
+            let (answer, proof) = await withProof(ask) { await self.carryOut(ask) }
             write(answer)
-            record(ask, answer)
+            record(ask, answer, proof: proof)
             onDone?()
         }
     }
@@ -251,8 +258,9 @@ public final class Door {
     }
 
     /// Every ask is kept, one line each, so the owner can read everything that was done through the door.
-    func record(_ ask: DoorAsk, _ answer: DoorAnswer) {
+    func record(_ ask: DoorAsk, _ answer: DoorAnswer, proof: String? = nil) {
         var line: [String: Any] = ["at": answer.at, "id": ask.id, "did": Door.line(ask), "ok": answer.ok, "said": answer.said]
+        if let proof { line["proof"] = proof }
         if let p = answer.picture { line["picture"] = p }
         guard let data = try? JSONSerialization.data(withJSONObject: line, options: [.sortedKeys]) else { return }
         let url = dir.appendingPathComponent("log.jsonl")

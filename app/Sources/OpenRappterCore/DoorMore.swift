@@ -350,10 +350,13 @@ extension Door {
         let f = DateFormatter(); f.dateFormat = "h:mm a"
         func row(_ l: [String: Any]) -> String {
             let t = f.string(from: Date(timeIntervalSince1970: l["at"] as? Double ?? 0))
-            return "<li><b>\(esc(l["said"] as? String ?? ""))</b><span>\(t)</span></li>"
+            let proof = (l["proof"] as? String).flatMap { FileManager.default.fileExists(atPath: self.dir.appendingPathComponent("proof/\($0).html").path) ? $0 : nil }
+            return "<li><b>\(esc(l["said"] as? String ?? ""))</b><span>\(proof.map { "<a href=\"proof/\($0).html\">before and after</a> " } ?? "")\(t)</span></li>"
         }
         let quiet = ["looking at the screen", "listing the jobs I know", "listing what I watch for", "writing the page of what happened"]
         let noticed = lines.filter { ($0["id"] as? String ?? "").hasPrefix("notice-") }
+        // Everything with a before-and-after picture, newest first, single presses included.
+        let proofs = Array(lines.filter { l in (l["proof"] as? String).map { FileManager.default.fileExists(atPath: self.dir.appendingPathComponent("proof/\($0).html").path) } ?? false }.reversed().prefix(12))
         let rest = lines.filter { !($0["id"] as? String ?? "").hasPrefix("notice-") && !quiet.contains($0["did"] as? String ?? "") }
         func isJob(_ l: [String: Any]) -> Bool { (l["did"] as? String ?? "").hasPrefix("doing the job") }
         let hand = ["pressing", "typing", "clicking", "opening", "checking for anything waiting", "hands", "reading back", "watching you"]
@@ -461,7 +464,7 @@ extension Door {
         <style>body{font:18px/1.5 -apple-system,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;background:#14110f;color:#f3ece4}
         h1{font-size:34px;margin:0}h2{font-size:20px;margin:34px 0 8px;color:#f0a04b}h2 em{font-style:normal;opacity:.6}
         ul{list-style:none;padding:0;margin:0}li{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid #2c2622}
-        li b{font-weight:500}li span{opacity:.55;white-space:nowrap}p{opacity:.6}img{width:100%;border-radius:12px;margin-top:14px}
+        li b{font-weight:500}li span{opacity:.55;white-space:nowrap}li span a{color:#f0a04b}p{opacity:.6}img{width:100%;border-radius:12px;margin-top:14px}
         .sub{opacity:.6;margin:4px 0 0}
         li.ask{display:block}li.ask div{margin-top:10px;display:flex;gap:10px;flex-wrap:wrap}
         .btn{background:#f0a04b;color:#14110f;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:10px}
@@ -471,6 +474,7 @@ extension Door {
         \(standing.isEmpty ? "" : section("Answers you made stick", standing, empty: ""))
         \(section("What I did", did.map(row), empty: "Nothing needed doing."))
         \(singles + refused > 0 ? "<p>Also \(singles) single presses and looks asked for by hand\(refused > 0 ? ", and \(refused) asks I turned down" : "").</p>" : "")
+        \(proofs.isEmpty ? "" : section("See what changed", proofs.map(row), empty: ""))
         \(section("What I skipped because it was already done", skipped.map(row), empty: "Nothing."))
         \(section("What I noticed", noticed.map(row), empty: "No box sat waiting."))
         \(pics.isEmpty ? "" : "<h2>The screen, last seen</h2>" + pics)
@@ -640,6 +644,43 @@ extension Door {
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         return (try? enc.encode(r).write(to: alwaysURL, options: .atomic)) != nil
     }
+    // MARK: before and after
+
+    var proofDir: URL { dir.appendingPathComponent("proof") }
+    /// Every time the door acts, it keeps a picture from just before and just after, so the owner can see what changed.
+    /// Like a dashcam: a fixed number is kept and the oldest fall off.
+    func withProof(_ ask: DoorAsk, keep: Int = 200, run: () async -> DoorAnswer) async -> (DoorAnswer, String?) {
+        guard !held, ["press", "click", "type", "key", "open", "job", "always"].contains(ask.do) else { return (await run(), nil) }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: proofDir, withIntermediateDirectories: true)
+        let name = String(ask.id.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "-" }.prefix(80))
+        let before = proofDir.appendingPathComponent("\(name)-before.jpg"), after = proofDir.appendingPathComponent("\(name)-after.jpg")
+        let gotBefore = await snap(before)
+        let answer = await run()
+        guard gotBefore, answer.ok else { try? fm.removeItem(at: before); return (answer, nil) }
+        try? await Task.sleep(for: .milliseconds(700))
+        guard await snap(after) else { try? fm.removeItem(at: before); return (answer, nil) }
+        func esc(_ s: String) -> String { s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;") }
+        let f = DateFormatter(); f.dateFormat = "EEE d MMM, HH:mm:ss"
+        let html = """
+        <!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Before and after</title>
+        <style>body{font:18px/1.5 -apple-system,sans-serif;max-width:1100px;margin:40px auto;padding:0 20px;background:#14110f;color:#f3ece4}
+        h1{font-size:28px;margin:0}h2{font-size:20px;margin:30px 0 8px;color:#f0a04b}p{opacity:.6;margin:4px 0}img{width:100%;border-radius:12px}a{color:#f0a04b}</style>
+        <p><a href="../page.html" onclick="history.back();return false">Back</a></p>
+        <h1>\(esc(answer.said))</h1><p>\(esc(Door.line(ask))), \(f.string(from: Date(timeIntervalSince1970: answer.at)))</p>
+        <h2>Before</h2><img alt="the screen before" src="\(name)-before.jpg">
+        <h2>After</h2><img alt="the screen after" src="\(name)-after.jpg">
+        """
+        guard (try? Data(html.utf8).write(to: proofDir.appendingPathComponent("\(name).html"), options: .atomic)) != nil else { return (answer, nil) }
+        let pages = ((try? fm.contentsOfDirectory(at: proofDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []).filter { $0.pathExtension == "html" }
+            .sorted { ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) > ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
+        for old in pages.dropFirst(keep) {
+            let base = old.deletingPathExtension().lastPathComponent
+            for f in ["\(base).html", "\(base)-before.jpg", "\(base)-after.jpg"] { try? fm.removeItem(at: proofDir.appendingPathComponent(f)) }
+        }
+        return (answer, name)
+    }
+
     /// The owner's other Macs that run a door, for the one page: peers.json = [{"name": "...", "at": "100.x.y.z"}].
     public func peers() -> [(name: String, at: String)] {
         let list = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("peers.json")))) as? [[String: String]]) ?? []

@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Speech
 
 /// A standing order: run a learned job on a sight, at a time of day, or every so many minutes.
 public struct DoorWatch: Codable, Equatable {
@@ -69,6 +70,30 @@ extension Door {
             let url = watchesDir.appendingPathComponent("\(slug(title)).json")
             ans.ok = fm.fileExists(atPath: url.path); try? fm.removeItem(at: url)
             ans.said = ans.ok ? "no longer watching \(title)" : "I was not watching \(title)"
+        case "hear":
+            // A rehearsal with no person and no microphone: speak the words to a sound file, listen to the file
+            // with the same recogniser the ears use, and act on what was heard.
+            guard let t = a.text, !t.isEmpty else { ans.said = "hear needs the words to say"; return true }
+            let file = dir.appendingPathComponent("\(a.id).aiff")
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/say"); p.arguments = ["-o", file.path, t]
+            guard (try? p.run()) != nil else { ans.said = "could not make the sound"; return true }
+            p.waitUntilExit()
+            guard SFSpeechRecognizer.authorizationStatus() == .authorized,
+                  let rec = SFSpeechRecognizer(locale: Locale(identifier: "en-US")), rec.isAvailable else { ans.said = "not allowed to understand speech yet"; return true }
+            let req = SFSpeechURLRecognitionRequest(url: file); req.shouldReportPartialResults = false
+            let heard: String = await withCheckedContinuation { c in
+                var done = false
+                rec.recognitionTask(with: req) { r, e in
+                    guard !done else { return }
+                    if let r, r.isFinal { done = true; c.resume(returning: r.bestTranscription.formattedString) }
+                    else if e != nil { done = true; c.resume(returning: "") }
+                }
+            }
+            try? fm.removeItem(at: file)
+            let word = Door.spoken(heard)
+            if word == "hold" { hold() } else if word == "resume" { release() }
+            ans.ok = !heard.isEmpty
+            ans.said = heard.isEmpty ? "I heard nothing" : "I heard \"\(heard)\"" + (word == "hold" ? ", so hands off is on" : word == "resume" ? ", so hands are back on" : ", which is not about the hands")
         case "boxes":
             if a.text == "windows" { ans.ok = true; ans.words = Screen.windowFacts(); ans.said = "windows listed"; return true }
             let b = Screen.boxes(); ans.ok = true

@@ -131,6 +131,7 @@ public final class Door {
         case "unwatch": return "no longer watching: \(a.title ?? "")"
         case "watches": return "listing what I watch for"
         case "boxes": return "checking for anything waiting"
+        case "hear": return "rehearsing a spoken line"
         case "page": return "writing the page of what happened"
         case "pack": return "packing my jobs for another Mac"
         case "show": return "watching you do \(a.title ?? "a job")"

@@ -320,4 +320,13 @@ final class DoorTests: XCTestCase {
         let raw = Data("POST /pick HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 53\r\n\r\nt=T&k=o1&back=http%3A%2F%2F100.70.213.17%3A7466%2Fall".utf8)
         XCTAssertEqual(DoorWeb.form(DoorWeb.parse(raw)!)["back"], "http://100.70.213.17:7466/all")
     }
+
+    func testWhyABoxCameUp() {
+        let t = Date(timeIntervalSince1970: 1_000_000), longAgo = t.addingTimeInterval(-90_000)
+        XCTAssertEqual(Door.cause(since: t, bootedAt: longAgo, appOpened: longAgo, app: "Mail", last: (t.addingTimeInterval(-5), "doing the job tidy up")), "right after I was doing the job tidy up")
+        XCTAssertEqual(Door.cause(since: t, bootedAt: longAgo, appOpened: t.addingTimeInterval(-10), app: "Mail", last: nil), "when Mail opened")
+        XCTAssertEqual(Door.cause(since: t, bootedAt: t.addingTimeInterval(-120), appOpened: t.addingTimeInterval(-10), app: "Mail", last: nil), "when Mail opened after this Mac restarted")
+        XCTAssertEqual(Door.cause(since: t, bootedAt: t.addingTimeInterval(-120), appOpened: nil, app: "Mail", last: nil), "right after this Mac restarted")
+        XCTAssertNil(Door.cause(since: t, bootedAt: longAgo, appOpened: longAgo, app: "Mail", last: (t.addingTimeInterval(-600), "pressing OK")))
+    }
 }

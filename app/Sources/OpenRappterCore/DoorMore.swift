@@ -317,7 +317,13 @@ extension Door {
                 }
             }
             guard now.timeIntervalSince(since) >= boxPatience else { continue }
-            waitingNow.append(["app": b.app, "since": since.timeIntervalSince1970, "words": b.words])
+            var entry: [String: Any] = ["app": b.app, "since": since.timeIntervalSince1970, "words": b.words]
+            if let why = boxCause[key] ?? Door.cause(since: since, bootedAt: Date(timeIntervalSinceNow: -ProcessInfo.processInfo.systemUptime),
+                                                     appOpened: NSWorkspace.shared.runningApplications.first { $0.localizedName == b.app }?.launchDate,
+                                                     app: b.app, last: lastActed(before: since)) {
+                boxCause[key] = why; entry["cause"] = why
+            }
+            waitingNow.append(entry)
             if !boxTold.contains(key) {
                 boxTold.insert(key)
                 var ask = DoorAsk(id: "notice-\(Int(now.timeIntervalSince1970))", do: "notice"); ask.app = b.app
@@ -328,6 +334,7 @@ extension Door {
         }
         boxSince = boxSince.filter { live.contains($0.key) }
         boxTold = boxTold.intersection(live)
+        boxCause = boxCause.filter { live.contains($0.key) }
         if waitingNow.isEmpty { try? FileManager.default.removeItem(at: waitingURL) }
         else if let d = try? JSONSerialization.data(withJSONObject: waitingNow, options: [.prettyPrinted, .sortedKeys]) { try? d.write(to: waitingURL, options: .atomic) }
     }
@@ -389,7 +396,8 @@ extension Door {
             let app = b["app"] as? String ?? "", words = (b["words"] as? [String]) ?? []
             let text = Door.boxSays(words)
             let all = Door.boxButtons(words), buttons = all.prefix(4)
-            var row = "<li class=\"ask\"><b>\(esc(app)) is asking: \(esc(text.isEmpty ? "a question with no words I could read" : text))</b><div>"
+            let why = b["cause"] as? String
+            var row = "<li class=\"ask\"><b>\(esc(app)) is asking: \(esc(text.isEmpty ? "a question with no words I could read" : text))</b>\(why.map { "<br><span style=\"opacity:.7;white-space:normal\">It came up \(esc($0)).</span>" } ?? "")<div>"
             for name in buttons { var a = DoorAsk(id: "", do: "press"); a.title = name; a.app = app; row += button("Press \(name)", a) }
             // The same answers, made to stick. Not offered for boxes that guard the Mac, or ones I cannot read.
             if !text.isEmpty, !Door.gates.contains(app) {
@@ -402,6 +410,7 @@ extension Door {
             }
             left.append(row + "</div></li>")
             closeRow("\(app) is asking: \(text)")
+            if let why { asks[asks.count - 1]["cause"] = why }
         }
         for f in ((try? FileManager.default.contentsOfDirectory(at: questionsDir, includingPropertiesForKeys: nil)) ?? []).sorted(by: { $0.path < $1.path })
         where f.pathExtension == "json" && !f.lastPathComponent.hasSuffix(".answer.json") {
@@ -635,6 +644,25 @@ extension Door {
     public func peers() -> [(name: String, at: String)] {
         let list = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("peers.json")))) as? [[String: String]]) ?? []
         return list.compactMap { p in p["at"].map { (p["name"] ?? $0, $0) } }
+    }
+    /// The last thing this door did before a moment, from its own record.
+    func lastActed(before t: Date) -> (at: Date, did: String)? {
+        guard let text = try? String(contentsOf: dir.appendingPathComponent("log.jsonl"), encoding: .utf8) else { return nil }
+        for line in text.split(separator: "\n").suffix(200).reversed() {
+            guard let o = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any], o["ok"] as? Bool == true,
+                  let at = o["at"] as? Double, at <= t.timeIntervalSince1970, let did = o["did"] as? String else { continue }
+            if ["doing the job", "pressing", "clicking", "typing", "opening", "pressing the key"].contains(where: { did.hasPrefix($0) }) { return (Date(timeIntervalSince1970: at), did) }
+        }
+        return nil
+    }
+    /// The likeliest reason a box came up, in plain words, from what happened just before it. Nil when nothing stands out.
+    public static func cause(since: Date, bootedAt: Date, appOpened: Date?, app: String, last: (at: Date, did: String)?) -> String? {
+        if let l = last, since.timeIntervalSince(l.at) >= 0, since.timeIntervalSince(l.at) <= 20 { return "right after I was \(l.did)" }
+        if let o = appOpened, since.timeIntervalSince(o) >= 0, since.timeIntervalSince(o) <= 60 {
+            return since.timeIntervalSince(bootedAt) <= 300 ? "when \(app) opened after this Mac restarted" : "when \(app) opened"
+        }
+        if since.timeIntervalSince(bootedAt) >= 0, since.timeIntervalSince(bootedAt) <= 300 { return "right after this Mac restarted" }
+        return nil
     }
     /// The words a box is asking, without its buttons.
     public static func boxSays(_ words: [String]) -> String {

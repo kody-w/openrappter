@@ -180,6 +180,8 @@ extension Door {
         case "page":
             let r = writePage(hours: a.every ?? 24)
             ans.ok = r.ok; ans.said = r.said; ans.picture = nil
+        case "week":
+            let r = writeWeek(); ans.ok = r.ok; ans.said = r.said
         case "pack":
             let out = dir.appendingPathComponent("pack"); try? fm.removeItem(at: out)
             try? fm.createDirectory(at: out, withIntermediateDirectories: true)
@@ -295,6 +297,7 @@ extension Door {
                   running: apps.compactMap { a in a.bundleURL.map { (a.localizedName ?? $0.lastPathComponent, $0.path) } },
                   os: ProcessInfo.processInfo.operatingSystemVersionString) { NSWorkspace.shared.open(URL(fileURLWithPath: $0)) }
         checkUpdates(now: now)
+        keepWeek(now: now)
         if now.timeIntervalSince(peersLooked) >= 60 {
             peersLooked = now
             for p in peers() {
@@ -542,6 +545,7 @@ extension Door {
         .btn.quiet{background:#2c2622;color:#f3ece4}</style>
         <h1>While you were away</h1><p class="sub">\(esc(host)), the last \(Int(hours)) hours\(held ? ". Hands off is on." : "")</p>\(setupNote)
         \(politeLine())
+        <p class="sub"><a href="weekly.html" style="color:#f0a04b">This week</a></p>
         \(section("Left for you", left, empty: "Nothing. You do not need to do anything."))
         \(standing.isEmpty ? "" : section("Answers you made stick", standing, empty: ""))
         \(section("What I did", did.map(row), empty: "Nothing needed doing."))

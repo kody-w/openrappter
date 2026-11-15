@@ -174,6 +174,7 @@ public final class Door {
         case "fits": return "checking which jobs still fit this Mac"
         case "setup": return "checking what I am allowed to do"
         case "settings": return "opening the setting for \(a.title ?? "")"
+        case "week": return "writing your weekly note"
         default: return "asked for something I do not know: \(a.do)"
         }
     }

@@ -73,6 +73,10 @@ public final class Door {
     }
     var signLooked = Date.distantPast, signSeen: Set<String> = [], signTold: [String: Date] = [:]
     var peersLooked = Date.distantPast
+    /// Bringing another Mac's screen to the owner. True when the owner is at this Mac; opens the screen at an address. Swapped out in tests.
+    public var ownerHere: () -> Bool = { Door.ownerAtThisMac() }
+    public var openScreen: (String) -> Bool = { Door.openScreenFor($0) }
+    var broughtIds: [String: Set<String>] = [:], broughtAt = Date.distantPast
     var updatesBusy = false
     var boxCause: [String: String] = [:]      // why each waiting box came up, worked out once
     var alwaysFired: [String: [Date]] = [:]   // when each standing answer last pressed, so a box that keeps coming back cannot loop

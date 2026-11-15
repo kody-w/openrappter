@@ -299,7 +299,7 @@ extension Door {
                         var req = URLRequest(url: u); req.timeoutInterval = 3
                         do {
                             let (d, _) = try await URLSession.shared.data(for: req)
-                            if let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], o["mac"] != nil { heard = (o["cover"] as? [[String: Any]]) ?? [] }
+                            if let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], o["mac"] != nil { heard = (o["cover"] as? [[String: Any]]) ?? []; self.bring(name: p.name, at: host, needs: o["needs"], now: Date()) }
                         } catch { try? Data("\(Date()) \(host): \(error.localizedDescription) \((error as NSError).code)\n".utf8).write(to: self.dir.appendingPathComponent("peer-error.txt")) }
                     }
                     // Report in as well: a Mac that cannot be reached may still be able to reach out.
@@ -459,6 +459,7 @@ extension Door {
             let all = Door.boxButtons(words), buttons = all.prefix(4)
             let why = b["cause"] as? String
             var row = "<li class=\"ask\"><b>\(esc(app)) is asking: \(esc(text.isEmpty ? "a question with no words I could read" : text))</b>\(why.map { "<br><span style=\"opacity:.7;white-space:normal\">It came up \(esc($0)).</span>" } ?? "")<div>"
+            row = Door.yours(row, app: app, otherMacs: !peers().isEmpty)
             for name in buttons { var a = DoorAsk(id: "", do: "press"); a.title = name; a.app = app; row += button("Press \(name)", a) }
             // The same answers, made to stick. Not offered for boxes that guard the Mac, or ones I cannot read.
             if !text.isEmpty, !Door.gates.contains(app) {
@@ -909,7 +910,7 @@ extension Door {
             return o
         }
         let left = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("left.json")))) as? [String: Any])?["left"] as? [Any]
-        return ["schema": "openrappter-door/1", "mac": Host.current().localizedName ?? "this Mac", "at": now.timeIntervalSince1970, "held": held, "left": left?.count ?? 0, "cover": cover]
+        return ["schema": "openrappter-door/1", "mac": Host.current().localizedName ?? "this Mac", "at": now.timeIntervalSince1970, "held": held, "left": left?.count ?? 0, "cover": cover, "needs": needs()]
     }
     /// Another Mac reported in. That proves it is alive and nothing more: the jobs to cover are only ever read by asking it directly.
     @discardableResult public func reportedIn(mac: String, now: Date = Date()) -> Bool {

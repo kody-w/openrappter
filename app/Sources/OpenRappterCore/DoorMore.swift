@@ -317,7 +317,15 @@ extension Door {
         if flags.contains(.option) { mods.append("option") }
         if let step = Door.step(forKey: named[code], bare: bare, mods: mods, shift: flags.contains(.shift)) {
             flushTyped(); var s = step; s.wait = 0.5; shownSteps.append(s)
-        } else if let c = chars { shownTyped += c }
+        } else if let c = chars, !Door.focusIsSecret() { shownTyped += c }
+    }
+
+    /// True when the cursor is in a password field. Nothing typed there is ever kept.
+    static func focusIsSecret() -> Bool {
+        guard let f = Screen.attr(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as String) else { return false }
+        let el = f as! AXUIElement
+        return (Screen.attr(el, kAXSubroleAttribute as String) as? String) == "AXSecureTextField"
+            || (Screen.attr(el, kAXRoleDescriptionAttribute as String) as? String)?.lowercased().contains("secure") == true
     }
 
     /// A key the owner pressed becomes a key step only when it is a named key or a shortcut. Plain letters are typing.
@@ -361,7 +369,7 @@ extension Screen {
     /// Boxes that are waiting for an answer: system alerts, and sheets or dialogs in the app in front.
     public static func boxes() -> [(app: String, words: [String])] {
         guard AXIsProcessTrusted() else { return [] }
-        let always = ["UserNotificationCenter", "CoreServicesUIAgent", "SecurityAgent"]
+        let always = ["UserNotificationCenter", "CoreServicesUIAgent", "SecurityAgent", "NetAuthAgent"]
         let apps = NSWorkspace.shared.runningApplications.filter {
             ($0.activationPolicy == .regular || always.contains($0.localizedName ?? "")) && $0.processIdentifier != getpid()
         }

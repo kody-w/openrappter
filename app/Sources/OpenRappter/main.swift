@@ -87,6 +87,10 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     }
 
     /// A kernel started as the app's child goes with the app. The opt-in login service is the way to keep one running.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for u in urls { log("page click \(u.host ?? "")"); door?.clicked(u) }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         if let p = kernelProcess, p.isRunning { log("stopping the kernel I started (pid \(p.processIdentifier))"); p.terminate() }
     }

@@ -146,8 +146,19 @@ final class DoorTests: XCTestCase {
         try drop(DoorAsk(id: "p1", do: "page"), in: door)
         await door.drain()
         let page = try String(contentsOf: door.dir.appendingPathComponent("page.html"), encoding: .utf8)
-        XCTAssertTrue(page.contains("Installer: StaticText: Allow this?"))
+        XCTAssertTrue(page.contains("Installer is asking: Allow this?"))
         XCTAssertTrue(page.contains("Left for you <em>1</em>"))
+        XCTAssertTrue(page.contains(">Press Allow</a>") && page.contains(">Press Later</a>"))
+        // A click with the wrong token does nothing; the right one drops the offered ask and uses the offer up.
+        let offers = try JSONDecoder().decode([String: [DoorAsk]].self, from: Data(contentsOf: door.dir.appendingPathComponent("offers.json")))
+        let token = offers["token"]![0].id
+        door.clicked(URL(string: "openrappter://pick/wrong/o1")!)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: door.dir.appendingPathComponent("offers.json").path))
+        door.clicked(URL(string: "openrappter://pick/\(token)/o2")!)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: door.dir.appendingPathComponent("offers.json").path))
+        let dropped = try FileManager.default.contentsOfDirectory(atPath: door.dir.path).filter { $0.hasPrefix("pick-") && !$0.contains("answer") }
+        XCTAssertEqual(dropped.count, 1)
+        XCTAssertEqual(try JSONDecoder().decode(DoorAsk.self, from: Data(contentsOf: door.dir.appendingPathComponent(dropped[0]))).title, "Later")
         door.noticeBoxes([], now: t0.addingTimeInterval(120))
         XCTAssertFalse(FileManager.default.fileExists(atPath: door.dir.appendingPathComponent("waiting.json").path))
     }

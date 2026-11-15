@@ -32,6 +32,19 @@ extension Door {
         return nil
     }
 
+    /// A button on the page was clicked. Only an offer the current page made, with its one-time token, is taken.
+    public func clicked(_ url: URL) {
+        let parts = url.pathComponents.filter { $0 != "/" }
+        guard url.scheme == "openrappter", url.host == "pick", parts.count == 2,
+              let data = try? Data(contentsOf: dir.appendingPathComponent("offers.json")),
+              let all = try? JSONDecoder().decode([String: [DoorAsk]].self, from: data),
+              all["token"]?.first?.id == parts[0], var ask = all["offers"]?.first(where: { $0.id == parts[1] }) else { return }
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("offers.json"))
+        ask.id = "pick-\(Int(Date().timeIntervalSince1970))-\(parts[1])"
+        if let d = try? JSONEncoder().encode(ask) { try? d.write(to: dir.appendingPathComponent("\(ask.id).json"), options: .atomic) }
+        Task { await self.drain(); _ = self.writePage(hours: 24) }
+    }
+
     var watchesDir: URL { dir.appendingPathComponent("watches") }
     var firedURL: URL { watchesDir.appendingPathComponent(".fired.json") }
     var waitingURL: URL { dir.appendingPathComponent("waiting.json") }
@@ -51,6 +64,12 @@ extension Door {
         let fm = FileManager.default
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         switch a.do {
+        case "forget":
+            guard let id = a.text else { ans.said = "forget needs what to leave"; return true }
+            let u = dir.appendingPathComponent("forgotten.json")
+            var list = (try? JSONDecoder().decode([String].self, from: Data(contentsOf: u))) ?? []
+            list.append(id); ans.ok = (try? JSONEncoder().encode(Array(list.suffix(200))).write(to: u, options: .atomic)) != nil
+            ans.said = "left it"
         case "hold":
             ans.ok = fm.createFile(atPath: holdURL.path, contents: Data())
             ans.said = "hands off. I will look but not touch until you ask resume."
@@ -264,8 +283,15 @@ extension Door {
         func isJob(_ l: [String: Any]) -> Bool { (l["did"] as? String ?? "").hasPrefix("doing the job") }
         let hand = ["pressing", "typing", "clicking", "opening", "checking for anything waiting", "hands", "reading back", "watching you"]
         func byHand(_ l: [String: Any]) -> Bool { let d = l["did"] as? String ?? ""; return hand.contains { d.hasPrefix($0) } }
-        let stopped = rest.filter { !($0["ok"] as? Bool ?? false) && isJob($0) }
-        let refused = rest.filter { !($0["ok"] as? Bool ?? false) && !isJob($0) }.count
+        let forgotten = Set((try? JSONDecoder().decode([String].self, from: Data(contentsOf: dir.appendingPathComponent("forgotten.json")))) ?? [])
+        func jobName(_ l: [String: Any]) -> String { String((l["did"] as? String ?? "").dropFirst("doing the job ".count)) }
+        var lastRun: [String: [String: Any]] = [:]
+        for l in rest where isJob(l) { lastRun[jobName(l)] = l }
+        let stopped = lastRun.values.filter { l in
+            let said = l["said"] as? String ?? ""
+            return !(l["ok"] as? Bool ?? false) && said.contains("stopped at step") && !forgotten.contains(l["id"] as? String ?? "")
+        }.sorted { ($0["at"] as? Double ?? 0) < ($1["at"] as? Double ?? 0) }
+        let refused = rest.filter { !($0["ok"] as? Bool ?? false) }.count - stopped.count
         let singles = rest.filter { ($0["ok"] as? Bool ?? false) && byHand($0) }.count
         let skipped = rest.filter { ($0["ok"] as? Bool ?? false) && ($0["said"] as? String ?? "").contains("not needed") }
         let did = rest.filter { ($0["ok"] as? Bool ?? false) && !byHand($0) && !($0["said"] as? String ?? "").contains("not needed") }
@@ -279,19 +305,50 @@ extension Door {
         func section(_ title: String, _ rows: [String], empty: String) -> String {
             "<h2>\(title) <em>\(rows.count)</em></h2>" + (rows.isEmpty ? "<p>\(empty)</p>" : "<ul>\(rows.joined())</ul>")
         }
-        let left = waiting.map { "<li><b>\(esc($0["app"] as? String ?? "")): \(esc((($0["words"] as? [String]) ?? []).prefix(4).joined(separator: "; ")))</b><span>waiting</span></li>" }
-            + stopped.map(row)
+        // Everything left for the owner comes with buttons. A button is a one-time offer this page made; nothing else can be clicked into action.
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        var offers: [String: DoorAsk] = [:]
+        func button(_ label: String, _ ask: DoorAsk, quiet: Bool = false) -> String {
+            let k = "o\(offers.count + 1)"; offers[k] = ask
+            return "<a class=\"btn\(quiet ? " quiet" : "")\" href=\"openrappter://pick/\(token)/\(k)\">\(esc(label))</a>"
+        }
+        var left: [String] = []
+        for b in waiting {
+            let app = b["app"] as? String ?? "", words = (b["words"] as? [String]) ?? []
+            let text = words.filter { !$0.hasPrefix("Button") }.map { String($0.drop(while: { $0 != ":" }).dropFirst(2)) }.prefix(2).joined(separator: " ")
+            let buttons = words.filter { $0.hasPrefix("Button: ") }.map { String($0.dropFirst(8)) }.prefix(4)
+            var row = "<li class=\"ask\"><b>\(esc(app)) is asking: \(esc(text.isEmpty ? "a question with no words I could read" : text))</b><div>"
+            for name in buttons { var a = DoorAsk(id: "", do: "press"); a.title = name; a.app = app; row += button("Press \(name)", a) }
+            left.append(row + "</div></li>")
+        }
+        for l in stopped {
+            let name = jobName(l)
+            var again = DoorAsk(id: "", do: "job"); again.title = name
+            var forget = DoorAsk(id: "", do: "forget"); forget.text = l["id"] as? String
+            left.append("<li class=\"ask\"><b>\(esc(l["said"] as? String ?? ""))</b><div>\(button("Try it again", again))\(button("Leave it", forget, quiet: true))</div></li>")
+        }
+        if held {
+            left.append("<li class=\"ask\"><b>Hands off is on, so I am only looking.</b><div>\(button("Let me work again", DoorAsk(id: "", do: "resume")))</div></li>")
+        }
+        let enc = JSONEncoder()
+        if let d = try? enc.encode(["token": [DoorAsk(id: token, do: "token")], "offers": Array(offers.keys.sorted().map { k in var a = offers[k]!; a.id = k; return a })]) {
+            let u = dir.appendingPathComponent("offers.json"); try? d.write(to: u, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: u.path)
+        }
         let host = Host.current().localizedName ?? "this Mac"
         let html = """
         <!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>While you were away</title>
+        <meta http-equiv="refresh" content="30"><title>While you were away</title>
         <style>body{font:18px/1.5 -apple-system,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;background:#14110f;color:#f3ece4}
         h1{font-size:34px;margin:0}h2{font-size:20px;margin:34px 0 8px;color:#f0a04b}h2 em{font-style:normal;opacity:.6}
         ul{list-style:none;padding:0;margin:0}li{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid #2c2622}
         li b{font-weight:500}li span{opacity:.55;white-space:nowrap}p{opacity:.6}img{width:100%;border-radius:12px;margin-top:14px}
-        .sub{opacity:.6;margin:4px 0 0}</style>
+        .sub{opacity:.6;margin:4px 0 0}
+        li.ask{display:block}li.ask div{margin-top:10px;display:flex;gap:10px;flex-wrap:wrap}
+        .btn{background:#f0a04b;color:#14110f;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:10px}
+        .btn.quiet{background:#2c2622;color:#f3ece4}</style>
         <h1>While you were away</h1><p class="sub">\(esc(host)), the last \(Int(hours)) hours\(held ? ". Hands off is on." : "")</p>
-        \(section("Left for you", left, empty: "Nothing is waiting on you."))
+        \(section("Left for you", left, empty: "Nothing. You do not need to do anything."))
         \(section("What I did", did.map(row), empty: "Nothing needed doing."))
         \(singles + refused > 0 ? "<p>Also \(singles) single presses and looks asked for by hand\(refused > 0 ? ", and \(refused) asks I turned down" : "").</p>" : "")
         \(section("What I skipped because it was already done", skipped.map(row), empty: "Nothing."))

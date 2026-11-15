@@ -87,4 +87,92 @@ final class DoorTests: XCTestCase {
         await door.drain()
         XCTAssertEqual(try answer("l2", in: door).said, "a job cannot hold another job")
     }
+
+    func testHandsOffStopsEveryActingAskUntilResume() async throws {
+        let door = tempDoor()
+        try drop(DoorAsk(id: "h1", do: "hold"), in: door)
+        var open = DoorAsk(id: "h2", do: "open"); open.text = "Nothing-here"
+        try drop(open, in: door)
+        await door.drain()
+        XCTAssertTrue(door.held)
+        XCTAssertTrue(try answer("h2", in: door).said.hasPrefix("hands off is on"))
+        try drop(DoorAsk(id: "h3", do: "resume"), in: door)
+        var again = DoorAsk(id: "h4", do: "open"); again.text = "Nothing-here"
+        try drop(again, in: door)
+        await door.drain()
+        XCTAssertFalse(door.held)
+        XCTAssertEqual(try answer("h4", in: door).said, "could not find Nothing-here")
+    }
+
+    func testAWatchNeedsALearnedJobAndIsDueOnASightOrAClock() async throws {
+        let door = tempDoor()
+        var w0 = DoorAsk(id: "w0", do: "watch"); w0.title = "morning"; w0.job = "open report"; w0.at = "07:30"
+        try drop(w0, in: door)
+        var learn = DoorAsk(id: "w1", do: "learn"); learn.title = "open report"
+        var step = DoorAsk(id: "", do: "key"); step.key = "escape"; learn.steps = [step]
+        try drop(learn, in: door)
+        var w2 = DoorAsk(id: "w2", do: "watch"); w2.title = "morning"; w2.job = "open report"; w2.at = "07:30"
+        try drop(w2, in: door)
+        var w3 = DoorAsk(id: "w3", do: "watch"); w3.title = "later box"; w3.job = "open report"; w3.see = "Quit & Reopen"
+        try drop(w3, in: door)
+        await door.drain()
+        XCTAssertFalse(try answer("w0", in: door).ok)
+        XCTAssertTrue(try answer("w2", in: door).ok)
+        let all = door.watches()
+        XCTAssertEqual(all.count, 2)
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let seven = cal.date(from: DateComponents(year: 2026, month: 11, day: 15, hour: 7, minute: 0))!
+        let nine = cal.date(from: DateComponents(year: 2026, month: 11, day: 15, hour: 9, minute: 0))!
+        XCTAssertEqual(Door.due(all, now: seven, fired: [:], onScreen: [], lit: [], calendar: cal).map(\.title), [])
+        XCTAssertEqual(Door.due(all, now: nine, fired: [:], onScreen: [], lit: [], calendar: cal).map(\.title), ["morning"])
+        XCTAssertEqual(Door.due(all, now: nine, fired: ["morning": seven.timeIntervalSince1970 + 1800], onScreen: [], lit: [], calendar: cal).map(\.title), [])
+        XCTAssertEqual(Door.due(all, now: seven, fired: [:], onScreen: ["Button: Quit & Reopen"], lit: [], calendar: cal).map(\.title), ["later box"])
+        XCTAssertEqual(Door.due(all, now: seven, fired: [:], onScreen: ["Button: Quit & Reopen"], lit: ["later box"], calendar: cal).map(\.title), [])
+    }
+
+    func testABoxThatSitsIsNoticedOnceAndLandsOnThePage() async throws {
+        let door = tempDoor()
+        door.boxPatience = 60
+        let t0 = Date()
+        let box = [(app: "Installer", words: ["StaticText: Allow this?", "Button: Allow", "Button: Later"])]
+        door.noticeBoxes(box, now: t0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: door.dir.appendingPathComponent("waiting.json").path))
+        door.noticeBoxes(box, now: t0.addingTimeInterval(61))
+        door.noticeBoxes(box, now: t0.addingTimeInterval(90))
+        let log = try String(contentsOf: door.dir.appendingPathComponent("log.jsonl"), encoding: .utf8)
+        XCTAssertEqual(log.components(separatedBy: "a box from Installer").count - 1, 1)
+        try drop(DoorAsk(id: "p1", do: "page"), in: door)
+        await door.drain()
+        let page = try String(contentsOf: door.dir.appendingPathComponent("page.html"), encoding: .utf8)
+        XCTAssertTrue(page.contains("Installer: StaticText: Allow this?"))
+        XCTAssertTrue(page.contains("Left for you <em>1</em>"))
+        door.noticeBoxes([], now: t0.addingTimeInterval(120))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: door.dir.appendingPathComponent("waiting.json").path))
+    }
+
+    func testAPackIsPlainAsksAnotherDoorLearnsOnArrival() async throws {
+        let a = tempDoor(), b = tempDoor()
+        var learn = DoorAsk(id: "k1", do: "learn"); learn.title = "wake the screen"
+        var step = DoorAsk(id: "", do: "key"); step.key = "escape"; learn.steps = [step]
+        try drop(learn, in: a)
+        var w = DoorAsk(id: "k2", do: "watch"); w.title = "hourly"; w.job = "wake the screen"; w.every = 60
+        try drop(w, in: a)
+        try drop(DoorAsk(id: "k3", do: "pack"), in: a)
+        await a.drain()
+        XCTAssertTrue(try answer("k3", in: a).said.hasPrefix("packed 1 jobs and 1 watches"))
+        for f in try FileManager.default.contentsOfDirectory(at: a.dir.appendingPathComponent("pack"), includingPropertiesForKeys: nil) {
+            try FileManager.default.copyItem(at: f, to: b.dir.appendingPathComponent(f.lastPathComponent))
+        }
+        try drop(DoorAsk(id: "k4", do: "jobs"), in: b)
+        await b.drain()
+        XCTAssertEqual(try answer("k4", in: b).words, ["wake the screen"])
+        XCTAssertEqual(b.watches().map(\.title), ["hourly"])
+    }
+
+    func testShownKeysBecomeKeyStepsOnlyForNamedKeysAndShortcuts() {
+        XCTAssertNil(Door.step(forKey: nil, bare: "a", mods: [], shift: false))
+        XCTAssertEqual(Door.step(forKey: "return", bare: nil, mods: [], shift: false)?.key, "return")
+        let q = Door.step(forKey: nil, bare: "q", mods: ["command"], shift: false)
+        XCTAssertEqual(q?.key, "q"); XCTAssertEqual(q?.with, ["command"])
+    }
 }

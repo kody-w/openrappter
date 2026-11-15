@@ -19,6 +19,10 @@ public struct DoorAsk: Codable, Equatable {
     public var steps: [DoorAsk]? // learn: the asks to keep under the name in `title`
     public var unless: String?   // a step inside a job: skip it when the screen already says this
     public var wait: Double?     // a step inside a job: seconds to wait after it
+    public var job: String?      // watch: the learned job to run
+    public var see: String?      // watch: run the job when the screen says this
+    public var at: String?       // watch: run the job each day at this time, like 07:30
+    public var every: Double?    // watch: run the job every this many minutes
     public init(id: String, do what: String) { self.id = id; self.do = what }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -29,6 +33,8 @@ public struct DoorAsk: Codable, Equatable {
         text = try c.decodeIfPresent(String.self, forKey: .text); key = try c.decodeIfPresent(String.self, forKey: .key)
         with = try c.decodeIfPresent([String].self, forKey: .with); steps = try c.decodeIfPresent([DoorAsk].self, forKey: .steps)
         unless = try c.decodeIfPresent(String.self, forKey: .unless); wait = try c.decodeIfPresent(Double.self, forKey: .wait)
+        job = try c.decodeIfPresent(String.self, forKey: .job); see = try c.decodeIfPresent(String.self, forKey: .see)
+        at = try c.decodeIfPresent(String.self, forKey: .at); every = try c.decodeIfPresent(Double.self, forKey: .every)
     }
 }
 
@@ -50,15 +56,28 @@ public final class Door {
     public var onDone: (() -> Void)?
     private var fd: Int32 = -1
     private var source: DispatchSourceFileSystemObject?
-    private var busy = false
+    var busy = false
     private var seen: Set<String> = []
+    var ticker: Timer?
+    var lit: Set<String> = []              // sight watches already fired for what is on screen now
+    var boxSince: [String: Date] = [:]     // boxes on screen and when each was first seen
+    var boxTold: Set<String> = []
+    var showMonitor: Any?
+    var shownSteps: [DoorAsk] = []
+    var shownTyped = ""
+    var shownName = ""
+    /// How long a box may sit before the creature says something is waiting.
+    public var boxPatience: TimeInterval = 90
 
     public init(dir: URL? = nil, watch: Bool = true) {
         self.dir = dir ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/door")
         try? FileManager.default.createDirectory(at: self.dir, withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: self.dir.path)
-        if watch { startWatching(); Task { await self.drain() } }
+        if watch {
+            startWatching(); Task { await self.drain() }
+            ticker = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in Task { @MainActor in await self?.tick() } }
+        }
     }
 
     /// The asks still waiting, oldest first.
@@ -104,6 +123,16 @@ public final class Door {
         case "learn": return "learning the job \(a.title ?? "")"
         case "job": return "doing the job \(a.title ?? "")"
         case "jobs": return "listing the jobs I know"
+        case "hold": return "hands off"
+        case "resume": return "hands back on"
+        case "watch": return "keeping watch: \(a.title ?? "")"
+        case "unwatch": return "no longer watching: \(a.title ?? "")"
+        case "watches": return "listing what I watch for"
+        case "page": return "writing the page of what happened"
+        case "pack": return "packing my jobs for another Mac"
+        case "show": return "watching you do \(a.title ?? "a job")"
+        case "shown": return "reading back what you showed me"
+        case "yes": return "keeping the job \(a.title ?? "")"
         default: return "asked for something I do not know: \(a.do)"
         }
     }
@@ -111,6 +140,10 @@ public final class Door {
     func carryOut(_ a: DoorAsk) async -> DoorAnswer {
         var ans = DoorAnswer(id: a.id, ok: false, said: "", front: NSWorkspace.shared.frontmostApplication?.localizedName,
                              words: nil, picture: nil, at: Date().timeIntervalSince1970)
+        if held, ["press", "click", "type", "key", "open", "job"].contains(a.do) {
+            ans.said = "hands off is on, so I did not do that. Ask resume to let me work again."
+            return ans
+        }
         switch a.do {
         case "look":
             let name = "\(a.id).png"
@@ -156,6 +189,9 @@ public final class Door {
             var done = 0, skipped = 0
             ans.ok = true
             for (i, step) in steps.enumerated() {
+                if held || waiting().contains(where: { $0.do == "hold" }) {
+                    ans.ok = false; ans.said = "\(name) stopped before step \(i + 1): hands off"; break
+                }
                 if let u = step.unless, Screen.words(app: step.app).contains(where: { $0.localizedCaseInsensitiveContains(u) }) { skipped += 1; continue }
                 var s = step; s.id = "\(a.id)-\(i + 1)"
                 let r = await carryOut(s)
@@ -165,9 +201,9 @@ public final class Door {
             }
             if ans.ok { ans.said = "\(name): \(done) steps done" + (skipped > 0 ? ", \(skipped) not needed" : "") }
         default:
-            ans.said = "I do not know how to \(a.do)"
+            if !(await more(a, &ans)) { ans.said = "I do not know how to \(a.do)" }
         }
-        if a.do != "look" && a.do != "job" { try? await Task.sleep(for: .milliseconds(400)) }
+        if ["press", "click", "type", "key", "open"].contains(a.do) { try? await Task.sleep(for: .milliseconds(400)) }
         ans.front = NSWorkspace.shared.frontmostApplication?.localizedName
         return ans
     }
@@ -182,7 +218,7 @@ public final class Door {
         return learned.appendingPathComponent("\(slug).json")
     }
 
-    private func write(_ answer: DoorAnswer) {
+    func write(_ answer: DoorAnswer) {
         let url = dir.appendingPathComponent("\(answer.id).answer.json")
         let tmp = dir.appendingPathComponent(".\(answer.id).answer.json.tmp")
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -193,8 +229,9 @@ public final class Door {
     }
 
     /// Every ask is kept, one line each, so the owner can read everything that was done through the door.
-    private func record(_ ask: DoorAsk, _ answer: DoorAnswer) {
-        let line: [String: Any] = ["at": answer.at, "id": ask.id, "did": Door.line(ask), "ok": answer.ok, "said": answer.said]
+    func record(_ ask: DoorAsk, _ answer: DoorAnswer) {
+        var line: [String: Any] = ["at": answer.at, "id": ask.id, "did": Door.line(ask), "ok": answer.ok, "said": answer.said]
+        if let p = answer.picture { line["picture"] = p }
         guard let data = try? JSONSerialization.data(withJSONObject: line, options: [.sortedKeys]) else { return }
         let url = dir.appendingPathComponent("log.jsonl")
         if let h = try? FileHandle(forWritingTo: url) {

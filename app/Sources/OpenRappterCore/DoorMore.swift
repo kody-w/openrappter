@@ -298,6 +298,7 @@ extension Door {
                   os: ProcessInfo.processInfo.operatingSystemVersionString) { NSWorkspace.shared.open(URL(fileURLWithPath: $0)) }
         checkUpdates(now: now)
         keepWeek(now: now)
+        keepDisk(now: now)
         if now.timeIntervalSince(peersLooked) >= 60 {
             peersLooked = now
             for p in peers() {

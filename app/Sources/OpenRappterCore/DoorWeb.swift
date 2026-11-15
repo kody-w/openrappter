@@ -133,6 +133,17 @@ public final class DoorWeb {
             let back = DoorWeb.form(r)["back"].flatMap { DoorWeb.safeBack($0) ? $0 : nil }
             if json { send(c, ok ? "200 OK" : "409 Conflict", "application/json", Data("{\"ok\":\(ok),\"said\":\"\(ok ? "done" : "that choice is no longer on offer; read /left.json again")\"}".utf8)) }
             else { send(c, "303 See Other", "text/plain", Data(), extra: "Location: \(back ?? "/")\r\n") }
+        case ("GET", "/hand"):
+            send(c, "200 OK", "text/html; charset=utf-8", Data(DoorWeb.handPage(mac: Host.current().localizedName ?? "This Mac").utf8), extra: "Cache-Control: no-store\r\n")
+        case ("GET", "/hand/screen.jpg"):
+            guard let d = await door.handScreen() else { send(c, "503 Service Unavailable", "text/plain", Data("cannot see the screen yet".utf8)); return }
+            send(c, "200 OK", "image/jpeg", d, extra: "Cache-Control: no-store\r\n")
+        case ("GET", "/hand/choices.json"):
+            send(c, "200 OK", "application/json", door.handChoicesJSON(), extra: "Cache-Control: no-store\r\n")
+        case ("POST", "/hand"):
+            guard DoorWeb.handAllowed(r), let a = Door.handAsk(r.body) else { send(c, "403 Forbidden", "application/json", Data("{\"ok\":false,\"said\":\"not taken\"}".utf8)); return }
+            let res = door.hand(a)
+            send(c, res.ok ? "200 OK" : "409 Conflict", "application/json", (try? JSONSerialization.data(withJSONObject: ["ok": res.ok, "said": res.said])) ?? Data("{}".utf8))
         case ("GET", "/all"):
             _ = door.writePage(hours: 24)
             let mine = (try? JSONSerialization.jsonObject(with: Data(contentsOf: door.dir.appendingPathComponent("left.json")))) as? [String: Any]

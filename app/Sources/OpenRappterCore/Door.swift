@@ -84,12 +84,18 @@ public final class Door {
     var shownKeys = 0
     /// How long a box may sit before the creature says something is waiting.
     public var boxPatience: TimeInterval = 90
+    /// Seconds since the owner last touched this Mac's own mouse or keys. Swapped out in tests.
+    public var ownerIdle: () -> Double = Door.hardwareIdle
+    /// The time now, for working out how long an ask has waited on the owner. Swapped out in tests.
+    public var clock: () -> Date = { Date() }
+    var polite = DoorPolite()                 // asks waiting for the owner to finish, and since when
 
     public init(dir: URL? = nil, watch: Bool = true) {
         self.dir = dir ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/door")
         try? FileManager.default.createDirectory(at: self.dir, withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: self.dir.path)
+        if !watch { ownerIdle = { .infinity } }   // a door driven by hand never waits on the owner
         if watch {
             startWatching(); Task { await self.drain() }
             ticker = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in Task { @MainActor in await self?.tick() } }
@@ -117,7 +123,7 @@ public final class Door {
     public func drain() async {
         guard !busy else { return }
         busy = true; defer { busy = false }
-        while let ask = waiting().first {
+        while let ask = nextUp() {
             seen.insert(ask.id)
             onAct?(Door.line(ask))
             let (answer, proof) = await withProof(ask) { await self.carryOut(ask) }

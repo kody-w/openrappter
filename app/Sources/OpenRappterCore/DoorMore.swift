@@ -282,6 +282,7 @@ extension Door {
 
     public func tick(now: Date = Date()) async {
         guard !busy else { return }
+        await drain()   // asks that waited for the owner to finish get another try
         let boxes = Screen.boxes()
         noticeBoxes(boxes, now: now)
         let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
@@ -345,6 +346,7 @@ extension Door {
             fired[w.title] = now.timeIntervalSince1970
             try? JSONEncoder().encode(fired).write(to: firedURL, options: .atomic)
             var ask = DoorAsk(id: "watch-\(Int(now.timeIntervalSince1970))-\(slug(w.title))", do: "job"); ask.title = w.job
+            if parked(ask, now: now) { continue }   // the owner is using this Mac: it waits its turn
             onAct?("\(w.title): \(Door.line(ask))")
             let answer = await carryOut(ask)
             write(answer); record(ask, answer); onDone?()
@@ -512,7 +514,7 @@ extension Door {
         let host = Host.current().localizedName ?? "this Mac"
         // The same thing as data, for a phone app later: what is left, and the choices for each.
         let leftDoc: [String: Any] = ["schema": "openrappter-door/1", "mac": host, "at": now.timeIntervalSince1970, "held": held,
-                                      "token": token, "left": asks, "always": sticks]
+                                      "token": token, "left": asks, "always": sticks, "waiting": politeCount()]
         if let d = try? JSONSerialization.data(withJSONObject: leftDoc, options: [.prettyPrinted, .sortedKeys]) {
             try? d.write(to: dir.appendingPathComponent("left.json"), options: .atomic)
         }
@@ -528,6 +530,7 @@ extension Door {
         .btn{background:#f0a04b;color:#14110f;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:10px}
         .btn.quiet{background:#2c2622;color:#f3ece4}</style>
         <h1>While you were away</h1><p class="sub">\(esc(host)), the last \(Int(hours)) hours\(held ? ". Hands off is on." : "")</p>
+        \(politeLine())
         \(section("Left for you", left, empty: "Nothing. You do not need to do anything."))
         \(standing.isEmpty ? "" : section("Answers you made stick", standing, empty: ""))
         \(section("What I did", did.map(row), empty: "Nothing needed doing."))

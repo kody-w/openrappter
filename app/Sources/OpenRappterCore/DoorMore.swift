@@ -20,6 +20,17 @@ extension Door {
     /// True while the owner has said hands off. A plain file, so anything can set it: `touch ~/.openrappter/door/hold`.
     public var held: Bool { FileManager.default.fileExists(atPath: holdURL.path) }
 
+    public func hold() { FileManager.default.createFile(atPath: holdURL.path, contents: Data()) }
+    public func release() { try? FileManager.default.removeItem(at: holdURL) }
+    /// What the owner said out loud, if it was about the hands: "hold", "resume", or nil.
+    public static func spoken(_ heard: String) -> String? {
+        let w = heard.lowercased().filter { $0.isLetter || $0 == " " }.split(separator: " ").joined(separator: " ")
+        let said = w.replacingOccurrences(of: "rappter ", with: "").replacingOccurrences(of: "raptor ", with: "").replacingOccurrences(of: "rapper ", with: "")
+        if ["hands off", "hand off", "stop", "stop everything", "hold"].contains(said) { return "hold" }
+        if ["hands on", "hands back on", "carry on", "resume"].contains(said) { return "resume" }
+        return nil
+    }
+
     var watchesDir: URL { dir.appendingPathComponent("watches") }
     var firedURL: URL { watchesDir.appendingPathComponent(".fired.json") }
     var waitingURL: URL { dir.appendingPathComponent("waiting.json") }

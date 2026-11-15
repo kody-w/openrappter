@@ -368,6 +368,15 @@ final class Coordinator: NSObject, NSApplicationDelegate {
 
     func act(_ m: Mode, _ heard: String, turn id: Int) async {
         guard !heard.isEmpty else { settle(); return }
+        // Said in any mode, these take the hands away or give them back. Never typed, never sent to the model.
+        if let word = Door.spoken(heard), let door {
+            if word == "hold" { door.hold() } else { door.release() }
+            log("spoken \(word)")
+            model.posture = .speaking; model.line = word == "hold" ? "Hands off. I will look but not touch." : "Hands back on."
+            await voice.speak(model.line); try? await Task.sleep(for: .seconds(1))
+            if turns.isLive(id) { settle() }
+            return
+        }
         switch m {
         case .ask:
             await ask(heard, screen: nil, turn: id)

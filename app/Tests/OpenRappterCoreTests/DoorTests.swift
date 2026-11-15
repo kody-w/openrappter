@@ -188,4 +188,11 @@ final class DoorTests: XCTestCase {
         XCTAssertEqual(try answer("q1", in: door).said, "No Such App 123 is not open, so I did not touch anything")
         XCTAssertEqual(try answer("q2", in: door).said, "quitting needs the app named, so I did not press it")
     }
+
+    func testHandsOffCanBeSaidOutLoud() {
+        XCTAssertEqual(Door.spoken("Rappter, hands off."), "hold")
+        XCTAssertEqual(Door.spoken("Hands back on"), "resume")
+        XCTAssertNil(Door.spoken("take my hands off the wheel"))
+        let door = tempDoor(); door.hold(); XCTAssertTrue(door.held); door.release(); XCTAssertFalse(door.held)
+    }
 }

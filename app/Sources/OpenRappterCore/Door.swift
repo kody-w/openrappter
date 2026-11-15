@@ -152,6 +152,7 @@ public final class Door {
         case "answer": return "took your answer: \(a.title ?? "")"
         case "page": return "writing the page of what happened"
         case "pack": return "packing my jobs for another Mac"
+        case "chore": return "taking a chore in plain words"
         case "show": return "watching you do \(a.title ?? "a job")"
         case "shown": return "reading back what you showed me"
         case "yes": return "keeping the job \(a.title ?? "")"

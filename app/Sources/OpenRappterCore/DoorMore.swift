@@ -11,6 +11,7 @@ public struct DoorWatch: Codable, Equatable {
     public var at: String?
     public var every: Double?
     public var cover: Bool?      // the owner's other Macs run this one when this Mac goes quiet
+    public var on: [Int]?        // with `at`: only on these days, 1 = Sunday ... 7 = Saturday; nil = every day
 }
 
 /// The rest of the door: hands off, standing orders, noticing a waiting box, the page of what happened,
@@ -137,7 +138,7 @@ extension Door {
             if let at = a.at, Door.minutes(at) == nil { ans.said = "I could not read the time \(at); say it like 07:30"; return true }
             try? fm.createDirectory(at: watchesDir, withIntermediateDirectories: true)
             let w = DoorWatch(title: title, job: job, see: a.see, app: a.app, at: a.at, every: a.every,
-                              cover: (a.with ?? []).contains("cover") && a.see == nil ? true : nil)
+                              cover: (a.with ?? []).contains("cover") && a.see == nil ? true : nil, on: nil)
             ans.ok = (try? enc.encode(w).write(to: watchesDir.appendingPathComponent("\(slug(title)).json"), options: .atomic)) != nil
             ans.said = ans.ok ? "watching: \(Door.plain(w))" : "could not keep that watch"
         case "unwatch":
@@ -200,6 +201,15 @@ extension Door {
             }
             ans.ok = n + m > 0
             ans.said = ans.ok ? "packed \(n) jobs and \(m) watches. Copy the pack folder into another Mac's door and it learns them." : "nothing to pack yet"
+        case "chore":
+            // One plain sentence: what to do and when. The owner shows it once; saying yes keeps the job and its clock together.
+            guard let said = a.text, let c = Door.chore(said) else { ans.said = "say what to do and when, like: every Friday at 9, export last week's orders"; return true }
+            guard AXIsProcessTrusted() else { ans.said = "not allowed to watch yet"; return true }
+            let w = DoorWatch(title: c.title, job: c.title, see: nil, app: nil, at: c.at, every: c.every, cover: nil, on: c.on)
+            _ = try? enc.encode(w).write(to: dir.appendingPathComponent(".chore.json"), options: .atomic)
+            startShowing(c.title); ans.ok = showMonitor != nil
+            let when = String(Door.plain(w).drop(while: { $0 != "\"" }).dropFirst().drop(while: { $0 != "\"" }).dropFirst(2))
+            ans.said = ans.ok ? "I will \(c.title) \(when). Show me once now, then ask shown, then yes." : "this Mac would not let me watch"
         case "show":
             guard let title = a.title, !slug(title).isEmpty else { ans.said = "show needs a name for the job"; return true }
             guard AXIsProcessTrusted() else { ans.said = "not allowed to watch yet"; return true }
@@ -220,6 +230,14 @@ extension Door {
             try? fm.removeItem(at: url)
             ans.ok = (try? fm.moveItem(at: draft, to: url)) != nil
             ans.said = ans.ok ? "learned \(title)" : "could not keep \(title)"
+            let pending = dir.appendingPathComponent(".chore.json")
+            if ans.ok, let w = try? JSONDecoder().decode(DoorWatch.self, from: Data(contentsOf: pending)), slug(w.job) == slug(title) {
+                try? fm.createDirectory(at: watchesDir, withIntermediateDirectories: true)
+                if (try? enc.encode(w).write(to: watchesDir.appendingPathComponent("\(slug(w.title)).json"), options: .atomic)) != nil {
+                    ans.said = "learned \(title). " + Door.plain(w).replacingOccurrences(of: "\(w.title): do \"\(w.job)\"", with: "I will do it")
+                }
+                try? fm.removeItem(at: pending)
+            }
         default:
             return false
         }
@@ -235,7 +253,7 @@ extension Door {
     public static func plain(_ w: DoorWatch) -> String {
         var when: [String] = []
         if let s = w.see { when.append("when the screen says \"\(s)\"") }
-        if let t = w.at { when.append("every day at \(t)") }
+        if let t = w.at { when.append("\(Door.days(w.on)) at \(t)") }
         if let e = w.every { when.append("every \(Int(e)) minutes") }
         return "\(w.title): do \"\(w.job)\" \(when.joined(separator: " and "))"
     }
@@ -254,6 +272,7 @@ extension Door {
             if let at = w.at, let m = minutes(at) {
                 let c = calendar.dateComponents([.hour, .minute], from: now)
                 let nowM = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+                if let on = w.on, !on.contains(calendar.component(.weekday, from: now)) { return false }
                 return nowM >= m && !(last.map { calendar.isDate($0, inSameDayAs: now) } ?? false)
             }
             if let e = w.every, e > 0 { return last.map { now.timeIntervalSince($0) >= e * 60 } ?? true }
@@ -755,6 +774,55 @@ extension Door {
         }
     }
 
+    // MARK: chores in plain words
+
+    public nonisolated static func days(_ on: [Int]?) -> String {
+        guard let on, !on.isEmpty, Set(on).count < 7 else { return "every day" }
+        if Set(on) == [2, 3, 4, 5, 6] { return "every weekday" }
+        let names = ["", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+        return "every " + on.sorted().filter { (1...7).contains($0) }.map { names[$0] }.joined(separator: " and ")
+    }
+    /// Reads "every Friday at 9, export last week's orders" into what to do and when. Nil when no time or day is said.
+    public nonisolated static func chore(_ sentence: String) -> (title: String, at: String?, every: Double?, on: [Int]?)? {
+        var rest = sentence
+        func cut(_ pattern: String) -> [String]? {
+            guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+                  let m = re.firstMatch(in: rest, range: NSRange(rest.startIndex..., in: rest)), let whole = Range(m.range, in: rest) else { return nil }
+            let groups = (0..<m.numberOfRanges).map { i in Range(m.range(at: i), in: rest).map { String(rest[$0]) } ?? "" }
+            rest.replaceSubrange(whole, with: " ")
+            return groups
+        }
+        var every: Double? = nil, at: String? = nil, on: [Int]? = nil, daySaid = false
+        if let g = cut("\\bevery\\s+(\\d+)?\\s*(minutes?|mins?|hours?|hrs?)\\b") {
+            every = Double(Int(g[1]) ?? 1) * (g[2].lowercased().hasPrefix("h") ? 60 : 1)
+        }
+        let day = "(?:mon|tues|wednes|thurs|fri|satur|sun)days?"
+        if let g = cut("\\b(?:every|each|on)\\s+((?:\(day)|weekdays?|days?)(?:\\s*(?:,|and|,\\s*and)\\s*\(day))*)") {
+            daySaid = true
+            let l = g[1].lowercased()
+            if l.contains("weekday") { on = [2, 3, 4, 5, 6] }
+            else {
+                let found = ["sun", "mon", "tues", "wednes", "thurs", "fri", "satur"].enumerated().filter { l.contains($0.element + "day") }.map { $0.offset + 1 }
+                on = found.isEmpty ? nil : found
+            }
+        } else if cut("\\bdaily\\b") != nil { daySaid = true }
+        if cut("\\b(?:at\\s+)?noon\\b") != nil { at = "12:00" }
+        else if cut("\\b(?:at\\s+)?midnight\\b") != nil { at = "00:00" }
+        else if let g = cut("\\bat\\s+(\\d{1,2})(?::(\\d{2}))?\\s*(am|pm|a\\.m\\.|p\\.m\\.)?(?![\\w:])") {
+            var h = Int(g[1]) ?? 0; let m = Int(g[2]) ?? 0, half = g[3].lowercased()
+            if half.hasPrefix("p"), h < 12 { h += 12 }; if half.hasPrefix("a"), h == 12 { h = 0 }
+            guard (0..<24).contains(h), (0..<60).contains(m) else { return nil }
+            at = String(format: "%02d:%02d", h, m)
+        }
+        if every != nil { at = nil; on = nil } else if at == nil { guard daySaid else { return nil }; at = "09:00" }
+        var title = rest.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        title = title.trimmingCharacters(in: CharacterSet(charactersIn: " ,.;:!"))
+        for lead in ["and ", "then ", "please "] where title.lowercased().hasPrefix(lead) { title = String(title.dropFirst(lead.count)) }
+        title = String(title.trimmingCharacters(in: CharacterSet(charactersIn: " ,.;:!")).prefix(60))
+        guard title.contains(where: { $0.isLetter }) else { return nil }
+        return (title, at, every, on)
+    }
+
     // MARK: signed out
 
     /// Browsers show sign-in pages all day; that is not an app signing the owner out.
@@ -873,7 +941,7 @@ extension Door {
         guard let seen = st["seen"] as? Double, now.timeIntervalSince1970 - seen >= 180 else { return [] }
         let theirs = ((st["cover"] as? [[String: Any]]) ?? []).compactMap { o -> (DoorWatch, Double)? in
             guard let t = o["title"] as? String, let j = o["job"] as? String, let u = learnedURL(j), FileManager.default.fileExists(atPath: u.path) else { return nil }
-            return (DoorWatch(title: t, job: j, see: nil, app: nil, at: o["at"] as? String, every: o["every"] as? Double, cover: true), o["fired"] as? Double ?? 0)
+            return (DoorWatch(title: t, job: j, see: nil, app: nil, at: o["at"] as? String, every: o["every"] as? Double, cover: true, on: nil), o["fired"] as? Double ?? 0)
         }
         if st["quiet"] as? Bool != true {
             st["quiet"] = true

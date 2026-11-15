@@ -465,4 +465,25 @@ final class DoorTests: XCTestCase {
         XCTAssertTrue(DoorWeb.homeNet("192.168.86.209")); XCTAssertTrue(DoorWeb.homeNet("10.0.0.5")); XCTAssertTrue(DoorWeb.homeNet("::ffff:172.20.1.1"))
         XCTAssertFalse(DoorWeb.homeNet("8.8.8.8")); XCTAssertFalse(DoorWeb.homeNet("172.32.0.1")); XCTAssertFalse(DoorWeb.homeNet("100.70.213.17"))
     }
+
+    func testAChoreSaidInPlainWords() throws {
+        func c(_ s: String) -> String { Door.chore(s).map { "\($0.title) | \($0.at ?? "-") | \($0.every.map { String(Int($0)) } ?? "-") | \($0.on.map { $0.map(String.init).joined(separator: ",") } ?? "-")" } ?? "nil" }
+        XCTAssertEqual(c("Every Friday at 9, export last week's orders"), "export last week's orders | 09:00 | - | 6")
+        XCTAssertEqual(c("back up the photos every day at 6:30 pm"), "back up the photos | 18:30 | - | -")
+        XCTAssertEqual(c("Every weekday at 7am tidy the desktop."), "tidy the desktop | 07:00 | - | 2,3,4,5,6")
+        XCTAssertEqual(c("check the downloads folder every 30 minutes"), "check the downloads folder | - | 30 | -")
+        XCTAssertEqual(c("every 2 hours, sync the notes"), "sync the notes | - | 120 | -")
+        XCTAssertEqual(c("on Monday and Thursday at noon send the report"), "send the report | 12:00 | - | 2,5")
+        XCTAssertEqual(c("empty the bin daily"), "empty the bin | 09:00 | - | -")
+        XCTAssertEqual(c("export the orders"), "nil"); XCTAssertEqual(c("every Friday at 9"), "nil"); XCTAssertEqual(c("every day at 25:00 do it"), "nil")
+        XCTAssertEqual(Door.days([6]), "every Friday"); XCTAssertEqual(Door.days([2, 5]), "every Monday and Thursday"); XCTAssertEqual(Door.days(nil), "every day")
+        // A Friday chore runs on Friday only, once.
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let w = DoorWatch(title: "orders", job: "orders", see: nil, app: nil, at: "09:00", every: nil, cover: nil, on: [6])
+        let fri = cal.date(from: DateComponents(year: 2026, month: 11, day: 20, hour: 9, minute: 5))!, thu = fri.addingTimeInterval(-86400)
+        XCTAssertEqual(Door.due([w], now: thu, fired: [:], onScreen: [], lit: [], calendar: cal).count, 0)
+        XCTAssertEqual(Door.due([w], now: fri, fired: [:], onScreen: [], lit: [], calendar: cal).count, 1)
+        XCTAssertEqual(Door.due([w], now: fri.addingTimeInterval(3600), fired: ["orders": fri.timeIntervalSince1970], onScreen: [], lit: [], calendar: cal).count, 0)
+        XCTAssertEqual(Door.plain(w), "orders: do \"orders\" every Friday at 09:00")
+    }
 }

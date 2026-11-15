@@ -39,6 +39,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>OpenRappter listens while you hold the key so it can hear what you say. Speech stays on this Mac.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>OpenRappter turns what you say into text on this Mac.</string>
+  <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+  <key>NSLocalNetworkUsageDescription</key><string>OpenRappter checks that your other Macs are still running.</string>
   <key>NSAppleEventsUsageDescription</key><string>OpenRappter types what you dictated into the app you are using.</string>
   <key>CFBundleURLTypes</key><array><dict>
     <key>CFBundleURLName</key><string>$BUNDLE_ID</string>

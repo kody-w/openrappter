@@ -10,6 +10,7 @@ public struct DoorWatch: Codable, Equatable {
     public var app: String?
     public var at: String?
     public var every: Double?
+    public var cover: Bool?      // the owner's other Macs run this one when this Mac goes quiet
 }
 
 /// The rest of the door: hands off, standing orders, noticing a waiting box, the page of what happened,
@@ -135,7 +136,8 @@ extension Door {
             guard a.see != nil || a.at != nil || a.every != nil else { ans.said = "watch needs a sight, a time or an every"; return true }
             if let at = a.at, Door.minutes(at) == nil { ans.said = "I could not read the time \(at); say it like 07:30"; return true }
             try? fm.createDirectory(at: watchesDir, withIntermediateDirectories: true)
-            let w = DoorWatch(title: title, job: job, see: a.see, app: a.app, at: a.at, every: a.every)
+            let w = DoorWatch(title: title, job: job, see: a.see, app: a.app, at: a.at, every: a.every,
+                              cover: (a.with ?? []).contains("cover") && a.see == nil ? true : nil)
             ans.ok = (try? enc.encode(w).write(to: watchesDir.appendingPathComponent("\(slug(title)).json"), options: .atomic)) != nil
             ans.said = ans.ok ? "watching: \(Door.plain(w))" : "could not keep that watch"
         case "unwatch":
@@ -268,6 +270,33 @@ extension Door {
                   running: apps.compactMap { a in a.bundleURL.map { (a.localizedName ?? $0.lastPathComponent, $0.path) } },
                   os: ProcessInfo.processInfo.operatingSystemVersionString) { NSWorkspace.shared.open(URL(fileURLWithPath: $0)) }
         checkUpdates(now: now)
+        if now.timeIntervalSince(peersLooked) >= 60 {
+            peersLooked = now
+            for p in peers() {
+                Task { @MainActor in
+                    var heard: [[String: Any]]? = nil
+                    for host in [p.at, p.lan].compactMap({ $0 }) where heard == nil {
+                        guard let u = URL(string: "http://\(host):\(DoorWeb.port)/beat") else { continue }
+                        var req = URLRequest(url: u); req.timeoutInterval = 3
+                        if let (d, _) = try? await URLSession.shared.data(for: req), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], o["mac"] != nil {
+                            heard = (o["cover"] as? [[String: Any]]) ?? []
+                        }
+                    }
+                    // Report in as well: a Mac that cannot be reached may still be able to reach out.
+                    let me = try? JSONSerialization.data(withJSONObject: ["mac": Host.current().localizedName ?? "this Mac"])
+                    for host in [p.at, p.lan].compactMap({ $0 }) {
+                        guard let u = URL(string: "http://\(host):\(DoorWeb.port)/beat") else { continue }
+                        var req = URLRequest(url: u); req.timeoutInterval = 3; req.httpMethod = "POST"; req.httpBody = me
+                        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                        if let (_, r) = try? await URLSession.shared.data(for: req), (r as? HTTPURLResponse)?.statusCode == 200 { break }
+                    }
+                    for w in self.peerBeat(name: p.name, heard: heard, now: Date()) {
+                        var ask = DoorAsk(id: "cover-\(Int(Date().timeIntervalSince1970))-\(self.slug(w.title))", do: "job"); ask.title = w.job
+                        if let d = try? JSONEncoder().encode(ask) { try? d.write(to: self.dir.appendingPathComponent("\(ask.id).json"), options: .atomic) }
+                    }
+                }
+            }
+        }
         if now.timeIntervalSince(signLooked) >= 300 {
             signLooked = now
             noticeSignOuts(apps.compactMap(\.localizedName).filter { !Door.browsers.contains($0) }.map { ($0, Screen.words(app: $0)) }, now: now)
@@ -794,9 +823,76 @@ extension Door {
     }
 
     /// The owner's other Macs that run a door, for the one page: peers.json = [{"name": "...", "at": "100.x.y.z"}].
-    public func peers() -> [(name: String, at: String)] {
+    public func peers() -> [(name: String, at: String, lan: String?)] {
         let list = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("peers.json")))) as? [[String: String]]) ?? []
-        return list.compactMap { p in p["at"].map { (p["name"] ?? $0, $0) } }
+        return list.compactMap { p in p["at"].map { (p["name"] ?? $0, $0, p["lan"]) } }
+    }
+
+    // MARK: covering for another Mac
+
+    var peersSeenURL: URL { dir.appendingPathComponent("peers-seen.json") }
+    /// What this Mac tells the others when they check on it: that it is alive, and which clock jobs they should run if it goes quiet.
+    public func beat(now: Date = Date()) -> [String: Any] {
+        let fired = (try? JSONDecoder().decode([String: Double].self, from: Data(contentsOf: firedURL))) ?? [:]
+        let cover: [[String: Any]] = watches().filter { $0.cover == true && $0.see == nil }.map { w in
+            var o: [String: Any] = ["title": w.title, "job": w.job, "fired": fired[w.title] ?? 0]
+            if let at = w.at { o["at"] = at }; if let e = w.every { o["every"] = e }
+            return o
+        }
+        let left = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("left.json")))) as? [String: Any])?["left"] as? [Any]
+        return ["schema": "openrappter-door/1", "mac": Host.current().localizedName ?? "this Mac", "at": now.timeIntervalSince1970, "held": held, "left": left?.count ?? 0, "cover": cover]
+    }
+    /// Another Mac reported in. That proves it is alive and nothing more: the jobs to cover are only ever read by asking it directly.
+    @discardableResult public func reportedIn(mac: String, now: Date = Date()) -> Bool {
+        func flat(_ s: String) -> String { s.lowercased().filter { $0.isLetter || $0.isNumber } }
+        guard let p = peers().first(where: { !flat($0.name).isEmpty && flat(mac).hasPrefix(flat($0.name)) }) else { return false }
+        let st = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: peersSeenURL))) as? [String: [String: Any]])?[p.name]
+        _ = peerBeat(name: p.name, heard: (st?["cover"] as? [[String: Any]]) ?? [], now: now)
+        return true
+    }
+    /// One check on another Mac. `heard` is what it said, or nil when it did not answer.
+    /// Three minutes of silence is "gone quiet" (one missed beat is not). While it is quiet, its covered clock jobs that this Mac
+    /// also knows come back as due; when it answers again the covering stops. A dropped link looks the same as a dead Mac,
+    /// so only jobs the owner marked for cover are ever run here.
+    func peerBeat(name: String, heard: [[String: Any]]?, now: Date, calendar: Calendar = .current) -> [DoorWatch] {
+        var all = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: peersSeenURL))) as? [String: [String: Any]]) ?? [:]
+        var st = all[name] ?? [:]
+        defer { all[name] = st; if let d = try? JSONSerialization.data(withJSONObject: all, options: [.prettyPrinted, .sortedKeys]) { try? d.write(to: peersSeenURL, options: .atomic) } }
+        func tell(_ said: String) {
+            var ask = DoorAsk(id: "notice-\(Int(now.timeIntervalSince1970))-peer-\(slug(name))", do: "notice"); ask.app = name
+            record(ask, DoorAnswer(id: ask.id, ok: true, said: said, front: nil, words: nil, picture: nil, at: now.timeIntervalSince1970))
+            onAct?(said); onDone?()
+        }
+        if let heard {
+            if st["quiet"] as? Bool == true, let since = st["seen"] as? Double {
+                tell("\(name) is back after \(Int((now.timeIntervalSince1970 - since) / 60)) min of quiet. I have stopped covering for it")
+            }
+            st = ["seen": now.timeIntervalSince1970, "cover": heard, "quiet": false]
+            return []
+        }
+        guard let seen = st["seen"] as? Double, now.timeIntervalSince1970 - seen >= 180 else { return [] }
+        let theirs = ((st["cover"] as? [[String: Any]]) ?? []).compactMap { o -> (DoorWatch, Double)? in
+            guard let t = o["title"] as? String, let j = o["job"] as? String, let u = learnedURL(j), FileManager.default.fileExists(atPath: u.path) else { return nil }
+            return (DoorWatch(title: t, job: j, see: nil, app: nil, at: o["at"] as? String, every: o["every"] as? Double, cover: true), o["fired"] as? Double ?? 0)
+        }
+        if st["quiet"] as? Bool != true {
+            st["quiet"] = true
+            tell("\(name) has gone quiet: no answer for \(Int((now.timeIntervalSince1970 - seen) / 60)) min" +
+                 (theirs.isEmpty ? "" : ". Until it is back I run its jobs: \(theirs.map { $0.0.title }.joined(separator: ", "))"))
+        }
+        guard !held else { return [] }
+        var fired = (try? JSONDecoder().decode([String: Double].self, from: Data(contentsOf: firedURL))) ?? [:]
+        var run: [DoorWatch] = []
+        for (w, theirLast) in theirs {
+            let key = "cover:\(name):\(w.title)"
+            var mine = w; mine.title = key
+            let last = max(fired[key] ?? 0, theirLast)
+            if !Door.due([mine], now: now, fired: last > 0 ? [key: last] : [:], onScreen: [], lit: [], calendar: calendar).isEmpty {
+                fired[key] = now.timeIntervalSince1970; run.append(w)
+            }
+        }
+        if !run.isEmpty { try? FileManager.default.createDirectory(at: watchesDir, withIntermediateDirectories: true); try? JSONEncoder().encode(fired).write(to: firedURL, options: .atomic) }
+        return run
     }
     /// The last thing this door did before a moment, from its own record.
     func lastActed(before t: Date) -> (at: Date, did: String)? {

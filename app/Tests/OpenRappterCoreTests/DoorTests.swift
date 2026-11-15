@@ -422,4 +422,47 @@ final class DoorTests: XCTestCase {
         XCTAssertEqual(told(), 2)
         XCTAssertTrue(try String(contentsOf: door.dir.appendingPathComponent("log.jsonl"), encoding: .utf8).contains("Orders wants you to sign in again (it says \\\"Please sign in to continue\\\")"))
     }
+
+    func testAMacThatGoesQuietIsToldAndItsMarkedJobsAreCovered() async throws {
+        let door = tempDoor()
+        var step = DoorAsk(id: "", do: "look"); step.app = "x"
+        var learn = DoorAsk(id: "l1", do: "learn"); learn.title = "nightly tidy"; learn.steps = [step]
+        try drop(learn, in: door); await door.drain()
+        let t = Date(timeIntervalSince1970: 4_000_000)
+        func log() -> String { (try? String(contentsOf: door.dir.appendingPathComponent("log.jsonl"), encoding: .utf8)) ?? "" }
+        let theirs: [[String: Any]] = [["title": "tidy each hour", "job": "nightly tidy", "every": 60.0, "fired": t.timeIntervalSince1970 - 600],
+                                       ["title": "unknown here", "job": "a job this Mac never learned", "every": 5.0, "fired": 0.0]]
+        // Never heard from: silence means nothing yet.
+        XCTAssertEqual(door.peerBeat(name: "One", heard: nil, now: t).count, 0); XCTAssertFalse(log().contains("gone quiet"))
+        XCTAssertEqual(door.peerBeat(name: "One", heard: theirs, now: t).count, 0)
+        // One missed beat is not quiet; three minutes is, said once.
+        XCTAssertEqual(door.peerBeat(name: "One", heard: nil, now: t.addingTimeInterval(60)).count, 0); XCTAssertFalse(log().contains("gone quiet"))
+        XCTAssertEqual(door.peerBeat(name: "One", heard: nil, now: t.addingTimeInterval(200)).count, 0)
+        XCTAssertTrue(log().contains("One has gone quiet: no answer for 3 min. Until it is back I run its jobs: tidy each hour"))
+        _ = door.peerBeat(name: "One", heard: nil, now: t.addingTimeInterval(260))
+        XCTAssertEqual(log().components(separatedBy: "gone quiet").count - 1, 1)
+        // Its hourly job ran 10 minutes before it went quiet, so it is covered 50 minutes later, once, and only the job this Mac knows.
+        XCTAssertEqual(door.peerBeat(name: "One", heard: nil, now: t.addingTimeInterval(1800)).count, 0)
+        XCTAssertEqual(door.peerBeat(name: "One", heard: nil, now: t.addingTimeInterval(3100)).map(\.job), ["nightly tidy"])
+        XCTAssertEqual(door.peerBeat(name: "One", heard: nil, now: t.addingTimeInterval(3200)).count, 0)
+        // Hands off: nothing is covered. Back again: said once, covering stops.
+        door.hold(); XCTAssertEqual(door.peerBeat(name: "One", heard: nil, now: t.addingTimeInterval(8000)).count, 0); door.release()
+        XCTAssertEqual(door.peerBeat(name: "One", heard: theirs, now: t.addingTimeInterval(8100)).count, 0)
+        XCTAssertTrue(log().contains("One is back after 135 min of quiet. I have stopped covering for it"))
+        // A Mac that reports in is alive, but cannot hand over jobs that way; a stranger's report is ignored.
+        try Data("[{\"name\": \"RappterOne\", \"at\": \"100.77.124.111\"}]".utf8).write(to: door.dir.appendingPathComponent("peers.json"))
+        XCTAssertFalse(door.reportedIn(mac: "Somebody's PC", now: t.addingTimeInterval(9000)))
+        XCTAssertTrue(door.reportedIn(mac: "RappterOne\u{2019}s Mac mini", now: t.addingTimeInterval(9000)))
+        XCTAssertEqual(door.peerBeat(name: "RappterOne", heard: nil, now: t.addingTimeInterval(9100)).count, 0)
+        _ = door.peerBeat(name: "RappterOne", heard: nil, now: t.addingTimeInterval(9200))
+        XCTAssertTrue(log().contains("RappterOne has gone quiet: no answer for 3 min") && !log().contains("RappterOne has gone quiet: no answer for 3 min. Until"))
+        // What this Mac says about itself, and who may ask.
+        var w = DoorAsk(id: "w1", do: "watch"); w.title = "tidy at night"; w.job = "nightly tidy"; w.at = "02:00"; w.with = ["cover"]
+        try drop(w, in: door); await door.drain()
+        let beat = door.beat(now: t)
+        XCTAssertEqual((beat["cover"] as? [[String: Any]])?.first?["title"] as? String, "tidy at night")
+        XCTAssertNil(beat["token"])
+        XCTAssertTrue(DoorWeb.homeNet("192.168.86.209")); XCTAssertTrue(DoorWeb.homeNet("10.0.0.5")); XCTAssertTrue(DoorWeb.homeNet("::ffff:172.20.1.1"))
+        XCTAssertFalse(DoorWeb.homeNet("8.8.8.8")); XCTAssertFalse(DoorWeb.homeNet("172.32.0.1")); XCTAssertFalse(DoorWeb.homeNet("100.70.213.17"))
+    }
 }

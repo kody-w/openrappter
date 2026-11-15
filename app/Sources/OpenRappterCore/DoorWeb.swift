@@ -9,6 +9,8 @@ import Network
 ///   POST /ask        {"title": "...", "text": "...", "choices": ["...", "..."]} puts a question to the owner; gives {ok, id}
 ///   GET  /all        one page for every Mac named in peers.json ([{"name": "...", "at": "100.x.y.z"}]); each button posts to its own Mac
 ///   GET  /proof/<name> a before-and-after page for one thing the door did, and its two pictures
+///   POST /beat       {"mac": "..."} another of the owner's Macs reporting that it is alive
+///   GET  /beat       {mac, at, held, left: <count>, cover: [...]}; the only thing a Mac on the home network (not Tailscale) may ask
 ///   GET  /answer/<id> {id, picked}; picked is null until the owner has chosen
 /// A choice is only ever taken by POST, so a link preview or a page preload can never press a button.
 /// Anything not from this Mac or the private network is hung up on.
@@ -16,6 +18,7 @@ import Network
 public final class DoorWeb {
     let door: Door
     var listener: NWListener?
+    var homeOnly: Set<ObjectIdentifier> = []   // connections from the home network: they may only ask /beat
     public static let port: UInt16 = 7466
     public init(door: Door) { self.door = door }
 
@@ -36,7 +39,11 @@ public final class DoorWeb {
     }
 
     func accept(_ c: NWConnection) {
-        guard case let .hostPort(host, _) = c.endpoint, DoorWeb.allowed("\(host)") else { c.cancel(); return }
+        guard case let .hostPort(host, _) = c.endpoint else { c.cancel(); return }
+        if !DoorWeb.allowed("\(host)") {
+            guard DoorWeb.homeNet("\(host)") else { c.cancel(); return }
+            homeOnly.insert(ObjectIdentifier(c))
+        }
         c.start(queue: .main); read(c, Data())
     }
 
@@ -90,7 +97,15 @@ public final class DoorWeb {
 
     func route(_ c: NWConnection, _ r: Request) async {
         let path = r.path.split(separator: "?").first.map(String.init) ?? "/"
+        let home = homeOnly.remove(ObjectIdentifier(c)) != nil
+        if home, !(path == "/beat" && (r.method == "GET" || r.method == "POST")) { send(c, "404 Not Found", "text/plain", Data("not here".utf8)); return }
         switch (r.method, path) {
+        case ("POST", "/beat"):
+            let mac = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["mac"] as? String ?? ""
+            let known = door.reportedIn(mac: String(mac.prefix(80)))
+            send(c, known ? "200 OK" : "404 Not Found", "application/json", Data("{\"ok\":\(known)}".utf8))
+        case ("GET", "/beat"):
+            send(c, "200 OK", "application/json", (try? JSONSerialization.data(withJSONObject: door.beat(), options: [.sortedKeys])) ?? Data("{}".utf8))
         case ("GET", "/"), ("GET", "/left.json"):
             _ = door.writePage(hours: 24)
             if path == "/" {
@@ -138,6 +153,17 @@ public final class DoorWeb {
         default:
             send(c, "404 Not Found", "text/plain", Data("not here".utf8))
         }
+    }
+
+    /// An address on a home network. Such a Mac may only ask whether this one is alive.
+    public static func homeNet(_ peer: String) -> Bool {
+        var h = peer.lowercased()
+        if let i = h.firstIndex(of: "%") { h = String(h[..<i]) }
+        if h.hasPrefix("::ffff:") { h = String(h.dropFirst(7)) }
+        if h.hasPrefix("fe80:") { return true }
+        let p = h.split(separator: ".").compactMap { Int($0) }
+        guard p.count == 4 else { return false }
+        return p[0] == 10 || (p[0] == 192 && p[1] == 168) || (p[0] == 172 && (16...31).contains(p[1])) || (p[0] == 169 && p[1] == 254)
     }
 
     /// A proof file may be asked for only by a plain name: letters, numbers and dashes, ending .html or .jpg.

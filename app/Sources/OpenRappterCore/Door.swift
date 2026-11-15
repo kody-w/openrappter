@@ -72,6 +72,7 @@ public final class Door {
         return (try? j.write(to: url, options: .atomic)) != nil
     }
     var signLooked = Date.distantPast, signSeen: Set<String> = [], signTold: [String: Date] = [:]
+    var peersLooked = Date.distantPast
     var updatesBusy = false
     var boxCause: [String: String] = [:]      // why each waiting box came up, worked out once
     var alwaysFired: [String: [Date]] = [:]   // when each standing answer last pressed, so a box that keeps coming back cannot loop

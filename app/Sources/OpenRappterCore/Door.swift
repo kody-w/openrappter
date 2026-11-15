@@ -84,6 +84,9 @@ public final class Door {
     var shownKeys = 0
     /// How long a box may sit before the creature says something is waiting.
     public var boxPatience: TimeInterval = 90
+    /// Setup: what this Mac allows (nil = read the real Mac), and what opens a System Settings page. Swapped out in tests.
+    public var setupFacts: (() -> DoorSetupFacts)?
+    public var openSetting: (URL) -> Bool = { NSWorkspace.shared.open($0) }
 
     public init(dir: URL? = nil, watch: Bool = true) {
         self.dir = dir ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/door")
@@ -156,6 +159,8 @@ public final class Door {
         case "show": return "watching you do \(a.title ?? "a job")"
         case "shown": return "reading back what you showed me"
         case "yes": return "keeping the job \(a.title ?? "")"
+        case "setup": return "checking what I am allowed to do"
+        case "settings": return "opening the setting for \(a.title ?? "")"
         default: return "asked for something I do not know: \(a.do)"
         }
     }

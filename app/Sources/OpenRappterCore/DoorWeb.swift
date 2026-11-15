@@ -11,6 +11,7 @@ import Network
 ///   GET  /proof/<name> a before-and-after page for one thing the door did, and its two pictures
 ///   POST /beat       {"mac": "..."} another of the owner's Macs reporting that it is alive
 ///   GET  /beat       {mac, at, held, left: <count>, cover: [...]}; the only thing a Mac on the home network (not Tailscale) may ask
+///   GET  /setup      the first-day page: what is allowed, what is not, and a button that opens the right setting
 ///   GET  /answer/<id> {id, picked}; picked is null until the owner has chosen
 /// A choice is only ever taken by POST, so a link preview or a page preload can never press a button.
 /// Anything not from this Mac or the private network is hung up on.
@@ -103,6 +104,7 @@ public final class DoorWeb {
         case ("POST", "/beat"):
             let mac = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["mac"] as? String ?? ""
             let known = door.reportedIn(mac: String(mac.prefix(80)))
+            if known { door.noteReport() }
             send(c, known ? "200 OK" : "404 Not Found", "application/json", Data("{\"ok\":\(known)}".utf8))
         case ("GET", "/beat"):
             send(c, "200 OK", "application/json", (try? JSONSerialization.data(withJSONObject: door.beat(), options: [.sortedKeys])) ?? Data("{}".utf8))
@@ -117,6 +119,9 @@ public final class DoorWeb {
                 send(c, "200 OK", "application/json", (try? Data(contentsOf: door.dir.appendingPathComponent("left.json"))) ?? Data("{}".utf8),
                      extra: from.map { "Access-Control-Allow-Origin: \($0)\r\nVary: Origin\r\n" } ?? "")
             }
+        case ("GET", "/setup"), ("GET", "/setup.html"):
+            _ = door.writePage(hours: 24)
+            send(c, "200 OK", "text/html; charset=utf-8", Data(DoorWeb.forWeb((try? String(contentsOf: door.dir.appendingPathComponent("setup.html"), encoding: .utf8)) ?? "").utf8))
         case ("POST", "/pick"):
             let json = (r.headers["content-type"] ?? "").contains("json")
             var ok = false

@@ -21,6 +21,7 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     let ears = Ears()
     let voice = Voice()
     let needs = NeedsQueue()
+    var door: Door?
     var notch: DynamicNotch<Expanded, CompactLeading, CompactTrailing>!
     var mind: MindClient?
     var sessionId: String?
@@ -58,6 +59,11 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         model.onAnswer = { [weak self] need, opt in self?.answer(need, opt) }
         model.onLater = { [weak self] need in self?.needs.later(need); self?.showNextNeedOrRest() }
         model.onSignIn = { [weak self] in self?.signIn() }
+        // The door: asks dropped in ~/.openrappter/door/ are carried out by these eyes and hands, in the open.
+        let door = Door()
+        door.onAct = { [weak self] line in log("door: \(line)"); self?.model.posture = .thinking }
+        door.onDone = { [weak self] in if self?.model.posture == .thinking { self?.model.posture = .idle } }
+        self.door = door
         model.onSignInAgain = { [weak self] in self?.signInAgain() }
         model.onTryAgain = { [weak self] in Task { await self?.findMind() } }
         model.onInstallTools = { [weak self] in self?.installTools() }

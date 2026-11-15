@@ -238,4 +238,19 @@ final class DoorTests: XCTestCase {
         let again = await door.pick(token: left["token"] as! String, key: choices[0]["offer"]!)
         XCTAssertFalse(again)
     }
+
+    func testPageNeverSwallowsItself() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("door-\(UUID().uuidString)")
+        let door = Door(dir: dir)
+        let now = Date().timeIntervalSince1970
+        let line = "{\"at\":\(now),\"did\":\"writing the page\",\"id\":\"a1\",\"ok\":true,\"picture\":\"page.html\",\"said\":\"page ready\"}\n"
+        try Data(line.utf8).write(to: dir.appendingPathComponent("log.jsonl"))
+        var sizes: [Int] = []
+        for _ in 0..<4 {
+            _ = door.writePage(hours: 24)
+            sizes.append((try Data(contentsOf: dir.appendingPathComponent("page.html"))).count)
+        }
+        XCTAssertLessThan(sizes[3], sizes[0] + 2000, "the page grew on refresh: \(sizes)")
+        XCTAssertNil(Door.small(Data("not a picture".utf8)))
+    }
 }

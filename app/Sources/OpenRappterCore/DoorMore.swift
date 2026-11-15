@@ -161,7 +161,7 @@ extension Door {
             let all = watches(); ans.ok = true; ans.words = all.map { Door.plain($0) }; ans.said = "I keep \(all.count) watches"
         case "page":
             let r = writePage(hours: a.every ?? 24)
-            ans.ok = r.ok; ans.said = r.said; ans.picture = r.ok ? "page.html" : nil
+            ans.ok = r.ok; ans.said = r.said; ans.picture = nil
         case "pack":
             let out = dir.appendingPathComponent("pack"); try? fm.removeItem(at: out)
             try? fm.createDirectory(at: out, withIntermediateDirectories: true)
@@ -336,9 +336,11 @@ extension Door {
         let did = rest.filter { ($0["ok"] as? Bool ?? false) && !byHand($0) && !($0["said"] as? String ?? "").contains("not needed") }
         let waiting = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: waitingURL))) as? [[String: Any]]) ?? []
         var pics = ""
-        for name in lines.compactMap({ $0["picture"] as? String }).suffix(2) {
-            if let d = try? Data(contentsOf: dir.appendingPathComponent(name)) {
-                pics += "<img alt=\"the screen\" src=\"data:image/png;base64,\(d.base64EncodedString())\">"
+        // Only real pictures go in the page, shrunk for a phone. The page once named itself as a
+        // picture and swallowed its own copy on every refresh until it was gigabytes.
+        for name in lines.compactMap({ $0["picture"] as? String }).filter({ $0.hasSuffix(".png") }).suffix(2) {
+            if let d = try? Data(contentsOf: dir.appendingPathComponent(name)), let j = Door.small(d) {
+                pics += "<img alt=\"the screen\" src=\"data:image/jpeg;base64,\(j.base64EncodedString())\">"
             }
         }
         func section(_ title: String, _ rows: [String], empty: String) -> String {
@@ -565,5 +567,23 @@ extension Screen {
             }
         }
         return out.map { (app: $0.0, words: $0.1) }
+    }
+}
+
+import ImageIO
+import UniformTypeIdentifiers
+
+extension Door {
+    /// A picture shrunk to phone size (at most `side` points on its long edge), as a JPEG.
+    public static func small(_ data: Data, side: Int = 1100) -> Data? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                     kCGImageSourceThumbnailMaxPixelSize: side,
+                                     kCGImageSourceCreateThumbnailWithTransform: true]
+        guard let img = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, img, [kCGImageDestinationLossyCompressionQuality: 0.6] as CFDictionary)
+        return CGImageDestinationFinalize(dest) ? out as Data : nil
     }
 }

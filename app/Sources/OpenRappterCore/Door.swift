@@ -84,6 +84,8 @@ public final class Door {
     var shownKeys = 0
     /// How long a box may sit before the creature says something is waiting.
     public var boxPatience: TimeInterval = 90
+    /// What an app's screen says, for noting what a job could see when it stopped fitting. Swapped out in tests.
+    public var fitWords: (String?) -> [String] = { Screen.words(app: $0) }
 
     public init(dir: URL? = nil, watch: Bool = true) {
         self.dir = dir ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openrappter/door")
@@ -156,6 +158,7 @@ public final class Door {
         case "show": return "watching you do \(a.title ?? "a job")"
         case "shown": return "reading back what you showed me"
         case "yes": return "keeping the job \(a.title ?? "")"
+        case "fits": return "checking which jobs still fit this Mac"
         default: return "asked for something I do not know: \(a.do)"
         }
     }
@@ -233,6 +236,7 @@ public final class Door {
                 done += 1
             }
             if ans.ok { ans.said = "\(name): \(done) steps done" + (skipped > 0 ? ", \(skipped) not needed" : "") }
+            fitAfter(name, steps, ans)
         default:
             if !(await more(a, &ans)) { ans.said = "I do not know how to \(a.do)" }
         }

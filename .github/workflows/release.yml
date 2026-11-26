@@ -22,15 +22,15 @@ jobs:
     outputs:
       version: ${{ steps.validate.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: typescript/package-lock.json
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -72,15 +72,15 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: typescript/package-lock.json
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -126,7 +126,7 @@ jobs:
           sha256sum --check SHA256SUMS
 
       - name: Upload immutable release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-artifacts-${{ env.RELEASE_VERSION }}
           path: release-dist/
@@ -159,7 +159,7 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-artifacts-${{ env.RELEASE_VERSION }}
           path: release-dist
@@ -168,7 +168,7 @@ jobs:
         working-directory: release-dist
         run: sha256sum --check SHA256SUMS
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -184,7 +184,7 @@ jobs:
           )"
           test "$reported_version" = "$RELEASE_VERSION"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -229,11 +229,11 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-artifacts-${{ env.RELEASE_VERSION }}
           path: release-dist
@@ -242,7 +242,7 @@ jobs:
         working-directory: release-dist
         run: sha256sum --check SHA256SUMS
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -369,7 +369,7 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-artifacts-${{ env.RELEASE_VERSION }}
           path: release-dist
@@ -379,7 +379,7 @@ jobs:
         run: sha256sum --check SHA256SUMS
 
       - name: Create GitHub Release with generated notes
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: v${{ env.RELEASE_VERSION }}
           make_latest: false

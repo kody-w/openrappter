@@ -14,7 +14,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Import Developer ID identity
         env:
@@ -97,7 +97,7 @@ jobs:
 
       - name: Open or update signing-health issue
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const title = '[signing-health] macOS release credentials need attention';
@@ -130,7 +130,7 @@ jobs:
 
       - name: Close resolved signing-health issues
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const title = '[signing-health] macOS release credentials need attention';

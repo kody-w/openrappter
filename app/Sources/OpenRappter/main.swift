@@ -21,6 +21,8 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     let ears = Ears()
     let voice = Voice()
     let needs = NeedsQueue()
+    var door: Door?
+    var web: DoorWeb?
     var notch: DynamicNotch<Expanded, CompactLeading, CompactTrailing>!
     var mind: MindClient?
     var sessionId: String?
@@ -58,6 +60,12 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         model.onAnswer = { [weak self] need, opt in self?.answer(need, opt) }
         model.onLater = { [weak self] need in self?.needs.later(need); self?.showNextNeedOrRest() }
         model.onSignIn = { [weak self] in self?.signIn() }
+        // The door: asks dropped in ~/.openrappter/door/ are carried out by these eyes and hands, in the open.
+        let door = Door()
+        door.onAct = { [weak self] line in log("door: \(line)"); self?.model.posture = .thinking }
+        door.onDone = { [weak self] in if self?.model.posture == .thinking { self?.model.posture = .idle } }
+        self.door = door
+        let web = DoorWeb(door: door); web.start(); self.web = web
         model.onSignInAgain = { [weak self] in self?.signInAgain() }
         model.onTryAgain = { [weak self] in Task { await self?.findMind() } }
         model.onInstallTools = { [weak self] in self?.installTools() }
@@ -81,6 +89,10 @@ final class Coordinator: NSObject, NSApplicationDelegate {
     }
 
     /// A kernel started as the app's child goes with the app. The opt-in login service is the way to keep one running.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for u in urls { log("page click \(u.host ?? "")"); door?.clicked(u) }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         if let p = kernelProcess, p.isRunning { log("stopping the kernel I started (pid \(p.processIdentifier))"); p.terminate() }
     }
@@ -362,6 +374,15 @@ final class Coordinator: NSObject, NSApplicationDelegate {
 
     func act(_ m: Mode, _ heard: String, turn id: Int) async {
         guard !heard.isEmpty else { settle(); return }
+        // Said in any mode, these take the hands away or give them back. Never typed, never sent to the model.
+        if let word = Door.spoken(heard), let door {
+            if word == "hold" { door.hold() } else { door.release() }
+            log("spoken \(word)")
+            model.posture = .speaking; model.line = word == "hold" ? "Hands off. I will look but not touch." : "Hands back on."
+            await voice.speak(model.line); try? await Task.sleep(for: .seconds(1))
+            if turns.isLive(id) { settle() }
+            return
+        }
         switch m {
         case .ask:
             await ask(heard, screen: nil, turn: id)

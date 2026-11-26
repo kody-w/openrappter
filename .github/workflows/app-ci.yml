@@ -7,7 +7,6 @@ on:
     paths: ['app/**', '.github/workflows/app-ci.yml']
   pull_request:
     branches: [main]
-    paths: ['app/**', '.github/workflows/app-ci.yml']
 
 concurrency:
   group: app-${{ github.ref }}

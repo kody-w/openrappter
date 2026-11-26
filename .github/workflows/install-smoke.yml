@@ -24,8 +24,8 @@ jobs:
     name: Unit tests (install.sh functions)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Run install.sh unit tests
@@ -35,7 +35,7 @@ jobs:
     name: shellcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install shellcheck
         run: sudo apt-get install -y shellcheck
       - name: Run shellcheck on install.sh
@@ -45,7 +45,7 @@ jobs:
     name: Verify docs/install.sh is in sync
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check docs/install.sh matches root install.sh
         run: diff install.sh docs/install.sh
 
@@ -54,8 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [unit-tests, shellcheck]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Build npm tarball
@@ -63,7 +63,7 @@ jobs:
         run: cd typescript && npm install --no-fund --no-audit && npm run build && npm pack
       - name: Download already-built release tarball
         if: inputs.release_artifact_name != ''
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.release_artifact_name }}
           path: release-dist
@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [unit-tests, shellcheck]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Copy install.sh to Docker context
         run: cp install.sh tests/install/docker/nonroot/install.sh
       - name: Build and run non-root test
@@ -96,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [unit-tests, shellcheck]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Copy install.sh to Docker context
         run: cp install.sh tests/install/docker/git-method/install.sh
       - name: Build and run git method test

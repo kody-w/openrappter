@@ -46,7 +46,7 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Use the runner's Xcode (macOS 15 SDK, needed by DynamicNotchKit's @Entry)
         run: |
@@ -196,7 +196,7 @@ jobs:
             "${NOTARY_KEY_PATH:-}"
 
       - name: Upload DMG as release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: "OpenRappter ${{ env.RELEASE_VERSION }}"
           body: |

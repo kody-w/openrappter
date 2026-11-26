@@ -47,9 +47,9 @@ jobs:
       run:
         working-directory: macos
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: swift-actions/setup-swift@v2
+      - uses: swift-actions/setup-swift@v3
         with:
           swift-version: '6.0'
 
@@ -195,7 +195,7 @@ jobs:
             "${NOTARY_KEY_PATH:-}"
 
       - name: Upload DMG as release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: "OpenRappter Bar ${{ env.RELEASE_VERSION }}"
           prerelease: true

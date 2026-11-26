@@ -407,7 +407,9 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         if model.hungry { showHungry(); return }
         model.posture = .thinking; model.line = question
         await notch.expand()
+        let extra = SenseKit.load()   // senses dropped in ~/.openrappter/senses ride on every turn (docs/SENSES.md)
         let msg = "\(question)\n\n\(screen.map { $0 + "\n\n" } ?? "")Answer in under 60 words, then end with |||VOICE||| and a one or two sentence spoken version."
+            + (extra.isEmpty ? "" : " After that, add these parts when they apply:\n" + extra.map { "|||\($0.tag)||| \($0.ask)" }.joined(separator: "\n"))
         do {
             let reply = try await mind.chat(msg, sessionId: sessionId, history: history)
             sessionId = reply.sessionId ?? sessionId
@@ -415,8 +417,25 @@ final class Coordinator: NSObject, NSApplicationDelegate {
             if history.count > 20 { history.removeFirst(2) }
             guard turns.isLive(id) else { log("reply for an older turn dropped"); return }
             model.posture = .speaking; model.line = reply.text
+            var sensed = SenseKit.read(text: reply.text, senses: reply.senses, specs: [SenseKit.voice] + extra)
+            if !extra.isEmpty { SenseKit.record(sensed, about: "ask") }
+            if let l = SenseKit.lines(sensed, specs: extra).first { model.line = reply.text + "\n" + l; log("sense line \(l.debugDescription)") }
             log("reply \(reply.text.debugDescription) voice=\(reply.voice.debugDescription)")
             await voice.speak(reply.voice.isEmpty ? reply.text : reply.voice)
+            // A sense's follow-through: one more chat, made from its words; the first line of the answer replaces them.
+            if let f = SenseKit.followThrough(sensed, specs: extra), let r = try? await mind.chat(f.message) {
+                sensed = SenseKit.followed(sensed, tag: f.tag, answer: r.text)
+                SenseKit.record(Sensed(text: "", values: [f.tag: sensed[f.tag]]), about: "ask follow-through")
+                log("sense follow-through \(f.tag) \(sensed[f.tag].debugDescription)")
+                if turns.isLive(id), let l = SenseKit.lines(sensed, specs: extra).first { model.line = reply.text + "\n" + l }
+            }
+            // A sense's button: a card with OK and that one button. Nothing happens until it is pressed.
+            if let b = SenseKit.button(sensed, specs: extra) {
+                let n = Need(id: "sense-\(Int(Date().timeIntervalSince1970))", title: SenseKit.lines(sensed, specs: extra).first ?? b.label,
+                             opts: [NeedOption(label: "OK"), b], source: "sense", created: Date().timeIntervalSince1970)
+                if let d = try? JSONEncoder().encode(n) { try? d.write(to: needs.dir.appendingPathComponent(n.id + ".json")) }
+                log("sense button \(b.label.debugDescription)")
+            }
             try? await Task.sleep(for: .seconds(2))
             if turns.isLive(id) { settle() }
         } catch MindError.hungry(let why) {
@@ -451,6 +470,9 @@ final class Coordinator: NSObject, NSApplicationDelegate {
         needs.answer(need, opt)
         log("answered \(need.id) \(opt.label.debugDescription) action=\(opt.action ?? "-")")
         if let a = opt.action, a.hasPrefix("open:"), let u = URL(string: String(a.dropFirst(5))) { NSWorkspace.shared.open(u) }
+        if let a = opt.action, a.hasPrefix("ask:") {   // a sense's button: asked as if you said it, only on your press
+            let q = String(a.dropFirst(4)); Task { await self.ask(q, screen: nil, turn: self.turns.begin()) }; return
+        }
         showNextNeedOrRest()   // shows the next need, or settles the answered one away
     }
 

@@ -40,5 +40,13 @@ Rules the kit keeps for you:
 Every reply's senses are written, one line each, to `~/.openrappter/senses/sensed.jsonl`
 (`"schema": "openrappter-sensed/1"`). An agent file, a controller or a script beside the app can read it.
 
-The code is `app/Sources/OpenRappterCore/SenseKit.swift`. In this release it is the kit and its tests; the app
-starts asking for added senses in the next one.
+The code is `app/Sources/OpenRappterCore/SenseKit.swift`. Added senses ride on every ask you make with the hold-keys.
+
+## Try one
+
+```sh
+mkdir -p ~/.openrappter/senses
+echo '{ "tag": "CLARITY", "show": true, "ask": "the same answer in one plain sentence, under 20 words" }' > ~/.openrappter/senses/clarity.json
+```
+
+Ask anything. The card shows the answer, then the clear line under it.

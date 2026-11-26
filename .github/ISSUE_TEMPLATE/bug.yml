@@ -1,0 +1,22 @@
+name: Something is broken
+description: The app did the wrong thing
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you saw.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OpenRappter version
+      description: Shown in the creature's menu.
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: macOS version and Mac model

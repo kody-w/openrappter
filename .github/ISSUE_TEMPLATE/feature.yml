@@ -1,0 +1,11 @@
+name: An idea
+description: Something the creature should do
+labels: [idea]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you were trying to do
+      description: The moment you wished it could help. One real example beats a feature list.
+    validations:
+      required: true
